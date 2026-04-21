@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}Black Whole Liquidation{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/public.css?v={{ now }}">
+</head>
+<body class="{% block body_class %}{% endblock %}">
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="site-header">
+    <a class="brand" href="/">
+      <span class="brand-mark">◉</span>
+      <span class="brand-name">BLACK&nbsp;WHOLE</span>
+      <span class="brand-sub">LIQUIDATION&nbsp;CO.</span>
+    </a>
+    <nav class="site-nav">
+      <a href="/listings" class="nav-link">Inventory</a>
+      <a href="/sell" class="nav-link">Sell&nbsp;Your&nbsp;Chairs</a>
+      <a href="/#contact" class="nav-link nav-cta">Contact</a>
+    </nav>
+  </header>
+
+  <main class="site-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <div class="foot-row">
+      <div class="foot-col">
+        <div class="foot-mark">◉ BLACK WHOLE LIQUIDATION CO.</div>
+        <div class="foot-line">Bulk seating, moved fast.</div>
+      </div>
+      <div class="foot-col">
+        <div class="foot-label">INVENTORY</div>
+        <a href="/listings">Browse current lots →</a>
+      </div>
+      <div class="foot-col">
+        <div class="foot-label">SELL</div>
+        <a href="/sell">Liquidate your chairs →</a>
+      </div>
+      <div class="foot-col">
+        <div class="foot-label">SHIPPING RANGE</div>
+        <div>Continental US · Local pickup preferred</div>
+      </div>
+    </div>
+    <div class="foot-rule"></div>
+    <div class="foot-meta">
+      <span>© BLACK WHOLE LIQUIDATION</span>
+      <span class="mono">PACKAGED &amp; PALLETED</span>
+      <span class="mono">EST. MMXXV</span>
+    </div>
+  </footer>
+
+  {% block scripts %}{% endblock %}
+</body>
+</html>

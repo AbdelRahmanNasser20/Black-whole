@@ -1,0 +1,166 @@
+{% extends "_public_base.html" %}
+{% block title %}Black Whole Liquidation — Bulk Chairs, Priced to Move{% endblock %}
+{% block body_class %}page-landing{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-grid">
+    <div class="hero-tag mono">LOT · 2025 · CONTINUOUS INTAKE</div>
+    <h1 class="hero-title">
+      <span class="h-line">LIQUIDATION-GRADE</span>
+      <span class="h-line"><span class="accent">BANQUET&nbsp;CHAIRS</span></span>
+      <span class="h-line h-line--sub">BY THE <em>PALLET</em>.</span>
+    </h1>
+    <p class="hero-lede">
+      We buy surplus seating from governments, venues, and event halls —
+      then move it on, priced for bulk. Thousands of chairs. One inbox.
+      Sold by the lot, never piece-meal.
+    </p>
+    <div class="hero-cta">
+      <a href="/listings" class="btn btn-primary">BROWSE CURRENT LOTS</a>
+      <a href="/sell" class="btn btn-ghost">HAVE CHAIRS TO SELL? →</a>
+    </div>
+  </div>
+  <div class="hero-sidebar" aria-hidden="true">
+    <div class="ticker">
+      <span>MANIFEST&nbsp;·&nbsp;</span>
+      <span>BANQUET&nbsp;·&nbsp;</span>
+      <span>STACKING&nbsp;·&nbsp;</span>
+      <span>FOLDING&nbsp;·&nbsp;</span>
+      <span>EXEC&nbsp;·&nbsp;</span>
+      <span>PADDED&nbsp;·&nbsp;</span>
+      <span>METAL&nbsp;·&nbsp;</span>
+      <span>MANIFEST&nbsp;·&nbsp;</span>
+    </div>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="stat-row">
+    <div class="stat">
+      <div class="stat-num">{{ "%d"|format(stats.lots) }}</div>
+      <div class="stat-label">ACTIVE LOTS</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">{{ "{:,}".format(stats.chairs) }}</div>
+      <div class="stat-label">CHAIRS AVAILABLE</div>
+    </div>
+    <div class="stat">
+      <div class="stat-num">{{ "%d"|format(stats.cities) }}</div>
+      <div class="stat-label">PICKUP CITIES</div>
+    </div>
+    <div class="stat stat--accent">
+      <div class="stat-num">NOW</div>
+      <div class="stat-label">INTAKE STATUS</div>
+    </div>
+  </div>
+</section>
+
+<section class="how">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">HOW&nbsp;WE&nbsp;MOVE</h2>
+  </div>
+  <div class="how-grid">
+    <article class="how-card">
+      <div class="how-num mono">01</div>
+      <h3>WE SOURCE</h3>
+      <p>Government surplus, venue closures, hotel refreshes. We buy entire ballrooms at once.</p>
+    </article>
+    <article class="how-card">
+      <div class="how-num mono">02</div>
+      <h3>WE STAGE</h3>
+      <p>Photographed, counted, measured. Each lot gets a manifest so you know exactly what arrives.</p>
+    </article>
+    <article class="how-card">
+      <div class="how-num mono">03</div>
+      <h3>YOU PICK</h3>
+      <p>Browse active lots. Local pickup preferred, freight arranged for the big ones.</p>
+    </article>
+  </div>
+</section>
+
+{% if featured %}
+<section class="featured">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">ON&nbsp;THE&nbsp;FLOOR&nbsp;NOW</h2>
+    <a class="see-all mono" href="/listings">SEE ALL →</a>
+  </div>
+  <div class="featured-grid">
+    {% for item in featured %}
+    <a class="lot-card" href="/listings/{{ item.lot_id }}">
+      <div class="lot-img">
+        {% if item.folder_name and item.hero_image %}
+          <img src="/image/{{ item.folder_name }}/{{ item.hero_image }}" alt="{{ item.title }}" loading="lazy">
+        {% else %}
+          <div class="lot-img-fallback">◉</div>
+        {% endif %}
+        <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
+      </div>
+      <div class="lot-body">
+        <div class="lot-meta mono">LOT #{{ item.lot_id }} · {{ item.city or '—' }}</div>
+        <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+        <div class="lot-row">
+          <div class="lot-qty">
+            <div class="lot-qty-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</div>
+            <div class="lot-qty-label">CHAIRS</div>
+          </div>
+          <div class="lot-price">
+            {% if item.price_per_chair %}
+              <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
+              <div class="lot-price-label">/ CHAIR</div>
+            {% else %}
+              <div class="lot-price-num">—</div>
+              <div class="lot-price-label">INQUIRE</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="contact" id="contact">
+  <div class="contact-grid">
+    <div>
+      <div class="section-rule"></div>
+      <h2 class="section-title">TALK&nbsp;TO&nbsp;A&nbsp;HUMAN</h2>
+      <p class="contact-lede">
+        Buying a lot? Selling a warehouse-worth? Fill in the manifest.
+        We read every one.
+      </p>
+    </div>
+    <form class="manifest-form" id="contact-form" data-mode="landing">
+      <div class="mf-row">
+        <label>
+          <span>INQUIRY TYPE</span>
+          <select name="kind" required>
+            <option value="buy">I want to BUY chairs</option>
+            <option value="sell">I want to SELL chairs</option>
+          </select>
+        </label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+        <label><span>EMAIL</span><input name="email" type="email" autocomplete="email"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+        <label><span>QUANTITY</span><input name="quantity_interested" type="number" min="1"></label>
+      </div>
+      <label class="mf-row"><span>MESSAGE</span>
+        <textarea name="message" rows="4" placeholder="Tell us which lot or describe what you have."></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">FILE INQUIRY</button>
+      <div class="mf-result" hidden></div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/public.js?v={{ now }}"></script>
+{% endblock %}

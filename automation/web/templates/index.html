@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>listing_automation · console</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">◣◢</span>
+    <span class="brand-name">listing<span class="brand-dot">.</span>automation</span>
+    <span class="brand-tag">local console / v0.1</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="launcher">
+      <span class="tab-num">01</span><span class="tab-label">Launcher</span>
+    </button>
+    <button class="tab" data-tab="drafts">
+      <span class="tab-num">02</span><span class="tab-label">Drafts</span>
+    </button>
+    <button class="tab" data-tab="compare">
+      <span class="tab-num">03</span><span class="tab-label">A/B</span>
+    </button>
+    <button class="tab" data-tab="auctions">
+      <span class="tab-num">04</span><span class="tab-label">Auctions</span>
+    </button>
+    <button class="tab" data-tab="inventory">
+      <span class="tab-num">05</span><span class="tab-label">Inventory</span>
+    </button>
+    <button class="tab" data-tab="inquiries">
+      <span class="tab-num">06</span><span class="tab-label">Inquiries</span>
+    </button>
+  </nav>
+  <div class="meta">
+    <span class="status-dot" id="conn-dot"></span>
+    <span class="meta-mono" id="clock">--:--:--</span>
+  </div>
+</header>
+
+<main>
+
+<!-- ───────────── Launcher ───────────── -->
+<section class="panel" data-pane="launcher">
+
+  <div class="hero">
+    <div class="hero-eyebrow">PIPELINE / RUN</div>
+    <h1 class="hero-title">
+      Pipe a <em>GovDeals</em> URL through the<br>
+      five-phase <span class="hero-mono">extract → list</span> reactor.
+    </h1>
+    <p class="hero-sub">
+      Server streams stdout in real time. Phases settle from
+      <span class="lex pending">pending</span> →
+      <span class="lex running">running</span> →
+      <span class="lex done">done</span>.
+      No publish — drafts only.
+    </p>
+  </div>
+
+  <form class="launcher" id="launch-form">
+    <label class="url-field">
+      <span class="url-label">URL</span>
+      <input type="url" name="url" id="url" required
+             placeholder="https://www.govdeals.com/en/asset/1234/5678"
+             autocomplete="off" spellcheck="false">
+    </label>
+    <div class="opts">
+      <label class="opt"><input type="checkbox" name="skip_dewatermark"> skip dewatermark</label>
+      <label class="opt"><input type="checkbox" name="skip_fb"> skip facebook</label>
+      <label class="opt"><input type="checkbox" name="skip_ebay"> skip ebay</label>
+      <label class="opt opt-num">
+        <input type="number" name="price" placeholder="price"
+               min="1" max="999" inputmode="numeric">
+        <span>$/chair override</span>
+      </label>
+    </div>
+    <div class="launch-actions">
+      <button type="submit" class="btn btn-primary" id="run-btn">
+        <span class="btn-glyph">▶</span> Run pipeline
+      </button>
+      <button type="button" class="btn btn-ghost" id="cancel-btn" disabled>
+        Cancel
+      </button>
+    </div>
+  </form>
+
+  <div class="queue-strip" id="queue-strip" hidden>
+    <span class="queue-label">UP NEXT</span>
+    <span class="queue-count" id="queue-count">0</span>
+    <span class="queue-urls" id="queue-urls"></span>
+    <button type="button" class="btn btn-small btn-ghost" id="queue-clear">clear</button>
+  </div>
+
+  <div class="phase-grid" id="phase-grid">
+    {% for ph in phases %}
+    <article class="phase" data-phase="{{ ph }}">
+      <header class="phase-head">
+        <span class="phase-num">{{ "%02d"|format(loop.index) }}</span>
+        <span class="phase-name">{{ ph }}</span>
+        <span class="phase-status" data-state="pending">pending</span>
+      </header>
+      <div class="phase-body" data-body></div>
+    </article>
+    {% endfor %}
+  </div>
+
+  <div class="price-prompt" id="price-prompt" hidden>
+    <div class="pp-label">CONFIRM PRICE</div>
+    <div class="pp-row">
+      <span>suggested</span>
+      <strong class="pp-suggested" id="pp-suggested">—</strong>
+      <input type="number" id="pp-input" min="1" max="999">
+      <button class="btn btn-small" id="pp-confirm">confirm</button>
+    </div>
+  </div>
+
+  <section class="console-block">
+    <header class="console-head">
+      <span class="console-title">stdout</span>
+      <span class="console-toggle">
+        <label><input type="checkbox" id="show-events" checked> events</label>
+        <label><input type="checkbox" id="autoscroll" checked> follow</label>
+      </span>
+    </header>
+    <pre class="console" id="console" aria-live="polite"></pre>
+  </section>
+</section>
+
+
+<!-- ───────────── Drafts ───────────── -->
+<section class="panel" data-pane="drafts" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">REVIEW / DRAFTS</div>
+    <h1 class="hero-title">Listing folders ready for the publish click.</h1>
+  </div>
+  <div class="drafts-grid" id="drafts-grid">
+    <div class="drafts-empty">Loading drafts…</div>
+  </div>
+</section>
+
+
+<!-- ───────────── Auctions ───────────── -->
+<section class="panel" data-pane="auctions" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">FEED / AUCTION CANDIDATES</div>
+    <h1 class="hero-title">Pick a lot. <em>Launch</em> the pipeline. Queue more.</h1>
+    <p class="hero-sub">
+      Live (and archived) bulk-chair lots from GovDeals + Public Surplus.
+      Quantities verified by <span class="lex done">LLM</span>,
+      condition scored <span class="lex running">1-10</span>. Hit <strong>Launch</strong>
+      to run <span class="hero-mono">extract → list</span> against it.
+    </p>
+  </div>
+
+  <form class="auction-controls" id="auction-form" onsubmit="return false;">
+    <div class="ac-group">
+      <span class="ac-label">SOURCE</span>
+      <div class="seg" id="auc-source">
+        <button type="button" class="seg-btn active" data-value="gd">GovDeals</button>
+        <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
+      </div>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">MIN QTY</span>
+      <input type="range" id="auc-min-qty" min="1" max="500" step="1" value="50">
+      <span class="ac-out" id="auc-min-qty-out">50</span>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">N</span>
+      <input type="number" id="auc-n" min="1" max="100" step="1" value="20">
+    </div>
+    <div class="ac-group">
+      <label class="opt"><input type="checkbox" id="auc-condition"> condition scoring</label>
+      <label class="opt"><input type="checkbox" id="auc-expired"> include expired</label>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">MAX STALE DAYS</span>
+      <input type="number" id="auc-stale" min="1" max="365" step="1" value="2">
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="auc-refresh" title="Reload cards from the cache (no scrape)">↻ refresh view</button>
+      <div class="dropdown" id="scrape-dropdown">
+        <button type="button" class="btn btn-small dropdown-toggle" id="scrape-toggle">⟳ run scraper ▾</button>
+        <div class="dropdown-menu" hidden>
+          <button type="button" data-scrape="gd">GovDeals</button>
+          <button type="button" data-scrape="ps">Public Surplus</button>
+          <button type="button" data-scrape="both">Both (gd → ps)</button>
+          <button type="button" data-scrape="ps-test" class="dropdown-sep">Public Surplus (test)</button>
+        </div>
+      </div>
+      <button type="button" class="btn btn-small btn-primary" id="auc-queue-all">▶ queue all</button>
+    </div>
+  </form>
+
+  <div class="scrape-strip" id="scrape-strip" hidden>
+    <span class="scrape-label">SCRAPE</span>
+    <span class="scrape-pill" id="scrape-pill" data-state="idle">idle</span>
+    <span class="scrape-source" id="scrape-source"></span>
+    <span class="scrape-stage" id="scrape-stage" hidden></span>
+    <span class="scrape-tail" id="scrape-tail"></span>
+    <button type="button" class="btn btn-small btn-ghost" id="scrape-cancel" hidden>cancel</button>
+  </div>
+
+  <div class="auction-status" id="auction-status"></div>
+  <div class="auction-grid" id="auction-grid">
+    <div class="drafts-empty">Loading auctions…</div>
+  </div>
+</section>
+
+
+<!-- ───────────── Compare ───────────── -->
+<section class="panel" data-pane="compare" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">A/B / EXTRACTORS</div>
+    <h1 class="hero-title">Claude Code vs. Gemini, field by field.</h1>
+    <p class="hero-sub">
+      Star <span class="lex done">match</span> when Gemini agrees with the
+      ground truth, <span class="lex error">wrong</span> when it doesn't.
+      Aggregate to decide promotion.
+    </p>
+  </div>
+  <div class="compare-summary" id="compare-summary"></div>
+  <div class="compare-list" id="compare-list">
+    <div class="drafts-empty">Loading comparisons…</div>
+  </div>
+</section>
+
+<!-- ───────────── Inventory ───────────── -->
+<section class="panel" data-pane="inventory" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">LEDGER / INVENTORY</div>
+    <h1 class="hero-title">Who's up where. What's left to sell.</h1>
+    <p class="hero-sub">
+      One row per lot. <span class="lex done">listed</span> means published
+      somewhere; <span class="lex running">draft</span> means not yet.
+      Edit qty inline — zero flips to <span class="lex error">sold_out</span> automatically.
+    </p>
+  </div>
+
+  <div class="inv-controls">
+    <div class="ac-group">
+      <span class="ac-label">STATUS</span>
+      <div class="seg" id="inv-status-filter">
+        <button type="button" class="seg-btn active" data-value="">all</button>
+        <button type="button" class="seg-btn" data-value="listed">listed</button>
+        <button type="button" class="seg-btn" data-value="draft">draft</button>
+        <button type="button" class="seg-btn" data-value="hidden">hidden</button>
+        <button type="button" class="seg-btn" data-value="sold_out">sold_out</button>
+      </div>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="inv-refresh">↻ refresh</button>
+      <button type="button" class="btn btn-small" id="inv-backfill"
+              title="Walk ~/Desktop/Banquet chiars Pictures/ and import folders as draft rows">
+        ↓ backfill from folders
+      </button>
+      <a class="btn btn-small btn-ghost" href="/listings" target="_blank" rel="noopener">open public /listings ↗</a>
+    </div>
+  </div>
+
+  <div class="inv-strip" id="inv-stats"></div>
+
+  <div class="inv-table-wrap">
+    <table class="inv-table" id="inv-table">
+      <thead>
+        <tr>
+          <th>LOT</th>
+          <th>HERO</th>
+          <th>TITLE</th>
+          <th>QTY</th>
+          <th>PRICE</th>
+          <th>STATUS</th>
+          <th>FB</th>
+          <th>EBAY</th>
+          <th>ACTIONS</th>
+        </tr>
+      </thead>
+      <tbody id="inv-tbody">
+        <tr><td colspan="9" class="drafts-empty">Loading inventory…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+
+<!-- ───────────── Inquiries ───────────── -->
+<section class="panel" data-pane="inquiries" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">INBOX / INQUIRIES</div>
+    <h1 class="hero-title">Customer messages. Buy-side and sell-side.</h1>
+    <p class="hero-sub">
+      From the public contact form. Move each one <span class="lex running">new</span> →
+      <span class="lex done">contacted</span> → <span class="lex pending">closed</span>
+      once you've replied.
+    </p>
+  </div>
+
+  <div class="inv-controls">
+    <div class="ac-group">
+      <span class="ac-label">STATUS</span>
+      <div class="seg" id="inq-status-filter">
+        <button type="button" class="seg-btn active" data-value="">all</button>
+        <button type="button" class="seg-btn" data-value="new">new</button>
+        <button type="button" class="seg-btn" data-value="contacted">contacted</button>
+        <button type="button" class="seg-btn" data-value="closed">closed</button>
+      </div>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="inq-refresh">↻ refresh</button>
+    </div>
+  </div>
+
+  <div class="inq-list" id="inq-list">
+    <div class="drafts-empty">Loading inquiries…</div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footstrip">
+  <span>localhost:8765</span>
+  <span>·</span>
+  <span class="meta-mono">~/.listing_automation</span>
+  <span>·</span>
+  <span class="meta-mono">~/Desktop/Banquet chiars Pictures</span>
+</footer>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

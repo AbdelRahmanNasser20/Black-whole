@@ -1,0 +1,97 @@
+{% extends "_public_base.html" %}
+{% block title %}{{ item.title or 'Lot' }} — Black Whole Liquidation{% endblock %}
+{% block body_class %}page-detail{% endblock %}
+
+{% block content %}
+<nav class="crumbs mono tiny">
+  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> / <span>LOT&nbsp;#{{ item.lot_id }}</span>
+</nav>
+
+<section class="detail-top">
+  <div class="detail-gallery">
+    {% if images %}
+      <div class="gal-main">
+        <img id="gal-main-img"
+             src="/image/{{ item.folder_name }}/{{ item.hero_image or images[0] }}"
+             alt="{{ item.title }}">
+        <div class="lot-stamp lot-stamp--big">
+          {% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}
+        </div>
+      </div>
+      {% if images|length > 1 %}
+      <div class="gal-thumbs">
+        {% for img in images %}
+          <button class="gal-thumb" data-src="/image/{{ item.folder_name }}/{{ img }}" aria-label="view image">
+            <img src="/image/{{ item.folder_name }}/{{ img }}" alt="" loading="lazy">
+          </button>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% else %}
+      <div class="gal-main"><div class="lot-img-fallback lot-img-fallback--big">◉</div></div>
+    {% endif %}
+  </div>
+
+  <div class="detail-info">
+    <div class="mono tiny">LOT&nbsp;#{{ item.lot_id }}{% if item.sku %} · SKU {{ item.sku }}{% endif %}</div>
+    <h1 class="detail-title">{{ item.title or 'Untitled lot' }}</h1>
+    {% if item.chair_type %}<div class="detail-type">{{ item.chair_type }}</div>{% endif %}
+
+    <dl class="spec-sheet">
+      <div><dt>QUANTITY</dt><dd class="big-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</dd></div>
+      <div><dt>PRICE / CHAIR</dt><dd class="big-num">{% if item.price_per_chair %}${{ "%.0f"|format(item.price_per_chair) }}{% else %}INQUIRE{% endif %}</dd></div>
+      <div><dt>LOCATION</dt><dd>{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}</dd></div>
+      {% if item.dimensions %}<div><dt>DIMENSIONS</dt><dd>{{ item.dimensions }}</dd></div>{% endif %}
+      <div><dt>PICKUP</dt><dd>Local preferred · Freight quotes on request</dd></div>
+      <div><dt>CONDITION</dt><dd>Used — inspected · see photos</dd></div>
+    </dl>
+
+    {% if item.description %}
+    <div class="description">
+      <div class="section-rule"></div>
+      <div class="section-label mono tiny">NOTES FROM THE FLOOR</div>
+      <p>{{ item.description }}</p>
+    </div>
+    {% endif %}
+
+    <div class="detail-ctas">
+      <a href="#contact-form" class="btn btn-primary">I WANT THIS LOT →</a>
+      {% if item.facebook_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.facebook_url }}">VIEW ON FACEBOOK</a>{% endif %}
+      {% if item.ebay_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.ebay_url }}">VIEW ON EBAY</a>{% endif %}
+    </div>
+  </div>
+</section>
+
+<section class="contact contact--slim" id="contact">
+  <div class="contact-grid">
+    <div>
+      <div class="section-rule"></div>
+      <h2 class="section-title">MAKE&nbsp;AN&nbsp;OFFER</h2>
+      <p class="contact-lede">
+        We reply within one business day. Bulk discounts available for 100+ chairs.
+      </p>
+    </div>
+    <form class="manifest-form" id="contact-form" data-mode="detail">
+      <input type="hidden" name="lot_id" value="{{ item.lot_id }}">
+      <input type="hidden" name="kind" value="buy">
+      <div class="mf-row mf-row--two">
+        <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+        <label><span>EMAIL</span><input name="email" type="email" autocomplete="email"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+        <label><span>QTY&nbsp;INTERESTED</span><input name="quantity_interested" type="number" min="1" value="{{ item.quantity_remaining or '' }}"></label>
+      </div>
+      <label class="mf-row"><span>MESSAGE</span>
+        <textarea name="message" rows="3" placeholder="Pickup date? Delivery? Offer price?"></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">FILE INQUIRY FOR LOT #{{ item.lot_id }}</button>
+      <div class="mf-result" hidden></div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/public.js?v={{ now }}"></script>
+{% endblock %}

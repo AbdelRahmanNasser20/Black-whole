@@ -1,0 +1,58 @@
+{% extends "_public_base.html" %}
+{% block title %}Sell Your Chairs — Black Whole Liquidation{% endblock %}
+{% block body_class %}page-sell{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">INTAKE FORM · SELLER</div>
+    <h1 class="page-title">OFFLOAD&nbsp;YOUR&nbsp;SEATING</h1>
+    <p class="page-lede">
+      Venue closing? Hotel refreshing its ballrooms? Event-rental company
+      downsizing? We buy in bulk — 50 chairs to 5,000. One check, one truck, gone.
+    </p>
+  </div>
+</section>
+
+<section class="sell-grid">
+  <div class="sell-tiles">
+    <div class="sell-tile">
+      <div class="mono tiny">01 · MINIMUM</div>
+      <div class="tile-big">50+</div>
+      <div class="tile-sub">chairs per lot</div>
+    </div>
+    <div class="sell-tile">
+      <div class="mono tiny">02 · TURN-AROUND</div>
+      <div class="tile-big">7<span class="tile-mark">D</span></div>
+      <div class="tile-sub">quote to pickup</div>
+    </div>
+    <div class="sell-tile">
+      <div class="mono tiny">03 · PAYMENT</div>
+      <div class="tile-big">ACH</div>
+      <div class="tile-sub">on truck-load</div>
+    </div>
+  </div>
+
+  <form class="manifest-form" id="contact-form" data-mode="sell">
+    <input type="hidden" name="kind" value="sell">
+    <div class="mf-row mf-row--two">
+      <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+      <label><span>EMAIL</span><input name="email" type="email" autocomplete="email"></label>
+    </div>
+    <div class="mf-row mf-row--two">
+      <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+      <label><span>QUANTITY</span><input name="quantity_interested" type="number" min="1" placeholder="e.g. 240"></label>
+    </div>
+    <label class="mf-row"><span>WHAT DO YOU HAVE?</span>
+      <textarea name="message" rows="5" required
+                placeholder="Chair type, condition, city, dimensions if known, photos welcome (we'll email you for attachments)."></textarea>
+    </label>
+    <button type="submit" class="btn btn-primary">REQUEST A QUOTE</button>
+    <div class="mf-result" hidden></div>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/public.js?v={{ now }}"></script>
+{% endblock %}

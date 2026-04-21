@@ -1,0 +1,106 @@
+{% extends "_public_base.html" %}
+{% block title %}Current Inventory — Black Whole Liquidation{% endblock %}
+{% block body_class %}page-listings{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">MANIFEST · ACTIVE</div>
+    <h1 class="page-title"><span class="accent">◉</span>&nbsp;CURRENT&nbsp;INVENTORY</h1>
+    <p class="page-lede">
+      Every lot on the floor. Counted, priced by the chair, moved by the pallet.
+      Click a card for the full manifest.
+    </p>
+  </div>
+  <div class="page-head-right mono tiny">
+    <div>TOTAL&nbsp;LOTS&nbsp;<span class="tag">{{ items|length }}</span></div>
+  </div>
+</section>
+
+<section class="filter-bar">
+  <div class="filter-group">
+    <label class="mono tiny">CHAIR TYPE</label>
+    <select id="f-type">
+      <option value="">ALL TYPES</option>
+      {% for t in chair_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label class="mono tiny">CITY</label>
+    <select id="f-city">
+      <option value="">ALL CITIES</option>
+      {% for c in cities %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label class="mono tiny">MIN&nbsp;QTY</label>
+    <input id="f-qty" type="number" min="1" placeholder="any">
+  </div>
+  <div class="filter-group filter-group--grow">
+    <label class="mono tiny">SEARCH</label>
+    <input id="f-search" type="search" placeholder="Title, lot, anything…">
+  </div>
+  <button class="btn btn-ghost btn-small" id="f-reset">RESET</button>
+</section>
+
+{% if items %}
+<section class="lot-grid" id="lot-grid">
+  {% for item in items %}
+  <a class="lot-card"
+     href="/listings/{{ item.lot_id }}"
+     data-type="{{ item.chair_type or '' }}"
+     data-city="{{ item.city or '' }}"
+     data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
+     data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.city or '' }}">
+    <div class="lot-img">
+      {% if item.folder_name and item.hero_image %}
+        <img src="/image/{{ item.folder_name }}/{{ item.hero_image }}" alt="{{ item.title }}" loading="lazy">
+      {% else %}
+        <div class="lot-img-fallback">◉</div>
+      {% endif %}
+      <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
+    </div>
+    <div class="lot-body">
+      <div class="lot-meta mono">LOT #{{ item.lot_id }} · {{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}</div>
+      <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+      <div class="lot-row">
+        <div class="lot-qty">
+          <div class="lot-qty-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</div>
+          <div class="lot-qty-label">CHAIRS</div>
+        </div>
+        <div class="lot-price">
+          {% if item.price_per_chair %}
+            <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
+            <div class="lot-price-label">/ CHAIR</div>
+          {% else %}
+            <div class="lot-price-num">—</div>
+            <div class="lot-price-label">INQUIRE</div>
+          {% endif %}
+        </div>
+      </div>
+      {% if item.chair_type %}
+        <div class="lot-tag mono tiny">{{ item.chair_type|upper }}</div>
+      {% endif %}
+    </div>
+  </a>
+  {% endfor %}
+</section>
+<div class="empty-filter" id="empty-filter" hidden>
+  <div class="empty-mark">◉</div>
+  <div>No lots match those filters.</div>
+  <button class="btn btn-ghost btn-small" onclick="document.getElementById('f-reset').click()">RESET FILTERS</button>
+</div>
+{% else %}
+<section class="empty">
+  <div class="empty-mark">◉</div>
+  <h2>FLOOR IS CLEAR</h2>
+  <p>No active lots right now. New inventory rolls in weekly —
+    drop us a note and we'll ping you when the next truck lands.</p>
+  <a href="/#contact" class="btn btn-primary">NOTIFY ME</a>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/public.js?v={{ now }}"></script>
+{% endblock %}
