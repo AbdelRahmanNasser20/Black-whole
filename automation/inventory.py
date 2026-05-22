@@ -20,7 +20,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from .config import STATE_ROOT
+from .config import ATTACHMENTS_ROOT, STATE_ROOT
 
 DB_PATH = STATE_ROOT / "inventory.db"
 
@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS inventory (
     description            TEXT,
     city                   TEXT,
     state                  TEXT,
+    zip_code               TEXT,
     chair_type             TEXT,
     dimensions             TEXT,
     quantity_original      INTEGER,
@@ -66,14 +67,69 @@ CREATE TABLE IF NOT EXISTS inquiries (
 );
 CREATE INDEX IF NOT EXISTS idx_inquiries_lot ON inquiries(lot_id);
 CREATE INDEX IF NOT EXISTS idx_inquiries_status ON inquiries(status);
+
+-- Auction favorites: a starred GovDeals/PublicSurplus lot the user wants
+-- countdown alerts on. Snapshot the asset metadata at star-time so the card
+-- still renders even if the listings_db row scrolls out of the active window.
+CREATE TABLE IF NOT EXISTS auction_favorites (
+    asset_id        TEXT PRIMARY KEY,
+    link            TEXT NOT NULL,
+    title           TEXT,
+    quantity        INTEGER,
+    end_date_iso    TEXT,        -- normalized ISO 8601 (UTC); NULL when unparseable
+    end_date_raw    TEXT,        -- original string from the scraper
+    image_url       TEXT,
+    location        TEXT,
+    starred_at      TEXT NOT NULL,
+    last_synced_at  TEXT NOT NULL,
+    notes           TEXT
+);
+
+-- Idempotency log: one row per (asset_id, interval_label) the moment we ship
+-- a Telegram alert. Cleared for an asset whenever its end_date changes (relist).
+CREATE TABLE IF NOT EXISTS auction_alerts_sent (
+    asset_id        TEXT NOT NULL,
+    interval_label  TEXT NOT NULL,
+    sent_at         TEXT NOT NULL,
+    PRIMARY KEY (asset_id, interval_label)
+);
 """
 
-PUBLIC_STATUSES = ("listed", "draft")
-ALL_STATUSES = ("draft", "listed", "hidden", "sold_out")
+PUBLIC_STATUSES = ("listed", "draft", "owned", "won_pickup")
+ALL_STATUSES = (
+    "draft", "listed", "hidden", "sold_out",
+    "owned", "won_pickup", "active_bid", "lost",
+)
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+_MIGRATIONS: tuple[str, ...] = (
+    # Added 2026-04-21: track Facebook Business page posts and paid ad
+    # placements alongside the existing Marketplace/eBay URLs. Four ALTERs,
+    # one column each so partial migration state is recoverable.
+    "ALTER TABLE inventory ADD COLUMN fb_business_url TEXT",
+    "ALTER TABLE inventory ADD COLUMN fb_business_published_at TEXT",
+    "ALTER TABLE inventory ADD COLUMN ad_url TEXT",
+    "ALTER TABLE inventory ADD COLUMN ad_published_at TEXT",
+    # Added 2026-05-08: pickup ZIP from the GovDeals asset page.
+    "ALTER TABLE inventory ADD COLUMN zip_code TEXT",
+    # Added 2026-05-08: GovDeals seller / facility contact (admin-only).
+    "ALTER TABLE inventory ADD COLUMN contact_name TEXT",
+    "ALTER TABLE inventory ADD COLUMN contact_email TEXT",
+    "ALTER TABLE inventory ADD COLUMN contact_phone TEXT",
+    # Added 2026-05-20: per-lot GovDeals account credentials + winning-bid
+    # buyer certificate attachment. The credentials are plain text — single-
+    # operator local SQLite, file mode 600 via `umask`. The cert path is
+    # relative to ATTACHMENTS_ROOT (so the row stays portable if the root
+    # moves).
+    "ALTER TABLE inventory ADD COLUMN govdeals_username TEXT",
+    "ALTER TABLE inventory ADD COLUMN govdeals_password TEXT",
+    "ALTER TABLE inventory ADD COLUMN buyer_cert_filename TEXT",
+    "ALTER TABLE inventory ADD COLUMN buyer_cert_path TEXT",
+)
 
 
 def connect() -> sqlite3.Connection:
@@ -81,6 +137,12 @@ def connect() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
+    for stmt in _MIGRATIONS:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError:
+            # Column already exists — idempotent migration.
+            pass
     conn.commit()
     return conn
 
@@ -160,6 +222,10 @@ def upsert_from_run(
     description: str | None,
     city: str | None,
     state: str | None,
+    zip_code: str | None,
+    contact_name: str | None,
+    contact_email: str | None,
+    contact_phone: str | None,
     chair_type: str | None,
     dimensions: str | None,
     quantity: int | None,
@@ -182,15 +248,18 @@ def upsert_from_run(
                 """
                 INSERT INTO inventory (
                     lot_id, seller_id, govdeals_url, folder_name, folder_path,
-                    sku, title, description, city, state, chair_type, dimensions,
-                    quantity_original, quantity_remaining, price_per_chair,
-                    hero_image, status, parsed_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+                    sku, title, description, city, state, zip_code,
+                    contact_name, contact_email, contact_phone, chair_type,
+                    dimensions, quantity_original, quantity_remaining,
+                    price_per_chair, hero_image, status, parsed_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
                 """,
                 (
                     str(lot_id), seller_id, govdeals_url, folder_name, folder_path,
-                    sku, title, description, city, state, chair_type, dimensions,
-                    quantity, quantity, price_per_chair, hero_image, now, now,
+                    sku, title, description, city, state, zip_code,
+                    contact_name, contact_email, contact_phone, chair_type,
+                    dimensions, quantity, quantity, price_per_chair, hero_image,
+                    now, now,
                 ),
             )
         else:
@@ -207,6 +276,10 @@ def upsert_from_run(
                     description       = COALESCE(?, description),
                     city              = COALESCE(?, city),
                     state             = COALESCE(?, state),
+                    zip_code          = COALESCE(?, zip_code),
+                    contact_name      = COALESCE(?, contact_name),
+                    contact_email     = COALESCE(?, contact_email),
+                    contact_phone     = COALESCE(?, contact_phone),
                     chair_type        = COALESCE(?, chair_type),
                     dimensions        = COALESCE(?, dimensions),
                     quantity_original = COALESCE(?, quantity_original),
@@ -217,23 +290,42 @@ def upsert_from_run(
                 """,
                 (
                     seller_id, govdeals_url, folder_name, folder_path, sku,
-                    title, description, city, state, chair_type, dimensions,
-                    quantity, price_per_chair, hero_image, now, str(lot_id),
+                    title, description, city, state, zip_code,
+                    contact_name, contact_email, contact_phone, chair_type,
+                    dimensions, quantity, price_per_chair, hero_image, now,
+                    str(lot_id),
                 ),
             )
         conn.commit()
     return get(lot_id)  # re-read
 
 
+# Platform name → (url_column, timestamp_column). Adding a new surface =
+# one migration + one entry here + the validator in the API layer.
+_PLATFORM_COLUMNS: dict[str, tuple[str, str]] = {
+    "facebook":    ("facebook_url",    "facebook_published_at"),
+    "ebay":        ("ebay_url",        "ebay_published_at"),
+    "fb_business": ("fb_business_url", "fb_business_published_at"),
+    "ad":          ("ad_url",          "ad_published_at"),
+}
+
+# Only these platforms promote status draft→listed. A Facebook Business page
+# post or an ad isn't a live marketplace listing; don't mark the lot "listed"
+# just because we linked promotional content to it.
+_MARKETPLACE_PLATFORMS: frozenset[str] = frozenset({"facebook", "ebay"})
+
+
 def set_platform_url(
     lot_id: str, platform: str, url: str | None, clear_timestamp: bool = False
 ) -> dict | None:
-    """Record an FB or eBay URL + publish timestamp. Used by run.py post-phase
-    AND by the admin backfill UI for listings posted manually pre-tracking."""
-    if platform not in ("facebook", "ebay"):
+    """Record a marketplace/promotional URL + publish timestamp.
+
+    Platforms: 'facebook', 'ebay', 'fb_business', 'ad'. Used by run.py post-phase
+    AND by the admin UI for listings posted manually.
+    """
+    if platform not in _PLATFORM_COLUMNS:
         raise ValueError(f"unknown platform: {platform}")
-    col_url = f"{platform}_url"
-    col_ts = f"{platform}_published_at"
+    col_url, col_ts = _PLATFORM_COLUMNS[platform]
     now = _now()
     ts = None if (url is None or clear_timestamp) else now
     with connect() as conn:
@@ -242,8 +334,9 @@ def set_platform_url(
             f"WHERE lot_id = ?",
             (url, ts, now, str(lot_id)),
         )
-        # Promote to 'listed' on first successful publish.
-        if url:
+        # Promote to 'listed' on first successful publish — but only for
+        # real marketplaces, not promotional posts/ads.
+        if url and platform in _MARKETPLACE_PLATFORMS:
             conn.execute(
                 "UPDATE inventory SET status = 'listed', updated_at = ? "
                 "WHERE lot_id = ? AND status = 'draft'",
@@ -262,6 +355,8 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
     allowed = {
         "quantity_remaining", "price_per_chair", "status", "hero_image",
         "title", "description", "chair_type", "dimensions", "city", "state",
+        "zip_code", "contact_name", "contact_email", "contact_phone",
+        "govdeals_username", "govdeals_password",
     }
     clean = {k: v for k, v in fields.items() if k in allowed}
     if not clean:
@@ -285,7 +380,90 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
     return get(lot_id)
 
 
+def _sanitize_filename(name: str) -> str:
+    """Strip directory components and unsafe chars from an uploaded filename."""
+    base = Path(name or "").name
+    safe = "".join(c if c.isalnum() or c in "._- " else "_" for c in base).strip(". ")
+    return safe or "buyer_cert"
+
+
+def _cert_dir(lot_id: str) -> Path:
+    safe_lot = "".join(c if c.isalnum() or c in "._-" else "_" for c in str(lot_id))
+    return ATTACHMENTS_ROOT / safe_lot
+
+
+def buyer_cert_abs_path(row: dict) -> Path | None:
+    """Resolve the stored `buyer_cert_path` (relative to ATTACHMENTS_ROOT) to an
+    absolute filesystem path. Returns None if the row has no cert."""
+    rel = (row or {}).get("buyer_cert_path")
+    if not rel:
+        return None
+    p = (ATTACHMENTS_ROOT / rel).resolve()
+    # Path-traversal guard: confine to ATTACHMENTS_ROOT.
+    if not str(p).startswith(str(ATTACHMENTS_ROOT.resolve())):
+        return None
+    return p
+
+
+def attach_buyer_cert(lot_id: str, filename: str, data: bytes) -> dict | None:
+    """Persist `data` under ATTACHMENTS_ROOT/<lot_id>/<filename>, replacing
+    any prior cert for the lot. Updates the inventory row."""
+    if not get(lot_id):
+        return None
+    safe_name = _sanitize_filename(filename)
+    target_dir = _cert_dir(lot_id)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    # Remove any prior cert file so we don't accumulate orphans on rename.
+    existing = get(lot_id) or {}
+    prior = buyer_cert_abs_path(existing)
+    if prior and prior.exists():
+        try:
+            prior.unlink()
+        except OSError:
+            pass
+    target = target_dir / safe_name
+    target.write_bytes(data)
+    rel = str(target.relative_to(ATTACHMENTS_ROOT))
+    now = _now()
+    with connect() as conn:
+        conn.execute(
+            "UPDATE inventory SET buyer_cert_filename = ?, buyer_cert_path = ?, "
+            "updated_at = ? WHERE lot_id = ?",
+            (safe_name, rel, now, str(lot_id)),
+        )
+        conn.commit()
+    return get(lot_id)
+
+
+def delete_buyer_cert(lot_id: str) -> dict | None:
+    row = get(lot_id)
+    if not row:
+        return None
+    prior = buyer_cert_abs_path(row)
+    if prior and prior.exists():
+        try:
+            prior.unlink()
+        except OSError:
+            pass
+    now = _now()
+    with connect() as conn:
+        conn.execute(
+            "UPDATE inventory SET buyer_cert_filename = NULL, buyer_cert_path = NULL, "
+            "updated_at = ? WHERE lot_id = ?",
+            (now, str(lot_id)),
+        )
+        conn.commit()
+    return get(lot_id)
+
+
 def delete(lot_id: str) -> bool:
+    row = get(lot_id)
+    prior = buyer_cert_abs_path(row) if row else None
+    if prior and prior.exists():
+        try:
+            prior.unlink()
+        except OSError:
+            pass
     with connect() as conn:
         cur = conn.execute("DELETE FROM inventory WHERE lot_id = ?", (str(lot_id),))
         conn.commit()
@@ -300,6 +478,7 @@ def insert_manual(
     price_per_chair: float | None = None,
     city: str | None = None,
     state: str | None = None,
+    zip_code: str | None = None,
     chair_type: str | None = None,
     dimensions: str | None = None,
     description: str | None = None,
@@ -314,14 +493,15 @@ def insert_manual(
         conn.execute(
             """
             INSERT INTO inventory (
-                lot_id, title, description, city, state, chair_type, dimensions,
-                quantity_original, quantity_remaining, price_per_chair,
+                lot_id, title, description, city, state, zip_code, chair_type,
+                dimensions, quantity_original, quantity_remaining, price_per_chair,
                 folder_name, hero_image, status, parsed_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
             """,
             (
-                str(lot_id), title, description, city, state, chair_type, dimensions,
-                quantity, quantity, price_per_chair, folder_name, hero_image, now, now,
+                str(lot_id), title, description, city, state, zip_code, chair_type,
+                dimensions, quantity, quantity, price_per_chair, folder_name,
+                hero_image, now, now,
             ),
         )
         conn.commit()

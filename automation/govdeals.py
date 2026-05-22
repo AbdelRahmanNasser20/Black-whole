@@ -28,6 +28,28 @@ EXTRACT_JS = r"""
   const stateMatch = location.match(/,\s*([A-Za-z ]+?)(?:,|$)/);
   const state = stateMatch ? stateMatch[1].trim() : '';
   const bodyText = document.body.innerText;
+  // Pickup ZIP: scan a window after the "Pickup" label so we don't pick up
+  // a stray phone-like 5-digit run elsewhere on the page.
+  let zip_code = '';
+  const pickupIdx = bodyText.search(/Pickup/i);
+  if (pickupIdx !== -1) {
+    const zipMatch = bodyText.slice(pickupIdx, pickupIdx + 600).match(/\b(\d{5})(?:-(\d{4}))?\b/);
+    if (zipMatch) zip_code = zipMatch[2] ? `${zipMatch[1]}-${zipMatch[2]}` : zipMatch[1];
+  }
+
+  // Seller contact: scan around the "Contact Information" / "Seller" label.
+  // Best-effort regex; the LLM gets the screenshot and can correct anything
+  // weird this misses.
+  let contact_email = '';
+  let contact_phone = '';
+  const contactIdx = bodyText.search(/Contact Information|Seller Information|Contact:/i);
+  const contactWindow = contactIdx !== -1
+    ? bodyText.slice(contactIdx, contactIdx + 800)
+    : bodyText;
+  const emailMatch = contactWindow.match(/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/);
+  if (emailMatch) contact_email = emailMatch[0];
+  const phoneMatch = contactWindow.match(/\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}/);
+  if (phoneMatch) contact_phone = phoneMatch[0].trim();
   const qtyMatch = bodyText.match(/\((\d{1,5})\)/);
   const titleQtyMatch = title.match(/(\d+)/);
   const quantity = qtyMatch ? qtyMatch[1] : (titleQtyMatch ? titleQtyMatch[1] : 'NA');
@@ -80,7 +102,8 @@ EXTRACT_JS = r"""
   const counterEl = document.querySelector('.lg-counter, [class*="counter"]');
   const counter = counterEl ? counterEl.textContent.trim() : '';
 
-  return { title, location, city, state, quantity, urls, counter,
+  return { title, location, city, state, zip_code, contact_email, contact_phone,
+           quantity, urls, counter,
            description: bodyText.slice(0, 4000) };
 }
 """
@@ -100,6 +123,9 @@ class ListingMetadata:
     location: str
     city: str
     state: str
+    zip_code: str
+    contact_email: str
+    contact_phone: str
     quantity: str
     lot_id: str
     seller_id: str
@@ -159,17 +185,46 @@ async def _click_carousel_until_stable(page: Page) -> None:
         await asyncio.sleep(0.25)
 
 
-def build_folder_name(title: str, city: str, quantity: str | int) -> str:
-    return f"{_slug(title)}_{_slug(city)}_{quantity}"
+def build_folder_name(
+    city: str,
+    state: str,
+    chair_title: str,
+    quantity: str | int,
+) -> str:
+    """Folder name shape: `{City}_{State}_{ChairTitle}_{Qty}`.
+
+    Empty parts collapse to 'Unknown' so we never end up with `__` runs that
+    make folder paths ambiguous.
+    """
+    parts = [
+        _slug(city) or "Unknown",
+        _slug(state) or "Unknown",
+        _slug(chair_title) or "Chairs",
+        str(quantity),
+    ]
+    return "_".join(parts)
 
 
-def finalize_folder(meta: "ListingMetadata", quantity: str | int) -> "ListingMetadata":
+def finalize_folder(
+    meta: "ListingMetadata",
+    quantity: str | int,
+    *,
+    chair_title: str | None = None,
+    state: str | None = None,
+    city: str | None = None,
+) -> "ListingMetadata":
     """Move screenshots out of the scratch dir into the real listing folder.
 
-    Called *after* the LLM finalizes quantity, so the folder name reflects the
-    corrected count rather than whatever the brittle DOM regex produced.
+    Called *after* the LLM finalizes quantity + chair title + location, so the
+    folder name reflects the corrected values rather than whatever the brittle
+    DOM regex produced. Fallbacks: `meta.city`/`meta.state`/`meta.title`.
     """
-    folder_name = build_folder_name(meta.title, meta.city, quantity)
+    folder_name = build_folder_name(
+        city or meta.city,
+        state or meta.state,
+        chair_title or meta.title,
+        quantity,
+    )
     folder_path = DOWNLOAD_ROOT / folder_name
     folder_path.mkdir(parents=True, exist_ok=True)
     shots_dir = folder_path / "_screenshots"
@@ -236,15 +291,20 @@ async def scrape(ctx: BrowserContext, url: str) -> ListingMetadata:
 
     await page.close()
 
-    # Provisional folder fields use the DOM quantity. run.py overwrites them
-    # via finalize_folder() once the LLM produces a corrected quantity.
-    provisional_name = build_folder_name(data["title"], data["city"], data["quantity"])
+    # Provisional folder fields use the DOM values. run.py overwrites them
+    # via finalize_folder() once the LLM produces corrected values.
+    provisional_name = build_folder_name(
+        data["city"], data["state"], data["title"], data["quantity"],
+    )
     return ListingMetadata(
         url=url,
         title=data["title"],
         location=data["location"],
         city=data["city"],
         state=data["state"],
+        zip_code=data.get("zip_code", "") or "",
+        contact_email=data.get("contact_email", "") or "",
+        contact_phone=data.get("contact_phone", "") or "",
         quantity=str(data["quantity"]),
         lot_id=lot_id,
         seller_id=seller_id,

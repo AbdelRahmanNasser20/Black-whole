@@ -5,20 +5,21 @@
 {% block content %}
 <section class="hero">
   <div class="hero-grid">
-    <div class="hero-tag mono">LOT · 2025 · CONTINUOUS INTAKE</div>
+    <div class="hero-tag mono">SALES FLOOR · 2026 · NEW LOTS WEEKLY</div>
     <h1 class="hero-title">
-      <span class="h-line">LIQUIDATION-GRADE</span>
-      <span class="h-line"><span class="accent">BANQUET&nbsp;CHAIRS</span></span>
-      <span class="h-line h-line--sub">BY THE <em>PALLET</em>.</span>
+      <span class="h-line">BANQUET&nbsp;CHAIRS</span>
+      <span class="h-line">FOR&nbsp;YOUR&nbsp;<span class="accent">CHURCH,</span></span>
+      <span class="h-line h-line--sub">VENUE, OR <em>EVENT</em>.</span>
     </h1>
     <p class="hero-lede">
-      We buy surplus seating from governments, venues, and event halls —
-      then move it on, priced for bulk. Thousands of chairs. One inbox.
-      Sold by the lot, never piece-meal.
+      Quality liquidation-grade seating at a fraction of retail.
+      Churches, congregations, banquet halls, conference rooms,
+      wedding venues, school auditoriums — we keep you sitting
+      without the catalog markup.
     </p>
     <div class="hero-cta">
-      <a href="/listings" class="btn btn-primary">BROWSE CURRENT LOTS</a>
-      <a href="/sell" class="btn btn-ghost">HAVE CHAIRS TO SELL? →</a>
+      <a href="/listings" class="btn btn-primary">SHOP AVAILABLE CHAIRS</a>
+      <a href="/sell" class="btn btn-ghost">HAVE CHAIRS TO LIQUIDATE? →</a>
     </div>
   </div>
   <div class="hero-sidebar" aria-hidden="true">
@@ -59,23 +60,23 @@
 <section class="how">
   <div class="how-head">
     <div class="section-rule"></div>
-    <h2 class="section-title">HOW&nbsp;WE&nbsp;MOVE</h2>
+    <h2 class="section-title">HOW&nbsp;IT&nbsp;WORKS</h2>
   </div>
   <div class="how-grid">
     <article class="how-card">
       <div class="how-num mono">01</div>
-      <h3>WE SOURCE</h3>
-      <p>Government surplus, venue closures, hotel refreshes. We buy entire ballrooms at once.</p>
+      <h3>BROWSE THE LOT</h3>
+      <p>Real photos, real counts, real pickup cities. Filter by chair type, quantity, and location — what you see is what's on the floor today.</p>
     </article>
     <article class="how-card">
       <div class="how-num mono">02</div>
-      <h3>WE STAGE</h3>
-      <p>Photographed, counted, measured. Each lot gets a manifest so you know exactly what arrives.</p>
+      <h3>RESERVE YOURS</h3>
+      <p>Tell us how many you need. We hold them while you confirm budget, board approval, or transport. No pressure, no auctions.</p>
     </article>
     <article class="how-card">
       <div class="how-num mono">03</div>
-      <h3>YOU PICK</h3>
-      <p>Browse active lots. Local pickup preferred, freight arranged for the big ones.</p>
+      <h3>PICK UP OR SHIP</h3>
+      <p>Local pickup at the lot's city, or we'll arrange freight for the bigger orders. Pay on collection — no deposit games.</p>
     </article>
   </div>
 </section>
@@ -99,7 +100,7 @@
         <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
       </div>
       <div class="lot-body">
-        <div class="lot-meta mono">LOT #{{ item.lot_id }} · {{ item.city or '—' }}</div>
+        <div class="lot-meta mono">LOT #{{ item.lot_id }} · {{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>
         <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
         <div class="lot-row">
           <div class="lot-qty">
@@ -129,8 +130,9 @@
       <div class="section-rule"></div>
       <h2 class="section-title">TALK&nbsp;TO&nbsp;A&nbsp;HUMAN</h2>
       <p class="contact-lede">
-        Buying a lot? Selling a warehouse-worth? Fill in the manifest.
-        We read every one.
+        Need chairs for a sanctuary, ballroom, or event space?
+        Or sitting on a surplus you'd like us to take off your hands?
+        Fill in the manifest — we read every one.
       </p>
     </div>
     <form class="manifest-form" id="contact-form" data-mode="landing">
@@ -139,7 +141,7 @@
           <span>INQUIRY TYPE</span>
           <select name="kind" required>
             <option value="buy">I want to BUY chairs</option>
-            <option value="sell">I want to SELL chairs</option>
+            <option value="sell">I want to SELL surplus chairs</option>
           </select>
         </label>
       </div>

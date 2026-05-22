@@ -55,6 +55,9 @@ CREATE TABLE IF NOT EXISTS listings (
     end_date               TEXT,
     time_left              TEXT,
     image_url              TEXT NOT NULL DEFAULT '',
+    pickup_zip             TEXT,
+    contact_email          TEXT,
+    contact_phone          TEXT,
     description_fetched_at TEXT,
     first_seen_at          TEXT NOT NULL,
     last_seen_at           TEXT NOT NULL
@@ -69,6 +72,11 @@ CREATE INDEX IF NOT EXISTS idx_listings_end_date ON listings(end_date);
 # idempotent.
 _MIGRATIONS = (
     "ALTER TABLE listings ADD COLUMN image_url TEXT NOT NULL DEFAULT ''",
+    # Added 2026-05-08: pickup ZIP scraped from the GovDeals asset detail page.
+    "ALTER TABLE listings ADD COLUMN pickup_zip TEXT",
+    # Added 2026-05-08: GovDeals seller contact (admin-only, never on public site).
+    "ALTER TABLE listings ADD COLUMN contact_email TEXT",
+    "ALTER TABLE listings ADD COLUMN contact_phone TEXT",
 )
 
 
@@ -144,6 +152,9 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
         desc_fetched_at = now
 
     new_image = listing.get("image_url") or ""
+    new_zip = listing.get("pickup_zip") or ""
+    new_email = listing.get("contact_email") or ""
+    new_phone = listing.get("contact_phone") or ""
 
     existing = get_cached(conn, asset_id)
     if existing is None:
@@ -152,9 +163,9 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
             INSERT INTO listings (
                 asset_id, link, title, description, quantity, quantity_source,
                 quantity_confidence, price, location, lot_number, end_date,
-                time_left, image_url, description_fetched_at,
-                first_seen_at, last_seen_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                time_left, image_url, pickup_zip, contact_email, contact_phone,
+                description_fetched_at, first_seen_at, last_seen_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 asset_id,
@@ -170,6 +181,9 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
                 listing.get("end_date"),
                 listing.get("time_left"),
                 new_image,
+                new_zip or None,
+                new_email or None,
+                new_phone or None,
                 desc_fetched_at,
                 now,
                 now,
@@ -178,9 +192,12 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
         conn.commit()
         return "insert"
 
-    # Update path: keep the old description / image if the new one is empty.
+    # Update path: keep the old description / image / zip if the new one is empty.
     final_desc = new_desc or existing["description"] or ""
     final_image = new_image or (existing["image_url"] if "image_url" in existing.keys() else "") or ""
+    final_zip = new_zip or (existing["pickup_zip"] if "pickup_zip" in existing.keys() else "") or ""
+    final_email = new_email or (existing["contact_email"] if "contact_email" in existing.keys() else "") or ""
+    final_phone = new_phone or (existing["contact_phone"] if "contact_phone" in existing.keys() else "") or ""
     final_desc_fetched_at = desc_fetched_at or existing["description_fetched_at"]
     conn.execute(
         """
@@ -197,6 +214,9 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
             end_date               = ?,
             time_left              = ?,
             image_url              = ?,
+            pickup_zip             = ?,
+            contact_email          = ?,
+            contact_phone          = ?,
             description_fetched_at = ?,
             last_seen_at           = ?
         WHERE asset_id = ?
@@ -214,6 +234,9 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
             listing.get("end_date", existing["end_date"]),
             listing.get("time_left", existing["time_left"]),
             final_image,
+            final_zip or None,
+            final_email or None,
+            final_phone or None,
             final_desc_fetched_at,
             now,
             asset_id,
@@ -286,6 +309,12 @@ def hydrate_from_cache(
             # image_url: cache wins if present, since every run hits it fresh.
             if cached.get("image_url"):
                 item["image_url"] = cached["image_url"]
+            if cached.get("pickup_zip"):
+                item["pickup_zip"] = cached["pickup_zip"]
+            if cached.get("contact_email"):
+                item["contact_email"] = cached["contact_email"]
+            if cached.get("contact_phone"):
+                item["contact_phone"] = cached["contact_phone"]
             item["_cache_hit"] = True
             hits += 1
     finally:

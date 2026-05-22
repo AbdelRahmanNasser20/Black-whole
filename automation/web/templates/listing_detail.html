@@ -40,7 +40,7 @@
     <dl class="spec-sheet">
       <div><dt>QUANTITY</dt><dd class="big-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</dd></div>
       <div><dt>PRICE / CHAIR</dt><dd class="big-num">{% if item.price_per_chair %}${{ "%.0f"|format(item.price_per_chair) }}{% else %}INQUIRE{% endif %}</dd></div>
-      <div><dt>LOCATION</dt><dd>{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}</dd></div>
+      <div><dt>LOCATION</dt><dd>{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</dd></div>
       {% if item.dimensions %}<div><dt>DIMENSIONS</dt><dd>{{ item.dimensions }}</dd></div>{% endif %}
       <div><dt>PICKUP</dt><dd>Local preferred · Freight quotes on request</dd></div>
       <div><dt>CONDITION</dt><dd>Used — inspected · see photos</dd></div>

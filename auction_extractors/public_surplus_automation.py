@@ -56,6 +56,13 @@ SEARCH_TERMS = [
     "church chairs",
     "event chairs",
     "conference chairs",
+    # medical vertical — single-unit lots (qty filter gated by category)
+    "dental chair",
+    "exam chair",
+    "treatment chair",
+    "phlebotomy chair",
+    "procedure chair",
+    "exam table",
 ]
 
 MIN_CHAIR_QUANTITY = 50
@@ -468,11 +475,19 @@ def main():
             f"{cache_counts['skip']} skipped (uncacheable URL)."
         )
 
-    listings = [item for item in listings if item.get("quantity", 0) > MIN_CHAIR_QUANTITY]
+    # Medical/dental lots sell as singles — gate the qty floor on category
+    # so the alert path still surfaces them. Cache already has every row.
+    from top_chairs import _classify
+    def _keep(item: dict) -> bool:
+        if item.get("quantity", 0) > MIN_CHAIR_QUANTITY:
+            return True
+        cat, _ = _classify(item.get("title"), item.get("description"))
+        return cat == "medical"
+    listings = [item for item in listings if _keep(item)]
     if not listings:
-        print(f"No listings with quantity > {MIN_CHAIR_QUANTITY}. Exiting.")
+        print(f"No listings with quantity > {MIN_CHAIR_QUANTITY} (or medical). Exiting.")
         return
-    print(f" → {len(listings)} listings with quantity > {MIN_CHAIR_QUANTITY}")
+    print(f" → {len(listings)} listings kept (qty > {MIN_CHAIR_QUANTITY} or medical)")
     ranked = rank_with_llm(listings)
     if not ranked:
         print("Ranking failed or returned empty. Exiting.")

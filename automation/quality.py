@@ -1,33 +1,22 @@
+"""Byte-identity sanity check on dewatermark.ai API output.
+
+Trust the API. This only catches the one failure mode it can't recover from
+on its own — an HTTP 200 response that echoed the input back unchanged.
+"""
 from pathlib import Path
-from PIL import Image, ImageChops
 
 
-def _br_crop(img: Image.Image, frac: float = 0.35) -> Image.Image:
-    w, h = img.size
-    return img.crop((int(w * (1 - frac)), int(h * (1 - frac)), w, h))
+def watermark_likely_present(original: Path, cleaned: Path) -> bool:
+    """Return True only when the cleaned file is unusable.
 
-
-def watermark_likely_present(
-    original: Path, cleaned: Path, min_delta: float = 8.0
-) -> bool:
-    """Heuristic: compare bottom-right quadrant of original vs cleaned.
-
-    If the mean absolute difference is below min_delta, the cleaning barely
-    changed the watermark region and dewatermark likely failed.
+    Reject if missing, empty, or byte-identical to the original. Anything else
+    is trusted as a legitimate API result.
     """
     try:
-        o = Image.open(original).convert("RGB")
-        c = Image.open(cleaned).convert("RGB").resize(o.size)
+        if not cleaned.exists() or cleaned.stat().st_size == 0:
+            return True
+        if cleaned.read_bytes() == original.read_bytes():
+            return True
     except Exception:
         return True
-    o_br = _br_crop(o)
-    c_br = _br_crop(c)
-    diff = ImageChops.difference(o_br, c_br)
-    stat = diff.getbbox()
-    if stat is None:
-        return True
-    hist = diff.histogram()
-    total = sum(i * v for i, v in enumerate(hist[:256]))
-    count = sum(hist[:256]) or 1
-    mean_delta = total / count
-    return mean_delta < min_delta
+    return False

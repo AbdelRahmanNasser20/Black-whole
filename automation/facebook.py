@@ -5,7 +5,7 @@ from .config import (
     FB_CATEGORY, FB_CONDITION, FB_PACKAGE_WEIGHT_LB, FB_PACKAGE_WEIGHT_OZ,
     FB_SHIPPING_CARRIER,
 )
-from .templates import fb_description
+from .templates import fb_description, listing_title
 
 
 CREATE_URL = "https://www.facebook.com/marketplace/create/item"
@@ -75,13 +75,31 @@ async def create_draft(
     dimensions: str,
     style_suffix: str,
     images: list[Path],
-) -> str:
+    description_text: str = "",
+    city: str = "",
+    state: str = "",
+    zip_code: str = "",
+    sku: str = "",
+) -> tuple[str, str]:
+    """Fill the FB Marketplace draft. Returns (draft_url, rendered_description).
+
+    The rendered description is returned so the caller can persist exactly the
+    copy we posted onto the marketplace (rather than re-rendering it later and
+    possibly drifting).
+    """
     page = await ctx.new_page()
     await page.goto(CREATE_URL, wait_until="domcontentloaded")
     await page.wait_for_timeout(4000)
 
-    full_title = f"{title} - {style_suffix}" if style_suffix else title
-    description = fb_description(location, chair_type, quantity, dimensions)
+    # Title format: "<chair_type> (<city>, <STATE>)" — e.g. "Banquet Chairs
+    # (Fresno, CA)". Fall back to the LLM's raw title if chair_type is empty.
+    # `style_suffix` ("Bulk Lot - Local Pickup" etc.) is now redundant and
+    # dropped — the FB category + body description already convey that.
+    full_title = listing_title(chair_type, city=city, state=state, fallback=title)
+    description = fb_description(
+        location, chair_type, quantity, dimensions, description_text,
+        city=city, state=state, zip_code=zip_code,
+    )
 
     # Photos — FB accepts set_input_files on its hidden <input type=file>
     file_input = await page.query_selector("input[type=file][accept*='image']")
@@ -92,10 +110,13 @@ async def create_draft(
     await _fill_by_label(page, "Title", full_title)
     await _fill_by_label(page, "Price", str(price_per_chair))
 
-    # Category dropdown
+    # Category dropdown — type the target category itself so the dropdown
+    # filters straight to it. (Previously typed "Furniture" and then tried to
+    # click a sub-category, which only worked for compound names like "Dining
+    # Furniture Sets" and missed standalone leaves like "Chairs".)
     try:
         await _click_text(page, "Category")
-        await page.keyboard.type("Furniture", delay=50)
+        await page.keyboard.type(FB_CATEGORY, delay=50)
         await page.wait_for_timeout(500)
         await _click_text(page, FB_CATEGORY)
     except Exception as e:
@@ -109,6 +130,18 @@ async def create_draft(
         print(f"[FB condition fill fallback: {e}]")
 
     await _fill_by_label(page, "Description", description)
+
+    # SKU field — only shown on Marketplace Business / commerce-enabled
+    # accounts. Best-effort: try the labels FB has used, fail silently if
+    # the field isn't on this form.
+    if sku:
+        for label in ("SKU", "Inventory ID", "Product ID"):
+            try:
+                await _fill_by_label(page, label, sku)
+                print(f"[FB] SKU filled into '{label}': {sku}")
+                break
+            except Exception:
+                continue
 
     # Hide from friends toggle — must end up ON. The switch is a sibling/parent
     # of the "Hide from friends" label, so we locate the label first then walk
@@ -157,4 +190,4 @@ async def create_draft(
         pass
 
     print(f"[FB] draft prepared — review and click Publish. URL: {page.url}")
-    return page.url
+    return page.url, description

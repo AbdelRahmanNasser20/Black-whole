@@ -35,4 +35,11 @@ class GeminiExtractor:
         if not m:
             raise ValueError(f"Gemini returned non-JSON: {text[:200]}")
         payload = json.loads(m.group(0))
-        return Extraction(source=self.name, **payload)
+        allowed = {
+            "title", "location", "city", "state", "zip_code", "quantity",
+            "chair_type", "chair_title", "description_text", "dimensions",
+            "suggested_price_per_chair", "style_suffix",
+            "contact_name", "contact_email", "contact_phone",
+        }
+        clean = {k: v for k, v in payload.items() if k in allowed}
+        return Extraction(source=self.name, **clean)

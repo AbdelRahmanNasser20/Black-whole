@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -37,9 +37,11 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import DOWNLOAD_ROOT, LOG_DIR, STATE_ROOT
+from ..config import DOWNLOAD_ROOT, LOG_DIR, STATE_ROOT, FACEBOOK_BUSINESS_URL
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import inventory
+from .. import favorites
+from .. import telegram_alerts
 
 try:
     from auction_extractors import get_top_chairs
@@ -256,6 +258,15 @@ async def admin(request: Request):
 
 # ───────────────────────────── public pages ─────────────────────────────
 
+def _public_ctx(extra: dict) -> dict:
+    """Common context for every public-page template (footer link etc)."""
+    return {
+        "now": int(time.time()),
+        "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
+        **extra,
+    }
+
+
 @app.get("/", response_class=HTMLResponse)
 async def public_landing(request: Request):
     try:
@@ -266,7 +277,7 @@ async def public_landing(request: Request):
         featured = []
     return templates.TemplateResponse(
         request, "landing.html",
-        {"stats": counts, "featured": featured, "now": int(time.time())},
+        _public_ctx({"stats": counts, "featured": featured}),
     )
 
 
@@ -278,8 +289,7 @@ async def public_listings(request: Request):
                           for r in items if r.get("chair_type")})
     return templates.TemplateResponse(
         request, "listings.html",
-        {"items": items, "cities": cities, "chair_types": chair_types,
-         "now": int(time.time())},
+        _public_ctx({"items": items, "cities": cities, "chair_types": chair_types}),
     )
 
 
@@ -295,14 +305,14 @@ async def public_listing_detail(request: Request, lot_id: str):
         imgs = _folder_images(folder)
     return templates.TemplateResponse(
         request, "listing_detail.html",
-        {"item": row, "images": imgs, "now": int(time.time())},
+        _public_ctx({"item": row, "images": imgs}),
     )
 
 
 @app.get("/sell", response_class=HTMLResponse)
 async def public_sell(request: Request):
     return templates.TemplateResponse(
-        request, "sell.html", {"now": int(time.time())},
+        request, "sell.html", _public_ctx({}),
     )
 
 
@@ -498,23 +508,30 @@ def _latest_compare_for_folder(folder_name: str) -> dict | None:
 
 @app.get("/api/drafts")
 async def list_drafts():
+    inv_by_folder = {
+        r["folder_name"]: r for r in inventory.list_all() if r.get("folder_name")
+    }
     out = []
     for folder in _list_listing_folders():
         imgs = _folder_images(folder)
         meta = _latest_compare_for_folder(folder.name)
         primary = (meta or {}).get("primary") or {}
+        inv = inv_by_folder.get(folder.name) or {}
         out.append({
             "folder": folder.name,
             "path": str(folder),
             "modified": folder.stat().st_mtime,
             "image_count": len(imgs),
             "images": imgs[:24],
-            "title": primary.get("title"),
+            "title": primary.get("title") or inv.get("title"),
             "location": primary.get("location"),
-            "quantity": primary.get("quantity"),
-            "chair_type": primary.get("chair_type"),
+            "quantity": primary.get("quantity") or inv.get("quantity_remaining"),
+            "chair_type": primary.get("chair_type") or inv.get("chair_type"),
             "dimensions": primary.get("dimensions"),
-            "suggested_price": primary.get("suggested_price_per_chair"),
+            "suggested_price": primary.get("suggested_price_per_chair") or inv.get("price_per_chair"),
+            "lot_id": inv.get("lot_id"),
+            "facebook_url": inv.get("facebook_url"),
+            "ebay_url": inv.get("ebay_url"),
         })
     return {"drafts": out}
 
@@ -898,22 +915,34 @@ _AUCTIONS_TTL = 600.0  # seconds
 async def list_auctions(
     source: str = "gd",
     n: int = 15,
-    min_qty: int = 50,
+    min_qty: int | None = None,
     condition: int = 0,
     active_only: int = 1,
     max_stale_days: int = 2,
+    category: str | None = None,
 ):
     if get_top_chairs is None:
         raise HTTPException(503, "auction_extractors package not available")
     if source not in ("gd", "ps"):
         raise HTTPException(400, "source must be 'gd' or 'ps'")
+    _CATS = {"banquet", "medical", "other"}
+    if category in ("", "all"):
+        category = None
+    if category is not None and category not in _CATS:
+        raise HTTPException(400, f"category must be one of {sorted(_CATS)}")
     n = max(1, min(int(n), 100))
+    # min_qty default depends on category: medical lots sell as singles.
+    if min_qty is None:
+        min_qty = 1 if category == "medical" else 50
     min_qty = max(1, int(min_qty))
     include_condition = bool(int(condition))
     active_flag = bool(int(active_only))
     stale = max(1, int(max_stale_days))
 
-    key = f"{source}|{n}|{min_qty}|{int(include_condition)}|{int(active_flag)}|{stale}"
+    key = (
+        f"{source}|{n}|{min_qty}|{int(include_condition)}|"
+        f"{int(active_flag)}|{stale}|{category or ''}"
+    )
     now = time.time()
     cached = _AUCTIONS_CACHE.get(key)
     if cached and (now - cached[0]) < _AUCTIONS_TTL:
@@ -928,6 +957,7 @@ async def list_auctions(
             include_condition=include_condition,
             active_only=active_flag,
             max_stale_days=stale,
+            category=category,
         )
     except Exception as e:
         raise HTTPException(500, f"get_top_chairs failed: {e!r}")
@@ -942,6 +972,353 @@ async def refresh_auctions_cache():
     return {"ok": True}
 
 
+# ───────────────────────────── auction favorites ──────────────────────────
+
+
+def _asset_id_from_link(link: str) -> str:
+    """Lift the auction_extractors helper inline to avoid an import cycle.
+
+    GovDeals: ``/asset/<a>/<b>`` → ``"<a>/<b>"``.
+    PublicSurplus: ``?auc=<n>`` → ``"ps:<n>"``.
+    """
+    if not link:
+        return ""
+    m = re.search(r"/asset/(\d+)/(\d+)", link)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
+    m = re.search(r"[?&]auc=(\d+)", link)
+    if m:
+        return f"ps:{m.group(1)}"
+    return ""
+
+
+@app.get("/api/auctions/favorites")
+async def list_favorites():
+    """All starred auctions, newest first. Each item carries a derived
+    ``seconds_until_end`` and a ``sent_intervals`` list so the UI can render
+    a checklist of which alerts have already fired."""
+    favs = favorites.list_all()
+    return {
+        "items": [f.to_dict() for f in favs],
+        "intervals": [label for label, _ in favorites.ALERT_INTERVALS],
+        "telegram_configured": telegram_alerts.is_configured(),
+    }
+
+
+@app.post("/api/auctions/favorites")
+async def star_favorite(payload: dict):
+    """Star (or refresh) an auction by URL. Body: ``{link, title?, quantity?,
+    end_date?, image_url?, location?, asset_id?}``. ``asset_id`` is derived
+    from the link if not provided."""
+    payload = payload or {}
+    link = (payload.get("link") or "").strip()
+    if not link:
+        raise HTTPException(400, "link required")
+    asset_id = (payload.get("asset_id") or "").strip() or _asset_id_from_link(link)
+    if not asset_id:
+        raise HTTPException(400, "could not derive asset_id from link")
+    fav = favorites.upsert(
+        asset_id=asset_id,
+        link=link,
+        title=payload.get("title"),
+        quantity=int(payload["quantity"]) if payload.get("quantity") not in (None, "") else None,
+        end_date_raw=payload.get("end_date") or payload.get("end_date_raw"),
+        image_url=payload.get("image_url"),
+        location=payload.get("location"),
+        notes=payload.get("notes"),
+    )
+    return fav.to_dict() if fav else {}
+
+
+@app.delete("/api/auctions/favorites/{asset_id:path}")
+async def unstar_favorite(asset_id: str):
+    ok = favorites.delete(asset_id)
+    if not ok:
+        raise HTTPException(404, "not favorited")
+    return {"ok": True}
+
+
+@app.post("/api/auctions/favorites/test-telegram")
+async def telegram_test():
+    """Fire a one-shot Telegram message so the user can verify their bot
+    token + chat_id are wired up before counting on countdown alerts."""
+    ok, err = await telegram_alerts.send_message(
+        "✅ listing_automation: Telegram alerts are wired up. "
+        "You'll get pings as your favorite auctions wind down."
+    )
+    if ok:
+        return {"ok": True}
+    raise HTTPException(500, err or "send failed")
+
+
+# ─────────── countdown alert scheduler (runs in-process) ───────────
+
+_SCHEDULER_TICK_SEC = 30.0  # tight enough for the 5m alert to be ±30s
+_alerts_task: asyncio.Task | None = None
+
+
+def _format_alert(fav_dict: dict, label: str) -> str:
+    """Compose the Telegram body. Plain text — no Markdown, since one bad
+    underscore in a title breaks Telegram's parser silently."""
+    title = (fav_dict.get("title") or "Untitled lot").strip()
+    qty = fav_dict.get("quantity")
+    qty_line = f"{qty:,} ×" if qty else ""
+    secs = fav_dict.get("seconds_until_end") or 0
+    if secs <= 0:
+        when = "now"
+    elif secs < 3600:
+        when = f"{secs // 60} min"
+    elif secs < 86400:
+        when = f"~{secs // 3600}h {secs % 3600 // 60}m"
+    else:
+        when = f"~{secs // 86400}d {(secs % 86400) // 3600}h"
+    return (
+        f"⏰ Auction ending in {label} ({when} left)\n"
+        f"{title}\n"
+        f"{qty_line}\n"
+        f"{fav_dict.get('link') or ''}"
+    ).strip()
+
+
+async def _alerts_tick() -> None:
+    """One scheduler pass. Re-syncs end_date from listings.db where possible
+    (catches relists with fresh end_date), then ships any due alerts."""
+    try:
+        favs = favorites.list_all()
+        if not favs:
+            return
+
+        # Re-sync end_date from auction_extractors cache so we catch relists.
+        # Cheap: one indexed lookup per favorite. If listings.db is gone we
+        # silently skip the sync — alerts still fire off the snapshot.
+        try:
+            import sqlite3
+            db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
+            if db_path.exists():
+                conn = sqlite3.connect(str(db_path))
+                conn.row_factory = sqlite3.Row
+                try:
+                    for f in favs:
+                        row = conn.execute(
+                            "SELECT end_date, time_left, image_url, title, "
+                            "quantity, location FROM listings WHERE asset_id = ?",
+                            (f.asset_id,),
+                        ).fetchone()
+                        if row is None:
+                            continue
+                        fresh_end = (row["end_date"] or row["time_left"] or "").strip()
+                        if not fresh_end and not f.end_date_raw:
+                            continue
+                        if fresh_end == (f.end_date_raw or ""):
+                            continue
+                        favorites.upsert(
+                            asset_id=f.asset_id,
+                            link=f.link,
+                            title=row["title"] or f.title,
+                            quantity=row["quantity"] or f.quantity,
+                            end_date_raw=fresh_end or f.end_date_raw,
+                            image_url=row["image_url"] or f.image_url,
+                            location=row["location"] or f.location,
+                        )
+                finally:
+                    conn.close()
+        except Exception as e:
+            print(f"[favorites] sync from listings.db failed: {e!r}")
+
+        # Re-read after sync.
+        favs = favorites.list_all()
+        due = favorites.due_alerts(favs)
+        if not due:
+            return
+        if not telegram_alerts.is_configured():
+            # Don't burn entries if we can't actually send. The user will see
+            # the favorite still primed once they configure Telegram.
+            print(
+                f"[favorites] {len(due)} alert(s) due but Telegram not "
+                "configured (TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID); skipping"
+            )
+            return
+        for fav, label in due:
+            text = _format_alert(fav.to_dict(), label)
+            ok, err = await telegram_alerts.send_message(text)
+            if ok:
+                favorites.mark_sent(fav.asset_id, label)
+                print(f"[favorites] alert sent: {fav.asset_id} {label}")
+            else:
+                print(f"[favorites] alert FAILED: {fav.asset_id} {label}: {err}")
+    except Exception as e:
+        # Never let the scheduler die from a single bad tick.
+        print(f"[favorites] tick error: {e!r}")
+
+
+async def _alerts_loop() -> None:
+    while True:
+        await _alerts_tick()
+        await asyncio.sleep(_SCHEDULER_TICK_SEC)
+
+
+@app.on_event("startup")
+async def _start_alerts_loop() -> None:
+    global _alerts_task
+    if _alerts_task is None or _alerts_task.done():
+        _alerts_task = asyncio.create_task(_alerts_loop())
+        print(
+            f"[favorites] countdown scheduler started "
+            f"(tick={_SCHEDULER_TICK_SEC:.0f}s, intervals="
+            f"{[l for l,_ in favorites.ALERT_INTERVALS]})"
+        )
+
+
+@app.on_event("shutdown")
+async def _stop_alerts_loop() -> None:
+    global _alerts_task
+    if _alerts_task and not _alerts_task.done():
+        _alerts_task.cancel()
+        try:
+            await _alerts_task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+
+@app.get("/api/auctions/cache-stats")
+async def auctions_cache_stats():
+    """Cheap roll-up over auction_extractors/state/listings.db — powers the
+    'N lots in cache · newest scraped X days ago' header on the Auctions tab."""
+    import sqlite3
+
+    db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
+    if not db_path.exists():
+        return {"total": 0, "newest_seen_at": None, "oldest_seen_at": None, "by_source": {}}
+
+    def _query():
+        conn = sqlite3.connect(str(db_path))
+        try:
+            total, newest, oldest = conn.execute(
+                "SELECT COUNT(*), MAX(last_seen_at), MIN(last_seen_at) FROM listings"
+            ).fetchone()
+            # No `source` column; infer from link prefix.
+            rows = conn.execute(
+                "SELECT "
+                "  CASE WHEN link LIKE '%govdeals.com%' THEN 'gd' "
+                "       WHEN link LIKE '%publicsurplus.com%' THEN 'ps' "
+                "       ELSE 'other' END AS src, "
+                "  COUNT(*), MAX(last_seen_at) "
+                "FROM listings GROUP BY src"
+            ).fetchall()
+            by_source = {
+                src: {"count": n, "newest_seen_at": mx} for src, n, mx in rows
+            }
+            return total or 0, newest, oldest, by_source
+        finally:
+            conn.close()
+
+    total, newest, oldest, by_source = await asyncio.to_thread(_query)
+    return {
+        "total": total,
+        "newest_seen_at": newest,
+        "oldest_seen_at": oldest,
+        "by_source": by_source,
+    }
+
+
+@app.get("/api/listings")
+async def list_raw_listings(
+    source: str = "all",           # 'all' | 'gd' | 'ps'
+    q: str = "",                   # text search over title + description
+    min_qty: int = 1,
+    max_qty: int = 99999,
+    status: str = "all",           # 'all' | 'active' | 'expired' | 'unknown'
+    seen_within_days: int = 0,     # 0 = any
+    sort: str = "qty_desc",        # 'qty_desc' | 'qty_asc' | 'price_low' | 'last_seen_desc' | 'first_seen_desc'
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Admin DB browser over auction_extractors/state/listings.db — raw rows
+    with filters. Unlike /api/auctions this has no ranking / LLM step; it's
+    a straight SQL query for admins."""
+    import sqlite3
+
+    db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
+    if not db_path.exists():
+        return {"items": [], "total": 0, "limit": limit, "offset": offset}
+
+    limit = max(1, min(int(limit), 500))
+    offset = max(0, int(offset))
+    min_qty = max(0, int(min_qty))
+    max_qty = max(min_qty, int(max_qty))
+    seen_within_days = max(0, int(seen_within_days))
+
+    where = []
+    params: list = []
+    if source == "gd":
+        where.append("link LIKE '%govdeals.com%'")
+    elif source == "ps":
+        where.append("link LIKE '%publicsurplus.com%'")
+    if q.strip():
+        where.append("(title LIKE ? OR description LIKE ?)")
+        like = f"%{q.strip()}%"
+        params.extend([like, like])
+    where.append("COALESCE(quantity, 0) BETWEEN ? AND ?")
+    params.extend([min_qty, max_qty])
+
+    if seen_within_days > 0:
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=seen_within_days)).isoformat()
+        where.append("last_seen_at >= ?")
+        params.append(cutoff)
+
+    if status == "active":
+        # end_date populated and parseable → GovDeals rows; time_left present → Public Surplus.
+        where.append("((end_date IS NOT NULL AND end_date != '' AND end_date >= datetime('now')) "
+                     "OR (time_left IS NOT NULL AND time_left != ''))")
+    elif status == "expired":
+        where.append("(end_date IS NOT NULL AND end_date != '' AND end_date < datetime('now'))")
+    elif status == "unknown":
+        where.append("((end_date IS NULL OR end_date = '') AND (time_left IS NULL OR time_left = ''))")
+
+    order = {
+        "qty_desc":         "COALESCE(quantity, 0) DESC, last_seen_at DESC",
+        "qty_asc":          "COALESCE(quantity, 0) ASC, last_seen_at DESC",
+        "last_seen_desc":   "last_seen_at DESC",
+        "first_seen_desc":  "first_seen_at DESC",
+        "price_low":        "CAST(REPLACE(REPLACE(REPLACE(price,'USD',''),'$',''),',','') AS REAL) ASC, last_seen_at DESC",
+    }.get(sort, "COALESCE(quantity, 0) DESC, last_seen_at DESC")
+
+    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
+
+    def _query():
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        try:
+            total = conn.execute(f"SELECT COUNT(*) FROM listings{where_sql}", params).fetchone()[0]
+            rows = conn.execute(
+                f"SELECT asset_id, link, title, description, quantity, quantity_source, "
+                f"quantity_confidence, price, location, lot_number, end_date, time_left, "
+                f"description_fetched_at, first_seen_at, last_seen_at, image_url "
+                f"FROM listings{where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
+                params + [limit, offset],
+            ).fetchall()
+            return total, [dict(r) for r in rows]
+        finally:
+            conn.close()
+
+    total, rows = await asyncio.to_thread(_query)
+
+    def _source_of(link: str) -> str:
+        if "govdeals.com" in link: return "gd"
+        if "publicsurplus.com" in link: return "ps"
+        return "other"
+
+    for r in rows:
+        r["source"] = _source_of(r.get("link") or "")
+        # Truncate description so the network payload stays small.
+        desc = r.get("description") or ""
+        if len(desc) > 400:
+            r["description"] = desc[:400] + "…"
+
+    return {"items": rows, "total": total, "limit": limit, "offset": offset}
+
+
 @app.get("/api/health", response_class=PlainTextResponse)
 async def health():
     return "ok"
@@ -950,7 +1327,11 @@ async def health():
 # ───────────────────────────── inventory API ─────────────────────────────
 
 def _inventory_to_public(row: dict) -> dict:
-    """Enrich an inventory row with the image URL the UI can render directly."""
+    """Enrich an inventory row with the image URL the UI can render directly.
+
+    Strips `govdeals_password` from the response (the admin only needs to know
+    *whether* one is on file). Adds `buyer_cert_url` when an attachment exists.
+    """
     out = dict(row)
     folder = row.get("folder_name")
     hero = row.get("hero_image")
@@ -958,6 +1339,11 @@ def _inventory_to_public(row: dict) -> dict:
         out["hero_image_url"] = f"/image/{folder}/{hero}"
     else:
         out["hero_image_url"] = None
+    out["govdeals_password_set"] = bool(out.pop("govdeals_password", None))
+    if out.get("buyer_cert_path"):
+        out["buyer_cert_url"] = f"/api/inventory/{row['lot_id']}/buyer-cert"
+    else:
+        out["buyer_cert_url"] = None
     return out
 
 
@@ -998,6 +1384,7 @@ async def inv_create(payload: dict):
                              if payload.get("price_per_chair") else None),
             city=payload.get("city") or None,
             state=payload.get("state") or None,
+            zip_code=payload.get("zip_code") or None,
             chair_type=payload.get("chair_type") or None,
             dimensions=payload.get("dimensions") or None,
             description=payload.get("description") or None,
@@ -1017,14 +1404,22 @@ async def inv_delete(lot_id: str):
     return {"ok": True}
 
 
+_ALLOWED_LINK_PLATFORMS = ("facebook", "ebay", "fb_business", "ad")
+
+
 @app.post("/api/inventory/{lot_id}/platform")
 async def inv_set_platform(lot_id: str, payload: dict):
-    """Backfill a FB or eBay URL for a lot that was listed manually."""
+    """Backfill a platform URL for a lot that was listed/posted manually.
+
+    Platforms: facebook, ebay, fb_business (FB page post), ad (paid placement).
+    """
     payload = payload or {}
     platform = payload.get("platform")
     url = (payload.get("url") or "").strip() or None
-    if platform not in ("facebook", "ebay"):
-        raise HTTPException(400, "platform must be 'facebook' or 'ebay'")
+    if platform not in _ALLOWED_LINK_PLATFORMS:
+        raise HTTPException(
+            400, f"platform must be one of {_ALLOWED_LINK_PLATFORMS}"
+        )
     row = inventory.set_platform_url(
         lot_id, platform, url, clear_timestamp=(url is None),
     )
@@ -1033,9 +1428,102 @@ async def inv_set_platform(lot_id: str, payload: dict):
     return _inventory_to_public(row)
 
 
+# ───────────────────────────── buyer cert ─────────────────────────────
+
+# 10 MB cap on the attachment — a buyer certificate is a PDF/screenshot, not
+# a video. Protects the server from a stray multi-GB upload tying up RAM.
+_MAX_CERT_BYTES = 10 * 1024 * 1024
+
+
+@app.post("/api/inventory/{lot_id}/buyer-cert")
+async def inv_attach_buyer_cert(lot_id: str, file: UploadFile = File(...)):
+    """Upload a winning-bid certificate (PDF/image) for a lot."""
+    data = await file.read()
+    if not data:
+        raise HTTPException(400, "empty upload")
+    if len(data) > _MAX_CERT_BYTES:
+        raise HTTPException(413, f"file exceeds {_MAX_CERT_BYTES // (1024*1024)} MB")
+    row = inventory.attach_buyer_cert(lot_id, file.filename or "buyer_cert", data)
+    if not row:
+        raise HTTPException(404, "lot not found")
+    return _inventory_to_public(row)
+
+
+@app.get("/api/inventory/{lot_id}/buyer-cert")
+async def inv_get_buyer_cert(lot_id: str):
+    row = inventory.get(lot_id)
+    if not row:
+        raise HTTPException(404, "lot not found")
+    path = inventory.buyer_cert_abs_path(row)
+    if not path or not path.exists():
+        raise HTTPException(404, "no certificate on file")
+    return FileResponse(
+        str(path),
+        filename=row.get("buyer_cert_filename") or path.name,
+    )
+
+
+@app.delete("/api/inventory/{lot_id}/buyer-cert")
+async def inv_delete_buyer_cert(lot_id: str):
+    row = inventory.delete_buyer_cert(lot_id)
+    if not row:
+        raise HTTPException(404, "lot not found")
+    return _inventory_to_public(row)
+
+
 @app.get("/api/inventory-stats")
 async def inv_stats():
     return inventory.stats()
+
+
+@app.get("/api/site-config")
+async def site_config():
+    return {"facebook_business_url": FACEBOOK_BUSINESS_URL or None}
+
+
+@app.post("/api/inventory/seed-snapshot")
+async def inv_seed_snapshot(payload: dict):
+    """Idempotent bulk-upsert for an admin-curated inventory snapshot.
+
+    Body: {"rows": [{"lot_id": "...", "title": "...", "quantity": N,
+    "city": "...", "state": "...", "status": "..."}]}.
+    Updates existing rows by lot_id; inserts new ones. Returns counts.
+    """
+    rows = (payload or {}).get("rows") or []
+    added = 0
+    updated = 0
+    for r in rows:
+        lot_id = str(r.get("lot_id", "")).strip()
+        if not lot_id:
+            continue
+        existing = inventory.get(lot_id)
+        if existing:
+            inventory.set_fields(
+                lot_id,
+                **{k: r[k] for k in (
+                    "title", "quantity_remaining", "city", "state", "zip_code",
+                    "status", "chair_type", "price_per_chair",
+                ) if k in r and r[k] is not None},
+            )
+            updated += 1
+        else:
+            try:
+                inventory.insert_manual(
+                    lot_id=lot_id,
+                    title=r.get("title") or lot_id,
+                    quantity=int(r.get("quantity") or r.get("quantity_remaining") or 0),
+                    price_per_chair=r.get("price_per_chair"),
+                    city=r.get("city"),
+                    state=r.get("state"),
+                    zip_code=r.get("zip_code"),
+                    chair_type=r.get("chair_type"),
+                )
+                if r.get("status"):
+                    inventory.set_fields(lot_id, status=r["status"])
+                added += 1
+            except ValueError:
+                pass
+    return {"added": added, "updated": updated, "total": len(rows)}
 
 
 @app.post("/api/inventory/backfill")
@@ -1065,6 +1553,7 @@ async def inv_backfill():
         title = primary.get("title") or dom_hint.get("title") or folder.name
         city = primary.get("city") or dom_hint.get("city")
         state = primary.get("state") or dom_hint.get("state")
+        zip_code = primary.get("zip_code") or dom_hint.get("zip_code")
         qty_raw = primary.get("quantity") or dom_hint.get("quantity")
         try:
             qty_int = int(qty_raw) if qty_raw and str(qty_raw).isdigit() else None
@@ -1076,7 +1565,7 @@ async def inv_backfill():
                     lot_id=lot_id,
                     title=title,
                     quantity=qty_int or 0,
-                    city=city, state=state,
+                    city=city, state=state, zip_code=zip_code,
                     chair_type=primary.get("chair_type"),
                     dimensions=primary.get("dimensions"),
                     price_per_chair=(
@@ -1143,10 +1632,13 @@ def main() -> None:
     import uvicorn
     host = os.getenv("LISTING_WEB_HOST", "127.0.0.1")
     port = int(os.getenv("LISTING_WEB_PORT", "8765"))
+    reload = os.getenv("LISTING_WEB_RELOAD", "1") not in ("0", "false", "False", "")
+    reload_dirs = [str(Path(__file__).resolve().parent.parent)] if reload else None
     uvicorn.run(
         "automation.web.app:app",
         host=host, port=port,
-        reload=False, log_level="info",
+        reload=reload, reload_dirs=reload_dirs,
+        log_level="info",
     )
 
 

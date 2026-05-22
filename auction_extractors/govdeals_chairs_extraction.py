@@ -64,8 +64,13 @@ except ValueError:
 # TEMPORARY: narrowed to a single broad term while we validate the new
 # regex_fulltext + cache pipeline. Restore the full list once accuracy is
 # confirmed on real GovDeals data.
-SEARCH_TERMS = ["chairs"]
-# SEARCH_TERMS = ["stackable chairs", "banquet chairs", "chairs", "church chairs", "event chairs", "conference chairs"]
+SEARCH_TERMS = [
+    "chairs", "banquet chairs", "stackable chairs", "church chairs",
+    "event chairs", "conference chairs", "folding chairs",
+    # medical vertical — single-unit lots (qty filter gated by category)
+    "dental chair", "exam chair", "treatment chair", "phlebotomy chair",
+    "procedure chair", "exam table",
+]
 
 
 
@@ -178,14 +183,17 @@ def _scrape_one_page(page) -> list:
     return page_listings
 
 
-def _fetch_govdeals_long_description(page, url: str) -> tuple[str, str]:
-    """Load asset page, return ``(description, image_url)``.
+def _fetch_govdeals_long_description(
+    page, url: str,
+) -> tuple[str, str, str, str, str]:
+    """Load asset page, return ``(description, image_url, pickup_zip,
+    contact_email, contact_phone)``.
 
     GovDeals renders the description via Angular (`app-read-more`). Before the data
     binds, the DOM literally contains the string "undefined", which used to leak
     into our LLM prompts and collapse every quantity to 1. We poll the selectors
-    until real text appears (or the timeout elapses). The primary image is
-    grabbed on the same page load — zero extra Playwright round-trip.
+    until real text appears (or the timeout elapses). The primary image and the
+    pickup ZIP are grabbed on the same page load — zero extra Playwright round-trip.
     """
     page.goto(url, wait_until="domcontentloaded", timeout=60000)
     selectors = (
@@ -265,7 +273,39 @@ def _fetch_govdeals_long_description(page, url: str) -> tuple[str, str]:
         except Exception:
             pass
 
-    return description, _pluck_image()
+    pickup_zip = ""
+    contact_email = ""
+    contact_phone = ""
+    try:
+        body_text = page.locator("body").inner_text(timeout=2000) or ""
+        idx = body_text.lower().find("pickup")
+        if idx != -1:
+            window = body_text[idx : idx + 600]
+            m = re.search(r"\b(\d{5})(?:-(\d{4}))?\b", window)
+            if m:
+                pickup_zip = f"{m.group(1)}-{m.group(2)}" if m.group(2) else m.group(1)
+
+        # Contact info — scan around the "Contact Information" / "Seller" anchor.
+        # If no anchor is found, fall back to the whole body but only pick the
+        # first email/phone (avoids capturing an unrelated phone number from
+        # boilerplate at the bottom of the page).
+        contact_re_idx = re.search(
+            r"Contact Information|Seller Information|Contact:", body_text, re.I,
+        )
+        scope = (
+            body_text[contact_re_idx.start() : contact_re_idx.start() + 800]
+            if contact_re_idx else body_text
+        )
+        em = re.search(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}", scope)
+        if em:
+            contact_email = em.group(0)
+        ph = re.search(r"\(?\d{3}\)?[\s.-]\d{3}[\s.-]\d{4}", scope)
+        if ph:
+            contact_phone = ph.group(0).strip()
+    except Exception:
+        pass
+
+    return description, _pluck_image(), pickup_zip, contact_email, contact_phone
 
 
 def enrich_listings_with_govdeals_descriptions(listings: list) -> list:
@@ -303,15 +343,24 @@ def enrich_listings_with_govdeals_descriptions(listings: list) -> list:
                 if not link:
                     item["description"] = ""
                     item.setdefault("image_url", "")
+                    item.setdefault("pickup_zip", "")
+                    item.setdefault("contact_email", "")
+                    item.setdefault("contact_phone", "")
                     continue
                 try:
-                    desc, img = _fetch_govdeals_long_description(page, link)
+                    desc, img, zip_code, email, phone = _fetch_govdeals_long_description(page, link)
                     item["description"] = desc
                     item["image_url"] = img
+                    item["pickup_zip"] = zip_code
+                    item["contact_email"] = email
+                    item["contact_phone"] = phone
                 except Exception as e:
                     print(f"   • description: {e}")
                     item["description"] = ""
                     item.setdefault("image_url", "")
+                    item.setdefault("pickup_zip", "")
+                    item.setdefault("contact_email", "")
+                    item.setdefault("contact_phone", "")
                 if delay > 0:
                     page.wait_for_timeout(int(delay * 1000))
                 if (i + 1) % 20 == 0:
@@ -784,12 +833,20 @@ def main():
             f"{cache_counts['skip']} skipped (uncacheable URL)."
         )
 
-    # Keep only chairs with quantity over MIN_CHAIR_QUANTITY (after optional LLM fixups)
-    listings = [item for item in listings if item.get("quantity", 0) > MIN_CHAIR_QUANTITY]
+    # Keep only chairs with quantity over MIN_CHAIR_QUANTITY (after optional LLM fixups).
+    # Exception: medical/dental lots sell as singles — gate the qty floor on category
+    # so the alert path still surfaces them. Cache already has every row regardless.
+    from top_chairs import _classify
+    def _keep(item: dict) -> bool:
+        if item.get("quantity", 0) > MIN_CHAIR_QUANTITY:
+            return True
+        cat, _ = _classify(item.get("title"), item.get("description"))
+        return cat == "medical"
+    listings = [item for item in listings if _keep(item)]
     if not listings:
-        print(f"No listings with quantity > {MIN_CHAIR_QUANTITY}. Exiting.")
+        print(f"No listings with quantity > {MIN_CHAIR_QUANTITY} (or medical). Exiting.")
         return
-    print(f" → {len(listings)} listings with quantity > {MIN_CHAIR_QUANTITY}")
+    print(f" → {len(listings)} listings kept (qty > {MIN_CHAIR_QUANTITY} or medical)")
     ranked = rank_with_llm(listings)
     if not ranked:
         print("Ranking failed or returned empty. Exiting.")

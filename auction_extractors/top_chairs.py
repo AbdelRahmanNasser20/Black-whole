@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import sqlite3
 import sys
 import warnings
 from datetime import datetime, timezone
@@ -36,8 +35,6 @@ import requests
 from dateutil import parser as _date_parser
 from dateutil.parser import UnknownTimezoneWarning
 from dotenv import load_dotenv
-
-from paths import STATE_DIR
 
 # GovDeals end_date strings use "EDT" / "EST" abbreviations. dateutil parses
 # them but emits a UnknownTimezoneWarning for each parse — hundreds of those
@@ -78,18 +75,59 @@ def _price_to_float(p: str | None) -> float:
 _SANE_MAX_QUANTITY = 50_000
 
 
+# Keyword-based vertical classifier. Runs on cached rows at query time —
+# no DB column, no LLM call. Medical and dental merge into one bucket.
+# See plan: /Users/abdelnasser/.claude/plans/1-combine-medical-and-vectorized-swing.md
+_MEDICAL_KEYWORDS: tuple[str, ...] = (
+    # patient-facing chairs
+    "dental", "dentist", "exam chair", "examination chair",
+    "treatment chair", "procedure chair", "phlebotomy", "dialysis",
+    "geriatric", "optometry", "ophthalmic", "podiatry", "tattoo",
+    "salon chair", "barber chair",
+    # equipment riding alongside chairs in medical auctions
+    "exam table", "examination table", "treatment couch",
+    "stretcher", "gurney", "dental cabinet", "dental cart",
+    # brand names that scream medical
+    "midmark", "ritter", "pelton & crane", "pelton and crane",
+    "takara belmont", "umf medical", "clinton industries",
+    "dexta", "smr apex", "lumex", "dntlworks",
+)
+_BANQUET_KEYWORDS: tuple[str, ...] = (
+    "banquet", "stackable", "folding chair", "church chair",
+    "event chair", "conference chair",
+)
+
+
+def _classify(title: str | None, description: str | None) -> tuple[str, str]:
+    """Return (category, matched_keyword). Category ∈ {medical, banquet, other}."""
+    blob = f"{title or ''} {description or ''}".lower()
+    for kw in _MEDICAL_KEYWORDS:
+        if kw in blob:
+            return "medical", kw
+    for kw in _BANQUET_KEYWORDS:
+        if kw in blob:
+            return "banquet", kw
+    return "other", ""
+
+
+CATEGORIES = ("banquet", "medical", "other")
+
+
 def _load_from_cache(source: Source, min_quantity: int) -> list[dict]:
     """Pull listings from ``state/listings.db`` filtered by source + min_qty.
 
     Sort: quantity DESC, then price ASC (same tiebreak the scrapers use).
     """
     frag = _PUBLIC_SURPLUS_URL_FRAG if source == "ps" else _GOVDEALS_URL_FRAG
-    conn = sqlite3.connect(str(STATE_DIR / "listings.db"))
-    conn.row_factory = sqlite3.Row
+    # Use listings_db.connect() so the schema migrations (e.g. pickup_zip)
+    # run before we SELECT against columns added in newer versions.
+    import listings_db
+    conn = listings_db.connect()
     rows = conn.execute(
         """
         SELECT asset_id, link, title, description, quantity,
                quantity_source, quantity_confidence, price, location,
+               pickup_zip, contact_email, contact_phone,
                end_date, time_left, image_url, last_seen_at
         FROM listings
         WHERE quantity >= ?
@@ -256,6 +294,7 @@ def get_top_chairs(
     include_condition: bool = True,
     active_only: bool = True,
     max_stale_days: int = 2,
+    category: str | None = None,
 ) -> list[dict]:
     """Return the top-``n`` chair listings from the cache.
 
@@ -276,6 +315,9 @@ def get_top_chairs(
             considered inactive if the scraper hasn't re-seen it in this
             many days. Default 2 — aligns with a daily scrape schedule
             plus a 1-day grace window.
+        category: Optional ``"banquet"`` / ``"medical"`` / ``"other"``
+            filter applied via on-read keyword classifier (no DB column).
+            When None (default), all categories returned.
 
     Returns:
         List of dicts, each containing:
@@ -289,7 +331,19 @@ def get_top_chairs(
     """
     if source not in ("gd", "ps"):
         raise ValueError(f"source must be 'gd' or 'ps', got {source!r}")
+    if category is not None and category not in CATEGORIES:
+        raise ValueError(f"category must be one of {CATEGORIES} or None, got {category!r}")
     items = _load_from_cache(source, min_quantity=max(1, int(min_quantity)))
+
+    # Classify every loaded row so the category survives into the response
+    # even when no filter is applied. Cheap — substring search over ~3k rows.
+    for it in items:
+        cat, kw = _classify(it.get("title"), it.get("description"))
+        it["category"] = cat
+        it["category_keyword"] = kw
+
+    if category is not None:
+        items = [it for it in items if it["category"] == category]
 
     if active_only:
         now = datetime.now(timezone.utc)
@@ -334,6 +388,12 @@ def get_top_chairs(
             "time_left": it.get("time_left") or "",
             "link": it.get("link") or "",
             "image_url": it.get("image_url") or "",
+            "location": it.get("location") or "",
+            "pickup_zip": it.get("pickup_zip") or "",
+            "contact_email": it.get("contact_email") or "",
+            "contact_phone": it.get("contact_phone") or "",
+            "category": it.get("category") or "other",
+            "category_keyword": it.get("category_keyword") or "",
         }
         # Always include the keys (None when disabled) so downstream consumers
         # can `it["condition"]` without handling KeyError.
@@ -374,11 +434,14 @@ def main() -> int:
                     help="include auctions that have ended or haven't been re-seen recently")
     ap.add_argument("--max-stale-days", type=int, default=2,
                     help="with --include-expired off, drop listings not re-seen in N days (default 2)")
+    ap.add_argument("--category", choices=CATEGORIES, default=None,
+                    help="filter by on-read keyword classifier (banquet / medical / other)")
     ap.add_argument("--json", action="store_true", help="JSON output on stdout (integration-friendly)")
     args = ap.parse_args()
 
     if not args.json:
-        print(f"Loading top {args.n} {args.source!r} listings with quantity ≥ {args.min_qty}…")
+        cat = f" [{args.category}]" if args.category else ""
+        print(f"Loading top {args.n} {args.source!r} listings{cat} with quantity ≥ {args.min_qty}…")
     listings = get_top_chairs(
         source=args.source,
         n=args.n,
@@ -386,6 +449,7 @@ def main() -> int:
         include_condition=not args.no_condition,
         active_only=not args.include_expired,
         max_stale_days=args.max_stale_days,
+        category=args.category,
     )
     if not listings:
         if args.json:

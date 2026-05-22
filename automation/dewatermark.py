@@ -1,14 +1,12 @@
-"""Dewatermark pipeline with idempotency, post-API quality re-check, and budget caps.
+"""Dewatermark pipeline — API-only, with idempotency + post-call quality re-check + budget caps.
 
 Per-image flow on every run:
   1. Hash the original (sha256 of bytes).
   2. Per-folder sidecar hit + on-disk output present + still-clean? → skip, emit `cache_hit`.
   3. Global API-response cache hit? → write bytes into folder, quality-check, save sidecar.
-  4. IOPaint local pass (batch). Each result that passes quality is shipped as method=iopaint.
-  5. For images IOPaint couldn't clean: budget-guarded API call. Post-call quality re-check.
-     A successful clean is cached globally so future runs (same hash, any lot) are free.
-     A failure is NEVER silently swapped for the watermarked IOPaint output — we leave
-     the originals in `_originals/` and emit `dewatermark:degraded`.
+  4. Budget-guarded API call. Post-call quality re-check. Success is cached globally so
+     future runs (same hash, any lot) are free. Failures leave the original in
+     `_originals/` and emit `dewatermark:degraded` — no silent fallback.
 
 Run `python -m automation.dewatermark verify <path>` and `... stats` for offline checks.
 """
@@ -18,7 +16,6 @@ import asyncio
 import argparse
 import base64
 import shutil
-import subprocess
 import sys
 from pathlib import Path
 from typing import Optional
@@ -38,64 +35,32 @@ from .dewatermark_cache import RunBudget
 from .quality import watermark_likely_present
 
 
-def _archive_originals(folder: Path, images: list[Path]) -> Path:
+def _archive_originals(folder: Path, images: list[Path]) -> dict[str, Path]:
+    """Move watermarked originals into ``_originals/`` and return a name→path map.
+
+    Every reference to the "original" downstream (sha, API upload body, byte
+    -identity check) MUST use the returned archived path, not the input path.
+    Leaving the watermarked file in the folder root would let it sit next to
+    the cleaned output (different extensions coexist) and contaminate the
+    inventory folder the user actually browses.
+
+    Idempotent: if an archived copy already exists from a prior run, the root
+    copy (if any) is just removed. Same-file edge case is a no-op.
+    """
     archive = folder / "_originals"
     archive.mkdir(exist_ok=True)
+    out: dict[str, Path] = {}
     for p in images:
         dst = archive / p.name
-        if not dst.exists():
-            shutil.copy2(p, dst)
-    return archive
-
-
-async def _run_iopaint(images: list[Path], folder: Path) -> dict[str, Path]:
-    """Returns {original_filename: cleaned_path} for everything IOPaint produced."""
-    mask_dir = folder / "_masks"
-    mask_dir.mkdir(exist_ok=True)
-    cleaned_dir = folder / "_cleaned_local"
-    cleaned_dir.mkdir(exist_ok=True)
-
-    try:
-        from PIL import Image, ImageDraw  # type: ignore
-    except ImportError:
-        print("[iopaint: PIL not available, skipping]")
-        return {}
-
-    for img in images:
-        im = Image.open(img).convert("RGB")
-        w, h = im.size
-        mask = Image.new("L", (w, h), 0)
-        draw = ImageDraw.Draw(mask)
-        draw.rectangle((int(w * 0.55), int(h * 0.82), w, h), fill=255)
-        mask.save(mask_dir / img.name)
-
-    cmd = [
-        "iopaint", "run",
-        "--model", "lama",
-        "--device", "cpu",
-        "--image", str(folder),
-        "--mask", str(mask_dir),
-        "--output", str(cleaned_dir),
-    ]
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-        )
-    except FileNotFoundError:
-        print("[iopaint: not installed, skipping local pass]")
-        return {}
-    _out, err = await proc.communicate()
-    if proc.returncode != 0:
-        print(f"[iopaint failed rc={proc.returncode}]\n{err.decode()[-400:]}")
-        return {}
-
-    # IOPaint preserves the source filename (jpg → jpg, png → png) since v1.6.
-    # Older builds wrote .png regardless. Map back by stem so either works.
-    by_stem: dict[str, Path] = {p.stem: p for p in cleaned_dir.iterdir() if p.is_file()}
-    out: dict[str, Path] = {}
-    for img in images:
-        if img.stem in by_stem:
-            out[img.name] = by_stem[img.stem]
+        if dst.exists():
+            try:
+                if p.exists() and p.resolve() != dst.resolve():
+                    p.unlink()
+            except OSError:
+                pass
+        elif p.exists():
+            shutil.move(str(p), str(dst))
+        out[p.name] = dst
     return out
 
 
@@ -117,16 +82,17 @@ async def _api_call_one(
                     timeout=120.0,
                 )
             last_status = r.status_code
+            req_id = r.headers.get("x-request-id") or ""
             if 500 <= r.status_code < 600 and attempt == 1:
-                last_err = f"HTTP {r.status_code} {r.text[:120]}"
+                last_err = f"HTTP {r.status_code} req={req_id} {r.text[:120]}"
                 await asyncio.sleep(1.5)
                 continue
             if r.status_code != 200:
-                return None, r.status_code, f"HTTP {r.status_code} {r.text[:200]}"
+                return None, r.status_code, f"HTTP {r.status_code} req={req_id} {r.text[:200]}"
             data = r.json()
             b64 = (data.get("edited_image") or {}).get("image")
             if not b64:
-                return None, r.status_code, "no edited_image in response"
+                return None, r.status_code, f"no edited_image in response req={req_id}"
             return base64.b64decode(b64), r.status_code, None
         except Exception as e:
             last_err = f"{type(e).__name__}: {e}"
@@ -172,7 +138,7 @@ async def dewatermark(
     if not images:
         return []
 
-    _archive_originals(folder, images)
+    archived = _archive_originals(folder, images)
     sidecar = cache.load_sidecar(folder)
     budget = RunBudget()
     lot = lot_label or folder.name
@@ -184,13 +150,14 @@ async def dewatermark(
 
     # ── Layer 1: per-folder sidecar
     for img in images:
-        sha = cache.sha256_of_file(img)
+        original = archived[img.name]
+        sha = cache.sha256_of_file(original)
         hashes[img.name] = sha
         entry = sidecar.get(sha)
         if entry and cache.sidecar_entry_is_fresh(entry, folder):
             out = folder / entry["output_filename"]
             # Re-check quality of the cached output before trusting it.
-            if _verify_clean_or_revert(img, out):
+            if _verify_clean_or_revert(original, out):
                 progress.emit(
                     "dewatermark", event="cache_hit", layer="sidecar",
                     image=img.name, sha=sha, output=out.name,
@@ -202,15 +169,16 @@ async def dewatermark(
         needs_processing.append(img)
 
     # ── Layer 2: global API response cache
-    still_unprocessed: list[Path] = []
+    needs_api: list[Path] = []
     for img in needs_processing:
         sha = hashes[img.name]
+        original = archived[img.name]
         payload = cache.load_cached_response(sha)
         if payload is None:
-            still_unprocessed.append(img)
+            needs_api.append(img)
             continue
         out = _publish_clean(folder, img.name, payload, ".png")
-        if _verify_clean_or_revert(img, out):
+        if _verify_clean_or_revert(original, out):
             cache.update_sidecar_entry(
                 folder, sha,
                 source_filename=img.name, output_filename=out.name,
@@ -222,40 +190,15 @@ async def dewatermark(
             )
             final_paths.append(out)
         else:
-            # The cached bytes don't actually clean this image (very unusual —
-            # would mean a hash collision or corrupted cache). Treat as miss.
+            # Cached bytes don't actually clean this image (very unusual — a
+            # hash collision or corrupted cache). Treat as miss.
             try:
                 out.unlink()
             except OSError:
                 pass
-            still_unprocessed.append(img)
-
-    # ── Layer 3: IOPaint local pass (batch)
-    iopaint_results: dict[str, Path] = {}
-    if still_unprocessed:
-        iopaint_results = await _run_iopaint(still_unprocessed, folder)
-
-    needs_api: list[Path] = []
-    for img in still_unprocessed:
-        local_clean = iopaint_results.get(img.name)
-        if local_clean and _verify_clean_or_revert(img, local_clean):
-            stem = img.stem
-            out = folder / f"{stem}{local_clean.suffix}"
-            shutil.copy2(local_clean, out)
-            cache.update_sidecar_entry(
-                folder, hashes[img.name],
-                source_filename=img.name, output_filename=out.name,
-                method="iopaint", status="clean", verified_clean=True,
-            )
-            progress.emit(
-                "dewatermark", event="iopaint_clean",
-                image=img.name, output=out.name,
-            )
-            final_paths.append(out)
-        else:
             needs_api.append(img)
 
-    # ── Layer 4: API fallback (budget-guarded, post-call re-check, never silent fallback)
+    # ── Layer 3: API call (budget-guarded, post-call re-check, never silent fallback)
     if needs_api and not DEWATERMARK_API_KEY:
         for img in needs_api:
             cache.update_sidecar_entry(
@@ -275,6 +218,7 @@ async def dewatermark(
         async with httpx.AsyncClient() as client:
             for img in needs_api:
                 sha = hashes[img.name]
+                original = archived[img.name]
                 bstatus = budget.check()
                 if not bstatus.allowed:
                     cache.update_sidecar_entry(
@@ -291,8 +235,8 @@ async def dewatermark(
                     continue
 
                 budget.record_call()
-                payload, http_status, err = await _api_call_one(client, img)
-                bytes_in = img.stat().st_size
+                payload, http_status, err = await _api_call_one(client, original)
+                bytes_in = original.stat().st_size
                 bytes_out = len(payload) if payload else 0
                 cache.log_api_call(
                     lot=lot, image=img.name, sha=sha,
@@ -321,7 +265,7 @@ async def dewatermark(
 
                 # Provisionally write to root and re-check quality.
                 out = _publish_clean(folder, img.name, payload, ".png")
-                if not _verify_clean_or_revert(img, out):
+                if not _verify_clean_or_revert(original, out):
                     try:
                         out.unlink()
                     except OSError:

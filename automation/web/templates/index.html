@@ -36,6 +36,9 @@
     <button class="tab" data-tab="inquiries">
       <span class="tab-num">06</span><span class="tab-label">Inquiries</span>
     </button>
+    <button class="tab" data-tab="listings-db">
+      <span class="tab-num">07</span><span class="tab-label">Listings DB</span>
+    </button>
   </nav>
   <div class="meta">
     <span class="status-dot" id="conn-dot"></span>
@@ -124,8 +127,8 @@
     <header class="console-head">
       <span class="console-title">stdout</span>
       <span class="console-toggle">
-        <label><input type="checkbox" id="show-events" checked> events</label>
-        <label><input type="checkbox" id="autoscroll" checked> follow</label>
+        <label><input type="checkbox" id="show-events" checked> events <span class="toggle-state" id="show-events-state" data-on="1">ON</span></label>
+        <label><input type="checkbox" id="autoscroll" checked> follow <span class="toggle-state" id="autoscroll-state" data-on="1">ON</span></label>
       </span>
     </header>
     <pre class="console" id="console" aria-live="polite"></pre>
@@ -160,33 +163,46 @@
 
   <form class="auction-controls" id="auction-form" onsubmit="return false;">
     <div class="ac-group">
-      <span class="ac-label">SOURCE</span>
+      <span class="ac-label" title="Which scraper cache to draw from">SOURCE</span>
       <div class="seg" id="auc-source">
         <button type="button" class="seg-btn active" data-value="gd">GovDeals</button>
         <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
       </div>
     </div>
     <div class="ac-group">
-      <span class="ac-label">MIN QTY</span>
+      <span class="ac-label" title="Filter by on-read vertical classifier (keyword match on title + description)">CATEGORY</span>
+      <div class="seg" id="auc-category">
+        <button type="button" class="seg-btn active" data-value="">all</button>
+        <button type="button" class="seg-btn" data-value="banquet">banquet</button>
+        <button type="button" class="seg-btn" data-value="medical">medical</button>
+      </div>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Hide lots where the LLM-extracted quantity is below this">Min chairs per lot</span>
       <input type="range" id="auc-min-qty" min="1" max="500" step="1" value="50">
       <span class="ac-out" id="auc-min-qty-out">50</span>
     </div>
     <div class="ac-group">
-      <span class="ac-label">N</span>
+      <span class="ac-label" title="Most listings to show after ranking by chair count">Show top</span>
       <input type="number" id="auc-n" min="1" max="100" step="1" value="20">
     </div>
     <div class="ac-group">
-      <label class="opt"><input type="checkbox" id="auc-condition"> condition scoring</label>
-      <label class="opt"><input type="checkbox" id="auc-expired"> include expired</label>
+      <label class="opt" title="Run LLM over descriptions to assign a 1–10 condition score. Adds 3–10s per request.">
+        <input type="checkbox" id="auc-condition"> Score condition (+3–10s)
+      </label>
+      <label class="opt" title="Include lots whose end date has already passed">
+        <input type="checkbox" id="auc-expired"> Show ended auctions
+      </label>
     </div>
     <div class="ac-group">
-      <span class="ac-label">MAX STALE DAYS</span>
-      <input type="number" id="auc-stale" min="1" max="365" step="1" value="2">
+      <span class="ac-label" title="Hide lots the scraper hasn't re-confirmed within this many days. Raise this if the cache is stale.">Hide if not re-scraped in</span>
+      <input type="number" id="auc-stale" min="1" max="365" step="1" value="7">
+      <span class="ac-unit">days</span>
     </div>
     <div class="ac-actions">
-      <button type="button" class="btn btn-small" id="auc-refresh" title="Reload cards from the cache (no scrape)">↻ refresh view</button>
+      <button type="button" class="btn btn-small" id="auc-refresh" title="Re-query the cache with current filters (no scrape)">↻ reload</button>
       <div class="dropdown" id="scrape-dropdown">
-        <button type="button" class="btn btn-small dropdown-toggle" id="scrape-toggle">⟳ run scraper ▾</button>
+        <button type="button" class="btn btn-small dropdown-toggle" id="scrape-toggle" title="Run the scraper to refresh the cache from the live sites">⟳ scrape now ▾</button>
         <div class="dropdown-menu" hidden>
           <button type="button" data-scrape="gd">GovDeals</button>
           <button type="button" data-scrape="ps">Public Surplus</button>
@@ -194,9 +210,17 @@
           <button type="button" data-scrape="ps-test" class="dropdown-sep">Public Surplus (test)</button>
         </div>
       </div>
-      <button type="button" class="btn btn-small btn-primary" id="auc-queue-all">▶ queue all</button>
+      <button type="button" class="btn btn-small btn-primary" id="auc-queue-all" title="Queue every visible GovDeals lot for the pipeline">▶ queue all</button>
     </div>
   </form>
+
+  <div class="cache-header" id="auction-cache-stats" hidden></div>
+
+  <div class="staleness-banner" id="staleness-banner" hidden>
+    <span class="sb-icon">⚠</span>
+    <span class="sb-message" id="staleness-message"></span>
+    <button type="button" class="btn btn-small btn-primary" id="staleness-scrape">⟳ scrape GovDeals now</button>
+  </div>
 
   <div class="scrape-strip" id="scrape-strip" hidden>
     <span class="scrape-label">SCRAPE</span>
@@ -208,8 +232,9 @@
   </div>
 
   <div class="auction-status" id="auction-status"></div>
+  <div class="auction-filter-summary" id="auction-filter-summary" hidden></div>
   <div class="auction-grid" id="auction-grid">
-    <div class="drafts-empty">Loading auctions…</div>
+    <div class="drafts-empty loading"><span class="spinner"></span> fetching listings from cache…</div>
   </div>
 </section>
 
@@ -278,11 +303,13 @@
           <th>STATUS</th>
           <th>FB</th>
           <th>EBAY</th>
+          <th>FB BIZ</th>
+          <th>AD</th>
           <th>ACTIONS</th>
         </tr>
       </thead>
       <tbody id="inv-tbody">
-        <tr><td colspan="9" class="drafts-empty">Loading inventory…</td></tr>
+        <tr><td colspan="11" class="drafts-empty">Loading inventory…</td></tr>
       </tbody>
     </table>
   </div>
@@ -321,7 +348,115 @@
   </div>
 </section>
 
+
+<!-- ───────────── Listings DB ───────────── -->
+<section class="panel" data-pane="listings-db" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">RAW / LISTINGS DB</div>
+    <h1 class="hero-title">Every scraped row. <em>No ranking.</em> No LLM.</h1>
+    <p class="hero-sub">
+      Direct view into <span class="hero-mono">auction_extractors/state/listings.db</span>.
+      Filter, sort, and click through to the source. This is the admin
+      back-door — the Auctions tab shows a curated ranked slice, this shows
+      everything.
+    </p>
+  </div>
+
+  <form class="auction-controls" id="ldb-form" onsubmit="return false;">
+    <div class="ac-group">
+      <span class="ac-label" title="Which scraper cache to draw from">SOURCE</span>
+      <div class="seg" id="ldb-source">
+        <button type="button" class="seg-btn active" data-value="all">All</button>
+        <button type="button" class="seg-btn" data-value="gd">GovDeals</button>
+        <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
+      </div>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Hides lots whose end_date has passed (gd) or that have no time_left (ps)">STATUS</span>
+      <div class="seg" id="ldb-status">
+        <button type="button" class="seg-btn active" data-value="all">All</button>
+        <button type="button" class="seg-btn" data-value="active">Active</button>
+        <button type="button" class="seg-btn" data-value="expired">Expired</button>
+        <button type="button" class="seg-btn" data-value="unknown">Unknown</button>
+      </div>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Search title + description (case-insensitive substring)">SEARCH</span>
+      <input type="search" id="ldb-q" placeholder="chair, banquet, stackable…" style="width: 220px;">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Inclusive range on LLM-extracted quantity">QTY</span>
+      <input type="number" id="ldb-min-qty" min="0" step="1" value="0" title="Minimum chairs per lot">
+      <span style="color:var(--ink-dim)">–</span>
+      <input type="number" id="ldb-max-qty" min="1" step="1" value="99999" title="Maximum chairs per lot">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Only rows re-confirmed by the scraper within this many days. 0 = any age.">SEEN WITHIN</span>
+      <select id="ldb-seen">
+        <option value="0">any</option>
+        <option value="1">1 day</option>
+        <option value="3">3 days</option>
+        <option value="7" selected>7 days</option>
+        <option value="30">30 days</option>
+      </select>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">SORT</span>
+      <select id="ldb-sort">
+        <option value="qty_desc" selected>Qty (high → low)</option>
+        <option value="qty_asc">Qty (low → high)</option>
+        <option value="last_seen_desc">Most recently scraped</option>
+        <option value="first_seen_desc">Newest listing</option>
+        <option value="price_low">Price (low → high)</option>
+      </select>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">PAGE SIZE</span>
+      <select id="ldb-limit">
+        <option value="25">25</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+      </select>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="ldb-reset" title="Clear filters back to defaults">↺ reset</button>
+      <button type="button" class="btn btn-small" id="ldb-refresh" title="Re-run the query">↻ reload</button>
+    </div>
+  </form>
+
+  <div class="auction-status" id="ldb-status-bar"></div>
+
+  <div class="ldb-table-wrap">
+    <table class="ldb-table" id="ldb-table">
+      <thead>
+        <tr>
+          <th class="ldb-col-src">SRC</th>
+          <th class="ldb-col-qty">QTY</th>
+          <th class="ldb-col-title">TITLE</th>
+          <th class="ldb-col-price">PRICE</th>
+          <th class="ldb-col-loc">LOCATION</th>
+          <th class="ldb-col-end">ENDS</th>
+          <th class="ldb-col-seen">LAST SEEN</th>
+          <th class="ldb-col-act"></th>
+        </tr>
+      </thead>
+      <tbody id="ldb-tbody">
+        <tr><td colspan="8" class="drafts-empty loading"><span class="spinner"></span> querying listings.db…</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="ldb-pager" id="ldb-pager" hidden>
+    <button type="button" class="btn btn-small" id="ldb-prev">← prev</button>
+    <span class="ldb-page-info" id="ldb-page-info"></span>
+    <button type="button" class="btn btn-small" id="ldb-next">next →</button>
+  </div>
+</section>
+
 </main>
+
+<div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false"></div>
 
 <footer class="footstrip">
   <span>localhost:8765</span>
