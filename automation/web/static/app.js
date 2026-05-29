@@ -4,6 +4,61 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
+// ───────── feedback primitives ─────────
+
+// Non-blocking inline toast. Replaces alert(). kind: info | ok | err.
+function toast(message, kind = 'info', ttlMs = 4000) {
+  const host = $('#toast-container');
+  if (!host) { console.warn('toast host missing:', message); return; }
+  const el = document.createElement('div');
+  el.className = `toast toast-${kind}`;
+  el.setAttribute('role', kind === 'err' ? 'alert' : 'status');
+  el.textContent = message;
+  host.appendChild(el);
+  // Kick the slide-in on next frame so CSS transitions engage.
+  requestAnimationFrame(() => el.classList.add('toast-in'));
+  const dismiss = () => {
+    el.classList.remove('toast-in');
+    el.classList.add('toast-out');
+    el.addEventListener('transitionend', () => el.remove(), {once: true});
+  };
+  el.addEventListener('click', dismiss);
+  setTimeout(dismiss, ttlMs);
+}
+
+// Disable + relabel a button while `fn` runs. Always restores label and
+// disabled state, even if fn throws. Returns fn's return value.
+async function withButtonLoading(btn, loadingText, fn) {
+  if (!btn) return fn();
+  const orig = btn.textContent;
+  const origDisabled = btn.disabled;
+  btn.disabled = true;
+  if (loadingText) btn.textContent = loadingText;
+  btn.classList.add('is-loading');
+  try {
+    return await fn();
+  } finally {
+    btn.disabled = origDisabled;
+    btn.textContent = orig;
+    btn.classList.remove('is-loading');
+  }
+}
+
+// Fetch wrapper that throws on !ok with a useful message. Callers can
+// try/catch and toast the error.
+async function apiFetch(url, opts) {
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    let detail = res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch {}
+    const err = new Error(detail);
+    err.status = res.status;
+    throw err;
+  }
+  const ct = res.headers.get('content-type') || '';
+  return ct.includes('application/json') ? res.json() : res.text();
+}
+
 // ───────── tabs ─────────
 
 const panels = {
@@ -13,22 +68,45 @@ const panels = {
   auctions: $('[data-pane="auctions"]'),
   inventory: $('[data-pane="inventory"]'),
   inquiries: $('[data-pane="inquiries"]'),
+  'listings-db': $('[data-pane="listings-db"]'),
 };
 
-$$('.tab').forEach(btn => {
-  btn.addEventListener('click', () => {
-    $$('.tab').forEach(t => t.classList.remove('active'));
-    btn.classList.add('active');
-    Object.entries(panels).forEach(([k, el]) => {
-      if (el) el.hidden = (k !== btn.dataset.tab);
-    });
-    if (btn.dataset.tab === 'drafts') loadDrafts();
-    if (btn.dataset.tab === 'compare') loadCompare();
-    if (btn.dataset.tab === 'auctions') loadAuctions();
-    if (btn.dataset.tab === 'inventory') loadInventory();
-    if (btn.dataset.tab === 'inquiries') loadInquiries();
+const TAB_STORAGE_KEY = 'admin.lastTab';
+
+function activateTab(name, {persist = true} = {}) {
+  const btn = $$('.tab').find(t => t.dataset.tab === name);
+  if (!btn) return false;
+  $$('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  Object.entries(panels).forEach(([k, el]) => {
+    if (el) el.hidden = (k !== name);
   });
+  if (name === 'drafts') loadDrafts();
+  if (name === 'compare') loadCompare();
+  if (name === 'auctions') loadAuctions();
+  if (name === 'inventory') loadInventory();
+  if (name === 'inquiries') loadInquiries();
+  if (name === 'listings-db') loadListingsDb();
+  if (persist) {
+    try { localStorage.setItem(TAB_STORAGE_KEY, name); } catch (_) {}
+  }
+  return true;
+}
+
+$$('.tab').forEach(btn => {
+  btn.addEventListener('click', () => activateTab(btn.dataset.tab));
 });
+
+// Restore the last tab on load. Falls back to whichever tab the markup
+// rendered as `.active` (typically 01 Launcher) if storage is empty or the
+// saved tab no longer exists in the DOM.
+(function restoreLastTab() {
+  let saved = null;
+  try { saved = localStorage.getItem(TAB_STORAGE_KEY); } catch (_) {}
+  if (saved && saved !== 'launcher') {
+    activateTab(saved, {persist: false});
+  }
+})();
 
 // ───────── clock ─────────
 
@@ -42,6 +120,19 @@ setInterval(() => {
 const consoleEl = $('#console');
 const showEvents = $('#show-events');
 const autoscroll = $('#autoscroll');
+
+function _bindToggleIndicator(checkbox, indicatorId) {
+  const ind = document.getElementById(indicatorId);
+  if (!checkbox || !ind) return;
+  const sync = () => {
+    ind.dataset.on = checkbox.checked ? '1' : '0';
+    ind.textContent = checkbox.checked ? 'ON' : 'OFF';
+  };
+  checkbox.addEventListener('change', sync);
+  sync();
+}
+_bindToggleIndicator(showEvents, 'show-events-state');
+_bindToggleIndicator(autoscroll, 'autoscroll-state');
 
 function appendLine(stream, data) {
   // Hide raw event lines if user toggled off
@@ -182,23 +273,47 @@ $('#launch-form').addEventListener('submit', async (e) => {
   $('#cancel-btn').disabled = false;
 });
 
-$('#cancel-btn').addEventListener('click', async () => {
-  await fetch('/api/runs/cancel', {method: 'POST'});
-});
-
-$('#queue-clear').addEventListener('click', async () => {
-  await fetch('/api/runs/queue/clear', {method: 'POST'});
-});
-
-$('#pp-confirm').addEventListener('click', async () => {
-  const v = parseInt($('#pp-input').value, 10);
-  if (!v) return;
-  await fetch('/api/runs/stdin', {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({line: String(v)}),
+$('#cancel-btn').addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '…cancelling', async () => {
+    try {
+      await apiFetch('/api/runs/cancel', {method: 'POST'});
+      toast('Cancel requested.', 'info');
+    } catch (err) {
+      toast('Cancel failed: ' + (err.message || err), 'err');
+    }
   });
-  $('#price-prompt').hidden = true;
+});
+
+$('#queue-clear').addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '…clearing', async () => {
+    try {
+      await apiFetch('/api/runs/queue/clear', {method: 'POST'});
+      toast('Run queue cleared.', 'ok');
+    } catch (err) {
+      toast('Clear failed: ' + (err.message || err), 'err');
+    }
+  });
+});
+
+$('#pp-confirm').addEventListener('click', (e) => {
+  const raw = $('#pp-input').value.trim();
+  const v = parseInt(raw, 10);
+  if (!raw || !Number.isFinite(v) || v <= 0) {
+    toast('Enter a positive number first.', 'err');
+    return;
+  }
+  withButtonLoading(e.currentTarget, '…sending', async () => {
+    try {
+      await apiFetch('/api/runs/stdin', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({line: String(v)}),
+      });
+      $('#price-prompt').hidden = true;
+    } catch (err) {
+      toast('Failed to send: ' + (err.message || err), 'err');
+    }
+  });
 });
 
 // ── SSE ──
@@ -245,6 +360,7 @@ function connectStream() {
 }
 
 // ── boot ──
+let scrapeES;
 fetch('/api/runs/state').then(r => r.json()).then(applyState).catch(() => {});
 connectStream();
 fetch('/api/scrape/state').then(r => r.json()).then(setScrapeStrip).catch(() => {});
@@ -287,8 +403,12 @@ async function loadDrafts() {
         ${row('images', d.image_count)}
       </dl>
       <div class="draft-actions">
-        <a class="disabled" title="run pipeline to populate">↗ Facebook draft</a>
-        <a class="disabled" title="run pipeline to populate">↗ eBay draft</a>
+        ${d.facebook_url
+          ? `<a href="${esc(d.facebook_url)}" target="_blank" rel="noopener">↗ Facebook draft</a>`
+          : '<a class="disabled" title="no FB URL — paste one on the Inventory tab or run the pipeline">↗ Facebook draft</a>'}
+        ${d.ebay_url
+          ? `<a href="${esc(d.ebay_url)}" target="_blank" rel="noopener">↗ eBay draft</a>`
+          : '<a class="disabled" title="no eBay URL — paste one on the Inventory tab or run the pipeline">↗ eBay draft</a>'}
       </div>
     `;
     grid.appendChild(card);
@@ -309,7 +429,7 @@ function esc(s) {
 
 // ───────── compare ─────────
 
-const FIELDS = ['title','location','city','state','quantity',
+const FIELDS = ['title','location','city','state','zip_code','quantity',
                 'chair_type','dimensions','suggested_price_per_chair','style_suffix'];
 
 async function loadCompare() {
@@ -381,13 +501,19 @@ function renderCompareEntry(e) {
   head.querySelectorAll('.ce-rate button').forEach(btn => {
     btn.addEventListener('click', async () => {
       const newRate = btn.classList.contains('active') ? null : btn.dataset.rate;
-      await fetch(`/api/compare/${e.id}/rate`, {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({rating: newRate}),
+      await withButtonLoading(btn, null, async () => {
+        try {
+          await apiFetch(`/api/compare/${e.id}/rate`, {
+            method: 'POST',
+            headers: {'content-type': 'application/json'},
+            body: JSON.stringify({rating: newRate}),
+          });
+          e.rating = newRate;
+          loadCompare();
+        } catch (err) {
+          toast('Rating failed: ' + (err.message || err), 'err');
+        }
       });
-      e.rating = newRate;
-      loadCompare();
     });
   });
   return wrap;
@@ -397,15 +523,63 @@ function renderCompareEntry(e) {
 
 const auc = {
   source: 'gd',
+  category: '',           // '' | 'banquet' | 'medical' (on-read keyword classifier)
   items: [],
+  stats: null,
   loading: false,
+  favorites: [],          // list of favorite dicts from /api/auctions/favorites
+  favoriteIds: new Set(), // asset_id strings — for fast "is starred?" lookup
+  intervals: [],          // alert interval labels in display order
+  telegramConfigured: false,
 };
+
+function _assetIdFromLink(link) {
+  if (!link) return '';
+  let m = link.match(/\/asset\/(\d+)\/(\d+)/);
+  if (m) return `${m[1]}/${m[2]}`;
+  m = link.match(/[?&]auc=(\d+)/);
+  if (m) return `ps:${m[1]}`;
+  return '';
+}
+
+// Build an eBay sold-listings search URL from an auction row. Used on the
+// MEDICAL sub-tab as the profitability-test hook: GovDeals doesn't expose
+// final winning bids, so we send the operator straight to the demand side.
+// Strips quantity prefixes ("Lot of 3x …") and trailing seller codes that
+// would otherwise dilute the eBay match.
+function _ebaySoldUrl(it) {
+  const raw = (it.title || it.raw_title || '').trim();
+  const cleaned = raw
+    .replace(/^lot of \d+x?\s*/i, '')
+    .replace(/\(\d+[^)]*\)\s*$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const q = encodeURIComponent(cleaned || raw);
+  return `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1`;
+}
 
 $$('#auc-source .seg-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     $$('#auc-source .seg-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     auc.source = btn.dataset.value;
+    loadAuctions();
+  });
+});
+
+// Category sub-tab — medical defaults min-qty to 1 (singles), banquet to 50.
+$$('#auc-category .seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#auc-category .seg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    auc.category = btn.dataset.value;
+    const minQty = $('#auc-min-qty');
+    if (minQty) {
+      const desired = auc.category === 'medical' ? '1' : '50';
+      minQty.value = desired;
+      const out = $('#auc-min-qty-out');
+      if (out) out.textContent = desired;
+    }
     loadAuctions();
   });
 });
@@ -419,9 +593,19 @@ $('#auc-condition').addEventListener('change', loadAuctions);
 $('#auc-expired').addEventListener('change', loadAuctions);
 $('#auc-stale').addEventListener('change', loadAuctions);
 
-$('#auc-refresh').addEventListener('click', async () => {
-  await fetch('/api/auctions/refresh', {method: 'POST'});
-  loadAuctions();
+$('#auc-refresh').addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '↻ reloading…', async () => {
+    try {
+      await apiFetch('/api/auctions/refresh', {method: 'POST'});
+      await loadAuctions();
+    } catch (err) {
+      toast(`Reload failed: ${err.message || err}`, 'err');
+    }
+  });
+});
+
+$('#staleness-scrape').addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '⟳ starting…', () => startScrape('gd', false));
 });
 
 // ── scrape dropdown ──
@@ -447,30 +631,37 @@ $$('.dropdown-menu button', dd).forEach(btn => {
 });
 
 async function startScrape(source, test) {
-  const res = await fetch('/api/scrape/start', {
-    method: 'POST',
-    headers: {'content-type': 'application/json'},
-    body: JSON.stringify({source, test}),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({detail: res.statusText}));
-    setScrapeStrip({status: 'error', source, last_line: err.detail || res.statusText});
-    return;
-  }
-  // Immediately show "running" in the UI; SSE will refine with live lines.
+  // Immediate optimistic feedback — don't wait for POST round-trip.
   setScrapeStrip({
     status: 'running',
     source,
     current_step: source === 'both' ? 'gd' : source,
     current_stage: 'starting',
     stage_detail: null,
-    last_line: 'starting…',
+    last_line: 'starting scraper…',
     test_mode: test,
   });
+  try {
+    await apiFetch('/api/scrape/start', {
+      method: 'POST',
+      headers: {'content-type': 'application/json'},
+      body: JSON.stringify({source, test}),
+    });
+  } catch (err) {
+    setScrapeStrip({status: 'error', source, last_line: err.message || String(err)});
+    toast(`Scrape failed to start: ${err.message || err}`, 'err');
+  }
 }
 
-$('#scrape-cancel').addEventListener('click', async () => {
-  await fetch('/api/scrape/cancel', {method: 'POST'});
+$('#scrape-cancel').addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '…cancelling', async () => {
+    try {
+      await apiFetch('/api/scrape/cancel', {method: 'POST'});
+      toast('Scrape cancel requested.', 'info');
+    } catch (err) {
+      toast('Cancel failed: ' + (err.message || err), 'err');
+    }
+  });
 });
 
 function setScrapeStrip(s) {
@@ -506,7 +697,6 @@ function setScrapeStrip(s) {
   $('#scrape-cancel').hidden = (s.status !== 'running');
 }
 
-let scrapeES;
 function connectScrapeStream() {
   if (scrapeES) scrapeES.close();
   scrapeES = new EventSource('/api/scrape/stream');
@@ -550,22 +740,106 @@ function handleScrapeLine(e, kind) {
   } catch (err) { console.warn(err); }
 }
 
-$('#auc-queue-all').addEventListener('click', async () => {
-  const urls = auc.items.map(it => it.link).filter(Boolean);
-  if (!urls.length) return;
-  await queueRuns(urls);
+$('#auc-queue-all').addEventListener('click', (e) => {
+  const urls = auc.items
+    .map(it => it.link)
+    .filter(u => typeof u === 'string' && u.includes('govdeals.com'));
+  if (!urls.length) {
+    toast('Nothing to queue — only GovDeals lots can run through the pipeline.', 'err');
+    return;
+  }
+  withButtonLoading(e.currentTarget, `…queuing ${urls.length}`, async () => {
+    try {
+      await queueRuns(urls);
+      toast(`Queued ${urls.length} lot${urls.length === 1 ? '' : 's'}. Watch Launcher tab.`, 'ok');
+    } catch (err) {
+      toast('Queue failed: ' + (err.message || err), 'err');
+    }
+  });
 });
+
+function _ageInDays(isoStr) {
+  if (!isoStr) return null;
+  const ms = Date.now() - new Date(isoStr).getTime();
+  if (Number.isNaN(ms)) return null;
+  return ms / 86400000;
+}
+
+function _fmtAge(days) {
+  if (days == null) return 'never';
+  if (days < 1/24) return 'just now';
+  if (days < 1) return `${Math.round(days * 24)}h ago`;
+  const d = Math.floor(days);
+  return `${d} day${d === 1 ? '' : 's'} ago`;
+}
+
+function renderCacheHeader(stats, maxStaleDays) {
+  const host = $('#auction-cache-stats');
+  if (!host) return;
+  if (!stats || !stats.total) {
+    host.hidden = false;
+    host.removeAttribute('data-freshness');
+    host.innerHTML = `<span class="ch-total">0 lots in cache</span>
+      <span class="ch-age">hit <strong>⟳ scrape now</strong> to populate</span>`;
+    return;
+  }
+  const ageDays = _ageInDays(stats.newest_seen_at);
+  let freshness = 'fresh';
+  if (ageDays == null) freshness = 'stale';
+  else if (ageDays > maxStaleDays) freshness = 'stale';
+  else if (ageDays > maxStaleDays * 0.6) freshness = 'aging';
+
+  const sources = Object.entries(stats.by_source || {})
+    .filter(([s]) => s !== 'other')
+    .map(([s, v]) => `${s}: ${v.count.toLocaleString()}`)
+    .join(' · ');
+
+  host.hidden = false;
+  host.dataset.freshness = freshness;
+  host.innerHTML = `
+    <span class="ch-total">📦 ${stats.total.toLocaleString()} lots in cache</span>
+    <span class="ch-age">newest scraped <span class="ch-age-val">${_fmtAge(ageDays)}</span></span>
+    ${sources ? `<span class="ch-sources">${sources}</span>` : ''}
+  `;
+}
+
+function renderStalenessBanner(stats, maxStaleDays) {
+  const banner = $('#staleness-banner');
+  if (!banner) return;
+  const ageDays = _ageInDays(stats?.newest_seen_at);
+  const shouldShow = stats && stats.total > 0 && ageDays != null && ageDays > Math.max(2, maxStaleDays);
+  if (!shouldShow) { banner.hidden = true; return; }
+  banner.hidden = false;
+  $('#staleness-message').innerHTML =
+    `Auction cache is <strong>${_fmtAge(ageDays)}</strong>. Re-scrape to refresh.`;
+}
+
+async function fetchCacheStats() {
+  try {
+    const stats = await apiFetch('/api/auctions/cache-stats');
+    auc.stats = stats;
+    renderCacheHeader(stats, Number($('#auc-stale').value) || 7);
+    renderStalenessBanner(stats, Number($('#auc-stale').value) || 7);
+    return stats;
+  } catch (err) {
+    console.warn('cache-stats failed', err);
+    return null;
+  }
+}
 
 async function loadAuctions() {
   if (auc.loading) return;
   auc.loading = true;
   const grid = $('#auction-grid');
   const status = $('#auction-status');
+  const summary = $('#auction-filter-summary');
   const useCond = $('#auc-condition').checked;
-  status.textContent = useCond
-    ? 'Loading auctions (condition scoring may take 3–10s)…'
-    : 'Loading auctions…';
-  grid.innerHTML = '<div class="drafts-empty">Loading…</div>';
+  const maxStaleDays = Number($('#auc-stale').value) || 7;
+  status.innerHTML = useCond
+    ? '<span class="pulse">●</span> Loading auctions (condition scoring may take 3–10s)…'
+    : '<span class="pulse">●</span> Loading auctions…';
+  grid.innerHTML = '<div class="drafts-empty loading"><span class="spinner"></span> fetching listings from cache…</div>';
+  if (summary) summary.hidden = true;
 
   const qs = new URLSearchParams({
     source: auc.source,
@@ -573,31 +847,74 @@ async function loadAuctions() {
     min_qty: $('#auc-min-qty').value,
     condition: useCond ? '1' : '0',
     active_only: $('#auc-expired').checked ? '0' : '1',
-    max_stale_days: $('#auc-stale').value,
+    max_stale_days: String(maxStaleDays),
   });
+  if (auc.category) qs.set('category', auc.category);
   try {
-    const res = await fetch('/api/auctions?' + qs.toString());
-    const body = await res.json();
-    if (!res.ok) {
-      status.textContent = `Error: ${body.detail || res.statusText}`;
-      grid.innerHTML = '';
-      return;
-    }
+    const [body, _stats, _favs] = await Promise.all([
+      apiFetch('/api/auctions?' + qs.toString()),
+      fetchCacheStats(),
+      loadFavorites(),
+    ]);
     auc.items = body.items || [];
-    status.textContent = `${auc.items.length} listings · ${body.cached ? `cached ${body.age}s ago` : 'fresh'}`;
-    renderAuctions(auc.items);
+    status.textContent = `${auc.items.length} shown · ${body.cached ? `cached ${body.age}s ago` : 'fresh'}`;
+    renderAuctions(auc.items, maxStaleDays);
+    renderFilterSummary(auc.items.length, maxStaleDays);
   } catch (err) {
-    status.textContent = `Network error: ${err}`;
-    grid.innerHTML = '';
+    status.textContent = '';
+    grid.innerHTML = `<div class="drafts-empty">Error loading auctions: ${err.message || err}</div>`;
+    toast(`Auction load failed: ${err.message || err}`, 'err');
   } finally {
     auc.loading = false;
   }
 }
 
-function renderAuctions(items) {
+function renderFilterSummary(shownCount, maxStaleDays) {
+  const summary = $('#auction-filter-summary');
+  if (!summary) return;
+  const stats = auc.stats;
+  if (!stats || !stats.total) { summary.hidden = true; return; }
+
+  const srcKey = auc.source; // 'gd' | 'ps'
+  const srcCount = stats.by_source?.[srcKey]?.count ?? 0;
+
+  if (shownCount === 0 && srcCount > 0) {
+    // Figure out the most likely culprit.
+    const ageDays = _ageInDays(stats.by_source?.[srcKey]?.newest_seen_at);
+    const activeOnly = !$('#auc-expired').checked;
+    const reasons = [];
+    if (activeOnly && ageDays != null && ageDays > maxStaleDays) {
+      reasons.push(`<span class="fs-bad">staleness</span> (newest ${srcKey} row is ${_fmtAge(ageDays)}, filter hides anything past ${maxStaleDays} days)`);
+    }
+    if ($('#auc-min-qty').value > 50) {
+      reasons.push(`<span class="fs-bad">min-chairs</span> set to ${$('#auc-min-qty').value}`);
+    }
+    if (activeOnly) {
+      reasons.push(`<span class="fs-hint">“Show ended auctions”</span> is off`);
+    }
+    const hint = reasons.length
+      ? `Likely culprit: ${reasons.join(' · ')}`
+      : `Try lowering filters or hit ⟳ scrape now.`;
+    summary.hidden = false;
+    summary.innerHTML =
+      `${srcCount.toLocaleString()} ${srcKey} lots in cache, filters excluded all of them. ${hint}`;
+  } else if (shownCount > 0 && shownCount < srcCount) {
+    summary.hidden = false;
+    summary.innerHTML = `Showing ${shownCount} of ${srcCount.toLocaleString()} ${srcKey} lots (ranked by chair count).`;
+  } else {
+    summary.hidden = true;
+  }
+}
+
+function renderAuctions(items, maxStaleDays) {
   const grid = $('#auction-grid');
   if (!items.length) {
-    grid.innerHTML = '<div class="drafts-empty">No listings matched. Try lowering min qty or include expired.</div>';
+    const stats = auc.stats;
+    const total = stats?.by_source?.[auc.source]?.count ?? 0;
+    const msg = total === 0
+      ? `Cache is empty for ${auc.source === 'gd' ? 'GovDeals' : 'Public Surplus'}. Hit ⟳ scrape now to populate.`
+      : `No listings matched the current filters. See details above.`;
+    grid.innerHTML = `<div class="drafts-empty">${msg}</div>`;
     return;
   }
   grid.innerHTML = '';
@@ -626,8 +943,25 @@ function renderAuctionCard(it) {
     ? 'Queue this listing for the pipeline'
     : 'Pipeline only supports GovDeals URLs';
 
+  // Compose "Location · ZIP" line. The cached `location` is already
+  // "City, State, Country"; we append the ZIP from the asset detail page
+  // when present (newer rows only — older cache entries leave it blank).
+  const locParts = [];
+  if (it.location) locParts.push(it.location);
+  if (it.pickup_zip) locParts.push(it.pickup_zip);
+  const locLine = locParts.join(' · ');
+
+  const assetId = _assetIdFromLink(it.link);
+  const isStarred = assetId && auc.favoriteIds.has(assetId);
+
   card.innerHTML = `
-    <div class="auction-img">${img}</div>
+    <div class="auction-img">
+      ${img}
+      ${assetId ? `<button class="auction-star ${isStarred ? 'on' : ''}"
+        data-asset-id="${esc(assetId)}"
+        title="${isStarred ? 'Unstar — stops countdown alerts' : 'Star — get Telegram pings as the auction winds down'}"
+        aria-label="${isStarred ? 'Unstar' : 'Star'}">${isStarred ? '★' : '☆'}</button>` : ''}
+    </div>
     <div class="auction-body">
       <h3 class="auction-title">${esc(it.title || it.raw_title || '—')}</h3>
       <div class="auction-meta">
@@ -635,10 +969,13 @@ function renderAuctionCard(it) {
         ${it.price ? `<span class="auction-price">${esc(it.price)}</span>` : ''}
         ${condPill}
       </div>
+      ${locLine ? `<div class="auction-loc">📍 ${esc(locLine)}</div>` : ''}
+      ${(it.contact_phone || it.contact_email) ? `<div class="auction-contact">☎ ${esc([it.contact_phone, it.contact_email].filter(Boolean).join(' · '))}</div>` : ''}
       ${ends ? `<div class="auction-ends">⏱ ${esc(ends)}</div>` : ''}
       ${it.condition_note ? `<div class="auction-note">${esc(it.condition_note)}</div>` : ''}
       <div class="auction-actions">
         <a href="${esc(it.link)}" target="_blank" rel="noopener" class="auction-link">↗ source</a>
+        ${it.category === 'medical' ? `<a href="${esc(_ebaySoldUrl(it))}" target="_blank" rel="noopener" class="auction-link" title="eBay sold-listings search — demand-side comps for this model">📊 sold comps</a>` : ''}
         <button class="btn btn-small btn-primary auction-launch"
                 ${launchDisabled ? 'disabled' : ''}
                 title="${esc(launchTitle)}"
@@ -647,32 +984,232 @@ function renderAuctionCard(it) {
     </div>
   `;
 
+  const starBtn = card.querySelector('.auction-star');
+  if (starBtn) {
+    starBtn.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      starBtn.disabled = true;
+      try {
+        await toggleFavorite(assetId, it);
+      } finally {
+        starBtn.disabled = false;
+      }
+    });
+  }
+
   const launchBtn = card.querySelector('.auction-launch');
   if (launchBtn && !launchDisabled) {
     launchBtn.addEventListener('click', async () => {
+      const orig = launchBtn.textContent;
       launchBtn.disabled = true;
-      launchBtn.textContent = '⏱ queued';
-      await queueRuns([it.link]);
-      setTimeout(() => {
+      launchBtn.textContent = '⏱ queuing…';
+      launchBtn.classList.add('is-loading');
+      try {
+        await queueRuns([it.link]);
+        // Permanent per-session badge so it's clear the lot is already in.
+        launchBtn.textContent = '✓ queued';
+        launchBtn.classList.add('queued');
+        toast(`Queued: ${it.title || it.link}`, 'ok');
+      } catch (err) {
+        launchBtn.textContent = orig;
         launchBtn.disabled = false;
-        launchBtn.textContent = '▶ launch';
-      }, 2000);
+        toast('Queue failed: ' + (err.message || err), 'err');
+      } finally {
+        launchBtn.classList.remove('is-loading');
+      }
     });
   }
   return card;
 }
 
+// ─────────── auction favorites + countdown alerts ───────────
+
+async function loadFavorites() {
+  try {
+    const body = await apiFetch('/api/auctions/favorites');
+    auc.favorites = body.items || [];
+    auc.favoriteIds = new Set(auc.favorites.map(f => f.asset_id));
+    auc.intervals = body.intervals || [];
+    auc.telegramConfigured = !!body.telegram_configured;
+    renderFavoritesStrip();
+  } catch (err) {
+    console.warn('Favorites load failed:', err);
+  }
+}
+
+async function toggleFavorite(assetId, sourceItem) {
+  if (!assetId) return;
+  const wasStarred = auc.favoriteIds.has(assetId);
+  try {
+    if (wasStarred) {
+      await apiFetch(`/api/auctions/favorites/${encodeURIComponent(assetId)}`, {
+        method: 'DELETE',
+      });
+      toast('Unstarred', 'ok');
+    } else {
+      await apiFetch('/api/auctions/favorites', {
+        method: 'POST',
+        headers: {'content-type': 'application/json'},
+        body: JSON.stringify({
+          asset_id: assetId,
+          link: sourceItem.link,
+          title: sourceItem.title || sourceItem.raw_title,
+          quantity: sourceItem.quantity,
+          end_date: sourceItem.end_date || sourceItem.time_left || '',
+          image_url: sourceItem.image_url,
+          location: sourceItem.location,
+        }),
+      });
+      toast(
+        auc.telegramConfigured
+          ? 'Starred — alerts armed'
+          : 'Starred — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to receive pings',
+        'ok'
+      );
+    }
+  } catch (err) {
+    toast('Star toggle failed: ' + (err.message || err), 'err');
+    return;
+  }
+  await loadFavorites();
+  // Re-render the auctions grid so the star icon flips state.
+  renderAuctions(auc.items, Number($('#auc-stale').value) || 7);
+}
+
+function _fmtRemaining(secs) {
+  if (secs == null) return 'no end date';
+  if (secs <= 0) return 'ended';
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3600) return `${Math.floor(secs / 60)}m`;
+  if (secs < 86400) {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    return `${h}h ${m}m`;
+  }
+  const d = Math.floor(secs / 86400);
+  const h = Math.floor((secs % 86400) / 3600);
+  return `${d}d ${h}h`;
+}
+
+function renderFavoritesStrip() {
+  let strip = $('#auction-favorites-strip');
+  const grid = $('#auction-grid');
+  const host = grid?.parentElement;
+  if (!host) return;
+
+  if (!auc.favorites.length) {
+    if (strip) strip.remove();
+    return;
+  }
+
+  if (!strip) {
+    strip = document.createElement('section');
+    strip.id = 'auction-favorites-strip';
+    strip.className = 'fav-strip';
+    host.insertBefore(strip, grid);
+  }
+
+  const tgPill = auc.telegramConfigured
+    ? '<span class="fav-tg ok">📡 Telegram alerts ON</span>'
+    : '<span class="fav-tg off" title="Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env">⚠ Telegram not configured</span>';
+
+  const cards = auc.favorites.map(_renderFavoriteCard).join('');
+  strip.innerHTML = `
+    <header class="fav-strip-head">
+      <div class="fav-strip-title">★ FAVORITES <span class="fav-count">${auc.favorites.length}</span></div>
+      <div class="fav-strip-meta">
+        ${tgPill}
+        <button class="btn btn-small fav-test-tg" type="button">test ping</button>
+      </div>
+    </header>
+    <div class="fav-strip-grid">${cards}</div>
+  `;
+
+  strip.querySelector('.fav-test-tg').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true; btn.textContent = 'sending…';
+    try {
+      await apiFetch('/api/auctions/favorites/test-telegram', {method: 'POST'});
+      toast('Test message sent — check Telegram', 'ok');
+      btn.textContent = '✓ sent';
+    } catch (err) {
+      toast('Test failed: ' + (err.message || err), 'err');
+      btn.textContent = 'test ping';
+    } finally {
+      setTimeout(() => { btn.disabled = false; btn.textContent = 'test ping'; }, 2000);
+    }
+  });
+
+  strip.querySelectorAll('.fav-card .auction-star').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const assetId = btn.dataset.assetId;
+      const fav = auc.favorites.find(f => f.asset_id === assetId);
+      if (!fav) return;
+      btn.disabled = true;
+      try {
+        await toggleFavorite(assetId, {
+          link: fav.link, title: fav.title, quantity: fav.quantity,
+          end_date: fav.end_date_raw, image_url: fav.image_url,
+          location: fav.location,
+        });
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  });
+}
+
+function _renderFavoriteCard(fav) {
+  const remaining = _fmtRemaining(fav.seconds_until_end);
+  const isExpired = fav.seconds_until_end != null && fav.seconds_until_end <= 0;
+  const noEnd = fav.seconds_until_end == null;
+  const stateCls = isExpired ? 'expired' : (noEnd ? 'no-end' : 'live');
+
+  const sentSet = new Set(fav.sent_intervals || []);
+  const dots = (auc.intervals || []).map(label => {
+    const fired = sentSet.has(label);
+    return `<span class="fav-dot ${fired ? 'fired' : ''}" title="${label} alert${fired ? ' fired' : ' pending'}">${label}</span>`;
+  }).join('');
+
+  const img = fav.image_url
+    ? `<img src="${esc(fav.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'auction-img-fallback',textContent:'🪑'}))">`
+    : `<div class="auction-img-fallback">🪑</div>`;
+
+  return `
+    <article class="fav-card ${stateCls}">
+      <div class="fav-card-img">
+        ${img}
+        <button class="auction-star on" data-asset-id="${esc(fav.asset_id)}"
+          title="Unstar — stops countdown alerts" aria-label="Unstar">★</button>
+      </div>
+      <div class="fav-card-body">
+        <a href="${esc(fav.link)}" target="_blank" rel="noopener" class="fav-card-title">${esc(fav.title || '—')}</a>
+        <div class="fav-card-meta">
+          <span class="fav-qty">${(fav.quantity || 0).toLocaleString()} ×</span>
+          <span class="fav-remaining ${stateCls}">${esc(remaining)}</span>
+        </div>
+        ${fav.location ? `<div class="auction-loc">📍 ${esc(fav.location)}</div>` : ''}
+        <div class="fav-dots" title="Alert schedule (filled = sent)">${dots}</div>
+      </div>
+    </article>
+  `;
+}
+
+// Periodically refresh the strip's countdown numbers without re-fetching the
+// (slow) auctions LLM call. Cheap GET; the dots reflect server-side sent state.
+setInterval(() => {
+  if ($('#auction-grid')) loadFavorites();
+}, 30000);
+
+
 async function queueRuns(urls) {
-  const res = await fetch('/api/runs/queue', {
+  await apiFetch('/api/runs/queue', {
     method: 'POST',
     headers: {'content-type': 'application/json'},
     body: JSON.stringify({urls}),
   });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({detail: res.statusText}));
-    appendLine('stderr', `[queue failed] ${err.detail || res.statusText}`);
-    return;
-  }
   // Refresh the launcher state so the queue strip updates immediately.
   fetch('/api/runs/state').then(r => r.json()).then(applyState).catch(() => {});
 }
@@ -680,12 +1217,12 @@ async function queueRuns(urls) {
 
 // ─────────────────────────── Inventory tab ───────────────────────────
 
-let _invItems = [];
-let _invStatusFilter = '';
+var _invItems = [];
+var _invStatusFilter = '';
 
 async function loadInventory() {
   const tbody = $('#inv-tbody');
-  tbody.innerHTML = '<tr><td colspan="9" class="drafts-empty">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="11" class="drafts-empty">Loading…</td></tr>';
   try {
     const [invRes, statsRes] = await Promise.all([
       fetch('/api/inventory' + (_invStatusFilter ? `?status=${_invStatusFilter}` : '')),
@@ -697,7 +1234,7 @@ async function loadInventory() {
     renderInvStats(stats);
     renderInvTable(_invItems);
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" class="drafts-empty">Load failed: ${e}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="drafts-empty">Load failed: ${e}</td></tr>`;
   }
 }
 
@@ -713,7 +1250,7 @@ function renderInvStats(stats) {
 function renderInvTable(items) {
   const tbody = $('#inv-tbody');
   if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="drafts-empty">No rows. Click ↓ backfill to import folder listings.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="drafts-empty">No rows. Click ↓ backfill to import folder listings.</td></tr>';
     return;
   }
   tbody.innerHTML = '';
@@ -727,7 +1264,21 @@ function renderInvTable(items) {
         : '<div class="inv-hero-fallback">◉</div>'}</td>
       <td>
         <div class="inv-title">${escapeHtml(item.title || '—')}</div>
-        <div class="inv-sub mono tiny">${escapeHtml((item.city || '') + (item.state ? ', ' + item.state : ''))}${item.chair_type ? ' · ' + escapeHtml(item.chair_type) : ''}</div>
+        <div class="inv-sub mono tiny">${escapeHtml((item.city || '') + (item.state ? ', ' + item.state : '') + (item.zip_code ? ' ' + item.zip_code : ''))}${item.chair_type ? ' · ' + escapeHtml(item.chair_type) : ''}</div>
+        ${(item.contact_email || item.contact_phone || item.contact_name) ? `
+          <div class="inv-sub mono tiny inv-contact">☎ ${escapeHtml([item.contact_name, item.contact_phone, item.contact_email].filter(Boolean).join(' · '))}</div>
+        ` : ''}
+        <div class="inv-sub inv-extras">
+          <button class="btn btn-small btn-ghost inv-acct" data-act="acct" title="Set the GovDeals login that owns this lot">
+            🔐 ${item.govdeals_username
+                  ? escapeHtml(item.govdeals_username) + (item.govdeals_password_set ? ' ✓' : ' (no pw)')
+                  : 'set acct'}
+          </button>
+          ${item.buyer_cert_url
+            ? `<a class="btn btn-small btn-ghost inv-cert-link" href="${escapeAttr(item.buyer_cert_url)}" target="_blank" rel="noopener" title="Open buyer certificate">📎 ${escapeHtml(item.buyer_cert_filename || 'cert')}</a>
+               <button class="btn btn-small btn-ghost inv-danger" data-act="cert-clear" title="Remove certificate">✕</button>`
+            : `<button class="btn btn-small btn-ghost" data-act="cert-attach" title="Attach winning-bid buyer certificate">📎 attach cert</button>`}
+        </div>
       </td>
       <td>
         <input type="number" class="inv-qty" value="${item.quantity_remaining ?? ''}" min="0" data-field="quantity_remaining">
@@ -738,12 +1289,14 @@ function renderInvTable(items) {
       </td>
       <td>
         <select class="inv-status" data-field="status">
-          ${['draft','listed','hidden','sold_out'].map(s =>
+          ${['draft','listed','hidden','sold_out','owned','won_pickup','active_bid','lost'].map(s =>
             `<option value="${s}" ${s===item.status?'selected':''}>${s}</option>`).join('')}
         </select>
       </td>
       <td>${renderPlatformCell(item, 'facebook')}</td>
       <td>${renderPlatformCell(item, 'ebay')}</td>
+      <td>${renderPlatformCell(item, 'fb_business')}</td>
+      <td>${renderPlatformCell(item, 'ad')}</td>
       <td class="inv-actions">
         <button class="btn btn-small btn-ghost" data-act="view">view</button>
         <button class="btn btn-small btn-ghost" data-act="republish">republish</button>
@@ -771,7 +1324,7 @@ function renderPlatformCell(item, platform) {
       <div class="plat-ok">
         <a href="${escapeAttr(url)}" target="_blank" rel="noopener">✓ link</a>
         <div class="mono tiny">${ts ? ts.slice(0,10) : ''}</div>
-        <button class="plat-clear" data-platform="${platform}" title="Clear URL">✕</button>
+        <button class="btn btn-small plat-clear" data-platform="${platform}" title="Clear URL">✕</button>
       </div>`;
   }
   return `<button class="btn btn-small plat-set" data-platform="${platform}">paste URL</button>`;
@@ -801,23 +1354,117 @@ async function onInvFieldChange(e) {
     flashRow(tr, 'ok');
   } catch (err) {
     flashRow(tr, 'err');
-    alert('Update failed: ' + err.message);
+    toast('Update failed: ' + err.message, 'err');
   }
 }
 
 async function onInvAction(e) {
-  const tr = e.target.closest('tr');
+  const btn = e.target;
+  const tr = btn.closest('tr');
   const lotId = tr.dataset.lotId;
-  const act = e.target.dataset.act;
+  const act = btn.dataset.act;
   if (act === 'view') {
     window.open(`/listings/${encodeURIComponent(lotId)}`, '_blank');
     return;
   }
   if (act === 'delete') {
     if (!confirm(`Delete lot ${lotId} from the ledger? (Folder on disk is untouched.)`)) return;
-    const r = await fetch(`/api/inventory/${encodeURIComponent(lotId)}`, {method: 'DELETE'});
-    if (r.ok) loadInventory();
-    else alert('Delete failed');
+    await withButtonLoading(btn, '…deleting', async () => {
+      try {
+        await apiFetch(`/api/inventory/${encodeURIComponent(lotId)}`, {method: 'DELETE'});
+        toast(`Lot ${lotId} deleted from ledger.`, 'ok');
+        loadInventory();
+      } catch (err) {
+        toast('Delete failed: ' + (err.message || err), 'err');
+      }
+    });
+    return;
+  }
+  if (act === 'acct') {
+    const item = _invItems.find(x => x.lot_id === lotId);
+    const curUser = item?.govdeals_username || '';
+    const username = prompt(
+      `GovDeals username/email for lot ${lotId}\n(leave blank to clear):`,
+      curUser,
+    );
+    if (username === null) return;
+    let password = null;
+    if (username.trim()) {
+      // Don't prefill the password — we never return it from the API. An empty
+      // submit keeps the existing password; "-" explicitly clears it.
+      const pwPrompt = prompt(
+        `GovDeals password for ${username.trim()}\n` +
+        `(empty = keep current, "-" = clear, anything else = replace):`,
+        '',
+      );
+      if (pwPrompt === null) return;
+      password = pwPrompt;
+    }
+    const body = {govdeals_username: username.trim() || null};
+    if (!username.trim()) {
+      body.govdeals_password = null;
+    } else if (password === '-') {
+      body.govdeals_password = null;
+    } else if (password !== '' && password !== null) {
+      body.govdeals_password = password;
+    }
+    await withButtonLoading(btn, '…saving', async () => {
+      try {
+        const res = await fetch(`/api/inventory/${encodeURIComponent(lotId)}`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+        toast(`Account saved for ${lotId}.`, 'ok');
+        loadInventory();
+      } catch (err) {
+        toast('Save failed: ' + (err.message || err), 'err');
+      }
+    });
+    return;
+  }
+  if (act === 'cert-attach') {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.png,.jpg,.jpeg,.webp,image/*,application/pdf';
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      await withButtonLoading(btn, '…uploading', async () => {
+        try {
+          const fd = new FormData();
+          fd.append('file', file);
+          const res = await fetch(
+            `/api/inventory/${encodeURIComponent(lotId)}/buyer-cert`,
+            {method: 'POST', body: fd},
+          );
+          if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+          toast(`Certificate attached to ${lotId}.`, 'ok');
+          loadInventory();
+        } catch (err) {
+          toast('Upload failed: ' + (err.message || err), 'err');
+        }
+      });
+    });
+    input.click();
+    return;
+  }
+  if (act === 'cert-clear') {
+    if (!confirm(`Remove the buyer certificate for ${lotId}?`)) return;
+    await withButtonLoading(btn, '…', async () => {
+      try {
+        const res = await fetch(
+          `/api/inventory/${encodeURIComponent(lotId)}/buyer-cert`,
+          {method: 'DELETE'},
+        );
+        if (!res.ok) throw new Error((await res.json()).detail || res.statusText);
+        toast(`Certificate removed for ${lotId}.`, 'ok');
+        loadInventory();
+      } catch (err) {
+        toast('Remove failed: ' + (err.message || err), 'err');
+      }
+    });
     return;
   }
   if (act === 'republish') {
@@ -825,50 +1472,75 @@ async function onInvAction(e) {
     if (!item) return;
     const url = item.govdeals_url;
     if (!url) {
-      alert('This row has no GovDeals URL — republish only works for scraped lots.');
+      toast('This row has no GovDeals URL — republish only works for scraped lots.', 'err');
       return;
     }
     if (!confirm(`Republish ${lotId}? This ignores the dedup check and spends API tokens.`)) return;
-    const res = await fetch('/api/runs/start', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({url, force_republish: true}),
+    await withButtonLoading(btn, '…queuing', async () => {
+      try {
+        await apiFetch('/api/runs/start', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({url, force_republish: true}),
+        });
+        toast(`Lot ${lotId} queued. Switch to Launcher to watch.`, 'ok');
+      } catch (err) {
+        toast('Republish failed: ' + (err.message || err), 'err');
+      }
     });
-    if (res.ok) {
-      alert('Queued. Switch to the Launcher tab to watch.');
-    } else {
-      const err = await res.json().catch(() => ({}));
-      alert('Republish failed: ' + (err.detail || res.statusText));
-    }
   }
 }
 
+const PLATFORM_LABELS = {
+  facebook: 'Facebook Marketplace',
+  ebay: 'eBay',
+  fb_business: 'Facebook Business post',
+  ad: 'Ad',
+};
+
 async function onPlatformSet(e) {
-  const tr = e.target.closest('tr');
+  const btn = e.target;
+  const tr = btn.closest('tr');
   const lotId = tr.dataset.lotId;
-  const platform = e.target.dataset.platform;
-  const url = prompt(`Paste the ${platform.toUpperCase()} URL for lot ${lotId}:`);
+  const platform = btn.dataset.platform;
+  const label = PLATFORM_LABELS[platform] || platform.toUpperCase();
+  const url = prompt(`Paste the ${label} URL for lot ${lotId}:`);
   if (!url) return;
-  const r = await fetch(`/api/inventory/${encodeURIComponent(lotId)}/platform`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({platform, url: url.trim()}),
+  await withButtonLoading(btn, '…saving', async () => {
+    try {
+      await apiFetch(`/api/inventory/${encodeURIComponent(lotId)}/platform`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({platform, url: url.trim()}),
+      });
+      toast(`${label} URL saved for ${lotId}.`, 'ok');
+      loadInventory();
+    } catch (err) {
+      toast(`Save failed: ${err.message || err}`, 'err');
+    }
   });
-  if (r.ok) loadInventory();
-  else alert('Failed: ' + ((await r.json().catch(()=>({}))).detail || r.statusText));
 }
 
 async function onPlatformClear(e) {
-  const tr = e.target.closest('tr');
+  const btn = e.target;
+  const tr = btn.closest('tr');
   const lotId = tr.dataset.lotId;
-  const platform = e.target.dataset.platform;
-  if (!confirm(`Clear the ${platform.toUpperCase()} URL for lot ${lotId}?`)) return;
-  const r = await fetch(`/api/inventory/${encodeURIComponent(lotId)}/platform`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({platform, url: null}),
+  const platform = btn.dataset.platform;
+  const label = PLATFORM_LABELS[platform] || platform.toUpperCase();
+  if (!confirm(`Clear the ${label} URL for lot ${lotId}?`)) return;
+  await withButtonLoading(btn, '…', async () => {
+    try {
+      await apiFetch(`/api/inventory/${encodeURIComponent(lotId)}/platform`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({platform, url: null}),
+      });
+      toast(`${label} URL cleared for ${lotId}.`, 'ok');
+      loadInventory();
+    } catch (err) {
+      toast(`Clear failed: ${err.message || err}`, 'err');
+    }
   });
-  if (r.ok) loadInventory();
 }
 
 function flashRow(tr, kind) {
@@ -877,22 +1549,20 @@ function flashRow(tr, kind) {
   tr.classList.add(kind === 'ok' ? 'flash-ok' : 'flash-err');
 }
 
-$('#inv-refresh')?.addEventListener('click', loadInventory);
-$('#inv-backfill')?.addEventListener('click', async () => {
+$('#inv-refresh')?.addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '↻ loading…', loadInventory);
+});
+$('#inv-backfill')?.addEventListener('click', async (e) => {
   if (!confirm('Walk the listings folder and import any missing rows as drafts?')) return;
-  const btn = $('#inv-backfill');
-  const label = btn.textContent;
-  btn.disabled = true; btn.textContent = '…backfilling';
-  try {
-    const r = await fetch('/api/inventory/backfill', {method: 'POST'});
-    const data = await r.json();
-    alert(`Backfill done.\nAdded ${data.counts.added}\nUpdated ${data.counts.updated}\nSkipped ${data.counts.skipped}`);
-    loadInventory();
-  } catch (e) {
-    alert('Backfill failed: ' + e);
-  } finally {
-    btn.disabled = false; btn.textContent = label;
-  }
+  await withButtonLoading(e.currentTarget, '…backfilling', async () => {
+    try {
+      const data = await apiFetch('/api/inventory/backfill', {method: 'POST'});
+      toast(`Backfill done · +${data.counts.added} added · ${data.counts.updated} updated · ${data.counts.skipped} skipped`, 'ok');
+      loadInventory();
+    } catch (err) {
+      toast('Backfill failed: ' + (err.message || err), 'err');
+    }
+  });
 });
 
 // status-filter segmented control
@@ -906,7 +1576,7 @@ $$('#inv-status-filter .seg-btn').forEach(b => b.addEventListener('click', () =>
 
 // ─────────────────────────── Inquiries tab ───────────────────────────
 
-let _inqStatusFilter = '';
+var _inqStatusFilter = '';
 
 async function loadInquiries() {
   const el = $('#inq-list');
@@ -959,29 +1629,219 @@ function renderInquiries(items) {
     `;
     card.querySelectorAll('[data-set-status]').forEach(b => b.addEventListener('click', async () => {
       const status = b.dataset.setStatus;
-      const r = await fetch(`/api/inquiries/${q.id}`, {
-        method: 'PATCH',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({status}),
+      await withButtonLoading(b, '…', async () => {
+        try {
+          await apiFetch(`/api/inquiries/${q.id}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status}),
+          });
+          toast(`Inquiry #${q.id} → ${status}`, 'ok');
+          loadInquiries();
+        } catch (err) {
+          toast('Status change failed: ' + (err.message || err), 'err');
+        }
       });
-      if (r.ok) loadInquiries();
     }));
-    card.querySelector('[data-delete]').addEventListener('click', async () => {
+    card.querySelector('[data-delete]').addEventListener('click', async (e) => {
       if (!confirm(`Delete inquiry #${q.id}?`)) return;
-      const r = await fetch(`/api/inquiries/${q.id}`, {method: 'DELETE'});
-      if (r.ok) loadInquiries();
+      await withButtonLoading(e.currentTarget, '…', async () => {
+        try {
+          await apiFetch(`/api/inquiries/${q.id}`, {method: 'DELETE'});
+          toast(`Inquiry #${q.id} deleted.`, 'ok');
+          loadInquiries();
+        } catch (err) {
+          toast('Delete failed: ' + (err.message || err), 'err');
+        }
+      });
     });
     el.appendChild(card);
   }
 }
 
-$('#inq-refresh')?.addEventListener('click', loadInquiries);
+$('#inq-refresh')?.addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '↻ loading…', loadInquiries);
+});
 $$('#inq-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => {
   $$('#inq-status-filter .seg-btn').forEach(x => x.classList.remove('active'));
   b.classList.add('active');
   _inqStatusFilter = b.dataset.value;
   loadInquiries();
 }));
+
+
+// ─────────────────────────── Listings DB tab ───────────────────────────
+
+const _ldb = {
+  source: 'all',
+  status: 'all',
+  offset: 0,
+  total: 0,
+  limit: 50,
+};
+
+function _ldbQuery() {
+  return new URLSearchParams({
+    source: _ldb.source,
+    status: _ldb.status,
+    q: $('#ldb-q').value.trim(),
+    min_qty: $('#ldb-min-qty').value || '0',
+    max_qty: $('#ldb-max-qty').value || '99999',
+    seen_within_days: $('#ldb-seen').value,
+    sort: $('#ldb-sort').value,
+    limit: $('#ldb-limit').value,
+    offset: String(_ldb.offset),
+  });
+}
+
+async function loadListingsDb() {
+  const tbody = $('#ldb-tbody');
+  const statusBar = $('#ldb-status-bar');
+  const pager = $('#ldb-pager');
+  _ldb.limit = Number($('#ldb-limit').value) || 50;
+  tbody.innerHTML = '<tr><td colspan="8" class="drafts-empty loading"><span class="spinner"></span> querying listings.db…</td></tr>';
+  statusBar.innerHTML = '<span class="pulse">●</span> loading…';
+  try {
+    const data = await apiFetch('/api/listings?' + _ldbQuery().toString());
+    _ldb.total = data.total;
+    renderListingsDb(data.items);
+    const shownFrom = data.total === 0 ? 0 : _ldb.offset + 1;
+    const shownTo = Math.min(_ldb.offset + data.items.length, data.total);
+    statusBar.textContent = data.total === 0
+      ? 'No rows match these filters.'
+      : `Showing ${shownFrom}–${shownTo} of ${data.total.toLocaleString()} rows`;
+    pager.hidden = data.total <= _ldb.limit;
+    $('#ldb-page-info').textContent = `page ${Math.floor(_ldb.offset / _ldb.limit) + 1} of ${Math.max(1, Math.ceil(data.total / _ldb.limit))}`;
+    $('#ldb-prev').disabled = _ldb.offset === 0;
+    $('#ldb-next').disabled = _ldb.offset + _ldb.limit >= data.total;
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="8" class="drafts-empty">Query failed: ${escapeHtml(err.message || String(err))}</td></tr>`;
+    statusBar.textContent = '';
+    toast('Listings DB query failed: ' + (err.message || err), 'err');
+  }
+}
+
+function _fmtEndDate(row) {
+  // GovDeals rows populate end_date; Public Surplus populates time_left only.
+  if (row.end_date) return row.end_date;
+  if (row.time_left) return row.time_left;
+  return '—';
+}
+
+function _fmtLastSeen(iso) {
+  if (!iso) return '—';
+  const ageD = _ageInDays(iso);
+  if (ageD == null) return iso.slice(0, 10);
+  return _fmtAge(ageD);
+}
+
+function renderListingsDb(items) {
+  const tbody = $('#ldb-tbody');
+  if (!items.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="drafts-empty">No rows match these filters.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  for (const r of items) {
+    const tr = document.createElement('tr');
+    tr.className = 'ldb-row';
+    const srcClass = r.source === 'gd' ? 'src-gd' : (r.source === 'ps' ? 'src-ps' : 'src-other');
+    const qty = r.quantity == null ? '—' : r.quantity.toLocaleString();
+    const price = r.price || '—';
+    const loc = r.location || '—';
+    const title = r.title || '(untitled)';
+    const endStr = _fmtEndDate(r);
+    const isExpired = r.end_date && new Date(r.end_date) < new Date();
+    tr.innerHTML = `
+      <td><span class="src-pill ${srcClass}">${r.source.toUpperCase()}</span></td>
+      <td class="ldb-qty">${qty}</td>
+      <td class="ldb-title">
+        <div class="ldb-title-main">${escapeHtml(title)}</div>
+        <div class="ldb-asset mono tiny">${escapeHtml(r.asset_id)}${r.quantity_source ? ` · qty via <em>${escapeHtml(r.quantity_source)}</em>` : ''}${r.quantity_confidence ? ` <span class="ldb-conf">${escapeHtml(r.quantity_confidence)}</span>` : ''}</div>
+      </td>
+      <td class="ldb-price">${escapeHtml(price)}</td>
+      <td class="ldb-loc">${escapeHtml(loc)}</td>
+      <td class="ldb-end ${isExpired ? 'expired' : ''}">${escapeHtml(endStr)}</td>
+      <td class="ldb-seen">${escapeHtml(_fmtLastSeen(r.last_seen_at))}</td>
+      <td class="ldb-act">
+        <a href="${escapeAttr(r.link || '#')}" target="_blank" rel="noopener" class="btn btn-small" title="Open source listing">↗</a>
+        ${r.source === 'gd' ? `<button type="button" class="btn btn-small btn-primary ldb-launch" data-url="${escapeAttr(r.link)}" title="Queue this lot for the pipeline">▶</button>` : ''}
+      </td>
+    `;
+    const launchBtn = tr.querySelector('.ldb-launch');
+    if (launchBtn) {
+      launchBtn.addEventListener('click', async () => {
+        await withButtonLoading(launchBtn, '⏱', async () => {
+          try {
+            await queueRuns([launchBtn.dataset.url]);
+            launchBtn.textContent = '✓';
+            launchBtn.disabled = true;
+            launchBtn.classList.add('queued');
+            toast(`Queued: ${title}`, 'ok');
+          } catch (err) {
+            toast('Queue failed: ' + (err.message || err), 'err');
+          }
+        });
+      });
+    }
+    tbody.appendChild(tr);
+  }
+}
+
+// Filter wiring — any change resets offset to 0 and re-queries.
+function _ldbReload() { _ldb.offset = 0; loadListingsDb(); }
+
+$$('#ldb-source .seg-btn').forEach(b => b.addEventListener('click', () => {
+  $$('#ldb-source .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  _ldb.source = b.dataset.value;
+  _ldbReload();
+}));
+
+$$('#ldb-status .seg-btn').forEach(b => b.addEventListener('click', () => {
+  $$('#ldb-status .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  _ldb.status = b.dataset.value;
+  _ldbReload();
+}));
+
+// Debounced search
+let _ldbSearchTimer;
+$('#ldb-q')?.addEventListener('input', () => {
+  clearTimeout(_ldbSearchTimer);
+  _ldbSearchTimer = setTimeout(_ldbReload, 350);
+});
+
+['#ldb-min-qty', '#ldb-max-qty', '#ldb-seen', '#ldb-sort', '#ldb-limit']
+  .forEach(sel => $(sel)?.addEventListener('change', _ldbReload));
+
+$('#ldb-refresh')?.addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '↻ loading…', loadListingsDb);
+});
+
+$('#ldb-reset')?.addEventListener('click', () => {
+  $$('#ldb-source .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.value === 'all'));
+  $$('#ldb-status .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.value === 'all'));
+  _ldb.source = 'all'; _ldb.status = 'all'; _ldb.offset = 0;
+  $('#ldb-q').value = '';
+  $('#ldb-min-qty').value = '0';
+  $('#ldb-max-qty').value = '99999';
+  $('#ldb-seen').value = '7';
+  $('#ldb-sort').value = 'qty_desc';
+  $('#ldb-limit').value = '50';
+  loadListingsDb();
+});
+
+$('#ldb-prev')?.addEventListener('click', () => {
+  _ldb.offset = Math.max(0, _ldb.offset - _ldb.limit);
+  loadListingsDb();
+});
+$('#ldb-next')?.addEventListener('click', () => {
+  if (_ldb.offset + _ldb.limit < _ldb.total) {
+    _ldb.offset += _ldb.limit;
+    loadListingsDb();
+  }
+});
 
 
 // ─────────────────────────── helpers ───────────────────────────

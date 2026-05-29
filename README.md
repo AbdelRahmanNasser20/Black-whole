@@ -14,14 +14,6 @@ pip install -e '.[dev]'
 playwright install chromium
 ```
 
-`iopaint` (local watermark removal) is an optional extra and pulls a large
-dependency tree — only install if you want the local pass to run before the
-dewatermark.ai API fallback:
-
-```bash
-pip install -e '.[iopaint]'
-```
-
 ## .env
 
 Create `.env` in the project root (already gitignored):
@@ -31,12 +23,13 @@ DEWATERMARK_API_KEY=your_dewatermark_api_key
 GEMINI_API_KEY=your_google_ai_studio_key   # optional, for secondary LLM A/B
 ```
 
-- `DEWATERMARK_API_KEY` — get from your paid dewatermark.ai account. Used by the
-  REST fallback (the script first tries IOPaint locally if installed, then
-  escalates to this API if the bottom-right histogram still looks watermarked).
-- `GEMINI_API_KEY` — free tier at https://aistudio.google.com/apikey. When set,
-  the script auto-promotes Gemini to the **primary** extractor (it works
-  standalone, unlike the Claude-Code one which needs a TTY).
+- `DEWATERMARK_API_KEY` — get from your paid dewatermark.ai account. Every image
+  that isn't already in the global response cache is sent to the API; failures
+  leave the original in `_originals/` and emit `dewatermark:degraded`.
+- `GEMINI_API_KEY` — free tier at https://aistudio.google.com/apikey. Gemini is
+  the primary extractor.
+- `OPENAI_API_KEY` — optional. When set, `gpt-4o-mini` runs as the secondary
+  extractor for A/B comparison.
 
 ## First-run login
 
@@ -67,7 +60,7 @@ Flow:
 2. Runs primary LLM (Claude Code, if driving) and secondary (Gemini) in parallel
 3. Prompts you to confirm the LLM-suggested per-chair price
 4. Downloads images to `~/Desktop/Banquet chiars Pictures/{folder}/`
-5. Dewatermarks locally (IOPaint/LaMa); falls back to dewatermark.ai if quality check fails
+5. Dewatermarks via dewatermark.ai API (with global response cache — same image hash across any lot is free on the second call)
 6. Opens Facebook Marketplace draft with all fields pre-filled
 7. Opens eBay bulk-sell draft with all fields pre-filled
 8. Leaves both browser tabs open — you review and click Publish manually
@@ -89,8 +82,9 @@ is currently primary.
 
 | `LISTING_LLM_MODE` | Primary used |
 |---|---|
-| (unset, "auto") | `gemini` if `GEMINI_API_KEY` set; else `claude_code` if stdin is a TTY; else `dom_fallback` |
+| (unset, "auto") | `gemini` if `GEMINI_API_KEY` set; else `openai` if `OPENAI_API_KEY` set; else `dom_fallback` |
 | `gemini` | Gemini (or `dom_fallback` if no key) |
+| `openai` | OpenAI `gpt-4o-mini` (or `dom_fallback` if no key) |
 | `claude_code` | Claude-Code stdin/stdout sentinel protocol |
 | `dom` | Pure DOM heuristic, no external calls |
 

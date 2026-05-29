@@ -47,6 +47,12 @@
         <div class="foot-label">SHIPPING RANGE</div>
         <div>Continental US · Local pickup preferred</div>
       </div>
+      {% if facebook_business_url %}
+      <div class="foot-col">
+        <div class="foot-label">SOCIAL</div>
+        <a href="{{ facebook_business_url }}" target="_blank" rel="noopener">Facebook business page →</a>
+      </div>
+      {% endif %}
     </div>
     <div class="foot-rule"></div>
     <div class="foot-meta">

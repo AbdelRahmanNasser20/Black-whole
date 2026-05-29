@@ -8,9 +8,10 @@ from pathlib import Path
 from .base import Extraction, Extractor
 from .claude_code import ClaudeCodeExtractor
 from .gemini import GeminiExtractor
+from .openai import OpenAIExtractor
 from .dom_fallback import DomFallbackExtractor
 from .ollama_local import OllamaTextExtractor, OllamaVisionExtractor
-from ..config import LOG_DIR, GEMINI_API_KEY
+from ..config import LOG_DIR, GEMINI_API_KEY, OPENAI_API_KEY
 
 
 async def run_parallel(
@@ -89,56 +90,51 @@ def _ollama_has_model(model: str) -> bool:
 def default_extractors() -> tuple[Extractor, Extractor | None]:
     """Pick primary/secondary extractors based on environment.
 
-    LISTING_LLM_MODE env var (ollama|claude_code|gemini|dom|auto, default auto):
+    LISTING_LLM_MODE env var (auto|gemini|openai|claude_code|ollama|dom, default auto):
       - auto (default):
-          primary   = OllamaTextExtractor (gpt-oss:120b-cloud) if ollama is
-                      installed; else Gemini if key; else ClaudeCode if TTY;
+          primary   = Gemini if GEMINI_API_KEY; else OpenAI if OPENAI_API_KEY;
                       else DomFallback.
-          secondary = OllamaVisionExtractor (llama3.2-vision:11b) if ollama;
-                      else Gemini if the primary isn't Gemini and key is set.
-      - ollama: force OllamaTextExtractor as primary, OllamaVisionExtractor as secondary.
-      - gemini | claude_code | dom: force-pick the matching primary.
+          secondary = OpenAI if OPENAI_API_KEY is set AND not already primary.
+      - gemini | openai | dom | claude_code: force-pick matching primary.
+      - ollama: force OllamaText primary + OllamaVision secondary (legacy path).
     """
     mode = os.getenv("LISTING_LLM_MODE", "auto").lower()
     has_gemini = bool(GEMINI_API_KEY)
+    has_openai = bool(OPENAI_API_KEY)
     has_ollama = _ollama_reachable()
     interactive = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
 
     if mode == "ollama":
-        primary = OllamaTextExtractor()
+        primary: Extractor = OllamaTextExtractor()
         vision_model = os.getenv("OLLAMA_VISION_MODEL", "llama3.2-vision:11b")
-        secondary = (
+        secondary: Extractor | None = (
             OllamaVisionExtractor(vision_model)
             if has_ollama and _ollama_has_model(vision_model)
             else None
         )
         return primary, secondary
+
     if mode == "claude_code":
         primary = ClaudeCodeExtractor()
     elif mode == "gemini":
         primary = GeminiExtractor() if has_gemini else DomFallbackExtractor()
+    elif mode == "openai":
+        primary = OpenAIExtractor() if has_openai else DomFallbackExtractor()
     elif mode == "dom":
         primary = DomFallbackExtractor()
-    else:
-        if has_ollama:
-            primary = OllamaTextExtractor()
-        elif has_gemini:
+    else:  # auto
+        if has_gemini:
             primary = GeminiExtractor()
+        elif has_openai:
+            primary = OpenAIExtractor()
         elif interactive:
             primary = ClaudeCodeExtractor()
         else:
             primary = DomFallbackExtractor()
 
-    secondary: Extractor | None = None
-    vision_model = os.getenv("OLLAMA_VISION_MODEL", "llama3.2-vision:11b")
-    if isinstance(primary, OllamaTextExtractor):
-        # Ollama primary → vision secondary only when the model is actually
-        # present. Don't silently fall back to Gemini: the whole point of
-        # Ollama is to escape Gemini's quota.
-        if has_ollama and _ollama_has_model(vision_model):
-            secondary = OllamaVisionExtractor(vision_model)
-    elif not isinstance(primary, GeminiExtractor) and has_gemini:
-        secondary = GeminiExtractor()
+    secondary = None
+    if has_openai and not isinstance(primary, OpenAIExtractor):
+        secondary = OpenAIExtractor()
     return primary, secondary
 
 
@@ -147,6 +143,7 @@ __all__ = [
     "Extractor",
     "ClaudeCodeExtractor",
     "GeminiExtractor",
+    "OpenAIExtractor",
     "OllamaTextExtractor",
     "OllamaVisionExtractor",
     "run_parallel",

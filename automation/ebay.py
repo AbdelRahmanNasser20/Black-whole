@@ -1,7 +1,7 @@
 from pathlib import Path
 from playwright.async_api import BrowserContext, Page
 
-from .templates import ebay_description
+from .templates import ebay_description, listing_title
 
 
 SELL_URL = "https://www.ebay.com/sl/sell"
@@ -25,13 +25,19 @@ async def create_draft(
     price_each: int,
     lot_id: str,
     images: list[Path],
+    description_text: str = "",
+    zip_code: str = "",
 ) -> str:
     page = await ctx.new_page()
     await page.goto(SELL_URL, wait_until="domcontentloaded")
     await page.wait_for_timeout(4000)
 
-    full_title = f"{title} - Bulk Deal - Local Pickup"[:80]
-    sku = f"BWL-{lot_id}-{city.replace(' ', '')}"
+    # Title format matches FB: "<chair_type> (<city>, <STATE>)". Trimmed to
+    # eBay's 80-char title cap.
+    full_title = listing_title(chair_type, city=city, state=state, fallback=title)[:80]
+    # SKU is the GovDeals lot id verbatim — consistent with the inventory
+    # ledger and easy to grep when tracking listings back to source.
+    sku = lot_id or ""
     qty_int = int(quantity) if quantity.isdigit() else 1
     bulk_price = price_each * qty_int
 
@@ -43,6 +49,10 @@ async def create_draft(
         dimensions=dimensions,
         price_each=price_each,
         bulk_price=bulk_price,
+        description_text=description_text,
+        city=city,
+        state=state,
+        zip_code=zip_code,
     )
 
     # eBay's sell flow opens a product-search first. Fall back to the classic
@@ -93,7 +103,10 @@ async def create_draft(
 
     # Location
     try:
-        await _fill_by_label(page, "Item location", f"{city}, {state}")
+        loc_str = f"{city}, {state}"
+        if zip_code:
+            loc_str = f"{loc_str} {zip_code}"
+        await _fill_by_label(page, "Item location", loc_str)
     except Exception:
         pass
 

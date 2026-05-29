@@ -26,13 +26,24 @@ DEFAULT_VISION_MODEL = os.getenv("OLLAMA_VISION_MODEL", "llama3.2-vision:11b")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST")  # None → ollama lib default (http://127.0.0.1:11434)
 
 
+_ALLOWED_EXTRACTION_KEYS = {
+    "title", "location", "city", "state", "zip_code", "quantity", "chair_type",
+    "chair_title", "description_text", "dimensions",
+    "suggested_price_per_chair", "style_suffix",
+    "contact_name", "contact_email", "contact_phone",
+}
+
+
 def _extract_json_block(text: str) -> dict:
     # Models love to wrap JSON in ```json ... ``` fences or pre/post chatter.
     # Find the first balanced {...} block and parse it.
     m = re.search(r"\{[\s\S]*\}", text)
     if not m:
         raise ValueError(f"Ollama returned non-JSON: {text[:300]}")
-    return json.loads(m.group(0))
+    payload = json.loads(m.group(0))
+    # Drop unknown keys so Extraction(**payload) doesn't crash when the model
+    # hallucinates extra fields. Missing fields fall back to dataclass defaults.
+    return {k: v for k, v in payload.items() if k in _ALLOWED_EXTRACTION_KEYS}
 
 
 def _ollama_client():
@@ -92,6 +103,14 @@ class OllamaVisionExtractor:
     async def extract(self, dom_hint: dict, screenshots: dict[str, Path]) -> Extraction:
         client = _ollama_client()
         image_paths = [str(p) for p in screenshots.values() if Path(p).exists()]
+        # llama3.2-vision:11b only accepts one image per request (HTTP 500 on 2+).
+        # Prefer 'header' if present (tighter crop → fewer tokens); otherwise first.
+        if image_paths:
+            header = screenshots.get("header")
+            if header and Path(header).exists():
+                image_paths = [str(header)]
+            else:
+                image_paths = image_paths[:1]
         if not image_paths:
             # No screenshots available — fall back to text-only prompt against
             # the same vision model (these models still accept plain chat).

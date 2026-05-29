@@ -14,7 +14,7 @@ import click
 
 from automation import browser, govdeals, downloader, dewatermark as dw, facebook, ebay, inventory
 from automation.llm import default_extractors, run_parallel
-from automation import progress
+from automation import progress, templates
 
 
 async def _wait_for_price_confirmation(suggested: int, timeout: float) -> int | None:
@@ -83,7 +83,9 @@ async def _run(
         primary_ext, secondary_ext = default_extractors()
         dom_hint = {
             "title": meta.title, "location": meta.location, "city": meta.city,
-            "state": meta.state, "quantity": meta.quantity,
+            "state": meta.state, "zip_code": meta.zip_code,
+            "contact_email": meta.contact_email, "contact_phone": meta.contact_phone,
+            "quantity": meta.quantity,
             "description_head": meta.description_text[:1000],
         }
         primary, secondary = await run_parallel(
@@ -98,10 +100,15 @@ async def _run(
             secondary=secondary.to_dict() if secondary else None,
         )
 
-        # Folder name uses the LLM-corrected quantity. Before this point, meta
-        # carries a provisional folder; finalize_folder() moves screenshots into
-        # the real folder and updates meta.folder_path.
-        govdeals.finalize_folder(meta, primary.quantity)
+        # Folder name uses the LLM-corrected quantity, chair title, and state.
+        # Before this point, meta carries a provisional folder; finalize_folder()
+        # moves screenshots into the real folder and updates meta.folder_path.
+        govdeals.finalize_folder(
+            meta, primary.quantity,
+            chair_title=(primary.chair_title or primary.chair_type),
+            state=primary.state,
+            city=primary.city,
+        )
         progress.emit(
             "folder", folder=str(meta.folder_path), folder_name=meta.folder_name,
             quantity=meta.quantity,
@@ -156,7 +163,7 @@ async def _run(
 
         cleaned: list[Path] = local_imgs
         if not skip_dw:
-            print("[3/5] dewatermarking (local IOPaint -> dewatermark.ai fallback)")
+            print("[3/5] dewatermarking via dewatermark.ai API")
             progress.emit("phase", phase="dewatermark", status="running")
             cleaned = await dw.dewatermark(ctx, local_imgs, meta.folder_path) or local_imgs
             print(f"  {len(cleaned)} cleaned images ready")
@@ -169,6 +176,7 @@ async def _run(
 
         existing_inv = inventory.get(meta.lot_id) if meta.lot_id else None
         fb_url: str | None = None
+        fb_rendered_description: str | None = None
         if not skip_fb:
             if existing_inv and existing_inv.get("facebook_url") and not force_republish:
                 fb_url = existing_inv["facebook_url"]
@@ -179,7 +187,7 @@ async def _run(
             else:
                 print("[4/5] Facebook Marketplace draft")
                 progress.emit("phase", phase="facebook", status="running")
-                fb_url = await facebook.create_draft(
+                fb_url, fb_rendered_description = await facebook.create_draft(
                     ctx=ctx,
                     title=primary.title,
                     price_per_chair=confirmed,
@@ -189,6 +197,11 @@ async def _run(
                     dimensions=primary.dimensions,
                     style_suffix=primary.style_suffix,
                     images=cleaned,
+                    description_text=primary.description_text,
+                    city=primary.city or meta.city,
+                    state=primary.state or meta.state,
+                    zip_code=primary.zip_code or meta.zip_code,
+                    sku=meta.lot_id or "",
                 )
                 print(f"  FB draft: {fb_url}")
                 progress.emit("phase", phase="facebook", status="done", url=fb_url)
@@ -214,11 +227,13 @@ async def _run(
                     location=primary.location,
                     city=primary.city,
                     state=primary.state,
+                    zip_code=primary.zip_code or meta.zip_code,
                     quantity=primary.quantity,
                     dimensions=primary.dimensions,
                     price_each=confirmed,
                     lot_id=meta.lot_id,
                     images=cleaned,
+                    description_text=primary.description_text,
                 )
                 print(f"  eBay draft: {ebay_url}")
                 progress.emit("phase", phase="ebay", status="done", url=ebay_url)
@@ -232,9 +247,23 @@ async def _run(
         if meta.lot_id:
             try:
                 qty_int = int(primary.quantity) if str(primary.quantity).isdigit() else None
-                city_nospace = (primary.city or meta.city or "").replace(" ", "")
-                sku = f"BWL-{meta.lot_id}-{city_nospace}" if city_nospace else f"BWL-{meta.lot_id}"
+                # SKU is the raw GovDeals lot id — same value that appears in
+                # the source URL (/asset/<seller>/<lot_id>) and in the eBay
+                # custom-label field. Easy to grep across systems.
+                sku = meta.lot_id
                 hero = cleaned[0].name if cleaned else None
+                # Prefer the exact FB copy we just posted; otherwise render it
+                # locally so the public site has a clean product description.
+                rendered_desc = fb_rendered_description or templates.fb_description(
+                    location=primary.location,
+                    chair_type=primary.chair_type,
+                    quantity=primary.quantity,
+                    dimensions=primary.dimensions,
+                    description_text=primary.description_text,
+                    city=primary.city or meta.city,
+                    state=primary.state or meta.state,
+                    zip_code=primary.zip_code or meta.zip_code,
+                )
                 inventory.upsert_from_run(
                     lot_id=meta.lot_id,
                     seller_id=meta.seller_id or None,
@@ -243,9 +272,13 @@ async def _run(
                     folder_path=str(meta.folder_path),
                     sku=sku,
                     title=primary.title,
-                    description=(meta.description_text[:1000] if meta.description_text else None),
+                    description=rendered_desc,
                     city=primary.city or meta.city,
                     state=primary.state or meta.state,
+                    zip_code=primary.zip_code or meta.zip_code,
+                    contact_name=primary.contact_name,
+                    contact_email=primary.contact_email or meta.contact_email,
+                    contact_phone=primary.contact_phone or meta.contact_phone,
                     chair_type=primary.chair_type,
                     dimensions=primary.dimensions,
                     quantity=qty_int,

@@ -1,5 +1,17 @@
 # Listing Automation — CLAUDE.md
 
+## How to answer
+Default to concise, direct responses — answer the question, show the
+result, stop. No restating the question, no preambles ("Great question…",
+"Let me…"), no closing summaries of what just happened, no narrating
+tool calls you're about to make. Skip section headers and bullet lists
+unless the answer genuinely has multiple independent parts. One sentence
+is better than three if it's complete. Only expand into detail, step-by-
+step explanations, or long-form structure when the user explicitly asks
+for it ("explain…", "walk me through…", "give me the full…", etc.) or
+when the task inherently requires it (e.g. a multi-step plan the user
+needs to review before execution).
+
 ## What this project is
 Python + Playwright pipeline that turns a GovDeals URL into a Facebook
 Marketplace draft + eBay draft. Source-of-truth spec is
@@ -13,16 +25,19 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
   - `browser.py` — Playwright persistent context. Auto-clears stale `SingletonLock`/Chromium on launch.
   - `govdeals.py` — Phase 1 scrape. Pulls images from `<img>`, `srcset`, `data-src`, CSS background, AND a regex sweep of the raw HTML for `webassets.lqdt1.com/.../photos/...` URLs.
   - `downloader.py` — async httpx with `Referer: govdeals.com` + Chrome UA (CDN 403s without these).
-  - `dewatermark.py` — IOPaint local pass first, then dewatermark.ai REST API fallback (NOT browser drag-drop). Uses `DEWATERMARK_API_KEY` from `.env`.
-  - `quality.py` — bottom-right histogram check to decide if local IOPaint cleaned enough.
+  - `dewatermark.py` — dewatermark.ai REST API only. Per-folder sidecar + global response cache + budget caps.
+  - `quality.py` — bottom-right histogram check; runs after every API call to guard against the API returning still-watermarked output.
   - `facebook.py`, `ebay.py` — fill drafts, stop before publish.
   - `templates.py` — FB description + eBay HTML description with placeholders.
+  - `favorites.py` — auction-favorites store + Telegram countdown alert schedule (6d/3d/2d/1d/1h/5m). Persists `favorites` + `alert_log` tables in the same `inventory.db`. The scheduler loop runs inside the FastAPI process (`web/app.py`); alert sends go through `telegram_alerts.py`. Marking `auction_extractors` cards via the dashboard's `04 Auctions` tab writes here.
+  - `telegram_alerts.py` — thin async `send_message(text)` over the Telegram Bot API. Reuses `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` from `automation.config`. Best-effort, never raises — returns `(ok, error_str)`.
   - `inventory.py` — SQLite ledger at `~/.listing_automation/inventory.db`. Two tables: `inventory` (one row per lot, keyed by `lot_id`) + `inquiries` (customer contact-form submissions). Source of truth for "what we've parsed, what's up where, how many are left." See "Inventory ledger" section below.
   - `llm/` — pluggable extractors:
     - `claude_code.py` — stdin/stdout sentinel protocol; ONLY works when Claude Code drives the script with a TTY.
-    - `gemini.py` — google-genai, free tier; needs `GEMINI_API_KEY`.
+    - `gemini.py` — google-genai, `gemini-2.5-flash`; needs `GEMINI_API_KEY`. Primary.
+    - `openai.py` — OpenAI `gpt-4o-mini` via `openai` SDK; needs `OPENAI_API_KEY`. Secondary (A/B log) when Gemini is primary.
     - `dom_fallback.py` — pure DOM heuristic, no external calls. Used when no LLM is reachable.
-    - `default_extractors()` picks: Gemini if key, else Claude Code if TTY, else DomFallback. Override with `LISTING_LLM_MODE=claude_code|gemini|dom`.
+    - `default_extractors()` picks: Gemini primary if key, else OpenAI primary if key, else DomFallback. Secondary = OpenAI when Gemini is primary. Override with `LISTING_LLM_MODE=gemini|openai|claude_code|ollama|dom`.
   - `progress.py` — emits `<<<EVENT>>>{json}` lines parsed by the dashboard.
   - `web/` — FastAPI app (`python -m automation.web` → http://127.0.0.1:8765). Serves **two surfaces off one process**:
     - **Public site** (brutalist-industrial theme, `public.css` / `public.js`, separate from the admin theme):
@@ -32,8 +47,22 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
       - `GET  /sell` — seller intake form
       - `POST /contact` — persists to `inquiries` table
     - **Admin dashboard** (`/admin`, `index.html`, dark terminal theme `app.css`). Tabs: `01 Launcher` / `02 Drafts` / `03 A/B` / `04 Auctions` / `05 Inventory` / `06 Inquiries`. Launcher shows an `UP NEXT` strip when the run queue is non-empty. Inventory tab = editable table (qty/price/status inline, FB/eBay URL backfill, Republish, Delete, Backfill-from-folders). Inquiries tab = chronological cards with status transitions.
-    - **Admin JSON APIs**: `/api/inventory[...]`, `/api/inventory-stats`, `/api/inventory/backfill`, `/api/inventory/{lot_id}/platform`, `/api/inquiries[...]` (list/patch/delete).
+    - **Admin JSON APIs**: `/api/inventory[...]`, `/api/inventory-stats`, `/api/inventory/backfill`, `/api/inventory/{lot_id}/platform`, `/api/inquiries[...]` (list/patch/delete), `/api/runs/queue` + `/api/runs/queue/clear` (serial run queue — see `auction_extractors` section), `/api/favorites[...]` (Auctions tab star/unstar + alert state).
 - `auction_extractors/` — integrated data pipeline + read-only API (see "auction_extractors" section below).
+
+## Connecting to the shared DB
+
+Workspace-level decision (see `workspace/CLAUDE.md §14`): all new DB code goes through `~/Desktop/Black_whole_projects/core/db.py` against Supabase Postgres. From this repo:
+
+```python
+from core.db import connect, fetch_one, fetch_all, execute, executemany
+```
+
+`core/` is at the workspace root, one level above this repo, so make sure the Python you run resolves the workspace as a sys.path entry (running CLIs from the workspace root or with `PYTHONPATH=..` from inside this repo both work). `BLACKWHOLE_DB_URL` is read from this repo's `.env`; the helper handles URL-encoding for `@` in the password.
+
+**Current adoption in this repo: none yet.** The SQLite ledger at `~/.listing_automation/inventory.db` (see "Inventory ledger" section below) is still the active source of truth for FB/eBay dedup and the admin Inventory tab. When porting `automation/inventory.py` onto Supabase, the target table is `inventory` from workspace §8 — the columns line up except SQLite-specific bits. Until the cutover is done, **do not write to both**: pick one for each call site.
+
+`auction_extractors/state/listings.db` stays SQLite-only and read-only to this repo (upstream scrape cache).
 
 ## Key environment
 - macOS only paths assumed (`~/Desktop/Banquet chiars Pictures/`).
@@ -45,20 +74,20 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
 
 | # | Symptom | Cause | Fix landed in |
 |---|---------|-------|---------------|
-| 1 | iopaint dep conflict on install | iopaint pins `Pillow==9.5` and a huge tree | `pyproject.toml` — moved iopaint to `[iopaint]` extra |
-| 2 | Dashboard `/` returns 500 | starlette 1.0 changed `TemplateResponse` signature | `automation/web/app.py` — `TemplateResponse(request, name, ctx)` |
-| 3 | `--login-only` exits instantly under `!` prefix | no TTY → `sys.stdin.readline()` returns EOF immediately | `run.py::_login_only` — wait for `ctx.on('close')` event instead of stdin |
-| 4 | `Failed to create ProcessSingleton` on launch | prior Chromium still alive holding the profile lock | `automation/browser.py::_clear_stale_profile_lock` — kills PID from `SingletonLock` symlink target + unlinks all `Singleton*` files |
-| 5 | LLM phase hangs forever in dashboard | `ClaudeCodeExtractor` waits on stdin nobody feeds | `automation/llm/dom_fallback.py` + `default_extractors()` env-aware picker (auto: gemini → claude_code-if-TTY → dom) |
-| 6 | 0 images downloaded; folder has only `_screenshots/` | GovDeals modernized to lightGallery v2 (`.lg-object`); some images render via `srcset` / CSS bg / inline JSON | `govdeals.py` `EXTRACT_JS` — scans `<img src/srcset/data-src>`, `<source srcset>`, CSS `background-image`, AND raw-HTML regex for `webassets.lqdt1.com/.../photos/...` |
-| 7 | Image fetch returns 403 from CDN | no `Referer` / no browser UA | `automation/downloader.py::DOWNLOAD_HEADERS` |
-| 8 | Related-listing thumbnails leak into the upload | sidebar uses same `lqdt1.com/photos/<other_lot>/` URLs | `govdeals.py` post-filter: `f"/photos/{lot_id}/" in u` |
-| 9 | `click.prompt` aborts under dashboard subprocess (`Aborted!`) | Even with `--price` flag passed, `click.prompt` still tries to read stdin; no TTY → EOF → abort | `run.py` — check `price_override is not None` first, else check `sys.stdin.isatty()` before prompting, else auto-accept suggestion. Same pattern for the "Press Enter to close" at end of run — replaced with a sleep loop under no-TTY. |
+| 1 | Dashboard `/` returns 500 | starlette 1.0 changed `TemplateResponse` signature | `automation/web/app.py` — `TemplateResponse(request, name, ctx)` |
+| 2 | `--login-only` exits instantly under `!` prefix | no TTY → `sys.stdin.readline()` returns EOF immediately | `run.py::_login_only` — wait for `ctx.on('close')` event instead of stdin |
+| 3 | `Failed to create ProcessSingleton` on launch | prior Chromium still alive holding the profile lock | `automation/browser.py::_clear_stale_profile_lock` — kills PID from `SingletonLock` symlink target + unlinks all `Singleton*` files |
+| 4 | LLM phase hangs forever in dashboard | `ClaudeCodeExtractor` waits on stdin nobody feeds | `automation/llm/dom_fallback.py` + `default_extractors()` env-aware picker (auto: gemini → claude_code-if-TTY → dom) |
+| 5 | 0 images downloaded; folder has only `_screenshots/` | GovDeals modernized to lightGallery v2 (`.lg-object`); some images render via `srcset` / CSS bg / inline JSON | `govdeals.py` `EXTRACT_JS` — scans `<img src/srcset/data-src>`, `<source srcset>`, CSS `background-image`, AND raw-HTML regex for `webassets.lqdt1.com/.../photos/...` |
+| 6 | Image fetch returns 403 from CDN | no `Referer` / no browser UA | `automation/downloader.py::DOWNLOAD_HEADERS` |
+| 7 | Related-listing thumbnails leak into the upload | sidebar uses same `lqdt1.com/photos/<other_lot>/` URLs | `govdeals.py` post-filter: `f"/photos/{lot_id}/" in u` |
+| 8 | `click.prompt` aborts under dashboard subprocess (`Aborted!`) | Even with `--price` flag passed, `click.prompt` still tries to read stdin; no TTY → EOF → abort | `run.py` — check `price_override is not None` first, else check `sys.stdin.isatty()` before prompting, else auto-accept suggestion. Same pattern for the "Press Enter to close" at end of run — replaced with a sleep loop under no-TTY. |
+| 9 | Dewatermark silently shipped watermarked images | The old bottom-right histogram quality check, written for a small corner stamp, failed open against GovDeals' new full-image tiled `www.govdeals.com` watermark and rejected every cleaned API output | `automation/quality.py` — replaced histogram heuristic with pure byte-identity check (cleaned != original); trust dewatermark.ai's HTTP 200 |
 
 **Other things worth knowing:**
 - Headless mode hits Akamai 403 on GovDeals. Always non-headless. `persistent_context(headless=False)` is the default — don't flip it.
 - `ClaudeCodeExtractor` only works when Claude Code is the orchestrator with a real TTY. From the dashboard subprocess it'll hang. The `default_extractors()` picker handles this automatically.
-- Dewatermark is now **API-based** (`DEWATERMARK_API_KEY` in `.env`). The Playwright drag-drop fallback was deleted. IOPaint local pass still runs first if installed; if quality check flags a watermark, the API takes over.
+- Dewatermark is **dewatermark.ai API only** (`DEWATERMARK_API_KEY` in `.env`). No local image processing, no heuristic watermark detection. Every image not in the global response cache goes to the API; failures leave originals in `_originals/` and emit `dewatermark:degraded`.
 
 ## How to run end-to-end
 1. First time only: `python run.py --login-only` (browser opens with FB + eBay tabs; log into both, close window).
@@ -70,7 +99,7 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
 **Why it exists:** FB/eBay draft URLs used to be emitted as progress events and thrown away. Re-running the pipeline on the same lot would burn API budget a second time. The ledger is now the single source of truth for "what we've parsed, what's up where, how many are left to sell."
 
 **Storage:** `~/.listing_automation/inventory.db` (SQLite). Two tables:
-- `inventory` — one row per GovDeals lot, PK = `lot_id`. Columns include `folder_name`, `folder_path`, `sku`, `title`, `city`, `chair_type`, `quantity_original`, `quantity_remaining` (user-editable), `price_per_chair`, `hero_image`, `status` (`draft` / `listed` / `hidden` / `sold_out`), `facebook_url` / `facebook_published_at`, `ebay_url` / `ebay_published_at`, `parsed_at`, `updated_at`.
+- `inventory` — one row per GovDeals lot, PK = `lot_id`. Columns include `folder_name`, `folder_path`, `sku`, `title`, `city`, `chair_type`, `quantity_original`, `quantity_remaining` (user-editable), `price_per_chair`, `hero_image`, `status`, `facebook_url` / `facebook_published_at`, `ebay_url` / `ebay_published_at`, `parsed_at`, `updated_at`. `status` lifecycle values: `draft` / `listed` / `hidden` / `sold_out` (the original automation set) plus `active_bid` / `lost` / `owned` / `won_pickup` (added so manually-tracked govt-auction lots can live in the same ledger; the SQLite schema doesn't enforce the set — the parallel Supabase mirror does, see workspace `CLAUDE.md §12`).
 - `inquiries` — customer contact-form submissions. `kind` = `buy` | `sell`, nullable `lot_id`, `status` = `new` | `contacted` | `closed`.
 
 **Dedup flow in `run.py`:** before each marketplace phase, `inventory.get(lot_id)` is consulted. If `facebook_url` (or `ebay_url`) is already set and `--force-republish` is NOT passed, that phase emits `phase:facebook` `status=skipped_duplicate url=<existing>` and does not touch the browser. After the phase, `inventory.set_platform_url()` stamps the URL + timestamp and promotes `status` from `draft` → `listed`. `inventory.upsert_from_run()` runs unconditionally at the end so a row exists even if both platforms were skipped.
@@ -95,7 +124,7 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
 - scrape ✓ 1 image (only lot the filter kept)
 - llm ✓ `dom_fallback` (no Gemini key set yet)
 - download ✓ 1 file with proper `Referer` + UA
-- dewatermark ✓ 1 cleaned via `dewatermark.ai` API (IOPaint not installed; skipped straight to API)
+- dewatermark ✓ 1 cleaned via `dewatermark.ai` API
 - facebook ✓ draft created, URL has `listing_id=3...`
 - ebay ✓ but URL landed on `ebay.com/sh/lst/active?sku=...` (the "active listings search" page), **NOT a real draft URL** — eBay selectors need verification
 
@@ -117,18 +146,18 @@ curl -X POST http://127.0.0.1:8765/api/runs/stdin \
 
 ## Dewatermark behavior — READ BEFORE TOUCHING
 
-**Idempotency, budget caps, and offline mode** were added 2026-04-17 because runs were burning API credits on images already cleaned in prior runs.
+**dewatermark.ai API only.** No IOPaint, no local inpainting, no heuristic watermark detection — the API is the watermark remover. Every image not already in the global response cache is sent to `https://platform.dewatermark.ai/api/object_removal/v2/erase_watermark` with `X-API-KEY: $DEWATERMARK_API_KEY`.
 
 - `automation/dewatermark_cache.py` owns three layers consulted before any API call:
-  1. Per-folder sidecar `<folder>/.dewatermark_state.json` keyed by sha256 of the original. Records method (iopaint / api_cache / api), status (clean / failed), api_calls counter.
+  1. Per-folder sidecar `<folder>/.dewatermark_state.json` keyed by sha256 of the original. Records method (`api_cache` / `api`), status (`clean` / `failed`), api_calls counter.
   2. Global response cache at `~/.listing_automation/api_cache/<sha>.bin`. Survives lot deletions and machine restarts. Once a hash is here, **no future run anywhere on this machine ever calls the API for that hash again.**
-  3. `RunBudget` (per-run counter + 24h rolling window) gates each call. Hard caps: `MAX_API_CALLS_PER_RUN=5`, `MAX_API_CALLS_PER_DAY=25`. Override in `.env`.
-- **`DEWATERMARK_OFFLINE=1` ships ON in `.env`.** Flip to `0` only when ready to verify the real API. Test cycles cost zero credits by default.
-- **No silent fallback to IOPaint when the API fails.** If a watermarked image can't be cleaned, the original stays in `_originals/`, the sidecar marks it `failed`, and a `dewatermark:degraded` event is emitted. Don't reintroduce the old "use whatever IOPaint produced anyway" behavior.
-- **Post-API quality re-check is mandatory.** Even an HTTP 200 doesn't mean the image is clean — `quality.watermark_likely_present()` runs on the API output before it's accepted. Failure here is a `failed` outcome (with reason `post_quality_check_failed`).
+  3. `RunBudget` (per-run counter + 24h rolling window) gates each call. Default caps: `MAX_API_CALLS_PER_RUN=50`, `MAX_API_CALLS_PER_DAY=250`. Override in `.env`.
+- **`DEWATERMARK_OFFLINE` defaults OFF.** The real API runs on every un-cached image. Set `DEWATERMARK_OFFLINE=1` in `.env` to freeze spend while developing.
+- **No fallback when the API fails.** If the API errors or returns byte-identical bytes to the input, the sidecar marks the hash `failed`, the original stays in `_originals/`, and a `dewatermark:degraded` event is emitted. There is nothing else to try.
+- **Sanity check on API output.** `quality.watermark_likely_present()` does one thing: reject only if the cleaned bytes are missing, empty, or equal the original. Don't reintroduce histogram/heuristic checks — the GovDeals watermark is semi-transparent and tiled full-image, so pixel-delta thresholds can't distinguish clean from dirty (see Gotcha #9).
 - Audit tools (no API calls):
   - `python -m automation.dewatermark stats` — today/month/all-time call counts + global cache size
-  - `python -m automation.dewatermark verify <path-to-cleaned-file>` — re-runs the histogram check vs the matching `_originals/<file>` and prints `clean` or `watermarked`
+  - `python -m automation.dewatermark verify <path-to-cleaned-file>` — byte-compares against the matching `_originals/<file>` and prints `clean` or `watermarked`
 
 ## Known TODOs (ordered roughly by blast-radius)
 
@@ -191,46 +220,27 @@ cd auction_extractors
 ../.venv/bin/python public_surplus_automation.py
 ```
 
-**Automatic daily refresh at 06:00.** A launchd agent runs
-`scripts/daily_scrape.sh` every morning so the cache stays warm whether
-or not the dashboard is running.
+**Refreshing the cache — dashboard-driven, no scheduler.** The previous
+launchd agent (`com.listing-automation.daily-scrape.plist`) was removed
+on 2026-04-21 because it couldn't actually run: macOS TCC blocks
+launchd from executing anything under `~/Desktop/`, and every 06:00
+fire since Apr 20 died with `Operation not permitted`. We now rely on
+two in-dashboard mechanisms instead:
 
-- Agent plist: `~/Library/LaunchAgents/com.listing-automation.daily-scrape.plist`
-- Wrapper: `scripts/daily_scrape.sh`
-- Logs: `~/.listing_automation/logs/scrape_<timestamp>.log` (stdout from
-  the scrapers), plus `launchd.stdout.log` / `launchd.stderr.log` for
-  launchd's own chatter.
+1. **Cache-stats header on the Auctions tab** — shows total lots and
+   newest-scraped age, colored green/yellow/red by freshness. Powered
+   by `GET /api/auctions/cache-stats`.
+2. **Staleness banner** — when the newest `last_seen_at` is older than
+   `MAX STALE DAYS` (default 7), a yellow `⚠ Cache is N days old
+   · ⟳ scrape GovDeals now` bar renders above the grid. Clicking the
+   button triggers the same flow as `⟳ scrape now → GovDeals`.
 
-Manage it:
-
-```bash
-# status (should show the label with PID=- when idle)
-launchctl list | grep listing-automation
-
-# run it right now (e.g. to test end-to-end)
-./scripts/daily_scrape.sh
-
-# pause (unload until reboot or explicit reload)
-launchctl unload ~/Library/LaunchAgents/com.listing-automation.daily-scrape.plist
-
-# resume
-launchctl load ~/Library/LaunchAgents/com.listing-automation.daily-scrape.plist
-
-# remove for good
-launchctl unload ~/Library/LaunchAgents/com.listing-automation.daily-scrape.plist
-rm ~/Library/LaunchAgents/com.listing-automation.daily-scrape.plist
-```
-
-Notes:
-- If the Mac is asleep/off at 06:00, launchd will fire the job as soon as
-  the system wakes up (catch-up behavior is on by default for
-  `StartCalendarInterval`).
-- The wrapper runs the scrapers directly — it does **not** go through
-  the dashboard. That's deliberate so the schedule works even when
-  `python -m automation.web` isn't running.
-- The dashboard's in-memory `_AUCTIONS_CACHE` won't auto-bust from a
-  launchd run (different process). It expires naturally after 10 min or
-  on the next `↻ refresh view` / `POST /api/auctions/refresh`.
+`scripts/daily_scrape.sh` is still there as a manual entry point —
+run `./scripts/daily_scrape.sh` from the repo root whenever you want
+to refresh both scrapers without touching the UI. If you want a real
+cron/launchd schedule back, move the repo off `~/Desktop/` first
+(`~/Code/` is the usual choice) to avoid the TCC block, then reinstate
+a plist pointing to the new path.
 
 **Note on dashboard restarts.** Changes to `automation/web/app.py`,
 `templates/`, or `static/` require killing the running server and
@@ -265,5 +275,5 @@ live in the upstream `HANDOFF.md`. Check it before debugging scraper
 internals.
 
 ## Skill / settings notes
-- `.claude/settings.json` allowlists the project's common Bash commands (venv, pip, pytest, playwright, python run.py, iopaint). Re-pickup needs `/hooks` open or session restart since Claude only watches files that existed at session start.
+- `.claude/settings.json` allowlists the project's common Bash commands (venv, pip, pytest, playwright, python run.py). Re-pickup needs `/hooks` open or session restart since Claude only watches files that existed at session start.
 - For a fresh session with everything pre-allowed: `cd .../listing_automation && claude --permission-mode bypassPermissions`. CLAUDE.md (this file) auto-loads on start.
