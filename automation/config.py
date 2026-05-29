@@ -15,6 +15,10 @@ except ImportError:
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Supabase Postgres connection string for the shared `blackwhole` DB. Consumed
+# by automation/db.py. URL is loaded from .env above.
+BLACKWHOLE_DB_URL = os.getenv("BLACKWHOLE_DB_URL")
+
 HOME = Path.home()
 
 DOWNLOAD_ROOT = Path(os.getenv(

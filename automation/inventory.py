@@ -5,95 +5,27 @@ output. Re-running the pipeline on a lot we'd already published would spend
 marketplace API budget a second time. This module is the single source of truth
 for "what we've parsed, what's up where, and how many are left to sell."
 
-Two tables, one SQLite file at `~/.listing_automation/inventory.db`:
+Two tables, both in the shared Supabase Postgres DB (`blackwhole`):
   - `inventory`  : one row per GovDeals lot, keyed by lot_id
   - `inquiries`  : customer contact-form submissions (buy/sell)
 
-Both are read/written from the FastAPI dashboard and from run.py. sqlite3 is
-stdlib and fine for single-user localhost — no ORM.
+Both are read/written from the FastAPI dashboard and from run.py. Storage goes
+through `automation.db` (psycopg over Supabase) — no ORM. Schema lives in
+Supabase (managed via migrations), not created at runtime.
 """
 from __future__ import annotations
 
-import sqlite3
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from .config import ATTACHMENTS_ROOT, STATE_ROOT
+from . import db
+from .config import ATTACHMENTS_ROOT
 
-DB_PATH = STATE_ROOT / "inventory.db"
-
-_SCHEMA = """
-CREATE TABLE IF NOT EXISTS inventory (
-    lot_id                 TEXT PRIMARY KEY,
-    seller_id              TEXT,
-    govdeals_url           TEXT,
-    folder_name            TEXT,
-    folder_path            TEXT,
-    sku                    TEXT,
-    title                  TEXT,
-    description            TEXT,
-    city                   TEXT,
-    state                  TEXT,
-    zip_code               TEXT,
-    chair_type             TEXT,
-    dimensions             TEXT,
-    quantity_original      INTEGER,
-    quantity_remaining     INTEGER,
-    price_per_chair        REAL,
-    hero_image             TEXT,
-    status                 TEXT NOT NULL DEFAULT 'draft',
-    facebook_url           TEXT,
-    facebook_published_at  TEXT,
-    ebay_url               TEXT,
-    ebay_published_at      TEXT,
-    parsed_at              TEXT NOT NULL,
-    updated_at             TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_inventory_status ON inventory(status);
-
-CREATE TABLE IF NOT EXISTS inquiries (
-    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
-    kind                   TEXT NOT NULL,
-    lot_id                 TEXT,
-    name                   TEXT NOT NULL,
-    email                  TEXT,
-    phone                  TEXT,
-    quantity_interested    INTEGER,
-    message                TEXT,
-    status                 TEXT NOT NULL DEFAULT 'new',
-    created_at             TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_inquiries_lot ON inquiries(lot_id);
-CREATE INDEX IF NOT EXISTS idx_inquiries_status ON inquiries(status);
-
--- Auction favorites: a starred GovDeals/PublicSurplus lot the user wants
--- countdown alerts on. Snapshot the asset metadata at star-time so the card
--- still renders even if the listings_db row scrolls out of the active window.
-CREATE TABLE IF NOT EXISTS auction_favorites (
-    asset_id        TEXT PRIMARY KEY,
-    link            TEXT NOT NULL,
-    title           TEXT,
-    quantity        INTEGER,
-    end_date_iso    TEXT,        -- normalized ISO 8601 (UTC); NULL when unparseable
-    end_date_raw    TEXT,        -- original string from the scraper
-    image_url       TEXT,
-    location        TEXT,
-    starred_at      TEXT NOT NULL,
-    last_synced_at  TEXT NOT NULL,
-    notes           TEXT
-);
-
--- Idempotency log: one row per (asset_id, interval_label) the moment we ship
--- a Telegram alert. Cleared for an asset whenever its end_date changes (relist).
-CREATE TABLE IF NOT EXISTS auction_alerts_sent (
-    asset_id        TEXT NOT NULL,
-    interval_label  TEXT NOT NULL,
-    sent_at         TEXT NOT NULL,
-    PRIMARY KEY (asset_id, interval_label)
-);
-"""
+# Re-export the connection opener so favorites.py (and any other caller) can do
+# `inventory.connect()` exactly as before — it now hands back a psycopg
+# connection with dict rows instead of a sqlite3.Connection.
+connect = db.connect
 
 PUBLIC_STATUSES = ("listed", "draft", "owned", "won_pickup")
 ALL_STATUSES = (
@@ -106,48 +38,7 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-_MIGRATIONS: tuple[str, ...] = (
-    # Added 2026-04-21: track Facebook Business page posts and paid ad
-    # placements alongside the existing Marketplace/eBay URLs. Four ALTERs,
-    # one column each so partial migration state is recoverable.
-    "ALTER TABLE inventory ADD COLUMN fb_business_url TEXT",
-    "ALTER TABLE inventory ADD COLUMN fb_business_published_at TEXT",
-    "ALTER TABLE inventory ADD COLUMN ad_url TEXT",
-    "ALTER TABLE inventory ADD COLUMN ad_published_at TEXT",
-    # Added 2026-05-08: pickup ZIP from the GovDeals asset page.
-    "ALTER TABLE inventory ADD COLUMN zip_code TEXT",
-    # Added 2026-05-08: GovDeals seller / facility contact (admin-only).
-    "ALTER TABLE inventory ADD COLUMN contact_name TEXT",
-    "ALTER TABLE inventory ADD COLUMN contact_email TEXT",
-    "ALTER TABLE inventory ADD COLUMN contact_phone TEXT",
-    # Added 2026-05-20: per-lot GovDeals account credentials + winning-bid
-    # buyer certificate attachment. The credentials are plain text — single-
-    # operator local SQLite, file mode 600 via `umask`. The cert path is
-    # relative to ATTACHMENTS_ROOT (so the row stays portable if the root
-    # moves).
-    "ALTER TABLE inventory ADD COLUMN govdeals_username TEXT",
-    "ALTER TABLE inventory ADD COLUMN govdeals_password TEXT",
-    "ALTER TABLE inventory ADD COLUMN buyer_cert_filename TEXT",
-    "ALTER TABLE inventory ADD COLUMN buyer_cert_path TEXT",
-)
-
-
-def connect() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
-    conn.executescript(_SCHEMA)
-    for stmt in _MIGRATIONS:
-        try:
-            conn.execute(stmt)
-        except sqlite3.OperationalError:
-            # Column already exists — idempotent migration.
-            pass
-    conn.commit()
-    return conn
-
-
-def _row_to_dict(row: sqlite3.Row | None) -> dict | None:
+def _row_to_dict(row: dict | None) -> dict | None:
     return dict(row) if row else None
 
 
@@ -156,7 +47,7 @@ def get(lot_id: str) -> dict | None:
         return None
     with connect() as conn:
         row = conn.execute(
-            "SELECT * FROM inventory WHERE lot_id = ?", (str(lot_id),)
+            "SELECT * FROM inventory WHERE lot_id = %s", (str(lot_id),)
         ).fetchone()
     return _row_to_dict(row)
 
@@ -165,7 +56,7 @@ def list_all(status: str | None = None) -> list[dict]:
     with connect() as conn:
         if status:
             rows = conn.execute(
-                "SELECT * FROM inventory WHERE status = ? ORDER BY updated_at DESC",
+                "SELECT * FROM inventory WHERE status = %s ORDER BY updated_at DESC",
                 (status,),
             ).fetchall()
         else:
@@ -196,17 +87,17 @@ def stats() -> dict:
     """Headline counts for the landing page."""
     with connect() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) FROM inventory WHERE status IN ('listed','draft')"
-        ).fetchone()[0]
+            "SELECT COUNT(*) AS n FROM inventory WHERE status IN ('listed','draft')"
+        ).fetchone()["n"]
         chairs = conn.execute(
-            "SELECT COALESCE(SUM(quantity_remaining), 0) FROM inventory "
+            "SELECT COALESCE(SUM(quantity_remaining), 0) AS n FROM inventory "
             "WHERE status IN ('listed','draft')"
-        ).fetchone()[0]
+        ).fetchone()["n"]
         cities = conn.execute(
-            "SELECT COUNT(DISTINCT city) FROM inventory "
+            "SELECT COUNT(DISTINCT city) AS n FROM inventory "
             "WHERE city IS NOT NULL AND city != '' "
             "AND status IN ('listed','draft')"
-        ).fetchone()[0]
+        ).fetchone()["n"]
     return {"lots": int(total), "chairs": int(chairs or 0), "cities": int(cities)}
 
 
@@ -252,7 +143,7 @@ def upsert_from_run(
                     contact_name, contact_email, contact_phone, chair_type,
                     dimensions, quantity_original, quantity_remaining,
                     price_per_chair, hero_image, status, parsed_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
                 """,
                 (
                     str(lot_id), seller_id, govdeals_url, folder_name, folder_path,
@@ -267,26 +158,26 @@ def upsert_from_run(
             conn.execute(
                 """
                 UPDATE inventory SET
-                    seller_id         = COALESCE(?, seller_id),
-                    govdeals_url      = COALESCE(?, govdeals_url),
-                    folder_name       = COALESCE(?, folder_name),
-                    folder_path       = COALESCE(?, folder_path),
-                    sku               = COALESCE(?, sku),
-                    title             = COALESCE(?, title),
-                    description       = COALESCE(?, description),
-                    city              = COALESCE(?, city),
-                    state             = COALESCE(?, state),
-                    zip_code          = COALESCE(?, zip_code),
-                    contact_name      = COALESCE(?, contact_name),
-                    contact_email     = COALESCE(?, contact_email),
-                    contact_phone     = COALESCE(?, contact_phone),
-                    chair_type        = COALESCE(?, chair_type),
-                    dimensions        = COALESCE(?, dimensions),
-                    quantity_original = COALESCE(?, quantity_original),
-                    price_per_chair   = COALESCE(price_per_chair, ?),
-                    hero_image        = COALESCE(hero_image, ?),
-                    updated_at        = ?
-                WHERE lot_id = ?
+                    seller_id         = COALESCE(%s, seller_id),
+                    govdeals_url      = COALESCE(%s, govdeals_url),
+                    folder_name       = COALESCE(%s, folder_name),
+                    folder_path       = COALESCE(%s, folder_path),
+                    sku               = COALESCE(%s, sku),
+                    title             = COALESCE(%s, title),
+                    description       = COALESCE(%s, description),
+                    city              = COALESCE(%s, city),
+                    state             = COALESCE(%s, state),
+                    zip_code          = COALESCE(%s, zip_code),
+                    contact_name      = COALESCE(%s, contact_name),
+                    contact_email     = COALESCE(%s, contact_email),
+                    contact_phone     = COALESCE(%s, contact_phone),
+                    chair_type        = COALESCE(%s, chair_type),
+                    dimensions        = COALESCE(%s, dimensions),
+                    quantity_original = COALESCE(%s, quantity_original),
+                    price_per_chair   = COALESCE(price_per_chair, %s),
+                    hero_image        = COALESCE(hero_image, %s),
+                    updated_at        = %s
+                WHERE lot_id = %s
                 """,
                 (
                     seller_id, govdeals_url, folder_name, folder_path, sku,
@@ -330,16 +221,16 @@ def set_platform_url(
     ts = None if (url is None or clear_timestamp) else now
     with connect() as conn:
         conn.execute(
-            f"UPDATE inventory SET {col_url} = ?, {col_ts} = ?, updated_at = ? "
-            f"WHERE lot_id = ?",
+            f"UPDATE inventory SET {col_url} = %s, {col_ts} = %s, updated_at = %s "
+            f"WHERE lot_id = %s",
             (url, ts, now, str(lot_id)),
         )
         # Promote to 'listed' on first successful publish — but only for
         # real marketplaces, not promotional posts/ads.
         if url and platform in _MARKETPLACE_PLATFORMS:
             conn.execute(
-                "UPDATE inventory SET status = 'listed', updated_at = ? "
-                "WHERE lot_id = ? AND status = 'draft'",
+                "UPDATE inventory SET status = 'listed', updated_at = %s "
+                "WHERE lot_id = %s AND status = 'draft'",
                 (now, str(lot_id)),
             )
         conn.commit()
@@ -372,10 +263,10 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
     if "status" in clean and clean["status"] not in ALL_STATUSES:
         raise ValueError(f"invalid status: {clean['status']}")
     clean["updated_at"] = _now()
-    cols = ", ".join(f"{k} = ?" for k in clean)
+    cols = ", ".join(f"{k} = %s" for k in clean)
     params = list(clean.values()) + [str(lot_id)]
     with connect() as conn:
-        conn.execute(f"UPDATE inventory SET {cols} WHERE lot_id = ?", params)
+        conn.execute(f"UPDATE inventory SET {cols} WHERE lot_id = %s", params)
         conn.commit()
     return get(lot_id)
 
@@ -427,8 +318,8 @@ def attach_buyer_cert(lot_id: str, filename: str, data: bytes) -> dict | None:
     now = _now()
     with connect() as conn:
         conn.execute(
-            "UPDATE inventory SET buyer_cert_filename = ?, buyer_cert_path = ?, "
-            "updated_at = ? WHERE lot_id = ?",
+            "UPDATE inventory SET buyer_cert_filename = %s, buyer_cert_path = %s, "
+            "updated_at = %s WHERE lot_id = %s",
             (safe_name, rel, now, str(lot_id)),
         )
         conn.commit()
@@ -449,7 +340,7 @@ def delete_buyer_cert(lot_id: str) -> dict | None:
     with connect() as conn:
         conn.execute(
             "UPDATE inventory SET buyer_cert_filename = NULL, buyer_cert_path = NULL, "
-            "updated_at = ? WHERE lot_id = ?",
+            "updated_at = %s WHERE lot_id = %s",
             (now, str(lot_id)),
         )
         conn.commit()
@@ -465,7 +356,7 @@ def delete(lot_id: str) -> bool:
         except OSError:
             pass
     with connect() as conn:
-        cur = conn.execute("DELETE FROM inventory WHERE lot_id = ?", (str(lot_id),))
+        cur = conn.execute("DELETE FROM inventory WHERE lot_id = %s", (str(lot_id),))
         conn.commit()
         return cur.rowcount > 0
 
@@ -496,7 +387,7 @@ def insert_manual(
                 lot_id, title, description, city, state, zip_code, chair_type,
                 dimensions, quantity_original, quantity_remaining, price_per_chair,
                 folder_name, hero_image, status, parsed_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft', ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
             """,
             (
                 str(lot_id), title, description, city, state, zip_code, chair_type,
@@ -533,7 +424,8 @@ def create_inquiry(
             INSERT INTO inquiries (
                 kind, lot_id, name, email, phone, quantity_interested,
                 message, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'new', ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'new', %s)
+            RETURNING id
             """,
             (
                 kind, str(lot_id) if lot_id else None, name.strip(),
@@ -541,15 +433,15 @@ def create_inquiry(
                 quantity_interested, (message or "").strip() or None, now,
             ),
         )
+        inquiry_id = cur.fetchone()["id"]
         conn.commit()
-        inquiry_id = cur.lastrowid
     return get_inquiry(inquiry_id)
 
 
 def get_inquiry(inquiry_id: int) -> dict | None:
     with connect() as conn:
         row = conn.execute(
-            "SELECT * FROM inquiries WHERE id = ?", (int(inquiry_id),)
+            "SELECT * FROM inquiries WHERE id = %s", (int(inquiry_id),)
         ).fetchone()
     return _row_to_dict(row)
 
@@ -558,7 +450,7 @@ def list_inquiries(status: str | None = None) -> list[dict]:
     with connect() as conn:
         if status:
             rows = conn.execute(
-                "SELECT * FROM inquiries WHERE status = ? ORDER BY created_at DESC",
+                "SELECT * FROM inquiries WHERE status = %s ORDER BY created_at DESC",
                 (status,),
             ).fetchall()
         else:
@@ -573,7 +465,7 @@ def set_inquiry_status(inquiry_id: int, status: str) -> dict | None:
         raise ValueError(f"invalid status: {status}")
     with connect() as conn:
         conn.execute(
-            "UPDATE inquiries SET status = ? WHERE id = ?",
+            "UPDATE inquiries SET status = %s WHERE id = %s",
             (status, int(inquiry_id)),
         )
         conn.commit()
@@ -583,7 +475,7 @@ def set_inquiry_status(inquiry_id: int, status: str) -> dict | None:
 def link_inquiry(inquiry_id: int, lot_id: str | None) -> dict | None:
     with connect() as conn:
         conn.execute(
-            "UPDATE inquiries SET lot_id = ? WHERE id = ?",
+            "UPDATE inquiries SET lot_id = %s WHERE id = %s",
             (str(lot_id) if lot_id else None, int(inquiry_id)),
         )
         conn.commit()
@@ -593,7 +485,7 @@ def link_inquiry(inquiry_id: int, lot_id: str | None) -> dict | None:
 def delete_inquiry(inquiry_id: int) -> bool:
     with connect() as conn:
         cur = conn.execute(
-            "DELETE FROM inquiries WHERE id = ?", (int(inquiry_id),)
+            "DELETE FROM inquiries WHERE id = %s", (int(inquiry_id),)
         )
         conn.commit()
         return cur.rowcount > 0
