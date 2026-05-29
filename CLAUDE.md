@@ -29,6 +29,8 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
   - `quality.py` — bottom-right histogram check; runs after every API call to guard against the API returning still-watermarked output.
   - `facebook.py`, `ebay.py` — fill drafts, stop before publish.
   - `templates.py` — FB description + eBay HTML description with placeholders.
+  - `favorites.py` — auction-favorites store + Telegram countdown alert schedule (6d/3d/2d/1d/1h/5m). Persists `favorites` + `alert_log` tables in the same `inventory.db`. The scheduler loop runs inside the FastAPI process (`web/app.py`); alert sends go through `telegram_alerts.py`. Marking `auction_extractors` cards via the dashboard's `04 Auctions` tab writes here.
+  - `telegram_alerts.py` — thin async `send_message(text)` over the Telegram Bot API. Reuses `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` from `automation.config`. Best-effort, never raises — returns `(ok, error_str)`.
   - `inventory.py` — SQLite ledger at `~/.listing_automation/inventory.db`. Two tables: `inventory` (one row per lot, keyed by `lot_id`) + `inquiries` (customer contact-form submissions). Source of truth for "what we've parsed, what's up where, how many are left." See "Inventory ledger" section below.
   - `llm/` — pluggable extractors:
     - `claude_code.py` — stdin/stdout sentinel protocol; ONLY works when Claude Code drives the script with a TTY.
@@ -45,7 +47,7 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
       - `GET  /sell` — seller intake form
       - `POST /contact` — persists to `inquiries` table
     - **Admin dashboard** (`/admin`, `index.html`, dark terminal theme `app.css`). Tabs: `01 Launcher` / `02 Drafts` / `03 A/B` / `04 Auctions` / `05 Inventory` / `06 Inquiries`. Launcher shows an `UP NEXT` strip when the run queue is non-empty. Inventory tab = editable table (qty/price/status inline, FB/eBay URL backfill, Republish, Delete, Backfill-from-folders). Inquiries tab = chronological cards with status transitions.
-    - **Admin JSON APIs**: `/api/inventory[...]`, `/api/inventory-stats`, `/api/inventory/backfill`, `/api/inventory/{lot_id}/platform`, `/api/inquiries[...]` (list/patch/delete).
+    - **Admin JSON APIs**: `/api/inventory[...]`, `/api/inventory-stats`, `/api/inventory/backfill`, `/api/inventory/{lot_id}/platform`, `/api/inquiries[...]` (list/patch/delete), `/api/runs/queue` + `/api/runs/queue/clear` (serial run queue — see `auction_extractors` section), `/api/favorites[...]` (Auctions tab star/unstar + alert state).
 - `auction_extractors/` — integrated data pipeline + read-only API (see "auction_extractors" section below).
 
 ## Connecting to the shared DB
@@ -94,10 +96,10 @@ from core.db import connect, fetch_one, fetch_all, execute, executemany
 
 ## Inventory ledger — READ BEFORE TOUCHING run.py OR APP.PY
 
-**Why it exists:** FB/eBay draft URLs used to be emitted as progress events and thrown away. Re-running the pipeline on the same lot would burn API budget a second time. The ledger is now the single source of truth fwor "what we've parsed, what's up where, how many are left to sell."
+**Why it exists:** FB/eBay draft URLs used to be emitted as progress events and thrown away. Re-running the pipeline on the same lot would burn API budget a second time. The ledger is now the single source of truth for "what we've parsed, what's up where, how many are left to sell."
 
 **Storage:** `~/.listing_automation/inventory.db` (SQLite). Two tables:
-- `inventory` — one row per GovDeals lot, PK = `lot_id`. Columns include `folder_name`, `folder_path`, `sku`, `title`, `city`, `chair_type`, `quantity_original`, `quantity_remaining` (user-editable), `price_per_chair`, `hero_image`, `status` (`draft` / `listed` / `hidden` / `sold_out`), `facebook_url` / `facebook_published_at`, `ebay_url` / `ebay_published_at`, `parsed_at`, `updated_at`.
+- `inventory` — one row per GovDeals lot, PK = `lot_id`. Columns include `folder_name`, `folder_path`, `sku`, `title`, `city`, `chair_type`, `quantity_original`, `quantity_remaining` (user-editable), `price_per_chair`, `hero_image`, `status`, `facebook_url` / `facebook_published_at`, `ebay_url` / `ebay_published_at`, `parsed_at`, `updated_at`. `status` lifecycle values: `draft` / `listed` / `hidden` / `sold_out` (the original automation set) plus `active_bid` / `lost` / `owned` / `won_pickup` (added so manually-tracked govt-auction lots can live in the same ledger; the SQLite schema doesn't enforce the set — the parallel Supabase mirror does, see workspace `CLAUDE.md §12`).
 - `inquiries` — customer contact-form submissions. `kind` = `buy` | `sell`, nullable `lot_id`, `status` = `new` | `contacted` | `closed`.
 
 **Dedup flow in `run.py`:** before each marketplace phase, `inventory.get(lot_id)` is consulted. If `facebook_url` (or `ebay_url`) is already set and `--force-republish` is NOT passed, that phase emits `phase:facebook` `status=skipped_duplicate url=<existing>` and does not touch the browser. After the phase, `inventory.set_platform_url()` stamps the URL + timestamp and promotes `status` from `draft` → `listed`. `inventory.upsert_from_run()` runs unconditionally at the end so a row exists even if both platforms were skipped.
