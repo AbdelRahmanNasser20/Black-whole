@@ -3,6 +3,7 @@ import json
 import os
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .base import Extraction, Extractor
@@ -11,7 +12,8 @@ from .gemini import GeminiExtractor
 from .openai import OpenAIExtractor
 from .dom_fallback import DomFallbackExtractor
 from .ollama_local import OllamaTextExtractor, OllamaVisionExtractor
-from ..config import LOG_DIR, GEMINI_API_KEY, OPENAI_API_KEY
+from .. import db
+from ..config import GEMINI_API_KEY, OPENAI_API_KEY
 
 
 async def run_parallel(
@@ -49,14 +51,22 @@ async def run_parallel(
             secondary_res = None
             print(f"[secondary LLM {secondary.name} failed: {e}]")
 
-    log = {
-        "timestamp": time.time(),
-        "dom_hint": dom_hint,
-        "primary": primary_res.to_dict() if primary_res else None,
-        "secondary": secondary_res.to_dict() if secondary_res else None,
-    }
-    log_path = LOG_DIR / f"llm_compare_{int(log['timestamp'])}.json"
-    log_path.write_text(json.dumps(log, indent=2))
+    ts_float = time.time()
+    db.execute(
+        """
+        INSERT INTO llm_compare_logs
+            (id, ts, dom_hint, primary_extraction, secondary_extraction)
+        VALUES (%s, %s, %s::jsonb, %s::jsonb, %s::jsonb)
+        ON CONFLICT (id) DO NOTHING
+        """,
+        (
+            int(ts_float),
+            datetime.fromtimestamp(ts_float, tz=timezone.utc),
+            json.dumps(dom_hint) if dom_hint is not None else None,
+            json.dumps(primary_res.to_dict()) if primary_res else None,
+            json.dumps(secondary_res.to_dict()) if secondary_res else None,
+        ),
+    )
     return primary_res, secondary_res
 
 

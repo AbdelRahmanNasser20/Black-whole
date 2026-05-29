@@ -31,7 +31,7 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
   - `templates.py` — FB description + eBay HTML description with placeholders.
   - `favorites.py` — auction-favorites store + Telegram countdown alert schedule (6d/3d/2d/1d/1h/5m). Persists `favorites` + `alert_log` tables in the same `inventory.db`. The scheduler loop runs inside the FastAPI process (`web/app.py`); alert sends go through `telegram_alerts.py`. Marking `auction_extractors` cards via the dashboard's `04 Auctions` tab writes here.
   - `telegram_alerts.py` — thin async `send_message(text)` over the Telegram Bot API. Reuses `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` from `automation.config`. Best-effort, never raises — returns `(ok, error_str)`.
-  - `inventory.py` — SQLite ledger at `~/.listing_automation/inventory.db`. Two tables: `inventory` (one row per lot, keyed by `lot_id`) + `inquiries` (customer contact-form submissions). Source of truth for "what we've parsed, what's up where, how many are left." See "Inventory ledger" section below.
+  - `inventory.py` — ledger on Supabase Postgres (via `automation/db.py`; cut over from SQLite 2026-05-29). Two tables: `inventory` (one row per lot, keyed by `lot_id`) + `inquiries` (customer contact-form submissions). Source of truth for "what we've parsed, what's up where, how many are left." See "Inventory ledger" section below.
   - `llm/` — pluggable extractors:
     - `claude_code.py` — stdin/stdout sentinel protocol; ONLY works when Claude Code drives the script with a TTY.
     - `gemini.py` — google-genai, `gemini-2.5-flash`; needs `GEMINI_API_KEY`. Primary.
@@ -52,15 +52,15 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
 
 ## Connecting to the shared DB
 
-Workspace-level decision (see `workspace/CLAUDE.md §14`): all new DB code goes through `~/Desktop/Black_whole_projects/core/db.py` against Supabase Postgres. From this repo:
+Workspace-level decision (see `workspace/CLAUDE.md §14`): all new DB code goes through Supabase Postgres. This repo uses a **self-contained, vendored** helper `automation/db.py` (psycopg over Supabase) rather than the workspace `core/db.py`, so it runs in standalone web/CI clones where `core/` isn't present. Same documented surface:
 
 ```python
-from core.db import connect, fetch_one, fetch_all, execute, executemany
+from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute, db.executemany
 ```
 
-`core/` is at the workspace root, one level above this repo, so make sure the Python you run resolves the workspace as a sys.path entry (running CLIs from the workspace root or with `PYTHONPATH=..` from inside this repo both work). `BLACKWHOLE_DB_URL` is read from this repo's `.env`; the helper handles URL-encoding for `@` in the password.
+`BLACKWHOLE_DB_URL` is read from this repo's `.env` (gitignored) by `automation/config.py`. Rows come back as plain dicts (psycopg `dict_row`), and timestamptz columns read back as `datetime` objects (not ISO strings).
 
-**Current adoption in this repo: none yet.** The SQLite ledger at `~/.listing_automation/inventory.db` (see "Inventory ledger" section below) is still the active source of truth for FB/eBay dedup and the admin Inventory tab. When porting `automation/inventory.py` onto Supabase, the target table is `inventory` from workspace §8 — the columns line up except SQLite-specific bits. Until the cutover is done, **do not write to both**: pick one for each call site.
+**Current adoption: `inventory.py` + `favorites.py` + the A/B compare feature are cut over to Supabase** (project `blackwhole` / `nihgzltpjriekyqqucbd`) as of 2026-05-29. `inventory.connect()` is an alias for `db.connect()`. The local SQLite file at `~/.listing_automation/inventory.db` is no longer read or written, and `~/.listing_automation/compare_ratings.json` / `llm_compare_*.json` are no longer read or written (existing logs were imported via `scripts/migrate_compare_logs.py`; the files can be deleted any time). Schema lives in Supabase (managed via migrations), not created at runtime; the cutover added `auction_favorites` / `auction_alerts_sent` / `llm_compare_logs`. Note: Supabase has RLS **disabled** on all tables — the server connects as the pooler `postgres` role (bypasses RLS), but enabling RLS + policies for the anon key is a separate, still-open task.
 
 `auction_extractors/state/listings.db` stays SQLite-only and read-only to this repo (upstream scrape cache).
 
@@ -68,7 +68,7 @@ from core.db import connect, fetch_one, fetch_all, execute, executemany
 - macOS only paths assumed (`~/Desktop/Banquet chiars Pictures/`).
 - `.env` carries `DEWATERMARK_API_KEY` and (optional) `GEMINI_API_KEY`. Already gitignored.
 - Persistent Playwright profile lives at `~/.listing_automation/chrome_profile/`. Logged into FB + eBay there.
-- `~/.listing_automation/logs/llm_compare_*.json` — per-run A/B log.
+- A/B compare logs and ratings live in Supabase table `llm_compare_logs` (one row per dual-extractor run, `id` = unix-ts). The old `~/.listing_automation/logs/llm_compare_*.json` + `compare_ratings.json` files are dormant — kept on disk as a backup but not read or written.
 
 ## Gotchas (all fixed — don't reintroduce)
 
@@ -108,7 +108,7 @@ from core.db import connect, fetch_one, fetch_all, execute, executemany
 
 **Auto-sold-out rule:** editing `quantity_remaining` to 0 via the admin tab auto-flips `status` to `sold_out` (unless the same PATCH also sets `status` explicitly). Sold-out rows disappear from the public `/listings`.
 
-**Backfill path for pre-tracking listings:** `POST /api/inventory/backfill` walks `~/Desktop/Banquet chiars Pictures/`, imports any folder missing from the ledger as a `draft` row with best-effort metadata from the matching `llm_compare_*.json` log. FB/eBay URLs stay NULL — admin uses the "paste URL" cell on the Inventory tab for each row.
+**Backfill path for pre-tracking listings:** `POST /api/inventory/backfill` walks `~/Desktop/Banquet chiars Pictures/`, imports any folder missing from the ledger as a `draft` row with best-effort metadata from the matching `llm_compare_logs` row (Supabase). FB/eBay URLs stay NULL — admin uses the "paste URL" cell on the Inventory tab for each row.
 
 **Things NOT to do:**
 - Don't add columns to `auction_extractors/state/listings.db` for publish state. That DB is the upstream scrape cache — keep the read-only separation.

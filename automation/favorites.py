@@ -14,7 +14,6 @@ re-fires.
 """
 from __future__ import annotations
 
-import sqlite3
 import warnings
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -108,7 +107,7 @@ class Favorite:
             return None
 
 
-def _row_to_favorite(row: sqlite3.Row, sent: list[str]) -> Favorite:
+def _row_to_favorite(row: dict, sent: list[str]) -> Favorite:
     return Favorite(
         asset_id=row["asset_id"],
         link=row["link"],
@@ -125,12 +124,12 @@ def _row_to_favorite(row: sqlite3.Row, sent: list[str]) -> Favorite:
     )
 
 
-def _sent_intervals(conn: sqlite3.Connection, asset_id: str) -> list[str]:
+def _sent_intervals(conn, asset_id: str) -> list[str]:
     rows = conn.execute(
-        "SELECT interval_label FROM auction_alerts_sent WHERE asset_id = ?",
+        "SELECT interval_label FROM auction_alerts_sent WHERE asset_id = %s",
         (asset_id,),
     ).fetchall()
-    return [r[0] for r in rows]
+    return [r["interval_label"] for r in rows]
 
 
 def list_all() -> list[Favorite]:
@@ -150,7 +149,7 @@ def get(asset_id: str) -> Favorite | None:
         return None
     with inventory.connect() as conn:
         row = conn.execute(
-            "SELECT * FROM auction_favorites WHERE asset_id = ?", (asset_id,),
+            "SELECT * FROM auction_favorites WHERE asset_id = %s", (asset_id,),
         ).fetchone()
         if not row:
             return None
@@ -162,7 +161,7 @@ def is_favorited(asset_id: str) -> bool:
         return False
     with inventory.connect() as conn:
         row = conn.execute(
-            "SELECT 1 FROM auction_favorites WHERE asset_id = ?", (asset_id,),
+            "SELECT 1 FROM auction_favorites WHERE asset_id = %s", (asset_id,),
         ).fetchone()
     return row is not None
 
@@ -187,7 +186,7 @@ def upsert(
     now = _now_iso()
     with inventory.connect() as conn:
         existing = conn.execute(
-            "SELECT end_date_iso FROM auction_favorites WHERE asset_id = ?",
+            "SELECT end_date_iso FROM auction_favorites WHERE asset_id = %s",
             (asset_id,),
         ).fetchone()
         if existing is None:
@@ -196,7 +195,7 @@ def upsert(
                 INSERT INTO auction_favorites (
                     asset_id, link, title, quantity, end_date_iso, end_date_raw,
                     image_url, location, starred_at, last_synced_at, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (asset_id, link, title, quantity, end_iso, end_date_raw,
                  image_url, location, now, now, notes),
@@ -206,14 +205,14 @@ def upsert(
             conn.execute(
                 """
                 UPDATE auction_favorites SET
-                    link = ?, title = COALESCE(?, title),
-                    quantity = COALESCE(?, quantity),
-                    end_date_iso = ?, end_date_raw = ?,
-                    image_url = COALESCE(?, image_url),
-                    location = COALESCE(?, location),
-                    last_synced_at = ?,
-                    notes = COALESCE(?, notes)
-                WHERE asset_id = ?
+                    link = %s, title = COALESCE(%s, title),
+                    quantity = COALESCE(%s, quantity),
+                    end_date_iso = %s, end_date_raw = %s,
+                    image_url = COALESCE(%s, image_url),
+                    location = COALESCE(%s, location),
+                    last_synced_at = %s,
+                    notes = COALESCE(%s, notes)
+                WHERE asset_id = %s
                 """,
                 (link, title, quantity, end_iso, end_date_raw, image_url,
                  location, now, notes, asset_id),
@@ -221,7 +220,7 @@ def upsert(
             # Relist: end_date moved → re-arm alerts.
             if end_iso and old_iso and end_iso != old_iso:
                 conn.execute(
-                    "DELETE FROM auction_alerts_sent WHERE asset_id = ?",
+                    "DELETE FROM auction_alerts_sent WHERE asset_id = %s",
                     (asset_id,),
                 )
         conn.commit()
@@ -231,10 +230,10 @@ def upsert(
 def delete(asset_id: str) -> bool:
     with inventory.connect() as conn:
         cur = conn.execute(
-            "DELETE FROM auction_favorites WHERE asset_id = ?", (asset_id,),
+            "DELETE FROM auction_favorites WHERE asset_id = %s", (asset_id,),
         )
         conn.execute(
-            "DELETE FROM auction_alerts_sent WHERE asset_id = ?", (asset_id,),
+            "DELETE FROM auction_alerts_sent WHERE asset_id = %s", (asset_id,),
         )
         conn.commit()
         return cur.rowcount > 0
@@ -243,8 +242,9 @@ def delete(asset_id: str) -> bool:
 def mark_sent(asset_id: str, interval_label: str) -> None:
     with inventory.connect() as conn:
         conn.execute(
-            "INSERT OR IGNORE INTO auction_alerts_sent "
-            "(asset_id, interval_label, sent_at) VALUES (?, ?, ?)",
+            "INSERT INTO auction_alerts_sent "
+            "(asset_id, interval_label, sent_at) VALUES (%s, %s, %s) "
+            "ON CONFLICT (asset_id, interval_label) DO NOTHING",
             (asset_id, interval_label, _now_iso()),
         )
         conn.commit()
