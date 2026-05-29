@@ -48,6 +48,20 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
     - **Admin JSON APIs**: `/api/inventory[...]`, `/api/inventory-stats`, `/api/inventory/backfill`, `/api/inventory/{lot_id}/platform`, `/api/inquiries[...]` (list/patch/delete).
 - `auction_extractors/` — integrated data pipeline + read-only API (see "auction_extractors" section below).
 
+## Connecting to the shared DB
+
+Workspace-level decision (see `workspace/CLAUDE.md §14`): all new DB code goes through `~/Desktop/Black_whole_projects/core/db.py` against Supabase Postgres. From this repo:
+
+```python
+from core.db import connect, fetch_one, fetch_all, execute, executemany
+```
+
+`core/` is at the workspace root, one level above this repo, so make sure the Python you run resolves the workspace as a sys.path entry (running CLIs from the workspace root or with `PYTHONPATH=..` from inside this repo both work). `BLACKWHOLE_DB_URL` is read from this repo's `.env`; the helper handles URL-encoding for `@` in the password.
+
+**Current adoption in this repo: none yet.** The SQLite ledger at `~/.listing_automation/inventory.db` (see "Inventory ledger" section below) is still the active source of truth for FB/eBay dedup and the admin Inventory tab. When porting `automation/inventory.py` onto Supabase, the target table is `inventory` from workspace §8 — the columns line up except SQLite-specific bits. Until the cutover is done, **do not write to both**: pick one for each call site.
+
+`auction_extractors/state/listings.db` stays SQLite-only and read-only to this repo (upstream scrape cache).
+
 ## Key environment
 - macOS only paths assumed (`~/Desktop/Banquet chiars Pictures/`).
 - `.env` carries `DEWATERMARK_API_KEY` and (optional) `GEMINI_API_KEY`. Already gitignored.
@@ -80,7 +94,7 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
 
 ## Inventory ledger — READ BEFORE TOUCHING run.py OR APP.PY
 
-**Why it exists:** FB/eBay draft URLs used to be emitted as progress events and thrown away. Re-running the pipeline on the same lot would burn API budget a second time. The ledger is now the single source of truth for "what we've parsed, what's up where, how many are left to sell."
+**Why it exists:** FB/eBay draft URLs used to be emitted as progress events and thrown away. Re-running the pipeline on the same lot would burn API budget a second time. The ledger is now the single source of truth fwor "what we've parsed, what's up where, how many are left to sell."
 
 **Storage:** `~/.listing_automation/inventory.db` (SQLite). Two tables:
 - `inventory` — one row per GovDeals lot, PK = `lot_id`. Columns include `folder_name`, `folder_path`, `sku`, `title`, `city`, `chair_type`, `quantity_original`, `quantity_remaining` (user-editable), `price_per_chair`, `hero_image`, `status` (`draft` / `listed` / `hidden` / `sold_out`), `facebook_url` / `facebook_published_at`, `ebay_url` / `ebay_published_at`, `parsed_at`, `updated_at`.
