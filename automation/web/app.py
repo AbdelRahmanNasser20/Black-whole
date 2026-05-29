@@ -6,7 +6,7 @@ Routes:
   POST /api/runs/start    → kick off run.py with a GovDeals URL
   GET  /api/runs/stream   → SSE: progress + raw stdout lines
   GET  /api/drafts        → JSON list of listing folders + metadata
-  GET  /api/compare       → JSON list of llm_compare_*.json logs
+  GET  /api/compare       → JSON list of llm_compare_logs rows (Supabase)
   POST /api/compare/{ts}/rate → save a star rating (matched / wrong)
   GET  /image/{folder}/{name} → serve image from a listing folder
   GET  /screenshot/{folder}/{name} → serve a Playwright screenshot
@@ -37,8 +37,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import DOWNLOAD_ROOT, LOG_DIR, STATE_ROOT, FACEBOOK_BUSINESS_URL
+from ..config import DOWNLOAD_ROOT, FACEBOOK_BUSINESS_URL
 from ..progress import EVENT_PREFIX, parse as parse_event
+from .. import db
 from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
@@ -53,7 +54,6 @@ TEMPLATE_DIR = PKG_DIR / "templates"
 STATIC_DIR = PKG_DIR / "static"
 PROJECT_ROOT = PKG_DIR.parents[1]
 AUCTION_EXTRACTORS_DIR = PROJECT_ROOT / "auction_extractors"
-RATINGS_FILE = STATE_ROOT / "compare_ratings.json"
 
 PHASES = ["scrape", "llm", "download", "dewatermark", "facebook", "ebay"]
 
@@ -487,22 +487,31 @@ def _folder_images(folder: Path) -> list[str]:
     return files
 
 
-def _latest_compare_for_folder(folder_name: str) -> dict | None:
+def _all_compare_rows() -> list[dict]:
+    """Single query — callers that iterate over folders should call this once
+    and pass the result to ``_latest_compare_for_folder`` to avoid an O(N) DB
+    fan-out (24 folders × 200 ms pooler latency = a 5 s page)."""
+    return db.fetch_all(
+        "SELECT dom_hint, primary_extraction, secondary_extraction "
+        "FROM llm_compare_logs ORDER BY ts DESC"
+    )
+
+
+def _latest_compare_for_folder(folder_name: str, rows: list[dict]) -> dict | None:
     """Best-effort match: pick the most recent llm log whose primary title slug
-    matches the folder name (folders are slugified titles)."""
-    candidates = sorted(LOG_DIR.glob("llm_compare_*.json"),
-                       key=lambda p: p.stat().st_mtime, reverse=True)
+    matches the folder name (folders are slugified titles). ``rows`` is the
+    pre-loaded output of :func:`_all_compare_rows`."""
     folder_slug = re.sub(r"[^a-z0-9]", "", folder_name.lower())
-    for log in candidates:
-        try:
-            data = json.loads(log.read_text())
-        except Exception:
-            continue
-        primary = (data.get("primary") or {})
+    for row in rows:
+        primary = row["primary_extraction"] or {}
         title = primary.get("title") or ""
         title_slug = re.sub(r"[^a-z0-9]", "", title.lower())
         if title_slug and (title_slug in folder_slug or folder_slug in title_slug):
-            return data
+            return {
+                "dom_hint": row["dom_hint"],
+                "primary": row["primary_extraction"],
+                "secondary": row["secondary_extraction"],
+            }
     return None
 
 
@@ -511,10 +520,11 @@ async def list_drafts():
     inv_by_folder = {
         r["folder_name"]: r for r in inventory.list_all() if r.get("folder_name")
     }
+    compare_rows = _all_compare_rows()
     out = []
     for folder in _list_listing_folders():
         imgs = _folder_images(folder)
-        meta = _latest_compare_for_folder(folder.name)
+        meta = _latest_compare_for_folder(folder.name, compare_rows)
         primary = (meta or {}).get("primary") or {}
         inv = inv_by_folder.get(folder.name) or {}
         out.append({
@@ -560,41 +570,24 @@ async def serve_screenshot(folder: str, name: str):
 
 # ───────────────────────────── compare ─────────────────────────────
 
-def _load_ratings() -> dict[str, str]:
-    if not RATINGS_FILE.exists():
-        return {}
-    try:
-        return json.loads(RATINGS_FILE.read_text())
-    except Exception:
-        return {}
-
-
-def _save_ratings(d: dict[str, str]) -> None:
-    RATINGS_FILE.write_text(json.dumps(d, indent=2))
-
-
 @app.get("/api/compare")
 async def list_compare():
-    ratings = _load_ratings()
-    logs = sorted(LOG_DIR.glob("llm_compare_*.json"),
-                 key=lambda p: p.stat().st_mtime, reverse=True)
+    rows = db.fetch_all(
+        "SELECT id, ts, dom_hint, primary_extraction, secondary_extraction, rating "
+        "FROM llm_compare_logs ORDER BY ts DESC"
+    )
     out = []
-    for log in logs:
-        try:
-            data = json.loads(log.read_text())
-        except Exception as e:
-            data = {"error": str(e)}
-        ts_match = re.search(r"llm_compare_(\d+)\.json", log.name)
-        ts = int(ts_match.group(1)) if ts_match else int(log.stat().st_mtime)
+    for row in rows:
+        ts_epoch = int(row["ts"].timestamp())
         out.append({
-            "id": str(ts),
-            "filename": log.name,
-            "timestamp": ts,
-            "modified": log.stat().st_mtime,
-            "dom_hint": data.get("dom_hint"),
-            "primary": data.get("primary"),
-            "secondary": data.get("secondary"),
-            "rating": ratings.get(str(ts)),
+            "id": str(row["id"]),
+            "filename": f"llm_compare_{row['id']}.json",
+            "timestamp": row["id"],
+            "modified": ts_epoch,
+            "dom_hint": row["dom_hint"],
+            "primary": row["primary_extraction"],
+            "secondary": row["secondary_extraction"],
+            "rating": row["rating"],
         })
     return {"entries": out}
 
@@ -604,12 +597,24 @@ async def rate_compare(cid: str, payload: dict):
     rating = (payload or {}).get("rating")
     if rating not in (None, "", "match", "wrong"):
         raise HTTPException(400, "rating must be 'match', 'wrong', or null")
-    ratings = _load_ratings()
+    try:
+        cid_int = int(cid)
+    except ValueError:
+        raise HTTPException(400, "id must be an integer")
     if rating in (None, ""):
-        ratings.pop(cid, None)
+        db.execute(
+            "UPDATE llm_compare_logs SET rating = NULL, rated_at = NULL WHERE id = %s",
+            (cid_int,),
+        )
     else:
-        ratings[cid] = rating
-    _save_ratings(ratings)
+        db.execute(
+            "UPDATE llm_compare_logs SET rating = %s, rated_at = now() WHERE id = %s",
+            (rating, cid_int),
+        )
+    rows = db.fetch_all(
+        "SELECT id, rating FROM llm_compare_logs WHERE rating IS NOT NULL"
+    )
+    ratings = {str(r["id"]): r["rating"] for r in rows}
     return {"ok": True, "ratings": ratings}
 
 
@@ -1531,14 +1536,15 @@ async def inv_backfill():
     """Walk DOWNLOAD_ROOT, add a draft row for any folder not in the table.
 
     Best-effort: pulls title/qty/city/chair_type from the same
-    llm_compare_*.json lookup the Drafts tab uses. FB/eBay URLs stay NULL;
+    llm_compare_logs lookup the Drafts tab uses. FB/eBay URLs stay NULL;
     admin must paste them manually for pre-tracking listings.
     """
     added: list[str] = []
     updated: list[str] = []
     skipped: list[str] = []
+    compare_rows = _all_compare_rows()
     for folder in _list_listing_folders():
-        meta = _latest_compare_for_folder(folder.name) or {}
+        meta = _latest_compare_for_folder(folder.name, compare_rows) or {}
         primary = meta.get("primary") or {}
         dom_hint = meta.get("dom_hint") or {}
         # Can we derive a stable lot_id? The folder name doesn't carry one, but
