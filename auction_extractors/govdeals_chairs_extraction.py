@@ -72,6 +72,12 @@ SEARCH_TERMS = [
     "procedure chair", "exam table",
 ]
 
+# Allow a comma-separated override so a targeted run (e.g. just "banquet chairs")
+# is possible without editing this list: GOVDEALS_SEARCH_TERMS="banquet chairs,church chairs"
+_terms_override = os.getenv("GOVDEALS_SEARCH_TERMS", "").strip()
+if _terms_override:
+    SEARCH_TERMS = [t.strip() for t in _terms_override.split(",") if t.strip()]
+
 
 
 def _govdeals_search_cards_locator(page):
@@ -135,14 +141,19 @@ def _scrape_one_page(page) -> list:
             title = title_element.inner_text().strip()
             link = title_element.get_attribute('href')
 
-            location_element = card.locator('p[name="pAssetLocation"]')
-            location = location_element.inner_text().strip()
+            # Optional fields: some cards (sponsored/closed lots) omit the
+            # location/price/lot elements. Read them with a short timeout so a
+            # missing element costs ~1.5s, not the default 30s, and never drops
+            # the whole card.
+            def _soft(selector: str) -> str:
+                try:
+                    return card.locator(selector).first.inner_text(timeout=1500).strip()
+                except Exception:
+                    return ""
 
-            price_element = card.locator('p[name="pAssetCurrentBid"]')
-            price = price_element.inner_text().strip()
-
-            lot_element = card.locator('p:has-text("Lot#:")')
-            lot_text = lot_element.inner_text().strip()
+            location = _soft('p[name="pAssetLocation"]')
+            price = _soft('p[name="pAssetCurrentBid"]')
+            lot_text = _soft('p:has-text("Lot#:")')
             lot_number = lot_text.replace('Lot#:', '').strip()
 
             end_date = ""
@@ -405,6 +416,17 @@ def _go_to_next_page(page) -> bool:
         print(f"   [pagination] next disabled (class={cls!r}, aria-disabled={aria_disabled!r}) — last page")
         return False
 
+    # Capture the first result card's asset link BEFORE clicking, so we can
+    # detect a real page change (and the last page, where the Next control can
+    # persist but no-op).
+    cards = _govdeals_search_cards_locator(page)
+    before = ""
+    try:
+        if cards.count() > 0:
+            before = cards.first.locator("a[href*='/asset/']").first.get_attribute("href") or ""
+    except Exception:
+        before = ""
+
     try:
         # Some Angular pagination components only respond to clicking the
         # inner anchor, others respond to the <li>. Try the anchor first,
@@ -417,14 +439,19 @@ def _go_to_next_page(page) -> bool:
         print(f"   [pagination] click failed: {e}")
         return False
 
-    # networkidle frequently times out on Angular SPAs that stream XHRs;
-    # treat that as best-effort, not fatal.
-    try:
-        page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception as e:
-        print(f"   [pagination] networkidle timeout (continuing anyway): {e}")
-    page.wait_for_timeout(1500)
-    return True
+    # GovDeals streams XHRs, so networkidle never settles — waiting on it just
+    # burns 15s/page. Poll the first card's asset link instead: when it changes,
+    # the next page has rendered. If it never changes, we're on the last page.
+    for _ in range(40):  # ~8s max (40 × 200ms); usually resolves in <1s
+        page.wait_for_timeout(200)
+        try:
+            now_first = cards.first.locator("a[href*='/asset/']").first.get_attribute("href") or ""
+        except Exception:
+            now_first = before
+        if now_first and now_first != before:
+            return True
+    print("   [pagination] first card unchanged after Next — treating as last page")
+    return False
 
 
 def scrape_listings():
@@ -444,8 +471,9 @@ def scrape_listings():
                 print(f"\n → Filter: '{term}'")
                 prepare_govdeals_search_page(page, term, script_dir=REPORTS_DIR)
                 page_num = 1
+                max_pages = int(os.getenv("GOVDEALS_MAX_PAGES", "10"))
 
-                while True:
+                while page_num <= max_pages:
                     page_cards = _scrape_one_page(page)
                     if not page_cards:
                         if page_num == 1:
@@ -455,6 +483,9 @@ def scrape_listings():
                     quantities = [c["quantity"] for c in page_cards]
                     print(f"   Page {page_num}: {len(page_cards)} listings, quantities: {quantities}")
 
+                    if page_num >= max_pages:
+                        print(f"   [pagination] hit GOVDEALS_MAX_PAGES={max_pages} for '{term}' — stopping (more pages may exist)")
+                        break
                     if not _go_to_next_page(page):
                         break
                     page_num += 1

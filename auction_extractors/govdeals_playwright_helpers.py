@@ -15,7 +15,7 @@ import os
 import re
 import time
 from pathlib import Path
-from urllib.parse import quote_plus
+from urllib.parse import quote
 
 from playwright.sync_api import Browser, BrowserContext, Locator, Page
 
@@ -122,21 +122,22 @@ def _govdeals_blocked(page: Page) -> bool:
 
 
 def _govdeals_search_urls(keyword_q: str) -> list[str]:
-    """Try alternate query param names (all under /en).
+    """Search-results URLs for ``keyword_q`` (already %20-encoded).
 
-    Always requests the largest reasonable page size so we don't have to
-    paginate through 25 pages of 24 results each. Override with the
-    ``GOVDEALS_NUM_PER_PAGE`` env var (default 100). GovDeals supports values
-    of 12 / 24 / 48 / 96 / 100 in its UI dropdown — pick the highest the
-    server still honors. Also requests sort=newest so we see fresh inventory
-    first; that's incidental but useful.
+    The keyword param is ``kWord`` — verified 2026-06-01 by driving the live
+    site's search box and capturing the navigation. ``?keyword=`` / ``?q=`` are
+    SILENTLY IGNORED by GovDeals' Angular app: it returns the entire ~25k-item
+    catalog instead of filtering, which is why earlier runs walked 200+ pages of
+    cars/heavy-equipment. ``numPerPage`` / ``sortBy`` are likewise ignored by the
+    SPA (page size is fixed at 24 client-side), so we don't send them.
+
+    Space must be ``%20`` (caller uses ``quote``): the Angular router reads ``+``
+    literally, so ``?kWord=banquet+chairs`` would search the literal string
+    "banquet+chairs" and miss.
     """
-    base = f"{GOVDEALS_SITE_ORIGIN}/browse/search"
-    num = os.getenv("GOVDEALS_NUM_PER_PAGE", "100")
-    extra = f"&numPerPage={num}&sortBy=newest"
+    base = f"{GOVDEALS_SITE_ORIGIN}/search"
     return [
-        f"{base}?keyword={keyword_q}{extra}",
-        f"{base}?keyWord={keyword_q}{extra}",
+        f"{base}?kWord={keyword_q}",
     ]
 
 
@@ -156,9 +157,8 @@ def _wait_for_govdeals_result_cards(
             raise TimeoutError(
                 "GovDeals blocked (Access Denied) while waiting for search results."
             )
-        n = page.locator("#myTabContent .card.card-search").count()
-        if n == 0:
-            n = page.locator("#myTabContent .card-search").count()
+        # /search no longer wraps results in #myTabContent; match cards directly.
+        n = page.locator(".card-search").count()
         if n > 0:
             return
         page.wait_for_timeout(450)
@@ -187,7 +187,8 @@ def open_govdeals_keyword_search_results(
     Does not use the homepage search box (avoids hydration / visibility issues).
     """
     shot = (script_dir / "govdeals_search_timeout.png") if script_dir else None
-    q = quote_plus(keyword.strip() or "chairs")
+    # quote (not quote_plus): GovDeals' kWord param needs %20 for spaces, not +.
+    q = quote(keyword.strip() or "chairs", safe="")
     urls = _govdeals_search_urls(q)
     last_err: Exception | None = None
 
@@ -206,8 +207,10 @@ def open_govdeals_keyword_search_results(
                         pass
                 continue
 
-            # Shell only — do NOT use ul.pagination here: it can exist before listing cards hydrate.
-            page.wait_for_selector("#myTabContent", state="attached", timeout=90000)
+            # Wait for the first result card to attach (the old #myTabContent
+            # shell no longer exists on /search). Don't use ul.pagination: it can
+            # exist before listing cards hydrate.
+            page.wait_for_selector(".card-search", state="attached", timeout=90000)
             page.wait_for_timeout(800)
             try:
                 page.wait_for_load_state("networkidle", timeout=25000)
@@ -328,7 +331,10 @@ def prepare_govdeals_search_page(
     Prefer direct browse URL; if ``GOVDEALS_USE_BROWSE_SEARCH_URL=0``, use homepage + fill.
     If the browse URL fails (layout change), fall back to homepage search once.
     """
-    if _GO_BROWSE:
+    # Read the flag at call time, not import time: the entrypoint loads .env
+    # (load_dotenv) *after* importing this module, so the module-level _GO_BROWSE
+    # would otherwise freeze to its default before .env is applied.
+    if int(os.getenv("GOVDEALS_USE_BROWSE_SEARCH_URL", str(_GO_BROWSE))):
         try:
             open_govdeals_keyword_search_results(page, keyword, script_dir=script_dir)
             return

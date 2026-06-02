@@ -176,7 +176,7 @@ curl -X POST http://127.0.0.1:8765/api/runs/stdin \
 ## auction_extractors
 
 `auction_extractors/` is a **sibling package** copied in from its own
-project (upstream: `/Users/abdelnasser/Desktop/Black_whole_projects/auction_extractors`).
+project (upstream: `/Users/abdelnasser/projects/blackwhole/auction_extractors`).
 It scrapes GovDeals + Public Surplus for bulk chair lots, caches every
 listing in `auction_extractors/state/listings.db` as a permanent archive,
 and exposes a **read-only** `get_top_chairs()` — no UI.

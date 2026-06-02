@@ -4,7 +4,7 @@
 # Manual trigger: `./scripts/daily_scrape.sh` — same entry point the scheduler uses.
 set -uo pipefail
 
-PROJECT="/Users/abdelnasser/Desktop/Black_whole_projects/listing_automation"
+PROJECT="/Users/abdelnasser/projects/blackwhole/listing_automation"
 PY="${PROJECT}/.venv/bin/python"
 LOG_DIR="${HOME}/.listing_automation/logs"
 TS="$(date +%Y%m%d_%H%M%S)"

@@ -7,7 +7,7 @@ eBay drafts. Implements the pipeline described in
 ## Install
 
 ```bash
-cd /Users/abdelnasser/Desktop/Black_whole_projects/listing_automation
+cd /Users/abdelnasser/projects/blackwhole/listing_automation
 python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -e '.[dev]'
@@ -159,7 +159,7 @@ require login.
 If you want a clean session with all permissions pre-allowed for this project:
 
 ```bash
-cd /Users/abdelnasser/Desktop/Black_whole_projects/listing_automation
+cd /Users/abdelnasser/projects/blackwhole/listing_automation
 claude --permission-mode bypassPermissions
 ```
 

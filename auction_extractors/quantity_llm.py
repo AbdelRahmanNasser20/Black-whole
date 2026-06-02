@@ -195,7 +195,13 @@ INPUT:
             elif prov == "groq":
                 if not groq_api_key:
                     raise ValueError("GROQ_API_KEY not set")
-                raw = _groq_chat(groq_api_key, prompt)
+                # GROQ_MODEL override: default llama-3.3-70b-versatile, but set
+                # GROQ_MODEL=openai/gpt-oss-120b for the model our quantity
+                # benchmark found doesn't hallucinate counts (see auction .env).
+                raw = _groq_chat(
+                    groq_api_key, prompt,
+                    model=os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile"),
+                )
             elif prov == "ollama":
                 raw = _ollama_chat(ollama_base_url, ollama_model, prompt, ollama_timeout)
             elif prov == "claude_max":
