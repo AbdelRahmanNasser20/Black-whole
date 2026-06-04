@@ -45,9 +45,13 @@ from .. import favorites
 from .. import telegram_alerts
 
 try:
-    from auction_extractors import get_top_chairs
+    # Auctions tab reads the shared Supabase `auction_listings` table. The
+    # loader reuses the upstream ranking/condition helpers, so card output is
+    # identical to the old SQLite path — only the data source changed.
+    from ..auctions_supabase import get_top_chairs, cache_stats as _auctions_cache_stats
 except Exception:  # pragma: no cover
-    get_top_chairs = None  # auction_extractors unavailable; /api/auctions will 503
+    get_top_chairs = None  # unavailable; /api/auctions will 503
+    _auctions_cache_stats = None
 
 PKG_DIR = Path(__file__).parent
 TEMPLATE_DIR = PKG_DIR / "templates"
@@ -1187,43 +1191,11 @@ async def _stop_alerts_loop() -> None:
 
 @app.get("/api/auctions/cache-stats")
 async def auctions_cache_stats():
-    """Cheap roll-up over auction_extractors/state/listings.db — powers the
+    """Cheap roll-up over the Supabase `auction_listings` table — powers the
     'N lots in cache · newest scraped X days ago' header on the Auctions tab."""
-    import sqlite3
-
-    db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
-    if not db_path.exists():
+    if _auctions_cache_stats is None:
         return {"total": 0, "newest_seen_at": None, "oldest_seen_at": None, "by_source": {}}
-
-    def _query():
-        conn = sqlite3.connect(str(db_path))
-        try:
-            total, newest, oldest = conn.execute(
-                "SELECT COUNT(*), MAX(last_seen_at), MIN(last_seen_at) FROM listings"
-            ).fetchone()
-            # No `source` column; infer from link prefix.
-            rows = conn.execute(
-                "SELECT "
-                "  CASE WHEN link LIKE '%govdeals.com%' THEN 'gd' "
-                "       WHEN link LIKE '%publicsurplus.com%' THEN 'ps' "
-                "       ELSE 'other' END AS src, "
-                "  COUNT(*), MAX(last_seen_at) "
-                "FROM listings GROUP BY src"
-            ).fetchall()
-            by_source = {
-                src: {"count": n, "newest_seen_at": mx} for src, n, mx in rows
-            }
-            return total or 0, newest, oldest, by_source
-        finally:
-            conn.close()
-
-    total, newest, oldest, by_source = await asyncio.to_thread(_query)
-    return {
-        "total": total,
-        "newest_seen_at": newest,
-        "oldest_seen_at": oldest,
-        "by_source": by_source,
-    }
+    return await asyncio.to_thread(_auctions_cache_stats)
 
 
 @app.get("/api/listings")

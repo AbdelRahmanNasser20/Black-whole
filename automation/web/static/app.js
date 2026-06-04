@@ -1282,7 +1282,7 @@ function renderInvTable(items) {
       </td>
       <td>
         <input type="number" class="inv-qty" value="${item.quantity_remaining ?? ''}" min="0" data-field="quantity_remaining">
-        <div class="inv-sub mono tiny">of ${item.quantity_original ?? '—'}</div>
+        <div class="inv-sub mono tiny">of <input type="number" class="inv-qty-orig" value="${item.quantity_original ?? ''}" min="0" data-field="quantity_original"></div>
       </td>
       <td>
         <input type="number" class="inv-price" value="${item.price_per_chair ?? ''}" min="0" step="1" data-field="price_per_chair">
@@ -1335,7 +1335,7 @@ async function onInvFieldChange(e) {
   const lotId = tr.dataset.lotId;
   const field = e.target.dataset.field;
   let value = e.target.value;
-  if (field === 'quantity_remaining' || field === 'price_per_chair') {
+  if (field === 'quantity_remaining' || field === 'quantity_original' || field === 'price_per_chair') {
     value = value === '' ? null : Number(value);
   }
   const body = {};

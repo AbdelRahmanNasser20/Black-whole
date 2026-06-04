@@ -244,7 +244,7 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
     being set explicitly in the same call.
     """
     allowed = {
-        "quantity_remaining", "price_per_chair", "status", "hero_image",
+        "quantity_remaining", "quantity_original", "price_per_chair", "status", "hero_image",
         "title", "description", "chair_type", "dimensions", "city", "state",
         "zip_code", "contact_name", "contact_email", "contact_phone",
         "govdeals_username", "govdeals_password",
