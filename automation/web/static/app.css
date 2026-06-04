@@ -971,6 +971,10 @@ main {
 .inv-table input[type="number"]:focus,
 .inv-table select:focus { border-color: var(--accent); }
 .inv-table select { width: 102px; }
+.inv-table input.inv-qty-orig {
+  width: 52px; padding: 2px 4px; font-size: 11px;
+  color: var(--ink-mute); margin-left: 2px;
+}
 
 .plat-ok {
   display: inline-flex; align-items: center; gap: 8px;
