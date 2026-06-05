@@ -835,6 +835,50 @@ async def _run_scraper(source: str, test_mode: bool) -> None:
             # Stop the chain — don't run ps if gd failed.
             break
 
+    # The scrapers write the SQLite cache (auction_extractors/state/listings.db),
+    # but /api/auctions reads Supabase `auction_listings`. Mirror the fresh rows
+    # across now — otherwise the scrape "succeeds" yet the Auctions tab keeps
+    # showing the previous sync's data.
+    if overall_rc == 0 and scrape_state.status != "cancelled":
+        scrape_state.current_stage = "syncing"
+        await scrape_state.broadcast({
+            "t": time.time(), "stream": "event",
+            "data": {"kind": "scrape_stage", "stage": "syncing",
+                     "detail": "Supabase", "step": scrape_state.current_step},
+        })
+        sync_script = PROJECT_ROOT / "scripts" / "transfer_listings_to_supabase.py"
+        await scrape_state.broadcast({
+            "t": time.time(), "stream": "system",
+            "data": f"$ python scripts/{sync_script.name}",
+        })
+        try:
+            sync_env = os.environ.copy()
+            sync_env["PYTHONUNBUFFERED"] = "1"
+            scrape_state.proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-u", str(sync_script),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(PROJECT_ROOT),
+                env=sync_env,
+            )
+            await asyncio.gather(
+                _pump_scrape_stream(scrape_state.proc.stdout, "stdout"),
+                _pump_scrape_stream(scrape_state.proc.stderr, "stderr"),
+            )
+            sync_rc = await scrape_state.proc.wait()
+            await scrape_state.broadcast({
+                "t": time.time(), "stream": "system",
+                "data": f"[supabase sync exit {sync_rc}]",
+            })
+            if sync_rc != 0:
+                overall_rc = sync_rc
+        except Exception as e:
+            await scrape_state.broadcast({
+                "t": time.time(), "stream": "system",
+                "data": f"[supabase sync failed] {e!r}",
+            })
+            overall_rc = -1
+
     scrape_state.proc = None
     scrape_state.return_code = overall_rc
     scrape_state.finished_at = time.time()
@@ -842,7 +886,7 @@ async def _run_scraper(source: str, test_mode: bool) -> None:
     if scrape_state.status != "cancelled":
         scrape_state.status = "finished" if overall_rc == 0 else "error"
 
-    # Fresh rows are in the DB now — bust the read-side cache so the next
+    # Fresh rows are in Supabase now — bust the read-side cache so the next
     # /api/auctions call returns the updated set.
     _AUCTIONS_CACHE.clear()
 

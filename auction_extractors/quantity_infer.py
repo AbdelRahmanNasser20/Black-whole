@@ -70,6 +70,34 @@ def _strip_noise(text: str) -> str:
     # preserves real counts like "4 chairs" that share the letter-space-digit
     # shape but with <3 digits.
     t = re.sub(r"\b[A-Z]{2,}[-\s]\d{3,}\b", "", t)
+    # Hyphenated alphanumeric model/part codes where the stem mixes letters and
+    # digits: "424L-115", "OS-712", "AB12-90". The trailing number is a model
+    # suffix, not a count ("MTI 424L-115 Power Exam Chair" used to → 115). Stem
+    # must contain a letter, so pure numeric ranges ("115-200") are left alone.
+    t = re.sub(r"\b[A-Za-z0-9]*[A-Za-z][A-Za-z0-9]*-\d{2,}\b", "", t)
+    # Title-case brand + model number sitting directly before a *singular*
+    # seating noun: "Winco 653 Chair", "Invacare 9153 Chair", "Jazzy 614
+    # Recliner". The number is a product model, not a count, so strip
+    # "<brand> <model>" before the proximity pattern below reads it
+    # ("Winco 653 Chair" → 653). Guarded three ways so real counts survive:
+    #   (a) the digits must butt right up against the seating noun;
+    #   (b) the noun must be SINGULAR (`chair`, not `chairs`) — genuine
+    #       multi-item lots say "32 Chairs"/"Table and 4 Chairs" (plural),
+    #       whereas a model designation reads "653 Chair Recliner" (singular);
+    #   (c) quantity connectors that legitimately precede a count
+    #       (of / lot / qty / approx / total / set / pack / pallet / box / case)
+    #       are excluded, so "Lot of 653 Chairs" / "Approx 50 Chairs" survive.
+    t = re.sub(
+        r"\b(?!(?:of|lot|qty|quantity|approx|approximately|about|around|roughly|"
+        r"est|estimated|total|set|sets|pack|packs|case|cases|box|boxes|pallet|"
+        r"pallets|up|to|over|plus)\b)"
+        r"[A-Za-z]{2,}\s+\d{1,4}\b"
+        r"(?=\s+(?:chair|recliner|geri|sofa|stool|bench|couch|seat|lounge|"
+        r"sleeper|glider|rocker|loveseat|settee)\b)",
+        "",
+        t,
+        flags=re.IGNORECASE,
+    )
     # Dimension / angle / weight / percentage contexts — NEVER chair counts.
     # "The chair rotates 360 degrees", "45 inches tall", "Weighs 25 lbs", "50%".
     # Remove the digits so the downstream proximity pattern doesn't pick them
