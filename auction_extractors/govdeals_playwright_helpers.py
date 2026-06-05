@@ -1,12 +1,15 @@
 """
 Shared GovDeals Playwright navigation.
 
-Default: load the homepage (https://www.govdeals.com/en) and fill the search box.
-The direct browse URL (/en/browse/search?keyword=…) often gets the egress IP
-flagged by Akamai, so we treat it as opt-in:
+Default: navigate directly to the search-results URL (/en/search?kWord=…).
+As of 2026-06 GovDeals moved search from /en/browse/search?keyword=… (now a
+404 "Page Not Found") to /en/search?kWord=…, and the homepage search box is a
+duplicated #textSearchInput (hidden mobile + visible desktop sharing one id),
+so the old "fill the box" path snags the invisible copy and times out. The
+direct URL is therefore the default; the homepage-fill path is the fallback:
 
-  GOVDEALS_USE_BROWSE_SEARCH_URL=1   # use direct browse/search URL
-  GOVDEALS_USE_BROWSE_SEARCH_URL=0   # (default) homepage + fill search box
+  GOVDEALS_USE_BROWSE_SEARCH_URL=1   # (default) direct /en/search?kWord= URL
+  GOVDEALS_USE_BROWSE_SEARCH_URL=0   # homepage + fill search box (legacy fallback)
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from urllib.parse import quote_plus
 
 from playwright.sync_api import Browser, BrowserContext, Locator, Page
 
-_GO_BROWSE = int(os.getenv("GOVDEALS_USE_BROWSE_SEARCH_URL", "0"))
+_GO_BROWSE = int(os.getenv("GOVDEALS_USE_BROWSE_SEARCH_URL", "1"))
 
 # GovDeals serves the app under /en; bare https://www.govdeals.com/ can redirect differently.
 GOVDEALS_SITE_ORIGIN = (os.getenv("GOVDEALS_SITE_ORIGIN") or "https://www.govdeals.com/en").rstrip("/")
@@ -131,12 +134,16 @@ def _govdeals_search_urls(keyword_q: str) -> list[str]:
     server still honors. Also requests sort=newest so we see fresh inventory
     first; that's incidental but useful.
     """
-    base = f"{GOVDEALS_SITE_ORIGIN}/browse/search"
     num = os.getenv("GOVDEALS_NUM_PER_PAGE", "100")
     extra = f"&numPerPage={num}&sortBy=newest"
+    # As of 2026-06 the live search route is /en/search?kWord=… ; the old
+    # /en/browse/search?keyword=… 404s. Keep the legacy URLs as trailing
+    # fallbacks in case GovDeals reverts or A/B-tests the old route.
     return [
-        f"{base}?keyword={keyword_q}{extra}",
-        f"{base}?keyWord={keyword_q}{extra}",
+        f"{GOVDEALS_SITE_ORIGIN}/search?kWord={keyword_q}{extra}",
+        f"{GOVDEALS_SITE_ORIGIN}/search?kWord={keyword_q}",
+        f"{GOVDEALS_SITE_ORIGIN}/browse/search?keyword={keyword_q}{extra}",
+        f"{GOVDEALS_SITE_ORIGIN}/browse/search?keyWord={keyword_q}{extra}",
     ]
 
 
@@ -248,7 +255,10 @@ def wait_for_govdeals_search_input(
     ]
     for loc in role_attempts:
         try:
-            first = loc.first
+            # GovDeals renders #textSearchInput twice (hidden mobile + visible
+            # desktop, same id). Pin to the visible one or .first grabs the
+            # invisible copy and wait_for(visible) times out.
+            first = loc.filter(visible=True).first
             first.wait_for(state="visible", timeout=per_try)
             try:
                 first.scroll_into_view_if_needed(timeout=5000)
@@ -272,7 +282,7 @@ def wait_for_govdeals_search_input(
     ]
     for sel in candidates:
         try:
-            loc = page.locator(sel).first
+            loc = page.locator(sel).filter(visible=True).first
             loc.wait_for(state="attached", timeout=per_try)
             try:
                 loc.scroll_into_view_if_needed(timeout=5000)

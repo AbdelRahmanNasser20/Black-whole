@@ -13,6 +13,7 @@ Setup: see README.md and .env.example in auction_extractors/.
 import os
 import re
 import requests
+from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from dotenv import load_dotenv
 
@@ -24,6 +25,8 @@ from govdeals_playwright_helpers import (
     govdeals_browser_context,
     govdeals_chromium_launch_args,
     prepare_govdeals_search_page,
+    dismiss_govdeals_overlays,
+    _goto_timeout_ms,
 )
 import listings_db
 
@@ -370,60 +373,54 @@ def enrich_listings_with_govdeals_descriptions(listings: list) -> list:
     return listings
 
 
-def _go_to_next_page(page) -> bool:
+def _with_page_param(url: str, page_num: int) -> str:
+    """Return ``url`` with the GovDeals page-number query param ``pn`` set to
+    ``page_num`` (replacing any existing ``pn``). Pure/string-only so it's unit
+    testable without a browser."""
+    parts = urlsplit(url)
+    q = [(k, v) for (k, v) in parse_qsl(parts.query, keep_blank_values=True) if k != "pn"]
+    q.append(("pn", str(page_num)))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(q), parts.fragment))
+
+
+def _go_to_next_page(page, next_page_num: int) -> bool:
     """
-    Click the 'Next Page' link in pagination (ul.pagination li[data-type="nextPage"]).
-    Returns True if we moved to the next page, False if we're on the last page or link is disabled.
+    Navigate to result page ``next_page_num`` via the ``?pn=N`` URL param.
+    Returns True if the page loaded with at least one listing card, False once
+    we've stepped one past the last page (zero cards).
 
-    Logs *why* we exited so we can tell pagination-broken-selector apart from
-    last-page-reached apart from networkidle-timeout. Previously every failure
-    mode silently returned False after page 1, which is why a 600-result
-    "chairs" search was only returning 24 listings.
+    Why URL-driven, not click-driven: as of 2026-06 GovDeals' search route
+    (/en/search?kWord=…) paginates by the ``pn`` query param — page size is
+    hard-capped at 24 regardless of numPerPage/ps — and the old click pager
+    (``ul.pagination li[data-type="nextPage"]``) no longer exists. The new
+    "google-like" pager only renders a forward control when results span more
+    than ~3 pages, so the previous click+aria-label fallback silently stopped
+    at page 1 for every term with ≤72 results (and stopped early on big ones).
+    Driving ``pn`` directly and stopping on the first empty page is robust to
+    both. Past-the-end pages return zero cards (no clamp/duplication).
     """
-    next_li = page.locator('ul.pagination li[data-type="nextPage"]').first
-    if next_li.count() == 0:
-        # Try a few alternate selectors before declaring defeat — GovDeals'
-        # Angular markup has shifted before.
-        for alt in (
-            'ul.pagination li.page-item.next',
-            'ul.pagination li:has(a[aria-label*="Next" i])',
-            'a[aria-label*="Next" i]',
-            'button[aria-label*="Next" i]',
-        ):
-            cand = page.locator(alt).first
-            if cand.count() > 0:
-                print(f"   [pagination] primary selector missed; using fallback {alt!r}")
-                next_li = cand
-                break
-        else:
-            print("   [pagination] no nextPage element found — selector broken or last page")
-            return False
-
-    cls = next_li.get_attribute("class") or ""
-    aria_disabled = next_li.get_attribute("aria-disabled") or ""
-    if "disabled" in cls or aria_disabled.lower() == "true":
-        print(f"   [pagination] next disabled (class={cls!r}, aria-disabled={aria_disabled!r}) — last page")
-        return False
-
+    target = _with_page_param(page.url or "", next_page_num)
     try:
-        # Some Angular pagination components only respond to clicking the
-        # inner anchor, others respond to the <li>. Try the anchor first,
-        # fall back to clicking the element itself.
-        try:
-            next_li.locator("a.page-link").click(timeout=5000)
-        except Exception:
-            next_li.click(timeout=5000)
+        page.goto(target, wait_until="load", timeout=_goto_timeout_ms())
     except Exception as e:
-        print(f"   [pagination] click failed: {e}")
+        print(f"   [pagination] goto pn={next_page_num} failed: {e}")
         return False
 
+    dismiss_govdeals_overlays(page)
     # networkidle frequently times out on Angular SPAs that stream XHRs;
     # treat that as best-effort, not fatal.
     try:
         page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception as e:
-        print(f"   [pagination] networkidle timeout (continuing anyway): {e}")
-    page.wait_for_timeout(1500)
+    except Exception:
+        pass
+
+    # Wait for cards to hydrate; their absence means we're past the last page.
+    try:
+        page.wait_for_selector("#myTabContent .card.card-search", state="attached", timeout=12000)
+    except Exception:
+        print(f"   [pagination] pn={next_page_num}: no cards — last page reached")
+        return False
+    page.wait_for_timeout(800)
     return True
 
 
@@ -444,8 +441,12 @@ def scrape_listings():
                 print(f"\n → Filter: '{term}'")
                 prepare_govdeals_search_page(page, term, script_dir=REPORTS_DIR)
                 page_num = 1
+                # Safety cap: 24 cards/page, so 200 pages = 4800 lots/term —
+                # far above any real chair search. Guards against an unexpected
+                # clamp-to-last-page making the pn loop never terminate.
+                max_pages = int(os.getenv("GOVDEALS_MAX_PAGES", "200"))
 
-                while True:
+                while page_num <= max_pages:
                     page_cards = _scrape_one_page(page)
                     if not page_cards:
                         if page_num == 1:
@@ -455,7 +456,7 @@ def scrape_listings():
                     quantities = [c["quantity"] for c in page_cards]
                     print(f"   Page {page_num}: {len(page_cards)} listings, quantities: {quantities}")
 
-                    if not _go_to_next_page(page):
+                    if not _go_to_next_page(page, page_num + 1):
                         break
                     page_num += 1
 
