@@ -1,0 +1,17 @@
+# Keep the Cloud Build context small and secret-free.
+# The Dockerfile only COPYs probe/ + auction_extractors/govdeals_playwright_helpers.py.
+.git/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+.env.*
+.claude/
+logs/
+auction_extractors/state/
+auction_extractors/reports/
+*.egg-info/
+build/
+dist/
+node_modules/

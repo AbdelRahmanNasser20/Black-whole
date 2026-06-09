@@ -1,0 +1,9 @@
+# Build the probe image with the repo root as context (so the Dockerfile can
+# COPY auction_extractors/govdeals_playwright_helpers.py) while using probe/Dockerfile.
+# Usage:
+#   gcloud builds submit --config probe/cloudbuild.yaml --substitutions=_IMAGE="$IMAGE" .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'probe/Dockerfile', '-t', '${_IMAGE}', '.']
+images:
+  - '${_IMAGE}'
