@@ -447,6 +447,38 @@ _BROWSER_UA = (
 _maestro_key_cache = None
 
 
+def _singularize_term(term: str) -> str:
+    """De-pluralize a search term's trailing word for the JSON API.
+
+    The maestro API matches search tokens **literally** (no stemming), while
+    the GovDeals website stems plurals (``chairs`` → ``chair``). Sending the
+    plural verbatim under-matches badly — measured: ``"chairs"`` returns 419
+    lots vs ``"chair"`` 684, and the 684 is a strict superset (0 lost, 265
+    gained). De-pluralizing the last word makes the API return the same
+    superset the site shows; the pipeline's quantity + category filters trim
+    any over-match. Conservative: only a simple trailing ``s`` (not ``ss``).
+    """
+    words = term.split()
+    if not words:
+        return term
+    last = words[-1]
+    if len(last) > 3 and last.lower().endswith("s") and not last.lower().endswith("ss"):
+        words[-1] = last[:-1]
+    return " ".join(words)
+
+
+def _dedup_listings(listings: list) -> list:
+    """Collapse listings to one per lot, keyed by link (then lot_number /
+    title). Shared by both scrape paths — the API path aggregates across many
+    overlapping search terms, so the same lot routinely appears more than once."""
+    dedup = {}
+    for item in listings:
+        key = item.get("link") or item.get("lot_number") or item.get("title")
+        if key not in dedup:
+            dedup[key] = item
+    return list(dedup.values())
+
+
 def _resolve_maestro_key() -> str:
     """Return the maestro API key, scraped fresh from the public JS bundle.
 
@@ -574,11 +606,16 @@ def scrape_listings_via_api() -> list:
     max_pages = int(os.getenv("GOVDEALS_MAX_PAGES", "200"))
     delay = float(os.getenv("GOVDEALS_API_DELAY_SEC", "0.2"))
     for term in SEARCH_TERMS:
+        # The API token-matches literally; the site stems plurals. Search the
+        # singular so we get the same superset the website shows (see
+        # _singularize_term). Cross-term dupes are collapsed by _dedup_listings.
+        api_term = _singularize_term(term)
         term_listings = []
-        print(f"\n → Filter: '{term}'")
+        label = term if api_term == term else f"{term}→{api_term}"
+        print(f"\n → Filter: '{label}'")
         page = 1
         while page <= max_pages:
-            assets = _search_via_api(term, page)
+            assets = _search_via_api(api_term, page)
             if not assets:
                 break
             term_listings.extend(_asset_to_card(a) for a in assets)
@@ -589,8 +626,11 @@ def scrape_listings_via_api() -> list:
             if delay > 0:
                 time.sleep(delay)
         listings.extend(term_listings)
-        print(f"   Filter '{term}' total: {len(term_listings)} listings")
-    return listings
+        print(f"   Filter '{label}' total: {len(term_listings)} listings")
+    unique = _dedup_listings(listings)
+    print(f"\n[1] Done scrape_listings_via_api(); {len(unique)} unique lots "
+          f"(from {len(listings)} across {len(SEARCH_TERMS)} terms)")
+    return unique
 
 
 def scrape_listings() -> list:
@@ -657,13 +697,8 @@ def scrape_listings_via_browser():
         finally:
             browser.close()
 
-    dedup = {}
-    for item in listings:
-        key = item.get("link") or item.get("lot_number") or item.get("title")
-        if key not in dedup:
-            dedup[key] = item
-    listings_unique = list(dedup.values())
-    print(f"\n[1] Done scrape_listings(); total unique listings: {len(listings_unique)}")
+    listings_unique = _dedup_listings(listings)
+    print(f"\n[1] Done scrape_listings_via_browser(); total unique listings: {len(listings_unique)}")
 
     # Print every unique listing the scraper found, before any filtering or
     # description enrichment. Useful for debugging coverage and seeing how

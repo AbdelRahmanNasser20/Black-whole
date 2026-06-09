@@ -14,7 +14,11 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from govdeals_chairs_extraction import _asset_to_card
+from govdeals_chairs_extraction import (
+    _asset_to_card,
+    _singularize_term,
+    _dedup_listings,
+)
 
 # A real assetSearchResults item, trimmed to the fields the mapper reads.
 SAMPLE = {
@@ -67,6 +71,21 @@ def main() -> int:
             True,
         ),
     ]
+
+    # Singularize search terms — the API token-matches literally, so plurals
+    # under-match; de-pluralizing the trailing word recovers the superset.
+    checks.append(_check("singular_chairs", _singularize_term("chairs"), "chair"))
+    checks.append(_check("singular_phrase", _singularize_term("banquet chairs"), "banquet chair"))
+    checks.append(_check("singular_exam_table", _singularize_term("exam table"), "exam table"))
+    checks.append(_check("singular_no_ss", _singularize_term("glass"), "glass"))
+
+    # Dedup collapses the same lot seen under multiple overlapping terms.
+    dups = [
+        {"link": "https://x/asset/1/2", "title": "A"},
+        {"link": "https://x/asset/1/2", "title": "A dup"},
+        {"link": "https://x/asset/3/4", "title": "B"},
+    ]
+    checks.append(_check("dedup_by_link", len(_dedup_listings(dups)), 2))
 
     # Graceful handling of a sparse item (missing photo / ids / bid).
     sparse = _asset_to_card({"assetShortDescription": "Chairs"})
