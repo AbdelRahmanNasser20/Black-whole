@@ -57,11 +57,20 @@ def main() -> int:
         )
         ctx = govdeals_browser_context(browser)
         page = ctx.new_page()
-        page.goto(
-            URL,
-            wait_until="load",
-            timeout=int(os.getenv("GOVDEALS_GOTO_TIMEOUT_MS", "90000")),
-        )
+        # GovDeals is a SPA that keeps long-lived connections open, so the
+        # "load"/"domcontentloaded" lifecycle events may never fire even though
+        # the page renders. Wait on "commit" (navigation committed) and then
+        # settle, rather than hanging forever on a lifecycle event.
+        nav_timeout = int(os.getenv("GOVDEALS_GOTO_TIMEOUT_MS", "45000"))
+        page.goto(URL, wait_until="commit", timeout=nav_timeout)
+        # Let client-side content render, then confirm real body text arrived.
+        try:
+            page.wait_for_function(
+                "() => document.body && document.body.innerText.trim().length > 50",
+                timeout=nav_timeout,
+            )
+        except Exception:
+            pass
         page.wait_for_timeout(1500)
 
         title = (page.title() or "").strip()
