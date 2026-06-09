@@ -12,6 +12,8 @@ Setup: see README.md and .env.example in auction_extractors/.
 
 import os
 import re
+import time
+import uuid
 import requests
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
@@ -424,8 +426,190 @@ def _go_to_next_page(page, next_page_num: int) -> bool:
     return True
 
 
-def scrape_listings():
-    print("[1] Starting scrape_listings()")
+# ─── JSON API fast path ──────────────────────────────────────────────────────
+# GovDeals' Angular UI is backed by an internal JSON search API. Calling it
+# directly returns every field we used to scrape from the DOM — crucially the
+# long description — in one request per page, with no browser and no headless
+# Akamai block. This is the primary scrape path; the Playwright DOM scraper
+# (``scrape_listings_via_browser``) stays as an automatic fallback. See GitHub
+# issue #6.
+MAESTRO_URL = os.getenv("GOVDEALS_MAESTRO_URL", "https://maestro.lqdt1.com")
+MAESTRO_SEARCH_PATH = "/search/assets/advanced"
+# Anonymous key embedded in the public main.*.js bundle. ``_resolve_maestro_key``
+# scrapes it fresh each process (it can rotate); this is the fallback.
+MAESTRO_KEY_FALLBACK = "af93060f-337e-428c-87b8-c74b5837d6cd"
+GOVDEALS_API_ROWS = int(os.getenv("GOVDEALS_API_ROWS", "120"))
+IMAGE_CDN_BASE = "https://webassets.lqdt1.com/assets/photos"
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+_maestro_key_cache = None
+
+
+def _resolve_maestro_key() -> str:
+    """Return the maestro API key, scraped fresh from the public JS bundle.
+
+    The key lives in the Angular ``main.*.js`` bundle as ``maestroApiKey:"<uuid>"``.
+    Scraping it per process guards against the key rotating; falls back to the
+    last-known constant on any failure. Cached for the life of the process.
+    """
+    global _maestro_key_cache
+    if _maestro_key_cache:
+        return _maestro_key_cache
+    key = MAESTRO_KEY_FALLBACK
+    try:
+        headers = {"User-Agent": _BROWSER_UA}
+        html = requests.get(
+            "https://www.govdeals.com/en/search?kWord=chairs",
+            headers=headers, timeout=15,
+        ).text
+        m = re.search(r"(main\.[0-9a-f.]+\.js)", html)
+        if m:
+            bundle = requests.get(
+                f"https://www.govdeals.com/{m.group(1)}",
+                headers=headers, timeout=20,
+            ).text
+            km = re.search(r'maestroApiKey:"([0-9a-f-]{8,})"', bundle)
+            if km:
+                key = km.group(1)
+    except Exception as e:
+        print(f"   [api] key resolve failed ({e}); using fallback key.")
+    _maestro_key_cache = key
+    return key
+
+
+def _search_via_api(term: str, page: int, rows: int = GOVDEALS_API_ROWS) -> list:
+    """POST one search page to the maestro JSON API and return the raw
+    ``assetSearchResults`` list. Raises on any non-200 so the caller can fall
+    back to the browser scraper. ``page`` is 1-indexed (0 clamps to page 1)."""
+    headers = {
+        "x-api-key": _resolve_maestro_key(),
+        "x-user-id": "-1",                          # -1 = anonymous
+        "x-api-correlation-id": str(uuid.uuid4()),
+        "Content-Type": "application/json",
+        "Origin": "https://www.govdeals.com",
+        "Referer": "https://www.govdeals.com/",
+        "User-Agent": _BROWSER_UA,
+    }
+    body = {
+        "categoryIds": "",          # MUST be a string, not [] — server 400s on an array
+        "searchText": term,
+        "isQAL": False,
+        "page": page,
+        "displayRows": rows,
+        "sortField": "bestfit",
+        "sortOrder": "asc",
+        "requestType": "search",
+        "responseStyle": "fullResponse",
+        "facets": [],
+        "facetsFilter": "",
+    }
+    resp = requests.post(
+        f"{MAESTRO_URL}{MAESTRO_SEARCH_PATH}", json=body, headers=headers, timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json().get("assetSearchResults") or []
+
+
+def _asset_to_card(asset: dict) -> dict:
+    """Map one ``assetSearchResults`` item to the card dict the pipeline
+    consumes (same shape as ``_scrape_one_page``), pre-filling the description /
+    image / pickup-zip that the browser path only gets via a per-lot page load."""
+    title = (asset.get("assetShortDescription") or "").strip()
+    account_id = asset.get("accountId")
+    asset_id = asset.get("assetId")
+    link = (
+        f"https://www.govdeals.com/en/asset/{account_id}/{asset_id}"
+        if account_id is not None and asset_id is not None else ""
+    )
+    city = (asset.get("locationCity") or "").strip()
+    state = (asset.get("locationState") or "").strip()
+    location = ", ".join(p for p in (city, state) if p)
+
+    bid = asset.get("currentBid")
+    if bid is None:
+        bid = asset.get("assetBidPrice")
+    currency = (asset.get("currencyCode") or "USD").strip()
+    price = f"{currency} {bid}" if bid is not None else ""
+
+    photo = (asset.get("photo") or "").strip()
+    image_url = (
+        f"{IMAGE_CDN_BASE}/{account_id}/{photo}"
+        if photo and account_id is not None else ""
+    )
+
+    description = (asset.get("assetLongDescription") or "").strip()[:4000]
+    time_remaining = asset.get("timeRemaining")
+
+    qty = infer_chair_quantity_from_title(title)
+
+    return {
+        "title": title,
+        "link": link,
+        "quantity": qty,
+        "quantity_source": "regex_title",
+        "quantity_confidence": "low" if qty == 1 else "medium",
+        "location": location,
+        "price": price,
+        "lot_number": str(asset.get("lotNumber") or "").strip(),
+        "end_date": (asset.get("assetAuctionEndDate") or "").strip(),
+        "time_left": time_remaining.strip() if isinstance(time_remaining, str) else "",
+        # Pre-filled enrichment — lets enrich_listings_with_govdeals_descriptions
+        # skip the per-lot Playwright page load entirely.
+        "description": description,
+        "image_url": image_url,
+        "pickup_zip": (asset.get("locationZip") or "").strip(),
+        "contact_email": "",
+        "contact_phone": "",
+    }
+
+
+def scrape_listings_via_api() -> list:
+    """Primary scrape path: pull all SEARCH_TERMS from the JSON API. Returns the
+    same list-of-card-dicts shape as the browser scraper. Raises if the API is
+    unreachable so ``scrape_listings`` can fall back."""
+    print("[1] scrape via JSON API (maestro)")
+    listings = []
+    max_pages = int(os.getenv("GOVDEALS_MAX_PAGES", "200"))
+    delay = float(os.getenv("GOVDEALS_API_DELAY_SEC", "0.2"))
+    for term in SEARCH_TERMS:
+        term_listings = []
+        print(f"\n → Filter: '{term}'")
+        page = 1
+        while page <= max_pages:
+            assets = _search_via_api(term, page)
+            if not assets:
+                break
+            term_listings.extend(_asset_to_card(a) for a in assets)
+            print(f"   Page {page}: {len(assets)} listings")
+            if len(assets) < GOVDEALS_API_ROWS:
+                break          # last (partial) page — don't probe the next
+            page += 1
+            if delay > 0:
+                time.sleep(delay)
+        listings.extend(term_listings)
+        print(f"   Filter '{term}' total: {len(term_listings)} listings")
+    return listings
+
+
+def scrape_listings() -> list:
+    """Dispatch to the JSON API scraper (fast, no browser) by default, falling
+    back to the Playwright DOM scraper on any failure or empty result. Set
+    ``GOVDEALS_USE_API=0`` to force the browser path."""
+    if os.getenv("GOVDEALS_USE_API", "1") != "0":
+        try:
+            listings = scrape_listings_via_api()
+            if listings:
+                return listings
+            print(" → JSON API returned 0 listings; falling back to browser scrape.")
+        except Exception as e:
+            print(f" → JSON API scrape failed ({e}); falling back to browser scrape.")
+    return scrape_listings_via_browser()
+
+
+def scrape_listings_via_browser():
+    print("[1] Starting scrape_listings_via_browser()")
     listings = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
