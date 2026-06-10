@@ -12,9 +12,13 @@ Setup (same .env as govdeals_chairs_extraction.py in auction_extractors/):
 - LLM: LLM_PROVIDER=openai|ollama|groq (+ corresponding API keys / Ollama URL)
 """
 
+import html as html_lib
 import os
 import re
+import time
 import urllib.parse
+from datetime import datetime, timezone
+
 import requests
 from playwright.sync_api import sync_playwright
 from dotenv import load_dotenv
@@ -22,7 +26,6 @@ from dotenv import load_dotenv
 from paths import REPORTS_DIR
 from quantity_infer import infer_chair_quantity_from_title
 from quantity_llm import refine_quantities_with_llm
-from quantity_refine import refine_quantities_with_regex_fulltext
 import listings_db
 
 load_dotenv()
@@ -67,6 +70,172 @@ SEARCH_TERMS = [
 
 MIN_CHAIR_QUANTITY = 50
 MAX_SEARCH_PAGES = 40
+
+# Public Surplus has no JSON API (legacy JSP site), but every search and
+# detail page is fully server-rendered and served to plain ``requests`` with
+# no bot block — so the fast path is direct HTTP + HTML parse, no browser.
+# Same effect as the GovDeals maestro path (GitHub issue #10 / PR #7 pattern):
+# the Playwright scraper below stays as an automatic fallback.
+PS_PAGE_SIZE = 25  # server-fixed cards per search page
+
+
+def _descriptions_enabled() -> bool:
+    """Description fetch defaults ON — it's a plain HTTP GET per uncached lot
+    now, and the LLM quantity pass is only trustworthy with descriptions."""
+    return os.getenv("FETCH_PUBLIC_SURPLUS_DESCRIPTION", "1") == "1"
+
+
+def _llm_quantity_enabled() -> bool:
+    """LLM quantity pass defaults ON. The title-regex value seeded at parse
+    time is untrusted (it reads lot numbers like "LOT #142" as counts) and
+    ships only when the LLM call fails, tagged ``quantity_source=llm_failed``."""
+    return os.getenv("USE_LLM_QUANTITY", "1") == "1"
+_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
+)
+_HTTP_HEADERS = {"User-Agent": _BROWSER_UA, "Accept-Language": "en-US,en;q=0.9"}
+
+# Each result renders twice (grid + list view); we parse the grid copy. All
+# field elements carry the auction id in their DOM id, so every extract below
+# is anchored to the card's own id — no positional guessing.
+_GRID_CARD_RE = re.compile(r'<div class="auction-item" id="(\d+)searchGrid">')
+
+
+def _parse_search_cards(html: str) -> list:
+    """Parse one server-rendered search page into the card dicts the pipeline
+    consumes (same shape as ``_scrape_one_page``), pre-filling ``image_url``
+    and ``end_date`` — both embedded in the search HTML, neither captured by
+    the browser path."""
+    matches = list(_GRID_CARD_RE.finditer(html))
+    cards = []
+    for i, m in enumerate(matches):
+        auc_id = m.group(1)
+        seg_end = matches[i + 1].start() if i + 1 < len(matches) else len(html)
+        seg = html[m.start():seg_end]
+
+        tm = re.search(
+            r'<a\s[^>]*href="(/sms/auction/view\?auc=%s)"[^>]*title="([^"]+)"'
+            % auc_id, seg)
+        if not tm:
+            continue
+        link = BASE_URL + tm.group(1)
+        title = html_lib.unescape(tm.group(2)).strip()
+
+        price = ""
+        pm = re.search(r'id="val_%ssearchGrid"[^>]*>\s*([^<]+)' % auc_id, seg)
+        if pm:
+            price = pm.group(1).strip()
+
+        time_left = ""
+        tlm = re.search(
+            r'id="timeLeftValue%ssearchGrid"[^>]*>\s*([^<]+)' % auc_id, seg)
+        if tlm:
+            time_left = tlm.group(1).strip()
+
+        # The card's countdown script carries the auction end as epoch millis:
+        # updateTimeLeftSpan(timeLeftInfoMap, <auc>, "<auc>searchGrid", <now>, <end>, …)
+        end_date = ""
+        em = re.search(
+            r'updateTimeLeftSpan\(\s*timeLeftInfoMap,\s*%s,\s*"[^"]*",\s*\d+,\s*(\d+)'
+            % auc_id, seg)
+        if em:
+            end_date = datetime.fromtimestamp(
+                int(em.group(1)) / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        location = ""
+        lm = re.search(r'auction-item-state[^>]*>\s*([^<]*)', seg)
+        if lm:
+            location = lm.group(1).strip()
+
+        image_url = ""
+        im = re.search(r'<img[^>]+src="(https://[^"]+/sms/docviewer/[^"]+)"', seg)
+        if im:
+            image_url = im.group(1)
+
+        qty = infer_chair_quantity_from_title(title)
+        cards.append({
+            "title": title,
+            "link": link,
+            "quantity": qty,
+            "quantity_source": "regex_title",
+            "quantity_confidence": "low" if qty == 1 else "medium",
+            "location": location,
+            "price": price,
+            "lot_number": f"AUC#{auc_id}",
+            "end_date": end_date,
+            "time_left": time_left,
+            "image_url": image_url,
+        })
+    return cards
+
+
+def _parse_detail_page(html: str) -> tuple[str, str]:
+    """Extract ``(description, image_url)`` from one auction detail page —
+    the plain-HTTP equivalent of ``_fetch_public_surplus_description``."""
+    image_url = ""
+    im = re.search(r'https://[^"\']+/sms/docviewer/cdnaucdoc/[^"\']+', html)
+    if im:
+        image_url = html_lib.unescape(im.group(0))
+
+    text = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html,
+                  flags=re.S | re.I)
+    text = html_lib.unescape(re.sub(r'<[^>]+>', '\n', text))
+    text = re.sub(r'[ \t\r]+', ' ', text)
+    text = re.sub(r'\n\s*', '\n', text).strip()
+    description = ""
+    dm = re.search(
+        r"Description[:\s]+\s*(.+?)(?:\n\s*(?:Seller|Location|Shipping|Time Left|Quantity)\b|$)",
+        text, flags=re.IGNORECASE | re.DOTALL)
+    if dm:
+        description = dm.group(1).strip()[:4000]
+    return description, image_url
+
+
+def _dedup(listings: list) -> list:
+    """One card per lot, keyed by link (then lot_number / title) — shared by
+    both scrape paths."""
+    dedup = {}
+    for item in listings:
+        key = item.get("link") or item.get("lot_number") or item.get("title")
+        if key not in dedup:
+            dedup[key] = item
+    return list(dedup.values())
+
+
+def scrape_listings_via_http() -> list:
+    """Primary scrape path: plain HTTP GET per search page, stdlib HTML parse.
+    Raises if the site is unreachable so ``scrape_listings`` can fall back."""
+    print("[1] scrape via plain HTTP (server-rendered HTML, no browser)")
+    listings = []
+    delay = float(os.getenv("PUBLICSURPLUS_HTTP_DELAY_SEC", "0.2"))
+    for term in SEARCH_TERMS:
+        term_listings = []
+        print(f"\n → Filter: '{term}'")
+        page_num = 0
+        while page_num < MAX_SEARCH_PAGES:
+            resp = requests.get(
+                _search_url(term, page_num), headers=_HTTP_HEADERS, timeout=30)
+            resp.raise_for_status()
+            page_cards = _parse_search_cards(resp.text)
+            if not page_cards:
+                if page_num == 0:
+                    print(f"   No results for '{term}'.")
+                break
+            term_listings.extend(page_cards)
+            print(f"   Page {page_num}: {len(page_cards)} listings")
+            if len(page_cards) < PS_PAGE_SIZE:
+                break
+            page_num += 1
+            if delay > 0:
+                time.sleep(delay)
+        listings.extend(term_listings)
+        print(f"   Filter '{term}' total: {len(term_listings)} listings")
+    unique = _dedup(listings)
+    print(f"\n[1] Done scrape_listings_via_http(); {len(unique)} unique lots "
+          f"(from {len(listings)} across {len(SEARCH_TERMS)} terms)")
+    return unique
 
 
 def _auction_id_from_card(card) -> str:
@@ -223,7 +392,7 @@ def enrich_listings_with_descriptions(listings: list) -> list:
     - Listings that still have no description after hydration get a live
       Playwright fetch.
     """
-    if os.getenv("FETCH_PUBLIC_SURPLUS_DESCRIPTION") != "1":
+    if not _descriptions_enabled():
         return listings
 
     hits, _, relists = listings_db.hydrate_from_cache(listings)
@@ -238,6 +407,37 @@ def enrich_listings_with_descriptions(listings: list) -> list:
 
     delay = float(os.getenv("FETCH_PUBLIC_SURPLUS_DELAY_SEC", "0.35"))
     print(f"[1b] Fetching descriptions for {len(needs_fetch)} uncached listings…")
+
+    # HTTP first — detail pages are server-rendered too. Playwright only for
+    # the listings whose HTTP fetch errored (network / non-200).
+    if os.getenv("PUBLICSURPLUS_USE_API", "1") != "0":
+        failed = []
+        for i, item in enumerate(needs_fetch):
+            link = item.get("link")
+            if not link:
+                item["description"] = ""
+                item.setdefault("image_url", "")
+                continue
+            try:
+                resp = requests.get(link, headers=_HTTP_HEADERS, timeout=30)
+                resp.raise_for_status()
+                desc, img = _parse_detail_page(resp.text)
+                item["description"] = desc
+                if img and not item.get("image_url"):
+                    item["image_url"] = img
+                item.setdefault("image_url", "")
+            except Exception as e:
+                print(f"   • description (http): {e}")
+                failed.append(item)
+            if delay > 0:
+                time.sleep(delay)
+            if (i + 1) % 20 == 0:
+                print(f"   … {i + 1}/{len(needs_fetch)}")
+        if not failed:
+            return listings
+        print(f"[1b] {len(failed)} HTTP fetch failure(s) — Playwright fallback for those.")
+        needs_fetch = failed
+
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=os.getenv("HEADLESS", "0") == "1",
@@ -278,8 +478,23 @@ def _search_url(term: str, page_idx: int) -> str:
     return f"{BASE_URL}/sms/browse/search?{q}"
 
 
-def scrape_listings():
-    print("[1] Starting scrape_listings() (Public Surplus)")
+def scrape_listings() -> list:
+    """Dispatch to the plain-HTTP scraper (fast, no browser) by default,
+    falling back to the Playwright DOM scraper on any failure or empty
+    result. Set ``PUBLICSURPLUS_USE_API=0`` to force the browser path."""
+    if os.getenv("PUBLICSURPLUS_USE_API", "1") != "0":
+        try:
+            listings = scrape_listings_via_http()
+            if listings:
+                return listings
+            print(" → HTTP scrape returned 0 listings; falling back to browser scrape.")
+        except Exception as e:
+            print(f" → HTTP scrape failed ({e}); falling back to browser scrape.")
+    return scrape_listings_via_browser()
+
+
+def scrape_listings_via_browser():
+    print("[1] Starting scrape_listings_via_browser() (Public Surplus)")
     listings = []
     with sync_playwright() as p:
         browser = p.chromium.launch(
@@ -341,13 +556,8 @@ def scrape_listings():
         finally:
             browser.close()
 
-    dedup = {}
-    for item in listings:
-        key = item.get("link") or item.get("lot_number") or item.get("title")
-        if key not in dedup:
-            dedup[key] = item
-    listings_unique = list(dedup.values())
-    print(f"\n[1] Done scrape_listings(); total unique listings: {len(listings_unique)}")
+    listings_unique = _dedup(listings)
+    print(f"\n[1] Done scrape_listings_via_browser(); total unique listings: {len(listings_unique)}")
     return listings_unique
 
 
@@ -444,15 +654,12 @@ def main():
 
     listings = enrich_listings_with_descriptions(listings)
 
-    if any(item.get("description") for item in listings):
-        print("[1c] Refining quantities with regex on title+description…")
-        listings = refine_quantities_with_regex_fulltext(listings)
-    else:
-        print("[1c] Skipping regex(fulltext) — no descriptions on any listing.")
-        print("     Set FETCH_PUBLIC_SURPLUS_DESCRIPTION=1 in .env to enable.")
-
-    if os.getenv("USE_LLM_QUANTITY") == "1":
-        print("[1d] Refining quantities with LLM (title + description when present)…")
+    # Quantity comes from the LLM over title + description. No regex refine
+    # pass — title-regex misreads lot numbers ("LOT #142" → 142 when the lot
+    # holds 6 chairs) and survives only as the tagged fallback when the LLM
+    # call fails (quantity_source=llm_failed). See GitHub issue #10.
+    if _llm_quantity_enabled():
+        print("[1c] Inferring quantities with LLM (title + description when present)…")
         listings = refine_quantities_with_llm(
             listings,
             provider=LLM_PROVIDER,
@@ -462,6 +669,8 @@ def main():
             groq_api_key=GROQ_API_KEY,
             openai_api_key=OPENAI_API_KEY,
         )
+    else:
+        print("[1c] USE_LLM_QUANTITY=0 — shipping untrusted title-regex quantities.")
 
     # Persist every processed listing to the cache BEFORE the quantity filter
     # so even small lots are remembered (avoids re-fetching next run).
