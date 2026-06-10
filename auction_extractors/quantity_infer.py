@@ -22,7 +22,11 @@ _QUANTITY_PATTERNS: tuple[tuple[str, str], ...] = (
     (r"(?i)lot\s+size\s*:?\s*(\d+)", "lot size"),
     # Parentheses often hold counts: "(370)" near chairs
     (r"(?i)\(\s*(\d+)\s*\)\s*(?:total|chair|stack|banquet|padded|metal)", "paren before chair words"),
-    (r"(?i)\(\s*(\d+)\s*\)\s*$", "paren at end of title"),
+    # 1-3 digits only: 4+ digit trailing parens are fleet/unit numbers, not
+    # counts ("2014 Ford ... ACCESSIBLE VAN (5173)" is van #5173, not 5173
+    # chairs). Genuine 4-digit counts still match "paren before chair words"
+    # above or the immediate "N chairs" pattern below.
+    (r"(?i)\(\s*(\d{1,3})\s*\)\s*$", "paren at end of title"),
     # Units
     (r"(?i)\b(\d+)\s*(?:pcs|pieces|ea|each)\b", "N pcs"),
     # Any-length number IMMEDIATELY before a chair word (0-5 char gap).

@@ -467,6 +467,57 @@ def _singularize_term(term: str) -> str:
     return " ".join(words)
 
 
+# The maestro API token-matches "chair" against "Wheelchair"/"Wheel Chair",
+# so wheelchair-accessible vans (and other vehicles) come back as chair
+# results. Detect them by title so the pipeline can drop them outright.
+_VEHICLE_NOUN_RE = re.compile(
+    r"\b(?:van|vans|truck|trucks|bus|buses|suv|suvs|sedan|sedans|pickup|"
+    r"pickups|minivan|minivans|ambulance|ambulances|motorcycle|motorcycles|"
+    r"coupe|hatchback|forklift|forklifts)\b",
+    re.IGNORECASE,
+)
+_VEHICLE_YEAR_MAKE_RE = re.compile(
+    r"^\s*(?:19|20)\d{2}\s+(?:ford|chevrolet|chevy|dodge|gmc|toyota|honda|"
+    r"nissan|freightliner|international|jeep|chrysler|buick|cadillac|hyundai|"
+    r"kia|subaru|mercedes|bmw|volkswagen|vw|volvo|mack|peterbilt|kenworth|"
+    r"isuzu|hino|ram|lincoln|mercury|pontiac|oldsmobile|gillig|blue\s?bird|"
+    r"thomas)\b",
+    re.IGNORECASE,
+)
+_WHEELCHAIR_RE = re.compile(r"\bwheel\s?chairs?\b", re.IGNORECASE)
+
+
+def _is_vehicle_lot(title: str) -> bool:
+    """True when a listing title describes a vehicle, not seating.
+
+    Two signals: (a) "model year + automotive make" prefix ("2016 Ford
+    Econoline"); (b) a vehicle noun, AFTER neutralizing "wheelchair" /
+    "wheel chair" so the embedded "chair" doesn't read as seating
+    ("... Wheel Chair Accesible Van (5244)"). A surviving standalone
+    chair word vetoes (b) — a chair lot that merely mentions a van is
+    still a chair lot.
+    """
+    t = title or ""
+    if _VEHICLE_YEAR_MAKE_RE.search(t):
+        return True
+    t = _WHEELCHAIR_RE.sub(" ", t)
+    if re.search(r"\bchairs?\b", t, re.IGNORECASE):
+        return False
+    return bool(_VEHICLE_NOUN_RE.search(t))
+
+
+def _drop_vehicle_lots(listings: list) -> list:
+    """Filter out vehicle lots, logging what was dropped (no silent trims)."""
+    kept, dropped = [], []
+    for item in listings:
+        (dropped if _is_vehicle_lot(item.get("title") or "") else kept).append(item)
+    if dropped:
+        print(f" → Dropped {len(dropped)} vehicle lot(s):")
+        for item in dropped:
+            print(f"    ✗ {item.get('title')}")
+    return kept
+
+
 def _dedup_listings(listings: list) -> list:
     """Collapse listings to one per lot, keyed by link (then lot_number /
     title). Shared by both scrape paths — the API path aggregates across many
@@ -641,11 +692,11 @@ def scrape_listings() -> list:
         try:
             listings = scrape_listings_via_api()
             if listings:
-                return listings
+                return _drop_vehicle_lots(listings)
             print(" → JSON API returned 0 listings; falling back to browser scrape.")
         except Exception as e:
             print(f" → JSON API scrape failed ({e}); falling back to browser scrape.")
-    return scrape_listings_via_browser()
+    return _drop_vehicle_lots(scrape_listings_via_browser())
 
 
 def scrape_listings_via_browser():

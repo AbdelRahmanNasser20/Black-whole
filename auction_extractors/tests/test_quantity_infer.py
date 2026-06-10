@@ -30,6 +30,13 @@ CASES = [
     ("MTI 424L-115 Power Medical Exam Chair", 1),
     ("Pedigo OS-712 Procedure Chair", 1),
 
+    # ── vehicle fleet/unit numbers in trailing parens must NOT be counts ─
+    # (2026-06-10: wheelchair-accessible vans ranked top of the Auctions tab
+    # with "quantity" 5173 because "(5173)" matched "paren at end of title")
+    ("2014 Ford Metrolite Wheelchair  ACCESSIBLE VAN (5173)", 1),
+    ("2010 Ford/Coach Phoenix DRW Wheelchair ACCESSIBLE VAN (5001)", 1),
+    ("2018 Ford Econoline Wheel Chair Accesible Van (5244)", 1),
+
     # ── genuine counts that must survive unchanged ──────────────────────
     ("653 Stackable Chairs", 653),
     ("Lot of 653 Chairs", 653),
