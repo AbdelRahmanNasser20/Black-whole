@@ -257,8 +257,13 @@ re-benchmarking via the upstream `quantity_eval/`.
 2. `image_url` can be empty on older rows; the card renders a 🪑 fallback.
 3. GovDeals blocks headless browsers via Akamai → set `HEADLESS=0` in
    `auction_extractors/.env` if you see "Access Denied".
-4. Public Surplus only populates `time_left`, not `end_date` —
-   `active_only` still works via `last_seen_at` staleness check.
+4. Public Surplus `end_date`: the plain-HTTP scrape path (default since
+   2026-06-10) fills it from the epoch embedded in each search card; only
+   the Playwright fallback path leaves it empty (`active_only` still
+   works there via the `last_seen_at` staleness check). PS quantity is
+   LLM-only — title-regex ships solely as the `llm_failed`-tagged
+   fallback (`USE_LLM_QUANTITY` / `FETCH_PUBLIC_SURPLUS_DESCRIPTION`
+   default ON; `PUBLICSURPLUS_USE_API=0` forces the browser scraper).
 5. `max_stale_days=2` assumes ~daily scrapes. If you scrape weekly,
    raise it or `active_only` drops everything.
 6. **Launch button on Auctions cards is enabled only for GovDeals URLs**
