@@ -1025,6 +1025,74 @@ async def refresh_auctions_cache():
     return {"ok": True}
 
 
+# ───────────────────────────── test scrape ─────────────────────────────
+# Backing for the "08 Test Scrape" tab: a live keyword search against one
+# source's fast path (GovDeals maestro JSON API / Public Surplus server-
+# rendered search pages). Read-only relevance probe for new categories —
+# nothing is written to listings.db or Supabase, and the LLM never runs.
+# Quantity on the returned cards is the title-regex seed only.
+
+_TEST_SCRAPE_FIELDS = (
+    "title", "link", "price", "image_url", "location",
+    "end_date", "time_left", "quantity",
+)
+
+
+def _test_scrape_sync(source: str, q: str, pages: int) -> list[dict]:
+    """Blocking worker for /api/test-scrape; runs under asyncio.to_thread.
+
+    Imports the scraper modules lazily (with the auction_extractors dir on
+    sys.path for their flat sibling imports) so the dashboard still boots
+    when the package is absent.
+    """
+    pkg_dir = str(AUCTION_EXTRACTORS_DIR)
+    if pkg_dir not in sys.path:
+        sys.path.insert(0, pkg_dir)
+    if source == "gd":
+        import govdeals_chairs_extraction as gd
+        term = gd._singularize_term(q)
+        cards: list[dict] = []
+        for page in range(1, pages + 1):
+            assets = gd._search_via_api(term, page)
+            if not assets:
+                break
+            cards.extend(gd._asset_to_card(a) for a in assets)
+            if len(assets) < gd.GOVDEALS_API_ROWS:
+                break
+        cards = gd._dedup_listings(cards)
+    else:
+        import requests
+        import public_surplus_automation as ps
+        cards = []
+        for page_idx in range(pages):
+            resp = requests.get(
+                ps._search_url(q, page_idx), headers=ps._HTTP_HEADERS, timeout=30)
+            resp.raise_for_status()
+            page_cards = ps._parse_search_cards(resp.text)
+            if not page_cards:
+                break
+            cards.extend(page_cards)
+            if len(page_cards) < ps.PS_PAGE_SIZE:
+                break
+        cards = ps._dedup(cards)
+    return [{k: c.get(k) for k in _TEST_SCRAPE_FIELDS} for c in cards]
+
+
+@app.get("/api/test-scrape")
+async def test_scrape(q: str, source: str = "gd", pages: int = 1):
+    q = (q or "").strip()
+    if not q:
+        raise HTTPException(400, "q (search keyword) is required")
+    if source not in ("gd", "ps"):
+        raise HTTPException(400, "source must be 'gd' or 'ps'")
+    pages = max(1, min(int(pages), 5))
+    try:
+        items = await asyncio.to_thread(_test_scrape_sync, source, q, pages)
+    except Exception as e:
+        raise HTTPException(502, f"test scrape failed: {e!r}")
+    return {"source": source, "q": q, "count": len(items), "items": items}
+
+
 # ───────────────────────────── auction favorites ──────────────────────────
 
 

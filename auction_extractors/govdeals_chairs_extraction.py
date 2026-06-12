@@ -473,7 +473,8 @@ def _singularize_term(term: str) -> str:
 _VEHICLE_NOUN_RE = re.compile(
     r"\b(?:van|vans|truck|trucks|bus|buses|suv|suvs|sedan|sedans|pickup|"
     r"pickups|minivan|minivans|ambulance|ambulances|motorcycle|motorcycles|"
-    r"coupe|hatchback|forklift|forklifts)\b",
+    r"coupe|hatchback|forklift|forklifts|motorhome|motorhomes|rv|rvs|"
+    r"camper|campers)\b",
     re.IGNORECASE,
 )
 _VEHICLE_YEAR_MAKE_RE = re.compile(
@@ -602,8 +603,11 @@ def _asset_to_card(asset: dict) -> dict:
     title = (asset.get("assetShortDescription") or "").strip()
     account_id = asset.get("accountId")
     asset_id = asset.get("assetId")
+    # Site URL order is /en/asset/{assetId}/{accountId} — verified against the
+    # search page's own hrefs 2026-06-12. The reverse order renders GovDeals'
+    # "Item not available" page even for live auctions.
     link = (
-        f"https://www.govdeals.com/en/asset/{account_id}/{asset_id}"
+        f"https://www.govdeals.com/en/asset/{asset_id}/{account_id}"
         if account_id is not None and asset_id is not None else ""
     )
     city = (asset.get("locationCity") or "").strip()

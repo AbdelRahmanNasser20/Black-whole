@@ -1206,3 +1206,28 @@ main {
 .toggle-state[data-on="1"] { color: var(--accent); }
 .toggle-state[data-on="0"] { color: var(--ink-dim); }
 
+
+/* ───────── test scrape (08) ───────── */
+
+.ts-keyword-group { flex: 1; min-width: 220px; }
+.ts-input {
+  width: 100%; max-width: 360px;
+  background: var(--bg-elev); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 6px 10px; font-family: var(--mono); font-size: 13px;
+}
+.ts-input:focus { outline: none; border-color: var(--accent); }
+
+.ts-source-pill {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: 3px; border: 1px solid var(--line);
+  color: var(--ink-mute);
+}
+.ts-source-pill[data-source="gd"] { border-color: var(--accent); color: var(--accent); }
+
+.ts-miss { outline: 1px dashed var(--err); outline-offset: -1px; opacity: .85; }
+.ts-miss-pill {
+  font-family: var(--mono); font-size: 10px;
+  padding: 2px 6px; border-radius: 3px;
+  color: var(--err); border: 1px solid var(--err);
+}

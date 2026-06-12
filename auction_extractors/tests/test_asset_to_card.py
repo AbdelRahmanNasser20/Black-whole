@@ -48,7 +48,8 @@ def _check(name: str, got, expected):
 def main() -> int:
     card = _asset_to_card(SAMPLE)
     checks = [
-        _check("link", card["link"], "https://www.govdeals.com/en/asset/195/1405"),
+        # Order is {assetId}/{accountId} — the reverse 404s (2026-06-12).
+        _check("link", card["link"], "https://www.govdeals.com/en/asset/1405/195"),
         _check("location", card["location"], "Jefferson, GA"),
         _check("price", card["price"], "USD 12.0"),          # currentBid wins over assetBidPrice
         _check("description", card["description"],

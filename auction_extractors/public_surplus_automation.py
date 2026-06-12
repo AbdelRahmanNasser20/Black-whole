@@ -152,7 +152,10 @@ def _parse_search_cards(html: str) -> list:
         image_url = ""
         im = re.search(r'<img[^>]+src="(https://[^"]+/sms/docviewer/[^"]+)"', seg)
         if im:
-            image_url = im.group(1)
+            # The grid embeds the 120x90 "thumb-b" rendition — blurry on any
+            # card bigger than a postage stamp. The same path with "thumb-l"
+            # serves 1280x960.
+            image_url = im.group(1).replace("/thumb-b/", "/thumb-l/")
 
         qty = infer_chair_quantity_from_title(title)
         cards.append({
@@ -177,7 +180,9 @@ def _parse_detail_page(html: str) -> tuple[str, str]:
     image_url = ""
     im = re.search(r'https://[^"\']+/sms/docviewer/cdnaucdoc/[^"\']+', html)
     if im:
-        image_url = html_lib.unescape(im.group(0))
+        # Same thumb-b → thumb-l upgrade as the search-grid parse: the page
+        # embeds the 120x90 rendition; thumb-l is 1280x960.
+        image_url = html_lib.unescape(im.group(0)).replace("/thumb-b/", "/thumb-l/")
 
     text = re.sub(r'<(script|style)[^>]*>.*?</\1>', ' ', html,
                   flags=re.S | re.I)

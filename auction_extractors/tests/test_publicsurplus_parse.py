@@ -64,7 +64,7 @@ def main() -> int:
     # Pre-filled from the card markup — browser path never had these.
     checks.append(_check(
         "image_url", first["image_url"],
-        "https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4020144/70098099"))
+        "https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-l/4020144/70098099"))
     checks.append(_check("end_date", first["end_date"], "2026-06-10T18:00:00Z"))
 
     # Every card on the page parses with a usable title + link.
@@ -84,7 +84,7 @@ def main() -> int:
     checks.append(_check("detail_desc_capped", len(desc) <= 4000, True))
     checks.append(_check(
         "detail_image", img,
-        "https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnaucdoc/thumb-b/4020144/70098099?x=2245"))
+        "https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnaucdoc/thumb-l/4020144/70098099?x=2245"))
     d2, i2 = _parse_detail_page("<html></html>")
     checks.append(_check("detail_garbage", (d2, i2), ("", "")))
 

@@ -39,6 +39,9 @@
     <button class="tab" data-tab="listings-db">
       <span class="tab-num">07</span><span class="tab-label">Listings DB</span>
     </button>
+    <button class="tab" data-tab="test-scrape">
+      <span class="tab-num">08</span><span class="tab-label">Test Scrape</span>
+    </button>
   </nav>
   <div class="meta">
     <span class="status-dot" id="conn-dot"></span>
@@ -451,6 +454,48 @@
     <button type="button" class="btn btn-small" id="ldb-prev">← prev</button>
     <span class="ldb-page-info" id="ldb-page-info"></span>
     <button type="button" class="btn btn-small" id="ldb-next">next →</button>
+  </div>
+</section>
+
+<!-- ───────────── Test Scrape ───────────── -->
+<section class="panel" data-pane="test-scrape" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">LAB / CATEGORY PROBE</div>
+    <h1 class="hero-title">Test a new category <em>before</em> committing a scraper to it.</h1>
+    <p class="hero-sub">
+      Live keyword search against the GovDeals JSON API and Public Surplus
+      search pages. Read-only — nothing is written to the cache or Supabase,
+      and the LLM never runs. Cards whose title doesn't mention the keyword
+      get a <span class="lex error">⚠ off-keyword</span> flag so you can
+      judge how noisy the term is.
+    </p>
+  </div>
+
+  <form class="auction-controls" id="ts-form" onsubmit="return false;">
+    <div class="ac-group">
+      <span class="ac-label" title="Which live site to search">SOURCE</span>
+      <div class="seg" id="ts-source">
+        <button type="button" class="seg-btn active" data-value="both">Both</button>
+        <button type="button" class="seg-btn" data-value="gd">GovDeals</button>
+        <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
+      </div>
+    </div>
+    <div class="ac-group ts-keyword-group">
+      <span class="ac-label">KEYWORD</span>
+      <input type="text" id="ts-q" class="ts-input" placeholder="e.g. desks, projectors, lockers" autocomplete="off">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Search pages per source (GovDeals: 100/page · Public Surplus: 25/page)">PAGES</span>
+      <input type="number" id="ts-pages" min="1" max="5" step="1" value="1">
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small btn-primary" id="ts-run">▶ run test scrape</button>
+    </div>
+  </form>
+
+  <div class="auction-status" id="ts-status"></div>
+  <div class="auction-grid" id="ts-grid">
+    <div class="drafts-empty">Enter a keyword and hit <strong>▶ run test scrape</strong>.</div>
   </div>
 </section>
 

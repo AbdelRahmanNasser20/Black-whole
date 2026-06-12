@@ -29,6 +29,11 @@ VEHICLES = [
     "2018 Freightliner M2 106 Extended Cab Chipper Dump Truck",
     "Freightliner MT55 Step Van Mobile Clinic Office",
     "2006 Ford Econoline",
+    # Scraped 2026-06-12: "Concorde" isn't in the make list and "motorhome"
+    # wasn't in the noun list, so this slipped through with quantity 400
+    # (from "19,400 miles").
+    "2005 Concorde wheelchair accessible motorhome.  19,400 miles, wheelchair lift",
+    "1999 Winnebago RV with wheelchair ramp",
 ]
 
 NOT_VEHICLES = [
