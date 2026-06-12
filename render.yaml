@@ -1,0 +1,55 @@
+# Render Blueprint for the black-whole.com cloud deploy (discovery-only).
+#
+# Two services off one Docker image:
+#   1. web  — the stateless FastAPI app (public site + admin), reads Supabase.
+#   2. cron — daily GovDeals discovery scrape (maestro JSON API) → Supabase sync.
+#
+# Secrets (BLACKWHOLE_DB_URL + LLM keys) live in the `blackwhole-secrets` env
+# group — set their VALUES in the Render dashboard once; nothing secret is
+# committed here. Apply with: Render dashboard → New → Blueprint → this repo.
+
+envVarGroups:
+  - name: blackwhole-secrets
+    envVars:
+      - key: BLACKWHOLE_DB_URL      # Supabase Session pooler URL (required)
+        sync: false
+      - key: OPENAI_API_KEY         # quantity refine + Auctions condition scoring
+        sync: false
+      - key: GEMINI_API_KEY         # optional alternate LLM for the app
+        sync: false
+
+services:
+  # ── 1. Always-on website ────────────────────────────────────────────────
+  - type: web
+    name: black-whole-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter            # always-on; bump if needed
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - fromGroup: blackwhole-secrets
+      - key: LISTING_WEB_HOST
+        value: 0.0.0.0
+      - key: LISTING_WEB_RELOAD
+        value: "0"
+      # PORT is injected by Render; the Docker CMD maps it to LISTING_WEB_PORT.
+
+  # ── 2. Daily discovery scrape → Supabase ────────────────────────────────
+  - type: cron
+    name: black-whole-discovery
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 8 * * *"    # 08:00 UTC daily
+    autoDeploy: true
+    dockerCommand: >-
+      sh -c "python auction_extractors/govdeals_chairs_extraction.py &&
+      python scripts/transfer_listings_to_supabase.py"
+    envVars:
+      - fromGroup: blackwhole-secrets
+      - key: GOVDEALS_USE_API
+        value: "1"           # JSON API path (proven from datacenter IPs)
+      - key: LLM_PROVIDER
+        value: openai        # quantity refine via OpenAI API (no local Ollama)
+      - key: LISTINGS_DB_PATH
+        value: /tmp/listings.db   # ephemeral staging buffer; Supabase is durable
