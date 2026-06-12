@@ -1,0 +1,14 @@
+.git
+.venv
+**/__pycache__
+*.pyc
+.env
+*.egg-info
+probe/
+tests/
+docs/
+auction_extractors/state/
+*.db
+*.sqlite
+.DS_Store
+.superset/

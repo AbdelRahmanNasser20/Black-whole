@@ -1,0 +1,86 @@
+name: probe-maestro-from-cloud
+
+# One-shot check: does the GovDeals maestro JSON API answer from a
+# datacenter IP (same kind Render/Fly use)? Tests the discovery-scrape
+# feasibility for the cloud deploy. Safe, read-only, no secrets.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [deploy-black-whole-cloudf]
+    paths: ['.github/workflows/probe-maestro.yml']
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install requests
+        run: pip install requests
+      - name: Probe maestro API from this runner's IP
+        run: |
+          python - <<'PY'
+          import re, uuid, requests, json
+
+          UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36")
+          FALLBACK_KEY = "af93060f-337e-428c-87b8-c74b5837d6cd"
+
+          # 0) show egress IP
+          try:
+              ip = requests.get("https://api.ipify.org?format=json", timeout=15).json()
+              print("EGRESS_IP:", ip)
+          except Exception as e:
+              print("EGRESS_IP: error", e)
+
+          # 1) resolve maestro key from the public JS bundle (with fallback)
+          key = FALLBACK_KEY
+          key_source = "fallback"
+          try:
+              h = {"User-Agent": UA}
+              html = requests.get("https://www.govdeals.com/en/search?kWord=chairs",
+                                  headers=h, timeout=20).text
+              m = re.search(r"(main\.[0-9a-f.]+\.js)", html)
+              print("BUNDLE_MATCH:", m.group(1) if m else None)
+              if m:
+                  bundle = requests.get(f"https://www.govdeals.com/{m.group(1)}",
+                                        headers=h, timeout=25).text
+                  km = re.search(r'maestroApiKey:"([0-9a-f-]{8,})"', bundle)
+                  if km:
+                      key, key_source = km.group(1), "scraped"
+          except Exception as e:
+              print("KEY_RESOLVE_ERROR:", e)
+          print("KEY_SOURCE:", key_source, "KEY_PREFIX:", key[:8])
+
+          # 2) the actual discovery call
+          headers = {
+              "x-api-key": key, "x-user-id": "-1",
+              "x-api-correlation-id": str(uuid.uuid4()),
+              "Content-Type": "application/json",
+              "Origin": "https://www.govdeals.com",
+              "Referer": "https://www.govdeals.com/",
+              "User-Agent": UA,
+          }
+          body = {"categoryIds": "", "searchText": "chair", "isQAL": False,
+                  "page": 1, "displayRows": 10, "sortField": "bestfit",
+                  "sortOrder": "asc", "requestType": "search",
+                  "responseStyle": "fullResponse", "facets": [], "facetsFilter": ""}
+          r = requests.post("https://maestro.lqdt1.com/search/assets/advanced",
+                            json=body, headers=headers, timeout=30)
+          print("HTTP_STATUS:", r.status_code)
+          try:
+              j = r.json()
+              results = j.get("assetSearchResults") or []
+              print("RESULT_COUNT:", len(results))
+              print("TOTAL_ROWS:", j.get("totalRows") or j.get("numFound"))
+              if results:
+                  s = results[0]
+                  print("SAMPLE_TITLE:", (s.get("assetShortDescription") or s.get("title") or "")[:80])
+              print("VERDICT:", "PASS" if results else "EMPTY")
+          except Exception as e:
+              print("BODY_HEAD:", r.text[:400])
+              print("VERDICT: BLOCKED_OR_ERROR", e)
+          PY
