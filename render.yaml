@@ -13,7 +13,9 @@ envVarGroups:
     envVars:
       - key: BLACKWHOLE_DB_URL      # Supabase Session pooler URL (required)
         sync: false
-      - key: OPENAI_API_KEY         # quantity refine + Auctions condition scoring
+      - key: OPENAI_API_KEY         # optional; Auctions condition scoring
+        sync: false
+      - key: GROQ_API_KEY           # quantity refine LLM (provider=groq)
         sync: false
       - key: GEMINI_API_KEY         # optional alternate LLM for the app
         sync: false
@@ -42,14 +44,14 @@ services:
     dockerfilePath: ./Dockerfile
     schedule: "0 8 * * *"    # 08:00 UTC daily
     autoDeploy: true
-    dockerCommand: >-
-      sh -c "python auction_extractors/govdeals_chairs_extraction.py &&
-      python scripts/transfer_listings_to_supabase.py"
+    # A committed script avoids the nested-quote mangling that broke the inline
+    # `sh -c "... && ..."` form (every run exited 127). See scripts/run_discovery.sh.
+    dockerCommand: sh scripts/run_discovery.sh
     envVars:
       - fromGroup: blackwhole-secrets
       - key: GOVDEALS_USE_API
         value: "1"           # JSON API path (proven from datacenter IPs)
       - key: LLM_PROVIDER
-        value: openai        # quantity refine via OpenAI API (no local Ollama)
+        value: groq          # quantity refine via Groq API (llama-3.3-70b)
       - key: LISTINGS_DB_PATH
         value: /tmp/listings.db   # ephemeral staging buffer; Supabase is durable
