@@ -168,6 +168,13 @@ Rules:
   • "50% polyester" → NOT 50 chairs
   If the only numbers nearby are dimensions/angles/weights, return 1 with confidence low.
 - A single retail product (e.g. "Herman Miller Caper Chair", "UMF Medical 8678 Phlebotomy Chair") is a lot of 1, even if its description mentions dimensions or rotation.
+- Count ONLY the chairs included in THIS listing. Sellers often split one batch across
+  several auctions and repeat the grand total in every description. Examples:
+  • "105 chairs total across our listings, sold in groups of 1, 4, and 12" → NOT 105;
+    use this listing's own count (title or per-lot statement). If unclear, return 1 with confidence low.
+  • "Lot of (6) chairs. (2) other sets of 8 chairs are also being posted." → 6, NOT 22.
+    Never add chairs from other listings mentioned in the description.
+  • "There are an additional 2,100 chairs available in a separate auction" → ignore the 2,100.
 - Never return 0; minimum 1.
 
 INPUT:
