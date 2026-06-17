@@ -70,9 +70,20 @@ def _groq_chat(api_key: str, prompt: str, model: str = "llama-3.3-70b-versatile"
 
 def _gemini_chat(api_key: str, prompt: str, model: str = "gemini-2.5-flash") -> str:
     from google import genai
+    from google.genai import types
 
     client = genai.Client(api_key=api_key)
-    resp = client.models.generate_content(model=model, contents=prompt)
+    # Force a JSON response — without this, gemini-2.5-flash often "helpfully"
+    # returns a Python script that *computes* the answer instead of the answer,
+    # which fails our JSON parse and marks every row in the chunk llm_failed.
+    resp = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0,
+        ),
+    )
     return resp.text or ""
 
 
