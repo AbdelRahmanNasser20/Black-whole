@@ -384,6 +384,8 @@ def _extra_args_from_payload(payload: dict) -> list[str]:
             extra.append("--" + flag.replace("_", "-"))
     if payload.get("price"):
         extra += ["--price", str(int(payload["price"]))]
+    if payload.get("quantity"):
+        extra += ["--quantity", str(int(payload["quantity"]))]
     return extra
 
 

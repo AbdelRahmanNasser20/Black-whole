@@ -63,6 +63,7 @@ async def _run(
     skip_fb: bool,
     skip_ebay: bool,
     force_republish: bool = False,
+    quantity_override: int | None = None,
 ) -> None:
     async with browser.persistent_context() as ctx:
         progress.emit("run", status="started", url=url)
@@ -99,6 +100,15 @@ async def _run(
             primary=primary.to_dict() if primary else None,
             secondary=secondary.to_dict() if secondary else None,
         )
+
+        # Manual quantity override (--quantity): the user knows the true count
+        # (e.g. several auctions are really one batch). Applied before
+        # finalize_folder so the folder name and all downstream consumers
+        # (FB/eBay/inventory) use it.
+        if quantity_override is not None:
+            print(f"  quantity: {quantity_override} (--quantity override; "
+                  f"LLM said {primary.quantity})")
+            primary.quantity = str(quantity_override)
 
         # Folder name uses the LLM-corrected quantity, chair title, and state.
         # Before this point, meta carries a provisional folder; finalize_folder()
@@ -338,18 +348,20 @@ async def _run(
 @click.argument("url", required=False)
 @click.option("--login-only", is_flag=True, help="Open browser so you can log into FB/eBay/dewatermark.ai once.")
 @click.option("--price", type=int, default=None, help="Override LLM-suggested per-chair price.")
+@click.option("--quantity", type=int, default=None, help="Override LLM-detected chair quantity.")
 @click.option("--skip-dewatermark", is_flag=True)
 @click.option("--skip-fb", is_flag=True)
 @click.option("--skip-ebay", is_flag=True)
 @click.option("--force-republish", is_flag=True,
               help="Ignore inventory ledger — create fresh FB/eBay drafts even if this lot was published before.")
-def main(url, login_only, price, skip_dewatermark, skip_fb, skip_ebay, force_republish):
+def main(url, login_only, price, quantity, skip_dewatermark, skip_fb, skip_ebay, force_republish):
     if login_only:
         asyncio.run(_login_only())
         return
     if not url:
         raise click.UsageError("URL required (or pass --login-only)")
-    asyncio.run(_run(url, price, skip_dewatermark, skip_fb, skip_ebay, force_republish))
+    asyncio.run(_run(url, price, skip_dewatermark, skip_fb, skip_ebay, force_republish,
+                     quantity_override=quantity))
 
 
 if __name__ == "__main__":
