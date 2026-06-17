@@ -102,13 +102,20 @@ $$('.tab').forEach(btn => {
 // Restore the last tab on load. Falls back to whichever tab the markup
 // rendered as `.active` (typically 01 Launcher) if storage is empty or the
 // saved tab no longer exists in the DOM.
-(function restoreLastTab() {
+//
+// NOTE: this is only *defined* here — it is invoked at the very bottom of the
+// file. activateTab() calls per-tab loaders (loadAuctions, loadInventory, …)
+// that read module-level `const` state (e.g. `auc`) declared further down. If
+// we invoked restoreLastTab here, restoring a saved tab like "auctions" would
+// call loadAuctions() before `const auc` is initialized → a temporal-dead-zone
+// ReferenceError that silently wedges the tab on its loading placeholder.
+function restoreLastTab() {
   let saved = null;
   try { saved = localStorage.getItem(TAB_STORAGE_KEY); } catch (_) {}
   if (saved && saved !== 'launcher') {
     activateTab(saved, {persist: false});
   }
-})();
+}
 
 // ───────── clock ─────────
 
@@ -1970,3 +1977,7 @@ function renderTestScrapeCard(it, match) {
   `;
   return card;
 }
+
+// All module-level state (`auc`, etc.) and per-tab loaders are defined above,
+// so it is now safe to restore the saved tab and trigger its loader.
+restoreLastTab();
