@@ -78,6 +78,15 @@ FACEBOOK_BUSINESS_URL = os.getenv("FACEBOOK_BUSINESS_URL", "")
 DEWATERMARK_API_KEY = os.getenv("DEWATERMARK_API_KEY")
 DEWATERMARK_API_URL = "https://platform.dewatermark.ai/api/object_removal/v2/erase_watermark"
 
+# Supabase Storage — durable listing images (BLACKWHOLE-6). Shared `listing-images`
+# bucket in the LIVE `blackwhole` project, one source of truth with the CRM.
+# NOTE: deliberately separate from SUPABASE_URL/ANON above, which may point at a
+# stale project — uploads MUST use these vars. Unset => uploads silently skipped
+# and the pipeline falls back to local-disk serving (dev-friendly).
+SUPABASE_STORAGE_URL = os.getenv("SUPABASE_STORAGE_URL")
+SUPABASE_STORAGE_KEY = os.getenv("SUPABASE_STORAGE_KEY")
+LISTING_IMAGES_BUCKET = os.getenv("LISTING_IMAGES_BUCKET", "listing-images")
+
 CAROUSEL_STABLE_CHECKS = 3
 CAROUSEL_MAX_CLICKS = 40
 PAGE_LOAD_WAIT_MS = 4000

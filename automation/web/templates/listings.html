@@ -53,8 +53,8 @@
      data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
      data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.city or '' }}">
     <div class="lot-img">
-      {% if item.folder_name and item.hero_image %}
-        <img src="/image/{{ item.folder_name }}/{{ item.hero_image }}" alt="{{ item.title }}" loading="lazy">
+      {% if item.hero_src %}
+        <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
       {% else %}
         <div class="lot-img-fallback">◉</div>
       {% endif %}

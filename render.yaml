@@ -19,6 +19,15 @@ envVarGroups:
         sync: false
       - key: GEMINI_API_KEY         # optional alternate LLM for the app
         sync: false
+      # Supabase Storage — durable listing images (BLACKWHOLE-6). Reads of the
+      # public listing-images bucket need NO key, so the live site renders images
+      # without these. Set the KEY only if a cloud-side job ever uploads images.
+      - key: SUPABASE_STORAGE_URL   # https://nihgzltpjriekyqqucbd.supabase.co
+        sync: false
+      - key: SUPABASE_STORAGE_KEY   # storage write key (only for cloud uploads)
+        sync: false
+      - key: LISTING_IMAGES_BUCKET  # listing-images
+        sync: false
 
 services:
   # ── 1. Always-on website ────────────────────────────────────────────────
