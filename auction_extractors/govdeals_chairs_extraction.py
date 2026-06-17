@@ -1138,20 +1138,25 @@ def main():
             f"{cache_counts['skip']} skipped (uncacheable URL)."
         )
 
-    # Keep only chairs with quantity over MIN_CHAIR_QUANTITY (after optional LLM fixups).
-    # Exception: medical/dental lots sell as singles — gate the qty floor on category
-    # so the alert path still surfaces them. Cache already has every row regardless.
-    from top_chairs import _classify
+    # Keep only banquet/event chairs over MIN_CHAIR_QUANTITY (after LLM fixups).
+    # Drop non-chair lots that merely share a chair-ish word (scales, stools,
+    # recliners, …). Medical exam/dental lots are gated behind INCLUDE_MEDICAL
+    # (default off) for the future medical vertical. Cache keeps every row.
+    from top_chairs import _classify, _is_non_chair_lot
+    include_medical = os.getenv("INCLUDE_MEDICAL") == "1"
     def _keep(item: dict) -> bool:
-        if item.get("quantity", 0) > MIN_CHAIR_QUANTITY:
-            return True
-        cat, _ = _classify(item.get("title"), item.get("description"))
-        return cat == "medical"
+        title = item.get("title") or ""
+        cat, _ = _classify(title, item.get("description"))
+        if cat == "medical":
+            return include_medical
+        if _is_non_chair_lot(title):
+            return False
+        return item.get("quantity", 0) > MIN_CHAIR_QUANTITY
     listings = [item for item in listings if _keep(item)]
     if not listings:
-        print(f"No listings with quantity > {MIN_CHAIR_QUANTITY} (or medical). Exiting.")
+        print(f"No banquet chairs with quantity > {MIN_CHAIR_QUANTITY}. Exiting.")
         return
-    print(f" → {len(listings)} listings kept (qty > {MIN_CHAIR_QUANTITY} or medical)")
+    print(f" → {len(listings)} banquet-chair listings kept (qty > {MIN_CHAIR_QUANTITY})")
     ranked = rank_with_llm(listings)
     if not ranked:
         print("Ranking failed or returned empty. Exiting.")
