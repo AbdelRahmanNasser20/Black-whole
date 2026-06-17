@@ -12,7 +12,7 @@ from pathlib import Path
 
 import click
 
-from automation import browser, govdeals, downloader, dewatermark as dw, facebook, ebay, inventory
+from automation import browser, govdeals, downloader, dewatermark as dw, facebook, ebay, inventory, listing_images
 from automation.llm import default_extractors, run_parallel
 from automation import progress, templates
 
@@ -252,6 +252,29 @@ async def _run(
                 # custom-label field. Easy to grep across systems.
                 sku = meta.lot_id
                 hero = cleaned[0].name if cleaned else None
+                # Mirror cleaned photos into the shared Supabase Storage bucket
+                # so the deployed site can serve them (BLACKWHOLE-6). Best-effort:
+                # if storage is unconfigured or upload fails, URLs stay None and
+                # the site falls back to local /image/ serving.
+                hero_image_url: str | None = None
+                image_urls: list[str] | None = None
+                if cleaned:
+                    progress.emit("phase", phase="upload", status="running")
+                    try:
+                        uploaded = listing_images.upload_lot_images(meta.lot_id, cleaned)
+                    except Exception as e:  # never let storage crash a run
+                        uploaded = None
+                        print(f"  [warn] image upload failed: {e!r}")
+                    if uploaded:
+                        hero_image_url = uploaded.get("hero_image_url")
+                        image_urls = uploaded.get("image_urls") or None
+                        print(f"  uploaded {len(image_urls or [])} images to storage")
+                        progress.emit(
+                            "phase", phase="upload", status="done",
+                            uploaded=len(image_urls or []), hero=hero_image_url,
+                        )
+                    else:
+                        progress.emit("phase", phase="upload", status="skipped")
                 # Prefer the exact FB copy we just posted; otherwise render it
                 # locally so the public site has a clean product description.
                 rendered_desc = fb_rendered_description or templates.fb_description(
@@ -284,6 +307,8 @@ async def _run(
                     quantity=qty_int,
                     price_per_chair=float(confirmed) if confirmed else None,
                     hero_image=hero,
+                    hero_image_url=hero_image_url,
+                    image_urls=image_urls,
                 )
                 if fb_url:
                     inventory.set_platform_url(meta.lot_id, "facebook", fb_url)

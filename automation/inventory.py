@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from psycopg.types.json import Jsonb
+
 from . import db
 from .config import ATTACHMENTS_ROOT
 
@@ -67,36 +69,46 @@ def list_all(status: str | None = None) -> list[dict]:
 
 
 def list_public() -> list[dict]:
-    """Rows customers should see on /listings — visible and actually have stock."""
+    """Rows customers should see on /listings — visible and actually have stock.
+
+    Includes everything in PUBLIC_STATUSES: marketplace listings/drafts AND lots
+    we own or won at auction (`owned` / `won_pickup`) — those are real available
+    inventory, not just GovDeals drafts. `lost` / `hidden` / `sold_out` stay off.
+    """
     with connect() as conn:
         rows = conn.execute(
             """
             SELECT * FROM inventory
-            WHERE status IN ('listed', 'draft')
+            WHERE status = ANY(%s)
               AND (quantity_remaining IS NULL OR quantity_remaining > 0)
             ORDER BY
               CASE status WHEN 'listed' THEN 0 ELSE 1 END,
               COALESCE(quantity_remaining, 0) DESC,
               updated_at DESC
-            """
+            """,
+            (list(PUBLIC_STATUSES),),
         ).fetchall()
     return [dict(r) for r in rows]
 
 
 def stats() -> dict:
-    """Headline counts for the landing page."""
+    """Headline counts for the landing page (same visible set as list_public)."""
+    statuses = list(PUBLIC_STATUSES)
     with connect() as conn:
         total = conn.execute(
-            "SELECT COUNT(*) AS n FROM inventory WHERE status IN ('listed','draft')"
+            "SELECT COUNT(*) AS n FROM inventory WHERE status = ANY(%s) "
+            "AND (quantity_remaining IS NULL OR quantity_remaining > 0)",
+            (statuses,),
         ).fetchone()["n"]
         chairs = conn.execute(
             "SELECT COALESCE(SUM(quantity_remaining), 0) AS n FROM inventory "
-            "WHERE status IN ('listed','draft')"
+            "WHERE status = ANY(%s)",
+            (statuses,),
         ).fetchone()["n"]
         cities = conn.execute(
             "SELECT COUNT(DISTINCT city) AS n FROM inventory "
-            "WHERE city IS NOT NULL AND city != '' "
-            "AND status IN ('listed','draft')"
+            "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)",
+            (statuses,),
         ).fetchone()["n"]
     return {"lots": int(total), "chairs": int(chairs or 0), "cities": int(cities)}
 
@@ -122,16 +134,23 @@ def upsert_from_run(
     quantity: int | None,
     price_per_chair: float | None,
     hero_image: str | None,
+    hero_image_url: str | None = None,
+    image_urls: list[str] | None = None,
 ) -> dict:
     """Create/update an inventory row from a completed pipeline run.
 
     Preserves user-editable fields on update: `quantity_remaining`, `status`,
     `price_per_chair` (if already set), `hero_image` (if already set), and any
     stored FB/eBay URLs. A re-run should refresh metadata, not stomp edits.
+
+    `hero_image_url` / `image_urls` are the durable Supabase Storage URLs
+    (BLACKWHOLE-6). They REFRESH on each run (a re-upload may improve them) but
+    a None — meaning "no upload this run" — never wipes an existing value.
     """
     if not lot_id:
         raise ValueError("lot_id required")
     now = _now()
+    img_urls_param = Jsonb(image_urls) if image_urls is not None else None
     existing = get(lot_id)
     with connect() as conn:
         if existing is None:
@@ -142,19 +161,22 @@ def upsert_from_run(
                     sku, title, description, city, state, zip_code,
                     contact_name, contact_email, contact_phone, chair_type,
                     dimensions, quantity_original, quantity_remaining,
-                    price_per_chair, hero_image, status, parsed_at, updated_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
+                    price_per_chair, hero_image, hero_image_url, image_urls,
+                    status, parsed_at, updated_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
                 """,
                 (
                     str(lot_id), seller_id, govdeals_url, folder_name, folder_path,
                     sku, title, description, city, state, zip_code,
                     contact_name, contact_email, contact_phone, chair_type,
                     dimensions, quantity, quantity, price_per_chair, hero_image,
+                    hero_image_url, img_urls_param,
                     now, now,
                 ),
             )
         else:
-            # Keep user edits. Only refresh the "as-parsed" fields.
+            # Keep user edits. Only refresh the "as-parsed" fields. Image URLs
+            # refresh when a fresh upload supplied them, else keep what's there.
             conn.execute(
                 """
                 UPDATE inventory SET
@@ -176,6 +198,8 @@ def upsert_from_run(
                     quantity_original = COALESCE(%s, quantity_original),
                     price_per_chair   = COALESCE(price_per_chair, %s),
                     hero_image        = COALESCE(hero_image, %s),
+                    hero_image_url    = COALESCE(%s, hero_image_url),
+                    image_urls        = COALESCE(%s, image_urls),
                     updated_at        = %s
                 WHERE lot_id = %s
                 """,
@@ -183,12 +207,38 @@ def upsert_from_run(
                     seller_id, govdeals_url, folder_name, folder_path, sku,
                     title, description, city, state, zip_code,
                     contact_name, contact_email, contact_phone, chair_type,
-                    dimensions, quantity, price_per_chair, hero_image, now,
+                    dimensions, quantity, price_per_chair, hero_image,
+                    hero_image_url, img_urls_param, now,
                     str(lot_id),
                 ),
             )
         conn.commit()
     return get(lot_id)  # re-read
+
+
+def set_images(
+    lot_id: str, hero_image_url: str | None, image_urls: list[str] | None
+) -> dict | None:
+    """Stamp durable image URLs onto a row (backfill / out-of-band upload).
+
+    None values are ignored (COALESCE), so this only ever adds/updates URLs —
+    it never clears them.
+    """
+    now = _now()
+    img_urls_param = Jsonb(image_urls) if image_urls is not None else None
+    with connect() as conn:
+        conn.execute(
+            """
+            UPDATE inventory SET
+                hero_image_url = COALESCE(%s, hero_image_url),
+                image_urls     = COALESCE(%s, image_urls),
+                updated_at     = %s
+            WHERE lot_id = %s
+            """,
+            (hero_image_url, img_urls_param, now, str(lot_id)),
+        )
+        conn.commit()
+    return get(lot_id)
 
 
 # Platform name → (url_column, timestamp_column). Adding a new surface =

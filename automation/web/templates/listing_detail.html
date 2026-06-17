@@ -9,10 +9,10 @@
 
 <section class="detail-top">
   <div class="detail-gallery">
-    {% if images %}
+    {% if hero or images %}
       <div class="gal-main">
         <img id="gal-main-img"
-             src="/image/{{ item.folder_name }}/{{ item.hero_image or images[0] }}"
+             src="{{ hero or images[0] }}"
              alt="{{ item.title }}">
         <div class="lot-stamp lot-stamp--big">
           {% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}
@@ -21,8 +21,8 @@
       {% if images|length > 1 %}
       <div class="gal-thumbs">
         {% for img in images %}
-          <button class="gal-thumb" data-src="/image/{{ item.folder_name }}/{{ img }}" aria-label="view image">
-            <img src="/image/{{ item.folder_name }}/{{ img }}" alt="" loading="lazy">
+          <button class="gal-thumb" data-src="{{ img }}" aria-label="view image">
+            <img src="{{ img }}" alt="" loading="lazy">
           </button>
         {% endfor %}
       </div>

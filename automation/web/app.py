@@ -271,11 +271,40 @@ def _public_ctx(extra: dict) -> dict:
     }
 
 
+def _hero_src(row: dict) -> str | None:
+    """Cover-image URL for a row: durable cloud URL first, local /image/ fallback.
+
+    The deployed site has no local Desktop folder, so a populated
+    `hero_image_url` (Supabase Storage, BLACKWHOLE-6) is what actually renders
+    there. Locally, an un-uploaded lot still shows via the /image/ route.
+    """
+    url = (row.get("hero_image_url") or "").strip()
+    if url.startswith("http"):
+        return url
+    folder, hero = row.get("folder_name"), row.get("hero_image")
+    if folder and hero:
+        return f"/image/{folder}/{hero}"
+    return None
+
+
+def _gallery_srcs(row: dict) -> list[str]:
+    """Ordered gallery URLs: durable cloud list first, else local folder files."""
+    urls = row.get("image_urls")
+    if isinstance(urls, list) and urls:
+        return [u for u in urls if u]
+    folder = row.get("folder_name")
+    if folder:
+        return [f"/image/{folder}/{n}" for n in _folder_images(DOWNLOAD_ROOT / folder)]
+    return []
+
+
 @app.get("/", response_class=HTMLResponse)
 async def public_landing(request: Request):
     try:
         counts = inventory.stats()
         featured = inventory.list_public()[:4]
+        for r in featured:
+            r["hero_src"] = _hero_src(r)
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0}
         featured = []
@@ -288,6 +317,8 @@ async def public_landing(request: Request):
 @app.get("/listings", response_class=HTMLResponse)
 async def public_listings(request: Request):
     items = inventory.list_public()
+    for r in items:
+        r["hero_src"] = _hero_src(r)
     cities = sorted({(r.get("city") or "").strip() for r in items if r.get("city")})
     chair_types = sorted({(r.get("chair_type") or "").strip()
                           for r in items if r.get("chair_type")})
@@ -302,14 +333,13 @@ async def public_listing_detail(request: Request, lot_id: str):
     row = inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
         raise HTTPException(404, "listing not found")
-    imgs: list[str] = []
-    folder_name = row.get("folder_name")
-    if folder_name:
-        folder = DOWNLOAD_ROOT / folder_name
-        imgs = _folder_images(folder)
     return templates.TemplateResponse(
         request, "listing_detail.html",
-        _public_ctx({"item": row, "images": imgs}),
+        _public_ctx({
+            "item": row,
+            "hero": _hero_src(row),
+            "images": _gallery_srcs(row),
+        }),
     )
 
 
@@ -1431,12 +1461,9 @@ def _inventory_to_public(row: dict) -> dict:
     *whether* one is on file). Adds `buyer_cert_url` when an attachment exists.
     """
     out = dict(row)
-    folder = row.get("folder_name")
-    hero = row.get("hero_image")
-    if folder and hero:
-        out["hero_image_url"] = f"/image/{folder}/{hero}"
-    else:
-        out["hero_image_url"] = None
+    # Prefer the durable Supabase Storage URL (BLACKWHOLE-6); only synthesize a
+    # local /image/ path when no cloud URL is on file. Don't clobber the cloud URL.
+    out["hero_image_url"] = _hero_src(row)
     out["govdeals_password_set"] = bool(out.pop("govdeals_password", None))
     if out.get("buyer_cert_path"):
         out["buyer_cert_url"] = f"/api/inventory/{row['lot_id']}/buyer-cert"

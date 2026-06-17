@@ -92,8 +92,8 @@
     {% for item in featured %}
     <a class="lot-card" href="/listings/{{ item.lot_id }}">
       <div class="lot-img">
-        {% if item.folder_name and item.hero_image %}
-          <img src="/image/{{ item.folder_name }}/{{ item.hero_image }}" alt="{{ item.title }}" loading="lazy">
+        {% if item.hero_src %}
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}
