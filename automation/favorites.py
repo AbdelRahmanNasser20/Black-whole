@@ -69,6 +69,24 @@ def _parse_end_date(raw: str | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+def _moved_significantly(old_iso: str | None, new_iso: str | None, tol_seconds: int = 120) -> bool:
+    """True only when two ISO end-times differ by more than tol_seconds.
+
+    Guards the alert re-arm: a scrape re-parse that drifts by a few seconds (or
+    a formatting change that parses to the same instant) must NOT wipe the
+    sent-log and re-fire every 6d/3d/2d/1d/1h/5m stage. That drift was the
+    alert flood.
+    """
+    if not old_iso or not new_iso:
+        return False
+    try:
+        a = datetime.fromisoformat(old_iso)
+        b = datetime.fromisoformat(new_iso)
+    except ValueError:
+        return old_iso != new_iso
+    return abs((b - a).total_seconds()) > tol_seconds
+
+
 @dataclass
 class Favorite:
     asset_id: str
@@ -217,8 +235,11 @@ def upsert(
                 (link, title, quantity, end_iso, end_date_raw, image_url,
                  location, now, notes, asset_id),
             )
-            # Relist: end_date moved → re-arm alerts.
-            if end_iso and old_iso and end_iso != old_iso:
+            # Relist: end_date moved SIGNIFICANTLY → re-arm alerts. The
+            # tolerance stops a trivial re-parse / formatting drift from
+            # wiping the sent-log and re-firing every countdown stage — the
+            # cause of the alert flood.
+            if _moved_significantly(old_iso, end_iso):
                 conn.execute(
                     "DELETE FROM auction_alerts_sent WHERE asset_id = %s",
                     (asset_id,),

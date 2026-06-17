@@ -110,6 +110,23 @@ def _classify(title: str | None, description: str | None) -> tuple[str, str]:
     return "other", ""
 
 
+# Items that carry a chair-ish word but are NOT banquet/event/stackable
+# seating. Keeps the deal-finder focused; mirrors the manual 2026-06-17 purge
+# of auction_listings. (Medical exam/dental chairs are handled separately via
+# _classify -> "medical" + the INCLUDE_MEDICAL gate, not here.)
+_NON_CHAIR_TERMS = (
+    "scale", "stool", "ottoman", "pouf", "footrest", "lumbar support",
+    "recliner", "filing cabinet", "file cabinet", "pillow", "drafting chair",
+)
+
+
+def _is_non_chair_lot(title: str | None) -> bool:
+    """True when a title is clearly not banquet seating despite a chair-ish
+    word (e.g. 'Health o Meter Chair Scale', 'Bar Stools Set of 2')."""
+    t = (title or "").lower()
+    return any(term in t for term in _NON_CHAIR_TERMS)
+
+
 CATEGORIES = ("banquet", "medical", "other")
 
 

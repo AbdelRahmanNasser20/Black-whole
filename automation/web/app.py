@@ -1227,10 +1227,19 @@ async def _alerts_tick() -> None:
                         ).fetchone()
                         if row is None:
                             continue
-                        fresh_end = (row["end_date"] or row["time_left"] or "").strip()
-                        if not fresh_end and not f.end_date_raw:
+                        # ONLY the absolute end_date — never time_left. A
+                        # relative "2 days left" string re-parses to a new
+                        # instant every tick, which re-armed alerts endlessly
+                        # (the alert flood). No absolute date → keep snapshot.
+                        fresh_end = (row["end_date"] or "").strip()
+                        if not fresh_end:
                             continue
-                        if fresh_end == (f.end_date_raw or ""):
+                        fresh_dt = favorites._parse_end_date(fresh_end)
+                        if fresh_dt is None:
+                            continue
+                        # Compare PARSED times, not raw strings: formatting
+                        # drift must not trigger a needless re-sync/re-arm.
+                        if f.end_dt and abs((fresh_dt - f.end_dt).total_seconds()) <= 120:
                             continue
                         favorites.upsert(
                             asset_id=f.asset_id,
