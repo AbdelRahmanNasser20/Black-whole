@@ -43,6 +43,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3.2")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# Quantity pass can use a higher-quota provider than ranking (see govdeals note).
+QUANTITY_LLM_PROVIDER = (os.getenv("QUANTITY_LLM_PROVIDER") or LLM_PROVIDER).strip().lower()
 
 try:
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "600"))
@@ -605,6 +608,32 @@ def _format_output(listings):
     return "\n".join(lines)
 
 
+def _alert_on_quantity_degradation(listings: list, *, provider: str) -> None:
+    """Telegram-alert when the LLM quantity pass failed for some rows so the
+    pipeline is back on the (unreliable) regex value — silent regex fallback is
+    how big lots get the wrong count and disappear from results."""
+    degraded = [
+        it for it in listings
+        if it.get("quantity_source") in ("llm_failed", "llm_missing")
+    ]
+    if not degraded or not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    reason = next((it.get("quantity_error") for it in degraded if it.get("quantity_error")), "unknown")
+    text = (
+        f"⚠️ Public Surplus scrape: quantity LLM ({provider}) FAILED on "
+        f"{len(degraded)}/{len(listings)} lots — falling back to regex, counts may be wrong. "
+        f"First error: {str(reason)[:160]}"
+    )
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "disable_web_page_preview": True},
+            timeout=10,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f" → Telegram degradation-alert error: {e}")
+
+
 def send_telegram(listings):
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(" → Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID); skipping.")
@@ -667,13 +696,15 @@ def main():
         print("[1c] Inferring quantities with LLM (title + description when present)…")
         listings = refine_quantities_with_llm(
             listings,
-            provider=LLM_PROVIDER,
+            provider=QUANTITY_LLM_PROVIDER,
             ollama_base_url=OLLAMA_BASE_URL,
             ollama_model=OLLAMA_MODEL,
             ollama_timeout=OLLAMA_TIMEOUT,
             groq_api_key=GROQ_API_KEY,
             openai_api_key=OPENAI_API_KEY,
+            gemini_api_key=GEMINI_API_KEY,
         )
+        _alert_on_quantity_degradation(listings, provider=QUANTITY_LLM_PROVIDER)
     else:
         print("[1c] USE_LLM_QUANTITY=0 — shipping untrusted title-regex quantities.")
 
