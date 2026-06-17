@@ -58,6 +58,15 @@ OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.2")
 # Groq (when LLM_PROVIDER=groq) — free tier, fast
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# Gemini (when (QUANTITY_)LLM_PROVIDER=gemini) — high free-tier daily limits
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# The quantity pass can use a different (cheaper / higher-quota) provider than
+# ranking. Groq's free tier (100k tokens/day) blows up on a full scrape and
+# silently falls back to regex — which is how "Lot of 2,100" becomes qty 2.
+# Set QUANTITY_LLM_PROVIDER=gemini in prod so quantity never hits that cap.
+QUANTITY_LLM_PROVIDER = (os.getenv("QUANTITY_LLM_PROVIDER") or LLM_PROVIDER).strip().lower()
+
 # Ollama HTTP timeout (large JSON prompts can exceed 120s on CPU)
 try:
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "600"))
@@ -909,6 +918,25 @@ def _fallback_rank(listings):
         listing["rank"] = i
     return safe
 
+def _alert_on_quantity_degradation(listings: list, *, provider: str) -> None:
+    """Telegram-alert when the LLM quantity pass failed for some rows so the
+    pipeline is back on the (unreliable) regex value. Silent regex fallback is
+    exactly how a "Lot of 2,100" lot becomes qty 2 and vanishes from results —
+    the operator must know the run's quantities are degraded."""
+    degraded = [
+        it for it in listings
+        if it.get("quantity_source") in ("llm_failed", "llm_missing")
+    ]
+    if not degraded:
+        return
+    reason = next((it.get("quantity_error") for it in degraded if it.get("quantity_error")), "unknown")
+    _send_telegram_plain(
+        f"⚠️ GovDeals scrape: quantity LLM ({provider}) FAILED on {len(degraded)}/{len(listings)} "
+        f"lots — falling back to regex, so counts may be wrong (big lots can disappear). "
+        f"First error: {str(reason)[:160]}"
+    )
+
+
 def _send_telegram_plain(text: str) -> None:
     """Short alert (errors, etc.); skips if Telegram not configured."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -1087,13 +1115,15 @@ def main():
         print("[1d] Refining quantities with LLM (title + description when present)…")
         listings = refine_quantities_with_llm(
             listings,
-            provider=LLM_PROVIDER,
+            provider=QUANTITY_LLM_PROVIDER,
             ollama_base_url=OLLAMA_BASE_URL,
             ollama_model=OLLAMA_MODEL,
             ollama_timeout=OLLAMA_TIMEOUT,
             groq_api_key=GROQ_API_KEY,
             openai_api_key=OPENAI_API_KEY,
+            gemini_api_key=GEMINI_API_KEY,
         )
+        _alert_on_quantity_degradation(listings, provider=QUANTITY_LLM_PROVIDER)
 
     # Persist EVERY processed listing to the SQLite cache before the
     # quantity filter — including small lots we're about to drop, so future

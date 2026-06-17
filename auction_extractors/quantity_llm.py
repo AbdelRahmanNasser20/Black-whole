@@ -68,6 +68,14 @@ def _groq_chat(api_key: str, prompt: str, model: str = "llama-3.3-70b-versatile"
     return resp.choices[0].message.content or ""
 
 
+def _gemini_chat(api_key: str, prompt: str, model: str = "gemini-2.5-flash") -> str:
+    from google import genai
+
+    client = genai.Client(api_key=api_key)
+    resp = client.models.generate_content(model=model, contents=prompt)
+    return resp.text or ""
+
+
 def _claude_max_chat(prompt: str) -> str:
     """Run a prompt through the user's Claude Max subscription via the official
     ``claude-agent-sdk``. Strips all tools (we want a pure text completion),
@@ -131,6 +139,7 @@ def refine_quantities_with_llm(
     ollama_timeout: int,
     groq_api_key: str | None,
     openai_api_key: str | None,
+    gemini_api_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Set quantity, quantity_confidence, quantity_source on each listing.
@@ -203,6 +212,11 @@ INPUT:
                 if not groq_api_key:
                     raise ValueError("GROQ_API_KEY not set")
                 raw = _groq_chat(groq_api_key, prompt)
+            elif prov == "gemini":
+                key = gemini_api_key or os.getenv("GEMINI_API_KEY")
+                if not key:
+                    raise ValueError("GEMINI_API_KEY not set")
+                raw = _gemini_chat(key, prompt, os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
             elif prov == "ollama":
                 raw = _ollama_chat(ollama_base_url, ollama_model, prompt, ollama_timeout)
             elif prov == "claude_max":
