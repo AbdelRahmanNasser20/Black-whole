@@ -1505,6 +1505,7 @@ async def inv_create(payload: dict):
             lot_id=str(payload["lot_id"]).strip(),
             title=str(payload["title"]).strip(),
             quantity=int(payload["quantity"]),
+            subtitle=payload.get("subtitle") or None,
             price_per_chair=(float(payload["price_per_chair"])
                              if payload.get("price_per_chair") else None),
             city=payload.get("city") or None,

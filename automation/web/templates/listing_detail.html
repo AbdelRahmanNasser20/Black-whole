@@ -4,7 +4,7 @@
 
 {% block content %}
 <nav class="crumbs mono tiny">
-  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> / <span>LOT&nbsp;#{{ item.lot_id }}</span>
+  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> / <span>{{ item.title or 'LOT' }}</span>
 </nav>
 
 <section class="detail-top">
@@ -33,8 +33,8 @@
   </div>
 
   <div class="detail-info">
-    <div class="mono tiny">LOT&nbsp;#{{ item.lot_id }}{% if item.sku %} · SKU {{ item.sku }}{% endif %}</div>
     <h1 class="detail-title">{{ item.title or 'Untitled lot' }}</h1>
+    {% if item.subtitle %}<div class="detail-subtitle">{{ item.subtitle }}</div>{% endif %}
     {% if item.chair_type %}<div class="detail-type">{{ item.chair_type }}</div>{% endif %}
 
     <dl class="spec-sheet">
@@ -66,9 +66,11 @@
   <div class="contact-grid">
     <div>
       <div class="section-rule"></div>
-      <h2 class="section-title">MAKE&nbsp;AN&nbsp;OFFER</h2>
+      <h2 class="section-title">REQUEST&nbsp;A&nbsp;QUOTE</h2>
       <p class="contact-lede">
-        We reply within one business day. Bulk discounts available for 100+ chairs.
+        Tell us how many you need and where they're headed — we'll come back
+        with pricing, freight options, and what's in stock. Better rates on
+        large orders, and we'll work with your budget.
       </p>
     </div>
     <form class="manifest-form" id="contact-form" data-mode="detail">
@@ -85,7 +87,7 @@
       <label class="mf-row"><span>MESSAGE</span>
         <textarea name="message" rows="3" placeholder="Pickup date? Delivery? Offer price?"></textarea>
       </label>
-      <button type="submit" class="btn btn-primary">FILE INQUIRY FOR LOT #{{ item.lot_id }}</button>
+      <button type="submit" class="btn btn-primary">SEND MY REQUEST →</button>
       <div class="mf-result" hidden></div>
     </form>
   </div>

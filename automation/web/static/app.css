@@ -903,6 +903,26 @@ main {
   padding: 12px var(--pad);
   border-bottom: 1px solid var(--line);
 }
+.inv-add-form {
+  padding: 16px var(--pad);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-elev);
+}
+.inv-add-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+.inv-add-grid label { display: flex; flex-direction: column; gap: 4px; }
+.inv-add-grid label > span {
+  font-size: 10px; letter-spacing: 0.14em; color: var(--muted);
+}
+.inv-add-grid input, .inv-add-grid textarea {
+  background: var(--bg); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px;
+  font: inherit; font-size: 13px;
+}
+.inv-add-grid .inv-add-wide { grid-column: 1 / -1; }
+.inv-add-actions { display: flex; gap: 10px; margin-top: 14px; }
+@media (max-width: 760px) { .inv-add-grid { grid-template-columns: repeat(2, 1fr); } }
 .inv-strip {
   display: grid; grid-template-columns: repeat(3, 1fr);
   border-bottom: 1px solid var(--line);

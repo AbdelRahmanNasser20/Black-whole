@@ -1574,6 +1574,44 @@ $('#inv-backfill')?.addEventListener('click', async (e) => {
   });
 });
 
+// add-listing form: toggle + submit
+$('#inv-add')?.addEventListener('click', () => {
+  const f = $('#inv-add-form');
+  if (!f) return;
+  f.hidden = !f.hidden;
+  if (!f.hidden) f.querySelector('input[name="lot_id"]')?.focus();
+});
+$('#inv-add-cancel')?.addEventListener('click', () => {
+  const f = $('#inv-add-form');
+  if (f) { f.reset(); f.hidden = true; }
+});
+$('#inv-add-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.currentTarget;
+  const fd = new FormData(f);
+  const payload = {};
+  fd.forEach((v, k) => { v = (v || '').toString().trim(); if (v) payload[k] = v; });
+  if (!payload.lot_id || !payload.title || !payload.quantity) {
+    toast('Lot ID, title, and quantity are required.', 'err');
+    return;
+  }
+  const btn = f.querySelector('button[type="submit"]');
+  await withButtonLoading(btn, '…creating', async () => {
+    try {
+      await apiFetch('/api/inventory', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      toast(`Listing ${payload.lot_id} created.`, 'ok');
+      f.reset(); f.hidden = true;
+      loadInventory();
+    } catch (err) {
+      toast('Create failed: ' + (err.message || err), 'err');
+    }
+  });
+});
+
 // status-filter segmented control
 $$('#inv-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => {
   $$('#inv-status-filter .seg-btn').forEach(x => x.classList.remove('active'));

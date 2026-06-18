@@ -283,6 +283,7 @@
       </div>
     </div>
     <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="inv-add">+ add listing</button>
       <button type="button" class="btn btn-small" id="inv-refresh">↻ refresh</button>
       <button type="button" class="btn btn-small" id="inv-backfill"
               title="Walk ~/Desktop/Banquet chiars Pictures/ and import folders as draft rows">
@@ -291,6 +292,25 @@
       <a class="btn btn-small btn-ghost" href="/listings" target="_blank" rel="noopener">open public /listings ↗</a>
     </div>
   </div>
+
+  <form class="inv-add-form" id="inv-add-form" hidden>
+    <div class="inv-add-grid">
+      <label><span>LOT ID *</span><input name="lot_id" required placeholder="e.g. 12345 or my-custom-id"></label>
+      <label><span>TITLE *</span><input name="title" required placeholder="e.g. Blue Banquet Chairs"></label>
+      <label class="inv-add-wide"><span>SUBTITLE</span><input name="subtitle" placeholder="One-line distinguisher, e.g. Denim-blue upholstery on silver frames."></label>
+      <label><span>QUANTITY *</span><input name="quantity" type="number" min="1" required></label>
+      <label><span>PRICE / CHAIR</span><input name="price_per_chair" type="number" min="0" step="0.01" placeholder="25"></label>
+      <label><span>CITY</span><input name="city"></label>
+      <label><span>STATE</span><input name="state" placeholder="AZ"></label>
+      <label><span>ZIP</span><input name="zip_code"></label>
+      <label><span>CHAIR TYPE</span><input name="chair_type"></label>
+      <label class="inv-add-wide"><span>DESCRIPTION</span><textarea name="description" rows="2" placeholder="Plain description of the chairs."></textarea></label>
+    </div>
+    <div class="inv-add-actions">
+      <button type="submit" class="btn btn-small">create listing</button>
+      <button type="button" class="btn btn-small btn-ghost" id="inv-add-cancel">cancel</button>
+    </div>
+  </form>
 
   <div class="inv-strip" id="inv-stats"></div>
 
