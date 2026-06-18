@@ -49,10 +49,19 @@ def _strip_noise(text: str) -> str:
     response to a false positive we actually saw in ``state/listings.db``.
     """
     t = text.strip()
+    # Thousands separators: "2,100 chairs" / "Lot of 1,600" are real counts, but
+    # every pattern below uses \d+, which stops at the comma and would read 2 / 1.
+    # Drop commas sitting between two digits before anything else runs.
+    t = re.sub(r"(?<=\d),(?=\d)", "", t)
     # Leading "#12345 - title"
     t = re.sub(r"^#\d+\s*[-–—]\s*", "", t)
     # Leading long numeric prefix + dash
     t = re.sub(r"^\d{5,}\s*[-–—]\s*", "", t)
+    # Leading GovDeals lot/item code "06-316 ", "06-312 " — a digit run, dash,
+    # another digit run, then whitespace. These are department lot numbers, not
+    # counts ("06-316  UAB Courtside Chairs (4)" used to read 316). The trailing
+    # \s+ keeps "16- Stackable Chairs" (no digits after the dash) untouched.
+    t = re.sub(r"^\d{1,3}\s*[-–—]\s*\d{2,}\s+", "", t)
     # GovDeals internal codes: "(218321 BT)", "(217377 DC)", "(12345 AJ)", etc.
     t = re.sub(r"\(\s*\d{4,}\s+[A-Z]{1,4}\s*\)", "", t)
     # Inline model numbers like "SMR APEX S241000" — letter+digits globs.

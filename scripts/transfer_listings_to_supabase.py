@@ -10,6 +10,7 @@ running it again after a fresh scrape brings Supabase up to date.
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 
@@ -19,10 +20,21 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from automation import db  # noqa: E402  (must load .env first)
 
-SQLITE_PATH = (
+_DEFAULT_SQLITE_PATH = (
     Path(__file__).resolve().parent.parent
     / "auction_extractors" / "state" / "listings.db"
 )
+
+
+def _sqlite_path() -> Path:
+    """Source SQLite cache, honoring ``LISTINGS_DB_PATH``.
+
+    Must match ``auction_extractors/listings_db.py`` — the discovery cron points
+    the scrape at ``/tmp/listings.db`` (ephemeral container fs), so the transfer
+    has to read the same env var instead of the hardcoded state-dir default,
+    which doesn't exist in the cron container.
+    """
+    return Path(os.getenv("LISTINGS_DB_PATH") or _DEFAULT_SQLITE_PATH)
 
 # Mirror of the SQLite `listings` schema. *_at columns become timestamptz;
 # end_date / time_left stay free-text (they hold strings like "April 15, 2026").
@@ -79,14 +91,15 @@ def _row_to_params(row: sqlite3.Row) -> list:
 
 
 def main() -> None:
-    if not SQLITE_PATH.exists():
-        raise SystemExit(f"source not found: {SQLITE_PATH}")
+    sqlite_path = _sqlite_path()
+    if not sqlite_path.exists():
+        raise SystemExit(f"source not found: {sqlite_path}")
 
-    src = sqlite3.connect(f"file:{SQLITE_PATH}?mode=ro", uri=True)
+    src = sqlite3.connect(f"file:{sqlite_path}?mode=ro", uri=True)
     src.row_factory = sqlite3.Row
     rows = src.execute(f"SELECT {', '.join(COLS)} FROM listings").fetchall()
     src.close()
-    print(f"read {len(rows)} rows from {SQLITE_PATH.name}")
+    print(f"read {len(rows)} rows from {sqlite_path}")
 
     with db.connect() as conn:
         conn.execute(DDL)

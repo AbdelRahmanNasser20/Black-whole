@@ -58,6 +58,22 @@ CASES = [
         6,
         "regex_fulltext",
     ),
+    # UAB Courtside (2026-06-18): title says "(4)" but the shared description
+    # repeats the grand total — "(This is part of 105 chairs being sold in
+    # varying numbers and individually.)" — and the fulltext pass upgraded
+    # every sibling lot to 105. The "part of N chairs … individually" sentence
+    # must be dropped so the title's 4 stands.
+    (
+        _row(
+            "06-316  UAB Courtside Chairs  (4)",
+            "Four UAB basketball courtside chairs. (This is part of 105 "
+            "chairs being sold in varying numbers and individually.) Send "
+            "all inquiries to MATT WILDT at mwildt@uab.edu.",
+            4,
+        ),
+        4,
+        "regex_title",
+    ),
     # the per-listing count in another sentence must still be picked up
     (
         _row(
