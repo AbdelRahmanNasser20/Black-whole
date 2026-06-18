@@ -93,6 +93,17 @@ def _llm_quantity_enabled() -> bool:
     time is untrusted (it reads lot numbers like "LOT #142" as counts) and
     ships only when the LLM call fails, tagged ``quantity_source=llm_failed``."""
     return os.getenv("USE_LLM_QUANTITY", "1") == "1"
+
+
+def _use_http_fast_path() -> bool:
+    """Plain-HTTP scrape now defaults OFF (browser is primary).
+
+    PS migrated to the ps-v2 site and anti-bot-gates search results: a plain
+    ``requests`` GET reliably returns only the empty shell (``noAuctionsFound``,
+    0 cards), so the old fast path just wastes a round-trip before the browser
+    fallback runs. Opt back in with ``PUBLICSURPLUS_USE_API=1`` if PS ever
+    re-opens server-rendered results to non-browser clients."""
+    return os.getenv("PUBLICSURPLUS_USE_API", "0") == "1"
 _BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -487,10 +498,11 @@ def _search_url(term: str, page_idx: int) -> str:
 
 
 def scrape_listings() -> list:
-    """Dispatch to the plain-HTTP scraper (fast, no browser) by default,
-    falling back to the Playwright DOM scraper on any failure or empty
-    result. Set ``PUBLICSURPLUS_USE_API=0`` to force the browser path."""
-    if os.getenv("PUBLICSURPLUS_USE_API", "1") != "0":
+    """Browser scrape is primary (PS anti-bot-gates server-rendered results to
+    non-browser clients). The plain-HTTP fast path is opt-in via
+    ``PUBLICSURPLUS_USE_API=1`` and still falls back to the browser on empty/
+    error."""
+    if _use_http_fast_path():
         try:
             listings = scrape_listings_via_http()
             if listings:
@@ -501,9 +513,39 @@ def scrape_listings() -> list:
     return scrape_listings_via_browser()
 
 
+# Page states after a search navigation: result cards (.auction-item), the
+# explicit empty marker (#noAuctionsFound, un-hidden by JS when a search truly
+# has no hits), or — under anti-bot throttling — neither (the ps-v2 shell).
+# Wait for either of the first two; on the third, back off and reload before
+# giving up so a transient throttle isn't misread as "no results".
+_RESULTS_OR_EMPTY = ".auction-item, #noAuctionsFound:not(.d-none)"
+
+
+def _wait_for_search_results(page, attempts: int = 3, backoff_sec: float = 4.0) -> bool:
+    """Return True if result cards rendered, False if confirmed empty/blocked.
+
+    Reloads with linear backoff to ride out transient PS throttling (the shell
+    response carries neither cards nor the un-hidden empty marker)."""
+    for attempt in range(max(1, attempts)):
+        try:
+            page.wait_for_selector(_RESULTS_OR_EMPTY, timeout=15000)
+            return page.locator(".auction-item").count() > 0
+        except Exception:
+            if attempt < attempts - 1:
+                page.wait_for_timeout(int(backoff_sec * 1000 * (attempt + 1)))
+                try:
+                    page.reload(wait_until="domcontentloaded", timeout=60000)
+                except Exception:
+                    pass
+    return False
+
+
 def scrape_listings_via_browser():
     print("[1] Starting scrape_listings_via_browser() (Public Surplus)")
     listings = []
+    # Polite pacing — PS throttles bursty automated access. Tunable via env.
+    page_delay = float(os.getenv("PUBLICSURPLUS_PAGE_DELAY_SEC", "1.5"))
+    term_delay = float(os.getenv("PUBLICSURPLUS_TERM_DELAY_SEC", "2.5"))
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=os.getenv("HEADLESS", "0") == "1",
@@ -516,51 +558,65 @@ def scrape_listings_via_browser():
         )
         page = browser.new_page()
         try:
-            page.goto(BASE_URL, wait_until="domcontentloaded", timeout=60000)
+            # Warm-up visit (cookies + session). Best-effort: a reset/timeout
+            # here must not abort the whole scrape.
             try:
-                page.locator("text='Yes, I Accept Cookies'").click(timeout=4000)
-            except Exception:
-                pass
-            page.wait_for_timeout(800)
+                page.goto(BASE_URL, wait_until="domcontentloaded", timeout=60000)
+                try:
+                    page.locator("text='Yes, I Accept Cookies'").click(timeout=4000)
+                except Exception:
+                    pass
+                page.wait_for_timeout(800)
+            except Exception as e:
+                print(f" → Warm-up visit failed ({e}); continuing to search.")
 
             for term in SEARCH_TERMS:
                 term_listings = []
                 print(f"\n → Filter: '{term}'")
-                page_num = 0
-                while page_num < MAX_SEARCH_PAGES:
-                    url = _search_url(term, page_num)
-                    page.goto(url, wait_until="domcontentloaded", timeout=60000)
-                    page.wait_for_timeout(600)
-                    try:
-                        page.wait_for_selector(".auction-item", timeout=20000)
-                    except Exception:
-                        if page_num == 0:
-                            print(f"   No results (or timeout) for '{term}'.")
-                        break
+                # Per-term isolation: a connection reset / timeout on one term
+                # (PS throttling is bursty) must not kill the remaining terms.
+                try:
+                    page_num = 0
+                    while page_num < MAX_SEARCH_PAGES:
+                        url = _search_url(term, page_num)
+                        page.goto(url, wait_until="domcontentloaded", timeout=60000)
+                        page.wait_for_timeout(600)
+                        if not _wait_for_search_results(page):
+                            if page_num == 0:
+                                print(f"   No results (or blocked) for '{term}'.")
+                            break
 
-                    page_cards = _scrape_one_page(page)
-                    if not page_cards:
-                        if page_num == 0:
-                            print(f"   No results for '{term}'.")
-                        break
-                    term_listings.extend(page_cards)
-                    quantities = [c["quantity"] for c in page_cards]
-                    print(f"   Page {page_num}: {len(page_cards)} listings, quantities: {quantities}")
+                        page_cards = _scrape_one_page(page)
+                        if not page_cards:
+                            if page_num == 0:
+                                print(f"   No results for '{term}'.")
+                            break
+                        term_listings.extend(page_cards)
+                        quantities = [c["quantity"] for c in page_cards]
+                        print(f"   Page {page_num}: {len(page_cards)} listings, quantities: {quantities}")
 
-                    if len(page_cards) < 25:
-                        break
-                    page_num += 1
+                        if len(page_cards) < 25:
+                            break
+                        page_num += 1
+                        page.wait_for_timeout(int(page_delay * 1000))
+                except Exception as e:
+                    print(f"   • '{term}' failed ({e}); skipping to next term.")
 
+                if term_delay > 0:
+                    time.sleep(term_delay)
                 listings.extend(term_listings)
                 qty_list = [c["quantity"] for c in term_listings]
                 print(f"   Filter '{term}' total: {len(term_listings)} listings, quantities: {qty_list}")
 
         except Exception as e:
             print(f" → Error during scraping: {e}")
-            REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-            err_png = REPORTS_DIR / "publicsurplus_error.png"
-            page.screenshot(path=str(err_png))
-            print(f" → Screenshot saved as {err_png}")
+            try:
+                REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+                err_png = REPORTS_DIR / "publicsurplus_error.png"
+                page.screenshot(path=str(err_png))
+                print(f" → Screenshot saved as {err_png}")
+            except Exception:
+                pass
         finally:
             browser.close()
 
