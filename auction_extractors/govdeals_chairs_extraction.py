@@ -322,6 +322,16 @@ def _fetch_govdeals_long_description(
     return description, _pluck_image(), pickup_zip, contact_email, contact_phone
 
 
+def _llm_quantity_enabled() -> bool:
+    """LLM quantity pass defaults ON (matches Public Surplus).
+
+    The title-only regex misreads model/fleet numbers and thousands-separated
+    counts; the LLM is the trustworthy signal and must run unless explicitly
+    disabled with ``USE_LLM_QUANTITY=0``.
+    """
+    return os.getenv("USE_LLM_QUANTITY", "1") == "1"
+
+
 def enrich_listings_with_govdeals_descriptions(listings: list) -> list:
     if os.getenv("FETCH_GOVDEALS_DESCRIPTION") != "1":
         return listings
@@ -1111,7 +1121,7 @@ def main():
         print("[1c] Skipping regex(fulltext) — no descriptions on any listing.")
         print("     Set FETCH_GOVDEALS_DESCRIPTION=1 in .env to enable.")
 
-    if os.getenv("USE_LLM_QUANTITY") == "1":
+    if _llm_quantity_enabled():
         print("[1d] Refining quantities with LLM (title + description when present)…")
         listings = refine_quantities_with_llm(
             listings,

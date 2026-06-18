@@ -41,6 +41,11 @@ _CROSS_LISTING_RE = re.compile(
     r"|across\s+(?:multiple|several|many|our|all)\s+(?:listing|auction|lot)s?"
     r"|total\s+across"
     r"|sold\s+in\s+(?:groups|sets|quantities|batches)\s+of"
+    # "(This is part of 105 chairs being sold in varying numbers and
+    # individually.)" — UAB Courtside split-lot phrasing (2026-06-18).
+    r"|part\s+of\s+(?:the\s+)?\d+\s+chairs?"
+    r"|sold\s+in\s+varying\s+(?:numbers|quantities|amounts|sizes)"
+    r"|being\s+sold\s+(?:in\s+varying|individually)"
     r"|(?:more|additional|remaining)\s+(?:\S+\s+){0,3}?available\s+in"
     r"|see\s+our\s+other"
     r"|multiple\s+(?:listings|auctions)"
