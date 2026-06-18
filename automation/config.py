@@ -27,7 +27,14 @@ DOWNLOAD_ROOT = Path(os.getenv(
 ))
 
 STATE_ROOT = HOME / ".listing_automation"
-CHROME_PROFILE = STATE_ROOT / "chrome_profile"
+# Chrome profile holding the FB + eBay sessions. Overridable via
+# LISTING_CHROME_PROFILE so the pipeline can reuse another project's profile
+# (e.g. the facebook-crm poller's chrome_profile/). When pointed at a shared
+# profile, the lock handling in browser.py refuses to kill a live owner so a
+# running poller is never taken down.
+CHROME_PROFILE = Path(os.getenv("LISTING_CHROME_PROFILE") or (STATE_ROOT / "chrome_profile"))
+# True when the profile is borrowed from elsewhere (not our own state dir).
+CHROME_PROFILE_SHARED = bool(os.getenv("LISTING_CHROME_PROFILE"))
 LOG_DIR = STATE_ROOT / "logs"
 SCRATCH_DIR = STATE_ROOT / "scratch"
 ATTACHMENTS_ROOT = STATE_ROOT / "attachments"
