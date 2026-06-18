@@ -100,8 +100,9 @@
         <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
       </div>
       <div class="lot-body">
-        <div class="lot-meta mono">LOT #{{ item.lot_id }} · {{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>
+        <div class="lot-meta mono">{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>
         <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+        {% if item.subtitle %}<div class="lot-subtitle">{{ item.subtitle }}</div>{% endif %}
         <div class="lot-row">
           <div class="lot-qty">
             <div class="lot-qty-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</div>

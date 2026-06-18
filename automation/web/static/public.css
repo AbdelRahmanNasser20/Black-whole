@@ -304,6 +304,12 @@ a:hover { color: var(--accent); }
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
 }
+.lot-subtitle {
+  font-family: var(--f-body); font-size: 13px; line-height: 1.35;
+  color: var(--muted); margin-top: 4px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .lot-row {
   display: flex; justify-content: space-between; align-items: flex-end;
   margin-top: 4px;
@@ -472,6 +478,7 @@ a:hover { color: var(--accent); }
   font-size: clamp(32px, 4vw, 54px); line-height: 1.05;
   text-transform: uppercase; letter-spacing: -0.01em;
 }
+.detail-subtitle { font-family: var(--f-body); font-size: 17px; line-height: 1.4; color: var(--ink); margin-top: -8px; }
 .detail-type { font-family: var(--f-body); font-style: italic; font-size: 19px; color: var(--muted); }
 
 .spec-sheet {

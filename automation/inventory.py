@@ -295,7 +295,7 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
     """
     allowed = {
         "quantity_remaining", "quantity_original", "price_per_chair", "status", "hero_image",
-        "title", "description", "chair_type", "dimensions", "city", "state",
+        "title", "subtitle", "description", "chair_type", "dimensions", "city", "state",
         "zip_code", "contact_name", "contact_email", "contact_phone",
         "govdeals_username", "govdeals_password",
     }
@@ -416,6 +416,7 @@ def insert_manual(
     lot_id: str,
     title: str,
     quantity: int,
+    subtitle: str | None = None,
     price_per_chair: float | None = None,
     city: str | None = None,
     state: str | None = None,
@@ -434,13 +435,13 @@ def insert_manual(
         conn.execute(
             """
             INSERT INTO inventory (
-                lot_id, title, description, city, state, zip_code, chair_type,
+                lot_id, title, subtitle, description, city, state, zip_code, chair_type,
                 dimensions, quantity_original, quantity_remaining, price_per_chair,
                 folder_name, hero_image, status, parsed_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
             """,
             (
-                str(lot_id), title, description, city, state, zip_code, chair_type,
+                str(lot_id), title, subtitle, description, city, state, zip_code, chair_type,
                 dimensions, quantity, quantity, price_per_chair, folder_name,
                 hero_image, now, now,
             ),

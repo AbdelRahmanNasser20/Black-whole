@@ -14,7 +14,7 @@ import click
 
 from automation import browser, govdeals, downloader, dewatermark as dw, facebook, ebay, inventory, listing_images
 from automation.llm import default_extractors, run_parallel
-from automation import progress, templates
+from automation import progress
 
 
 async def _wait_for_price_confirmation(suggested: int, timeout: float) -> int | None:
@@ -275,18 +275,12 @@ async def _run(
                         )
                     else:
                         progress.emit("phase", phase="upload", status="skipped")
-                # Prefer the exact FB copy we just posted; otherwise render it
-                # locally so the public site has a clean product description.
-                rendered_desc = fb_rendered_description or templates.fb_description(
-                    location=primary.location,
-                    chair_type=primary.chair_type,
-                    quantity=primary.quantity,
-                    dimensions=primary.dimensions,
-                    description_text=primary.description_text,
-                    city=primary.city or meta.city,
-                    state=primary.state or meta.state,
-                    zip_code=primary.zip_code or meta.zip_code,
-                )
+                # Persist only the plain chair prose to the ledger. The public
+                # site shows location / quantity / contact separately, so the
+                # logistics boilerplate (📍 location, 📦 qty, "to get a quote")
+                # is intentionally NOT stored here. The Facebook post still
+                # includes that boilerplate via facebook.create_draft.
+                clean_desc = (primary.description_text or "").strip() or None
                 inventory.upsert_from_run(
                     lot_id=meta.lot_id,
                     seller_id=meta.seller_id or None,
@@ -295,7 +289,7 @@ async def _run(
                     folder_path=str(meta.folder_path),
                     sku=sku,
                     title=primary.title,
-                    description=rendered_desc,
+                    description=clean_desc,
                     city=primary.city or meta.city,
                     state=primary.state or meta.state,
                     zip_code=primary.zip_code or meta.zip_code,
