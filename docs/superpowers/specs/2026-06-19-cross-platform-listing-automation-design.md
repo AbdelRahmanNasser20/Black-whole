@@ -1,8 +1,32 @@
 # Cross-platform listing automation — design
 
 **Date:** 2026-06-19
-**Status:** Approved (design); pending implementation plan
+**Status:** Implemented (eBay) — see Implementation outcome below
 **Author:** Claude (brainstormed with Abdel)
+
+## Implementation outcome (2026-06-20)
+
+- **OfferUp dropped:** web item-posting is app-only (every post route → `/getapp`);
+  `business.offerup.com` is a paid/sales-gated ad product, not self-serve. Not
+  browser-automatable. Pivoted Phase 1 to **eBay**.
+- **eBay is the proven driver.** Funnel: prelist → title → Banquet Chairs
+  category → Continue without match → condition (Used) → editor. Lot **31225
+  (Boise) published live** (item `336544966627`); lot **2807 (Maroon) verified as
+  a draft** through the skill.
+- **Lead-gen model** (per user): eBay quantity = 1, description carries bulk qty +
+  freight + "message for quotes" + the `black-whole.com/listings/<lot>` backlink.
+  Promoted Listings (ad rate) for extra reach is a separate, still-manual step.
+- **Enrichment added** (per user "fill up as much detail… colors and what not"):
+  `listing_content.parse_attributes()` derives Color / Frame Material / Seat
+  Material / Frame Color / Style from each lot's free-text fields and fills eBay
+  item specifics + a detail line in the description.
+- **Login reality:** the established CfT `chrome_profile` is reused for all
+  marketplace work — a fresh Playwright/MCP profile gets bot-blocked at eBay/
+  OfferUp login (reCAPTCHA). `LISTING_CHROME_PROFILE` points at it.
+- Shipped: `automation/listing_content.py`, `automation/drivers/ebay.py`,
+  `automation/drivers/__init__.py`, `scripts/list_item.py`,
+  `.claude/skills/list-item/SKILL.md`. Ledger `set_platform_url` already supports
+  `ebay`; `offerup`/`craigslist` columns remain unused.
 
 ## Problem
 
