@@ -208,6 +208,11 @@ INPUT:
         def _mark_chunk_failed(reason: str, raw_excerpt: str = "") -> None:
             short = reason[:200]
             for it in chunk:
+                # Drop the regex seed rather than shipping it as a trusted count.
+                # An unverified regex quantity (often a lot/model number) must
+                # not survive an LLM failure — leave it None and let the next
+                # run retry (BLACKWHOLE-4 AC4).
+                it["quantity"] = None
                 it["quantity_source"] = "llm_failed"
                 it["quantity_confidence"] = "unknown"
                 it["quantity_error"] = short
@@ -268,6 +273,8 @@ INPUT:
             if not row:
                 # Parsed JSON but this row is missing — mark it so it is
                 # visible rather than blending in with successful predictions.
+                # Null the regex seed so it isn't trusted (BLACKWHOLE-4 AC4).
+                item["quantity"] = None
                 item["quantity_source"] = "llm_missing"
                 item["quantity_confidence"] = "unknown"
                 item["quantity_error"] = "row absent from LLM response"
