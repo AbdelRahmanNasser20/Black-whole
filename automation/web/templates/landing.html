@@ -57,6 +57,9 @@
   </div>
 </section>
 
+{% set subscribe_source = 'site_landing' %}
+{% include "_subscribe_form.html" %}
+
 <section class="how">
   <div class="how-head">
     <div class="section-rule"></div>
@@ -172,9 +175,6 @@
     </form>
   </div>
 </section>
-
-{% set subscribe_source = 'site_landing' %}
-{% include "_subscribe_form.html" %}
 {% endblock %}
 
 {% block scripts %}
