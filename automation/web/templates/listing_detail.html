@@ -1,5 +1,16 @@
 {% extends "_public_base.html" %}
-{% block title %}{{ item.title or 'Lot' }} — Black Whole Liquidation{% endblock %}
+{% block title %}{{ seo_title }}{% endblock %}
+{% block meta_description %}{{ seo_description }}{% endblock %}
+{% block og_type %}product{% endblock %}
+{% block og_image_tags %}
+  {%- if og_image %}
+  <meta property="og:image" content="{{ og_image }}">
+  <meta name="twitter:card" content="summary_large_image">
+  {%- endif %}
+{% endblock %}
+{% block head_extra %}
+  <script type="application/ld+json">{{ product_jsonld | safe }}</script>
+{% endblock %}
 {% block body_class %}page-detail{% endblock %}
 
 {% block content %}
