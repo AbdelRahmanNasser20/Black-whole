@@ -42,6 +42,9 @@
     <button class="tab" data-tab="test-scrape">
       <span class="tab-num">08</span><span class="tab-label">Test Scrape</span>
     </button>
+    <button class="tab" data-tab="subscribers">
+      <span class="tab-num">09</span><span class="tab-label">Subscribers</span>
+    </button>
   </nav>
   <div class="meta">
     <span class="status-dot" id="conn-dot"></span>
@@ -368,6 +371,40 @@
 
   <div class="inq-list" id="inq-list">
     <div class="drafts-empty">Loading inquiries…</div>
+  </div>
+</section>
+
+
+<!-- ───────────── Subscribers ───────────── -->
+<section class="panel" data-pane="subscribers" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">INBOX / ALERT SIGNUPS</div>
+    <h1 class="hero-title">Buyers waiting on the next truck.</h1>
+    <p class="hero-sub">
+      From the public alerts form. Work each one <span class="lex running">new</span> →
+      <span class="lex done">contacted</span> → <span class="lex done">matched</span>;
+      <span class="lex pending">unsubscribed</span> means never blast them again.
+    </p>
+  </div>
+
+  <div class="inv-controls">
+    <div class="ac-group">
+      <span class="ac-label">STATUS</span>
+      <div class="seg" id="sub-status-filter">
+        <button type="button" class="seg-btn active" data-value="">all</button>
+        <button type="button" class="seg-btn" data-value="new">new</button>
+        <button type="button" class="seg-btn" data-value="contacted">contacted</button>
+        <button type="button" class="seg-btn" data-value="matched">matched</button>
+        <button type="button" class="seg-btn" data-value="unsubscribed">unsubscribed</button>
+      </div>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="sub-refresh">↻ refresh</button>
+    </div>
+  </div>
+
+  <div class="inq-list" id="sub-list">
+    <div class="drafts-empty">Loading subscribers…</div>
   </div>
 </section>
 

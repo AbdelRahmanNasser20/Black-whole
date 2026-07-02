@@ -1031,6 +1031,8 @@ main {
 .inq-card.inq-new { border-left-color: var(--accent); }
 .inq-card.inq-contacted { border-left-color: var(--info); }
 .inq-card.inq-closed { border-left-color: var(--ink-dim); opacity: 0.75; }
+.inq-card.inq-matched { border-left-color: var(--ok); }
+.inq-card.inq-unsubscribed { border-left-color: var(--err); opacity: 0.75; }
 
 .inq-head {
   display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
@@ -1055,6 +1057,8 @@ main {
 .inq-status-new { color: var(--accent); border-color: var(--accent); }
 .inq-status-contacted { color: var(--info); border-color: var(--info); }
 .inq-status-closed { color: var(--ink-dim); }
+.inq-status-matched { color: var(--ok); border-color: var(--ok); }
+.inq-status-unsubscribed { color: var(--err); border-color: var(--err); }
 
 .inq-body { display: flex; flex-direction: column; gap: 6px; }
 .inq-name { font-size: 15px; font-weight: 500; }

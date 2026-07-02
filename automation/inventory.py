@@ -5,9 +5,11 @@ output. Re-running the pipeline on a lot we'd already published would spend
 marketplace API budget a second time. This module is the single source of truth
 for "what we've parsed, what's up where, and how many are left to sell."
 
-Two tables, both in the shared Supabase Postgres DB (`blackwhole`):
-  - `inventory`  : one row per GovDeals lot, keyed by lot_id
-  - `inquiries`  : customer contact-form submissions (buy/sell)
+Three tables, all in the shared Supabase Postgres DB (`blackwhole`):
+  - `inventory`   : one row per GovDeals lot, keyed by lot_id
+  - `inquiries`   : customer contact-form submissions (buy/sell)
+  - `subscribers` : new-inventory alert signups (BLACKWHOLE-10); DDL of record
+                    in `scripts/sql/001_subscribers.sql`
 
 Both are read/written from the FastAPI dashboard and from run.py. Storage goes
 through `automation.db` (psycopg over Supabase) — no ORM. Schema lives in
@@ -537,6 +539,108 @@ def delete_inquiry(inquiry_id: int) -> bool:
     with connect() as conn:
         cur = conn.execute(
             "DELETE FROM inquiries WHERE id = %s", (int(inquiry_id),)
+        )
+        conn.commit()
+        return cur.rowcount > 0
+
+
+# ───────────────────────────── subscribers ─────────────────────────────
+# New-inventory alert signups (BLACKWHOLE-10). Distinct from `inquiries`
+# (one-off contact) — a subscriber is a standing "ping me when chairs land"
+# registration and the join surface for the CRM (BWCRM-26, match on
+# email/phone). `unsubscribed` is the do-not-blast terminal state the future
+# blast job filters on.
+
+SUBSCRIBER_STATUSES = ("new", "contacted", "matched", "unsubscribed")
+SUBSCRIBER_SOURCES = ("site_listings", "site_landing", "site_detail", "operator")
+
+
+def create_subscriber(
+    *,
+    name: str | None = None,
+    email: str | None = None,
+    phone: str | None = None,
+    city: str | None = None,
+    state: str | None = None,
+    zip_code: str | None = None,
+    quantity_wanted: int | None = None,
+    use_case: str | None = None,
+    chair_type: str | None = None,
+    timeline: str | None = None,
+    budget_per_chair: str | None = None,
+    delivery: str | None = None,
+    notes: str | None = None,
+    source: str = "site_listings",
+) -> dict:
+    if not (email or "").strip() and not (phone or "").strip():
+        raise ValueError("email or phone required")
+    if source not in SUBSCRIBER_SOURCES:
+        raise ValueError(f"invalid source: {source}")
+    now = _now()
+    with connect() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO subscribers (
+                name, email, phone, city, state, zip_code, quantity_wanted,
+                use_case, chair_type, timeline, budget_per_chair, delivery,
+                notes, source, status, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new', %s)
+            RETURNING id
+            """,
+            (
+                (name or "").strip() or None,
+                (email or "").strip() or None, (phone or "").strip() or None,
+                (city or "").strip() or None, (state or "").strip() or None,
+                (zip_code or "").strip() or None, quantity_wanted,
+                (use_case or "").strip() or None, (chair_type or "").strip() or None,
+                (timeline or "").strip() or None, (budget_per_chair or "").strip() or None,
+                (delivery or "").strip() or None, (notes or "").strip() or None,
+                source, now,
+            ),
+        )
+        subscriber_id = cur.fetchone()["id"]
+        conn.commit()
+    return get_subscriber(subscriber_id)
+
+
+def get_subscriber(subscriber_id: int) -> dict | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM subscribers WHERE id = %s", (int(subscriber_id),)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def list_subscribers(status: str | None = None) -> list[dict]:
+    with connect() as conn:
+        if status:
+            rows = conn.execute(
+                "SELECT * FROM subscribers WHERE status = %s ORDER BY created_at DESC",
+                (status,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM subscribers ORDER BY created_at DESC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_subscriber_status(subscriber_id: int, status: str) -> dict | None:
+    if status not in SUBSCRIBER_STATUSES:
+        raise ValueError(f"invalid status: {status}")
+    with connect() as conn:
+        conn.execute(
+            "UPDATE subscribers SET status = %s WHERE id = %s",
+            (status, int(subscriber_id)),
+        )
+        conn.commit()
+    return get_subscriber(subscriber_id)
+
+
+def delete_subscriber(subscriber_id: int) -> bool:
+    with connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM subscribers WHERE id = %s", (int(subscriber_id),)
         )
         conn.commit()
         return cur.rowcount > 0

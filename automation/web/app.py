@@ -10,6 +10,8 @@ Routes:
   POST /api/compare/{ts}/rate → save a star rating (matched / wrong)
   GET  /image/{folder}/{name} → serve image from a listing folder
   GET  /screenshot/{folder}/{name} → serve a Playwright screenshot
+  POST /subscribe             → public alerts signup → subscribers table
+  GET/PATCH/DELETE /api/subscribers[/{id}] → admin Subscribers tab
 
 Streams stdout from run.py as Server-Sent Events. Parses
 `<<<EVENT>>>{json}` lines emitted by automation.progress.
@@ -302,7 +304,13 @@ def _gallery_srcs(row: dict) -> list[str]:
 async def public_landing(request: Request):
     try:
         counts = inventory.stats()
-        featured = inventory.list_public()[:4]
+        # Featured carousel: Idaho lots lead (the Boise nationwide-ships
+        # campaign), then the rest in ledger order.
+        def _idaho_first(r: dict) -> int:
+            state = (r.get("state") or "").strip().upper()
+            city = (r.get("city") or "").strip().lower()
+            return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
+        featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
         for r in featured:
             r["hero_src"] = _hero_src(r)
     except Exception:
@@ -369,6 +377,61 @@ async def public_contact(payload: dict):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    return {"ok": True, "id": row["id"]}
+
+
+async def _notify_new_subscriber(row: dict) -> None:
+    # Fire-and-forget: a lost ping must never surface as a failed signup.
+    try:
+        bits = [f"◉ NEW ALERTS SIGNUP #{row['id']}"]
+        contact = " / ".join(x for x in (row.get("email"), row.get("phone")) if x)
+        who = row.get("name") or "—"
+        bits.append(f"{who} — {contact}")
+        geo = " ".join(x for x in (row.get("city"), row.get("state"), row.get("zip_code")) if x)
+        prefs = " · ".join(
+            str(x) for x in (
+                geo or None,
+                f"qty {row['quantity_wanted']}" if row.get("quantity_wanted") else None,
+                row.get("use_case"), row.get("chair_type"), row.get("timeline"),
+                row.get("budget_per_chair"), row.get("delivery"),
+            ) if x
+        )
+        if prefs:
+            bits.append(prefs)
+        if row.get("notes"):
+            bits.append(f"“{row['notes']}”")
+        await telegram_alerts.send_message("\n".join(bits))
+    except Exception:
+        pass
+
+
+@app.post("/subscribe")
+async def public_subscribe(payload: dict):
+    payload = payload or {}
+    try:
+        row = inventory.create_subscriber(
+            name=(payload.get("name") or "").strip() or None,
+            email=(payload.get("email") or "").strip() or None,
+            phone=(payload.get("phone") or "").strip() or None,
+            city=(payload.get("city") or "").strip() or None,
+            state=(payload.get("state") or "").strip() or None,
+            zip_code=(payload.get("zip_code") or "").strip() or None,
+            quantity_wanted=(
+                int(payload["quantity_wanted"])
+                if payload.get("quantity_wanted")
+                else None
+            ),
+            use_case=(payload.get("use_case") or "").strip() or None,
+            chair_type=(payload.get("chair_type") or "").strip() or None,
+            timeline=(payload.get("timeline") or "").strip() or None,
+            budget_per_chair=(payload.get("budget_per_chair") or "").strip() or None,
+            delivery=(payload.get("delivery") or "").strip() or None,
+            notes=(payload.get("notes") or "").strip() or None,
+            source=(payload.get("source") or "site_listings").strip(),
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
 
 
@@ -1750,6 +1813,39 @@ async def inq_update(inquiry_id: int, payload: dict):
 @app.delete("/api/inquiries/{inquiry_id}")
 async def inq_delete(inquiry_id: int):
     ok = inventory.delete_inquiry(inquiry_id)
+    if not ok:
+        raise HTTPException(404, "not found")
+    return {"ok": True}
+
+
+# ───────────────────────────── subscribers API ─────────────────────────────
+# Alert-signup rows captured by POST /subscribe (BLACKWHOLE-10). Status-only
+# updates — subscribers aren't lot-scoped, so there is no link step.
+
+@app.get("/api/subscribers")
+async def sub_list(status: str | None = None):
+    return {"items": inventory.list_subscribers(status=status)}
+
+
+@app.patch("/api/subscribers/{subscriber_id}")
+async def sub_update(subscriber_id: int, payload: dict):
+    payload = payload or {}
+    row: dict | None = None
+    if "status" in payload:
+        try:
+            row = inventory.set_subscriber_status(subscriber_id, payload["status"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    if row is None:
+        row = inventory.get_subscriber(subscriber_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
+@app.delete("/api/subscribers/{subscriber_id}")
+async def sub_delete(subscriber_id: int):
+    ok = inventory.delete_subscriber(subscriber_id)
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}

@@ -57,38 +57,18 @@
   </div>
 </section>
 
-<section class="how">
-  <div class="how-head">
-    <div class="section-rule"></div>
-    <h2 class="section-title">HOW&nbsp;IT&nbsp;WORKS</h2>
-  </div>
-  <div class="how-grid">
-    <article class="how-card">
-      <div class="how-num mono">01</div>
-      <h3>BROWSE THE LOT</h3>
-      <p>Real photos, real counts, real pickup cities. Filter by chair type, quantity, and location — what you see is what's on the floor today.</p>
-    </article>
-    <article class="how-card">
-      <div class="how-num mono">02</div>
-      <h3>RESERVE YOURS</h3>
-      <p>Tell us how many you need. We hold them while you confirm budget, board approval, or transport. No pressure, no auctions.</p>
-    </article>
-    <article class="how-card">
-      <div class="how-num mono">03</div>
-      <h3>PICK UP OR SHIP</h3>
-      <p>Local pickup at the lot's city, or we'll arrange freight for the bigger orders. Pay on collection — no deposit games.</p>
-    </article>
-  </div>
-</section>
-
 {% if featured %}
 <section class="featured">
   <div class="how-head">
     <div class="section-rule"></div>
     <h2 class="section-title">ON&nbsp;THE&nbsp;FLOOR&nbsp;NOW</h2>
+    <div class="carousel-nav">
+      <button type="button" class="carousel-btn" id="feat-prev" aria-label="previous lots">←</button>
+      <button type="button" class="carousel-btn" id="feat-next" aria-label="next lots">→</button>
+    </div>
     <a class="see-all mono" href="/listings">SEE ALL →</a>
   </div>
-  <div class="featured-grid">
+  <div class="featured-track" id="featured-track">
     {% for item in featured %}
     <a class="lot-card" href="/listings/{{ item.lot_id }}">
       <div class="lot-img">
@@ -121,19 +101,58 @@
       </div>
     </a>
     {% endfor %}
+    <a class="lot-card lot-card--seeall" href="/listings">
+      <div class="seeall-inner">
+        <div class="seeall-mark">◉</div>
+        <div class="seeall-text">SEE&nbsp;ALL<br>LOTS&nbsp;→</div>
+      </div>
+    </a>
   </div>
 </section>
 {% endif %}
+
+{% set subscribe_source = 'site_landing' %}
+{% include "_subscribe_form.html" %}
+
+<section class="how">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">HOW&nbsp;IT&nbsp;WORKS</h2>
+  </div>
+  <div class="how-grid">
+    <article class="how-card">
+      <div class="how-num mono">01</div>
+      <h3>BROWSE THE LOT</h3>
+      <p>Real photos, real counts, real pickup cities. Filter by chair type, quantity, and location — what you see is what's on the floor today.</p>
+    </article>
+    <article class="how-card">
+      <div class="how-num mono">02</div>
+      <h3>RESERVE YOURS</h3>
+      <p>Tell us how many you need. We hold them while you confirm budget, board approval, or transport. No pressure, no auctions.</p>
+    </article>
+    <article class="how-card">
+      <div class="how-num mono">03</div>
+      <h3>PICK UP OR SHIP</h3>
+      <p>Local pickup at the lot's city, or we'll arrange freight for the bigger orders. Pay on collection — no deposit games.</p>
+    </article>
+  </div>
+</section>
 
 <section class="contact" id="contact">
   <div class="contact-grid">
     <div>
       <div class="section-rule"></div>
+      <div class="section-eyebrow section-eyebrow--ink mono tiny">✉ DIRECT LINE — ABOUT TODAY'S FLOOR</div>
       <h2 class="section-title">TALK&nbsp;TO&nbsp;A&nbsp;HUMAN</h2>
       <p class="contact-lede">
-        Need chairs for a sanctuary, ballroom, or event space?
-        Or sitting on a surplus you'd like us to take off your hands?
-        Fill in the manifest — we read every one.
+        Buying from a lot that's on the floor right now, want a quote or
+        freight estimate, or sitting on surplus chairs you'd like us to take
+        off your hands? Fill in the manifest — a real person reads every one
+        and gets back within a business day.
+      </p>
+      <p class="section-crosslink mono tiny">
+        NOTHING FITS <em>YET</em>?
+        <a href="#alerts">JOIN THE ALERT LIST →</a>
       </p>
     </div>
     <form class="manifest-form" id="contact-form" data-mode="landing">

@@ -97,9 +97,12 @@
   <h2>FLOOR IS CLEAR</h2>
   <p>No active lots right now. New inventory rolls in weekly —
     drop us a note and we'll ping you when the next truck lands.</p>
-  <a href="/#contact" class="btn btn-primary">NOTIFY ME</a>
+  <a href="#alerts" class="btn btn-primary">NOTIFY ME</a>
 </section>
 {% endif %}
+
+{% set subscribe_source = 'site_listings' %}
+{% include "_subscribe_form.html" %}
 {% endblock %}
 
 {% block scripts %}
