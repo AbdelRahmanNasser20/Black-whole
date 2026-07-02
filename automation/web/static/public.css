@@ -419,7 +419,19 @@ a:hover { color: var(--accent); }
 .mf-hint { color: #6a655c; letter-spacing: 0.12em; margin-top: -8px; }
 
 /* alerts signup (BLACKWHOLE-10) */
-.subscribe { border-top: 4px solid var(--accent); }
+.subscribe { border-top: 4px solid var(--accent); background: var(--paper-2); }
+.section-eyebrow {
+  display: inline-block;
+  letter-spacing: 0.22em; color: var(--accent);
+  border: 1.5px solid var(--accent);
+  padding: 5px 10px; margin-bottom: 16px;
+}
+.section-eyebrow--ink { color: var(--paper); background: var(--ink); border-color: var(--ink); }
+.section-crosslink { margin-top: 22px; letter-spacing: 0.14em; color: #6a655c; }
+.section-crosslink a {
+  color: var(--ink); text-decoration: none;
+  border-bottom: 2px solid var(--accent); padding-bottom: 2px;
+}
 .alerts-strip {
   padding: 14px 48px; border-top: 1.5px solid var(--ink);
   background: var(--paper-2); letter-spacing: 0.12em;
