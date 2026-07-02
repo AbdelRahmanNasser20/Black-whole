@@ -95,7 +95,7 @@ a { color: var(--ink); }
 a:hover { color: var(--accent); }
 
 .section-rule { height: 2px; background: var(--ink); width: 64px; margin-bottom: 16px; }
-.section-title { font-size: 36px; line-height: 1.02; letter-spacing: 0.005em; }
+.section-title { font-size: clamp(24px, 4.5vw, 36px); line-height: 1.08; letter-spacing: 0.005em; }
 
 /* =========================================================================
    hero (landing)
@@ -116,7 +116,7 @@ a:hover { color: var(--accent); }
   animation: fadeUp .7s cubic-bezier(.2,.8,.2,1) .05s both;
 }
 .hero-title {
-  font-size: clamp(54px, 9vw, 140px);
+  font-size: clamp(34px, 9vw, 140px);
   line-height: 0.92;
   letter-spacing: -0.02em;
   text-transform: uppercase;
@@ -645,4 +645,33 @@ a:hover { color: var(--accent); }
   .sell-grid { grid-template-columns: 1fr; padding: 36px 24px 60px 24px; }
   .foot-row { grid-template-columns: 1fr 1fr; gap: 22px; }
   .site-footer { padding: 40px 24px 22px 24px; }
+  .contact--slim { padding: 48px 24px; }
+  .alerts-strip { padding: 14px 24px; }
+}
+
+@media (max-width: 600px) {
+  .site-header { flex-wrap: wrap; row-gap: 10px; padding: 12px 16px; }
+  .site-nav { width: 100%; justify-content: space-between; gap: 8px; }
+  .hero-grid { padding: 32px 16px 44px 16px; }
+  .hero-lede { font-size: 16px; }
+  .hero-cta { flex-wrap: wrap; }
+  .hero-cta .btn { width: 100%; text-align: center; }
+  .stat-row { grid-template-columns: 1fr 1fr; }
+  .stat-num { font-size: clamp(32px, 10vw, 44px); }
+  .how, .featured, .contact { padding: 40px 16px; }
+  .contact--slim { padding: 40px 16px; }
+  .how-head { gap: 12px; }
+  .carousel-nav { order: 3; }
+  .featured-track .lot-card { flex: 0 0 82vw; }
+  .section-eyebrow { font-size: 10px; letter-spacing: 0.14em; }
+  .section-crosslink { letter-spacing: 0.08em; }
+  .filter-bar { flex-wrap: wrap; gap: 10px; }
+  .filter-group { min-width: calc(50% - 10px); }
+  .filter-group--grow { min-width: 100%; }
+  .page-head, .lot-grid { padding-left: 16px; padding-right: 16px; }
+  .filter-bar { padding-left: 16px; padding-right: 16px; }
+  .detail-gallery, .detail-info { padding: 20px 16px; }
+  .foot-row { grid-template-columns: 1fr; }
+  .foot-meta { flex-wrap: wrap; gap: 6px; }
+  .alerts-strip { padding: 14px 16px; }
 }
