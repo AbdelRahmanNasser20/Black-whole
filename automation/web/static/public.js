@@ -59,6 +59,22 @@ function bindCaptureForm(form) {
   document.querySelectorAll('.js-capture-form').forEach(bindCaptureForm);
 })();
 
+// ─── featured carousel (landing) ────────────────────────────────────────
+(function initFeaturedCarousel() {
+  const track = document.getElementById('featured-track');
+  if (!track) return;
+  const step = () => {
+    const card = track.querySelector('.lot-card');
+    return card ? card.getBoundingClientRect().width + 24 : 324;
+  };
+  document.getElementById('feat-prev')?.addEventListener('click', () => {
+    track.scrollBy({left: -step(), behavior: 'smooth'});
+  });
+  document.getElementById('feat-next')?.addEventListener('click', () => {
+    track.scrollBy({left: step(), behavior: 'smooth'});
+  });
+})();
+
 // ─── listings filter ────────────────────────────────────────────────────
 (function initListingsFilter() {
   const grid = document.getElementById('lot-grid');

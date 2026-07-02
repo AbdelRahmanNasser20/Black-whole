@@ -86,9 +86,13 @@
   <div class="how-head">
     <div class="section-rule"></div>
     <h2 class="section-title">ON&nbsp;THE&nbsp;FLOOR&nbsp;NOW</h2>
+    <div class="carousel-nav">
+      <button type="button" class="carousel-btn" id="feat-prev" aria-label="previous lots">←</button>
+      <button type="button" class="carousel-btn" id="feat-next" aria-label="next lots">→</button>
+    </div>
     <a class="see-all mono" href="/listings">SEE ALL →</a>
   </div>
-  <div class="featured-grid">
+  <div class="featured-track" id="featured-track">
     {% for item in featured %}
     <a class="lot-card" href="/listings/{{ item.lot_id }}">
       <div class="lot-img">
@@ -121,12 +125,15 @@
       </div>
     </a>
     {% endfor %}
+    <a class="lot-card lot-card--seeall" href="/listings">
+      <div class="seeall-inner">
+        <div class="seeall-mark">◉</div>
+        <div class="seeall-text">SEE&nbsp;ALL<br>LOTS&nbsp;→</div>
+      </div>
+    </a>
   </div>
 </section>
 {% endif %}
-
-{% set subscribe_source = 'site_landing' %}
-{% include "_subscribe_form.html" %}
 
 <section class="contact" id="contact">
   <div class="contact-grid">
@@ -165,6 +172,9 @@
     </form>
   </div>
 </section>
+
+{% set subscribe_source = 'site_landing' %}
+{% include "_subscribe_form.html" %}
 {% endblock %}
 
 {% block scripts %}

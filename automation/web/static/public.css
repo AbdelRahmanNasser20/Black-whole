@@ -251,6 +251,38 @@ a:hover { color: var(--accent); }
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 24px;
 }
+
+/* featured carousel (landing) */
+.featured-track {
+  display: flex; gap: 24px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-behavior: smooth;
+  padding-bottom: 12px;   /* room for the shadow on hover */
+  scrollbar-width: thin;
+}
+.featured-track .lot-card {
+  flex: 0 0 300px;
+  scroll-snap-align: start;
+}
+.carousel-nav { display: flex; gap: 8px; }
+.carousel-btn {
+  width: 42px; height: 42px;
+  border: 1.5px solid var(--ink);
+  background: var(--paper);
+  font-family: var(--f-mono); font-size: 16px;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.carousel-btn:hover { background: var(--accent); }
+.lot-card--seeall { justify-content: center; background: var(--ink); color: var(--paper); }
+.lot-card--seeall:hover { background: var(--accent); color: var(--ink); }
+.seeall-inner { text-align: center; padding: 40px 24px; }
+.seeall-mark { font-size: 34px; margin-bottom: 14px; }
+.seeall-text {
+  font-family: var(--f-mono); font-size: 14px;
+  letter-spacing: 0.25em; line-height: 1.8;
+}
 .lot-card {
   display: flex; flex-direction: column;
   background: var(--paper);

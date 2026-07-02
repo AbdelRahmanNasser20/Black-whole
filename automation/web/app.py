@@ -304,7 +304,13 @@ def _gallery_srcs(row: dict) -> list[str]:
 async def public_landing(request: Request):
     try:
         counts = inventory.stats()
-        featured = inventory.list_public()[:4]
+        # Featured carousel: Idaho lots lead (the Boise nationwide-ships
+        # campaign), then the rest in ledger order.
+        def _idaho_first(r: dict) -> int:
+            state = (r.get("state") or "").strip().upper()
+            city = (r.get("city") or "").strip().lower()
+            return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
+        featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
         for r in featured:
             r["hero_src"] = _hero_src(r)
     except Exception:
