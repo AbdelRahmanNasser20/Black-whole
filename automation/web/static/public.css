@@ -384,6 +384,15 @@ a:hover { color: var(--accent); }
 }
 .mf-result--ok { background: var(--stamp-bg); border-color: var(--accent); color: var(--accent); }
 .mf-result--err { background: #FFE0E0; border-color: #B00020; color: #B00020; }
+.mf-hint { color: #6a655c; letter-spacing: 0.12em; margin-top: -8px; }
+
+/* alerts signup (BLACKWHOLE-10) */
+.subscribe { border-top: 4px solid var(--accent); }
+.alerts-strip {
+  padding: 14px 48px; border-top: 1.5px solid var(--ink);
+  background: var(--paper-2); letter-spacing: 0.12em;
+}
+.alerts-strip a { color: var(--accent); }
 
 /* =========================================================================
    listings page

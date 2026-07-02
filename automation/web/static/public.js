@@ -1,9 +1,8 @@
 /* Black Whole Liquidation — public site */
 
-// ─── contact form submission ────────────────────────────────────────────
-(function initContactForm() {
-  const form = document.getElementById('contact-form');
-  if (!form) return;
+// ─── capture form submission (contact + alerts signup) ─────────────────
+function bindCaptureForm(form) {
+  const endpoint = form.dataset.endpoint || '/contact';
   const result = form.querySelector('.mf-result');
 
   form.addEventListener('submit', async (e) => {
@@ -14,25 +13,33 @@
       if (typeof v === 'string' && v.trim() === '') continue;
       payload[k] = v;
     }
-    if (payload.quantity_interested) {
-      payload.quantity_interested = parseInt(payload.quantity_interested, 10);
+    for (const qty of ['quantity_interested', 'quantity_wanted']) {
+      if (payload[qty]) payload[qty] = parseInt(payload[qty], 10);
+    }
+
+    result.hidden = true;
+    result.classList.remove('mf-result--ok', 'mf-result--err');
+    if (endpoint === '/subscribe' && !payload.email && !payload.phone) {
+      result.textContent = '✗ We need an email or a phone number to reach you.';
+      result.classList.add('mf-result--err');
+      result.hidden = false;
+      return;
     }
 
     const btn = form.querySelector('button[type="submit"]');
     const btnText = btn.textContent;
     btn.disabled = true; btn.textContent = 'FILING…';
-    result.hidden = true;
-    result.classList.remove('mf-result--ok', 'mf-result--err');
 
     try {
-      const r = await fetch('/contact', {
+      const r = await fetch(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
       });
       const data = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(data.detail || 'Request failed');
-      result.textContent = '◉ INQUIRY #' + data.id + ' FILED. WE\u2019LL BE IN TOUCH WITHIN 1 BUSINESS DAY.';
+      result.textContent = form.dataset.success ||
+        ('◉ INQUIRY #' + data.id + ' FILED. WE\u2019LL BE IN TOUCH WITHIN 1 BUSINESS DAY.');
       result.classList.add('mf-result--ok');
       result.hidden = false;
       form.reset();
@@ -44,6 +51,12 @@
       btn.disabled = false; btn.textContent = btnText;
     }
   });
+}
+
+(function initCaptureForms() {
+  const contact = document.getElementById('contact-form');
+  if (contact) bindCaptureForm(contact);
+  document.querySelectorAll('.js-capture-form').forEach(bindCaptureForm);
 })();
 
 // ─── listings filter ────────────────────────────────────────────────────
