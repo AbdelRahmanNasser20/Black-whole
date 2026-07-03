@@ -22,7 +22,7 @@ def next_poll_delay(end_utc: datetime, now: datetime, lane: Lane) -> float:
     secs_to_close = (end_utc - now).total_seconds()
     if secs_to_close <= 0:
         return HOT_POLL_SECONDS
-    return min(HOT_POLL_SECONDS, max(1.0, secs_to_close))
+    return min(HOT_POLL_SECONDS, secs_to_close)
 
 def is_snapshot_change(prev: Snapshot | None, new: Snapshot) -> bool:
     if prev is None:

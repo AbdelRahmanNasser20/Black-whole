@@ -38,3 +38,7 @@ def test_outcome_low_bid_and_sold():
 def test_outcome_incomplete_if_not_yet_dropped():
     o, complete = detect_outcome(snap(bc=0), dropped=False)
     assert complete is False                                            # still live; not a final outcome
+
+def test_hot_poll_never_overshoots_sub_second_close():
+    d = next_poll_delay(NOW + timedelta(milliseconds=300), NOW, Lane.HOT)
+    assert d <= 0.3 + 1e-9        # must not be floored up to 1.0 past the close
