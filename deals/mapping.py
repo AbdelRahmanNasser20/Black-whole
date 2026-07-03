@@ -23,6 +23,12 @@ def _price(raw: dict) -> float:
     except (TypeError, ValueError) as e:
         raise ValueError(f"currentBid unparseable ({cb!r}) for asset {raw.get('assetId')!r}") from e
 
+def _hero_url(account_id: int, photo: str) -> str:
+    # The CDN serves photos under an account-id subfolder:
+    # /assets/photos/{account_id}/{photo}. Omitting the subfolder 404s
+    # (verified live). Matches govdeals_chairs_extraction IMAGE_CDN_BASE usage.
+    return f"{IMAGE_BASE}{account_id}/{photo}" if photo else ""
+
 def asset_to_lot(raw: dict) -> Lot:
     current = _price(raw)
     photo = raw.get("photo") or ""
@@ -49,7 +55,7 @@ def asset_to_lot(raw: dict) -> Lot:
         state=(raw.get("locationState") or "").strip(),
         zip=(raw.get("locationZip") or "").strip(),
         lat=raw.get("latitude"), lng=raw.get("longitude"),
-        hero_image_url=(IMAGE_BASE + photo) if photo else "",
+        hero_image_url=_hero_url(int(raw["accountId"]), photo),
         status=(raw.get("assetStatusCd") or "").strip(),
         is_sold=bool(raw.get("isSoldAuction")),
         raw=raw,

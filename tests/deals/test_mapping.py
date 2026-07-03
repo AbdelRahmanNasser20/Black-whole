@@ -37,8 +37,9 @@ def test_non_usd_currency_preserved():
     assert asset_to_lot(_raw(currencyCode="CAD")).currency_code == "CAD"
 
 def test_hero_image_url_prefixed():
-    lot = asset_to_lot(_raw(photo="a_b_c.jpg?cb=1"))
-    assert lot.hero_image_url == IMAGE_BASE + "a_b_c.jpg?cb=1"
+    # CDN path includes the account-id subfolder: /assets/photos/{account}/{photo}
+    lot = asset_to_lot(_raw(photo="a_b_c.jpg?cb=1"))          # _raw accountId=6466
+    assert lot.hero_image_url == IMAGE_BASE + "6466/a_b_c.jpg?cb=1"
 
 def test_missing_photo_yields_empty_image():
     assert asset_to_lot(_raw(photo=None)).hero_image_url == ""
