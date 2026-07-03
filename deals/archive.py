@@ -1,17 +1,26 @@
-import os, hashlib, httpx
+import os, re, hashlib, httpx
 from deals.models import Lot
 from automation.downloader import DOWNLOAD_HEADERS
 
 BUCKET = "listing-images"
 
+_EXT_RE = re.compile(r'\.(jpe?g|png|webp)(?:\?|$)', re.I)
+_CONTENT_TYPES = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "webp": "image/webp"}
+
+def _content_type(path: str) -> str:
+    return _CONTENT_TYPES.get(path.rsplit(".", 1)[-1].lower(), "image/jpeg")
+
 def _storage_path(lot: Lot, idx: int, url: str) -> str:
+    # idx retained for call-site signature compatibility; the path is
+    # content-addressed by the URL hash so the same image always resolves to the
+    # same object key regardless of scrape ordering (idempotent re-archiving).
+    m = _EXT_RE.search(url)
     ext = ".jpg"
-    for cand in (".jpg", ".jpeg", ".png", ".webp"):
-        if cand in url.lower():
-            ext = ".jpg" if cand == ".jpeg" else cand
-            break
+    if m:
+        e = m.group(1).lower()
+        ext = ".jpg" if e == "jpeg" else "." + e
     h = hashlib.sha256(url.encode()).hexdigest()[:10]
-    return f"govdeals/{lot.asset_id}_{lot.account_id}_{lot.auction_id}/{idx:02d}_{h}{ext}"
+    return f"govdeals/{lot.asset_id}_{lot.account_id}_{lot.auction_id}/{h}{ext}"
 
 def _download(url: str) -> bytes | None:
     try:
@@ -26,7 +35,7 @@ def _upload(path: str, data: bytes) -> str:
     base = os.environ["SUPABASE_STORAGE_URL"].rstrip("/")
     key = os.environ["SUPABASE_STORAGE_KEY"]
     httpx.post(f"{base}/object/{BUCKET}/{path}", content=data,
-               headers={"Authorization": f"Bearer {key}", "content-type": "image/jpeg",
+               headers={"Authorization": f"Bearer {key}", "content-type": _content_type(path),
                         "x-upsert": "true"}, timeout=60).raise_for_status()
     return f"{base}/object/public/{BUCKET}/{path}"
 

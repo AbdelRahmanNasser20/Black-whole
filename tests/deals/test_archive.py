@@ -14,6 +14,17 @@ def test_storage_path_is_stable_and_namespaced():
     assert p.startswith("govdeals/984_6466_2/")
     assert p.endswith(".jpg")
 
+def test_storage_path_is_idempotent_across_idx():
+    lot = _lot()
+    url = "https://webassets.lqdt1.com/assets/photos/x.png?cb=9"
+    assert _storage_path(lot, 0, url) == _storage_path(lot, 7, url)   # position must not change the key
+
+def test_content_type_from_extension():
+    from deals.archive import _content_type
+    assert _content_type("govdeals/a/deadbeef.png") == "image/png"
+    assert _content_type("govdeals/a/deadbeef.webp") == "image/webp"
+    assert _content_type("govdeals/a/deadbeef.jpg") == "image/jpeg"
+
 def test_archive_dedups_hero_and_gallery_and_uploads_each_once():
     lot = _lot()
     gallery = [lot.hero_image_url, "https://webassets.lqdt1.com/assets/photos/2.jpg?cb=1"]
