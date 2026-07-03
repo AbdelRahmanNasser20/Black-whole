@@ -51,6 +51,8 @@ from .. import db
 from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
+from . import deals_query
+from deals.fees import fee_model_from_env
 
 try:
     # Auctions tab reads the shared Supabase `auction_listings` table. The
@@ -452,6 +454,86 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
     if not row:
         raise HTTPException(status_code=404, detail="lot not archived")
     return templates.TemplateResponse(request, "deal_listing.html", {"lot": row})
+
+
+# ── Deals dashboard API (BLACKWHOLE-12) ─────────────────────────────────────
+
+_DEALS_COLS = (
+    "asset_id, account_id, auction_id, title, canonical_category, city, state, "
+    "bid_count, current_bid, currency_code, end_utc, outcome, final_bid, "
+    "outcome_complete, first_seen_at, hero_image_url, archived_hero_url"
+)
+
+_DEALS_ACTIVE = "outcome_complete IS NOT TRUE AND end_utc > now()"
+
+
+@app.get("/api/deals")
+async def list_deals(
+    q: str | None = None,
+    category: str | None = None,
+    state: str | None = None,
+    max_bids: int | None = None,
+    ending_within: int | None = None,
+    status: str = "active",
+    sort: str = "ends",
+    dir: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Search/filter/sort deal_lots for the admin Deals tab.
+
+    Facets reflect the full active set (not the filtered subset) — v1 keeps
+    the SQL simple; counts guide, not gate.
+    """
+    if status not in ("active", "closed", "all"):
+        raise HTTPException(400, "status must be active|closed|all")
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    where, args = deals_query.build_where(
+        q=q, category=category, state=state, max_bids=max_bids,
+        ending_within=ending_within, status=status,
+    )
+    order = deals_query.order_clause(sort, dir)
+
+    def _fetch():
+        rows = db.fetch_all(
+            f"SELECT {_DEALS_COLS} FROM deal_lots WHERE {where} {order} "
+            "LIMIT %s OFFSET %s",
+            (*args, limit, offset),
+        )
+        total = db.fetch_one(
+            f"SELECT count(*) AS c FROM deal_lots WHERE {where}", tuple(args)
+        )["c"]
+        cats = db.fetch_all(
+            "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
+            f"WHERE {_DEALS_ACTIVE} AND canonical_category IS NOT NULL "
+            "GROUP BY 1 ORDER BY count DESC"
+        )
+        states = db.fetch_all(
+            "SELECT state AS value, count(*) AS count FROM deal_lots "
+            f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
+            "GROUP BY 1 ORDER BY count DESC"
+        )
+        stats = db.fetch_one(
+            "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
+            "(SELECT count(*) FROM deal_candidates) AS candidates, "
+            f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
+            "AND end_utc <= now() + interval '24 hours') AS ending_24h"
+        )
+        return rows, total, cats, states, stats
+
+    try:
+        rows, total, cats, states, stats = await asyncio.to_thread(_fetch)
+    except Exception as e:  # DB down / view missing → 503, matches /api/auctions
+        raise HTTPException(503, f"deals query failed: {e!r}")
+
+    fees = fee_model_from_env()
+    return {
+        "total": total,
+        "rows": [deals_query.enrich(dict(r), fees) for r in rows],
+        "facets": {"categories": cats, "states": states},
+        "stats": stats,
+    }
 
 
 @app.get("/sell", response_class=HTMLResponse)
