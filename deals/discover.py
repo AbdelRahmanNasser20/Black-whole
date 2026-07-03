@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from deals.adapters.base import SiteAdapter
@@ -8,7 +9,7 @@ from deals.archive import archive_lot_images
 
 @dataclass
 class DiscoveryReport:
-    discovered: int = 0; upserted: int = 0; classified: int = 0; archived: int = 0
+    discovered: int = 0; upserted: int = 0; classified: int = 0; archived: int = 0; errors: int = 0
 
 def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool = True,
                   archive_candidates: bool = True, now: datetime | None = None) -> DiscoveryReport:
@@ -17,15 +18,19 @@ def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool
     for category in categories:
         for lot in adapter.discover(category_ids=category):
             rep.discovered += 1
-            if classify and (lot.canonical_category in ("general_merchandise", "other")):
-                apply_classification(lot); rep.classified += 1
-            upsert_lot(lot); rep.upserted += 1
-            lane = schedule_lane(lot.end_utc, now)
-            delay = next_poll_delay(lot.end_utc, now, lane)
-            set_poll_schedule((lot.asset_id, lot.account_id, lot.auction_id),
-                              now + timedelta(seconds=delay), lane.value)
-            if archive_candidates and lot.bid_count == 0 and not lot.is_free \
-               and lot.canonical_category == "seating_furniture":
-                archive_lot_images(lot, adapter.fetch_gallery(lot.asset_id, lot.account_id))
-                rep.archived += 1
+            try:
+                if classify and (lot.canonical_category in ("general_merchandise", "other")):
+                    apply_classification(lot); rep.classified += 1
+                upsert_lot(lot); rep.upserted += 1
+                lane = schedule_lane(lot.end_utc, now)
+                delay = next_poll_delay(lot.end_utc, now, lane)
+                set_poll_schedule((lot.asset_id, lot.account_id, lot.auction_id),
+                                  now + timedelta(seconds=delay), lane.value)
+                if archive_candidates and lot.bid_count == 0 and not lot.is_free \
+                   and lot.canonical_category == "seating_furniture":
+                    archive_lot_images(lot, adapter.fetch_gallery(lot.asset_id, lot.account_id))
+                    rep.archived += 1
+            except Exception as e:
+                rep.errors += 1
+                print(f"[discover] error on lot {lot.asset_id}/{lot.account_id}: {e}", file=sys.stderr)
     return rep
