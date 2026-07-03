@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS deal_lots (
   next_poll_at TIMESTAMPTZ, lane TEXT,
   first_seen_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(),
   images_archived BOOLEAN DEFAULT false,
+  archived_hero_url TEXT, gallery_urls JSONB,
   PRIMARY KEY (asset_id, account_id, auction_id)
 );
 CREATE INDEX IF NOT EXISTS ix_deal_lots_cat ON deal_lots(canonical_category);

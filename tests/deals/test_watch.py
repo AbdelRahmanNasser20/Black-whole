@@ -32,8 +32,20 @@ def test_live_lot_gets_snapshot_and_reschedule(monkeypatch):
     snaps=[]; sched=[]
     monkeypatch.setattr("deals.watch.append_snapshot", lambda s: snaps.append(s))
     monkeypatch.setattr("deals.watch.record_outcome", lambda *a: (_ for _ in ()).throw(AssertionError("should not finalize")))
-    monkeypatch.setattr("deals.watch.set_poll_schedule", lambda k,t,ln: sched.append(ln))
+    monkeypatch.setattr("deals.watch.update_live_state", lambda k, s, t, ln: sched.append(ln))
     present={lot_key(1,2,3): Snapshot(1,2,3,NOW,1,12.0,NOW+timedelta(minutes=13),"STA")}  # bid + extension
     rep=poll_once(FakeAdapter(present), NOW)
     assert len(snaps)==1 and rep.snapshotted==1
     assert sched==["hot"]                                # 13 min out -> hot lane
+
+def test_absent_cold_lot_requeued_not_finalized(monkeypatch):
+    lot = _lot(NOW + timedelta(days=2))            # cold, far from close
+    monkeypatch.setattr("deals.watch.due_for_poll", lambda now: [lot])
+    monkeypatch.setattr("deals.watch.latest_snapshot", lambda k: None)
+    monkeypatch.setattr("deals.watch.append_snapshot", lambda s: None)
+    monkeypatch.setattr("deals.watch.record_outcome",
+        lambda *a: (_ for _ in ()).throw(AssertionError("must not finalize a cold lot")))
+    sched = []
+    monkeypatch.setattr("deals.watch.set_poll_schedule", lambda k, t, ln: sched.append(ln))
+    rep = poll_once(FakeAdapter(present={}), NOW)   # absent from refetch
+    assert rep.finalized == 0 and rep.requeued == 1 and sched == ["cold"]

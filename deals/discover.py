@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from deals.adapters.base import SiteAdapter
 from deals.classify import apply_classification
-from deals.store import upsert_lot, set_poll_schedule
+from deals.store import upsert_lot, set_poll_schedule, set_archived_images
 from deals.watcher_logic import schedule_lane, next_poll_delay
 from deals.archive import archive_lot_images
 
@@ -28,7 +28,9 @@ def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool
                                   now + timedelta(seconds=delay), lane.value)
                 if archive_candidates and lot.bid_count == 0 and not lot.is_free \
                    and lot.canonical_category == "seating_furniture":
-                    archive_lot_images(lot, adapter.fetch_gallery(lot.asset_id, lot.account_id))
+                    stored = archive_lot_images(lot, adapter.fetch_gallery(lot.asset_id, lot.account_id))
+                    if stored:
+                        set_archived_images((lot.asset_id, lot.account_id, lot.auction_id), stored[0], stored[1:])
                     rep.archived += 1
             except Exception as e:
                 rep.errors += 1

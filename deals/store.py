@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS deal_lots (
   next_poll_at TIMESTAMPTZ, lane TEXT,
   first_seen_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(),
   images_archived BOOLEAN DEFAULT false,
+  archived_hero_url TEXT, gallery_urls JSONB,
   PRIMARY KEY (asset_id, account_id, auction_id)
 );
 CREATE INDEX IF NOT EXISTS ix_deal_lots_cat ON deal_lots(canonical_category);
@@ -105,6 +106,18 @@ def record_outcome(key, outcome, final_bid, final_bid_count, closed_at, complete
 def set_poll_schedule(key, next_poll_at: datetime, lane: str) -> None:
     db.execute("""UPDATE deal_lots SET next_poll_at=%s, lane=%s, updated_at=now()
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""", (next_poll_at, lane, *key))
+
+def set_archived_images(key, hero_url: str, gallery_urls: list[str]) -> None:
+    db.execute("""UPDATE deal_lots SET archived_hero_url=%s, gallery_urls=%s,
+        images_archived=true, updated_at=now()
+        WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
+        (hero_url, json.dumps(gallery_urls), *key))
+
+def update_live_state(key, s: Snapshot, next_poll_at, lane: str) -> None:
+    db.execute("""UPDATE deal_lots SET bid_count=%s, current_bid=%s, end_utc=%s,
+        next_poll_at=%s, lane=%s, updated_at=now()
+        WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
+        (s.bid_count, s.current_bid, s.end_utc, next_poll_at, lane, *key))
 
 def due_for_poll(now: datetime) -> list[Lot]:
     from deals.mapping import asset_to_lot

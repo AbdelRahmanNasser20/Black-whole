@@ -62,3 +62,16 @@ def test_per_lot_error_is_isolated(monkeypatch):
     rep = run_discovery(FakeAdapter([a, b, c]), categories=["x"],
                         now=datetime(2026, 7, 3, 12, tzinfo=timezone.utc))
     assert rep.errors == 1 and {l.asset_id for l in seen} == {1, 2}
+
+def test_archived_urls_are_persisted(monkeypatch):
+    saved = []
+    monkeypatch.setattr("deals.discover.upsert_lot", lambda l: None)
+    monkeypatch.setattr("deals.discover.set_poll_schedule", lambda k, t, ln: None)
+    monkeypatch.setattr("deals.discover.apply_classification", lambda l, **k: l)
+    monkeypatch.setattr("deals.discover.archive_lot_images",
+                        lambda l, g: ["https://store/hero.jpg", "https://store/2.jpg"])
+    monkeypatch.setattr("deals.discover.set_archived_images",
+                        lambda key, hero, gallery: saved.append((hero, gallery)))
+    run_discovery(FakeAdapter([_lot()]), categories=["x"],
+                  now=datetime(2026, 7, 3, 12, tzinfo=timezone.utc))
+    assert saved == [("https://store/hero.jpg", ["https://store/2.jpg"])]

@@ -17,10 +17,10 @@ def format_digest(rows: list[dict], fees: FeeModel) -> str:
         return "🪑 No 0-bid lots closing in the next 24h."
     lines = [f"🪑 {len(rows)} lots closing <24h with 0 bids:\n"]
     for r in rows[:40]:
-        lc = landed_cost(float(r["current_bid"]), qty=1, fees=fees)
+        lc = landed_cost(float(r["current_bid"] or 0), qty=1, fees=fees)
         url = f"https://www.govdeals.com/en/asset/{r['asset_id']}/{r['account_id']}"
         lines.append(f"• {r['title'][:50]} — ${r['current_bid']:.0f} ({r['bid_count']} bids), "
-                     f"landed ~${lc.total:.0f}, {r['city']},{r['state']} — {url}")
+                     f"landed ~${lc.total:.0f}, {r['city']}, {r['state']} — {url}")
     return "\n".join(lines)
 
 def send_daily_digest(fees: FeeModel) -> tuple[bool, str | None]:
