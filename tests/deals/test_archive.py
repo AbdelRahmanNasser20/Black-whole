@@ -1,0 +1,26 @@
+from datetime import datetime, timezone
+from unittest.mock import patch
+from deals.models import Lot
+from deals.archive import archive_lot_images, _storage_path
+
+def _lot():
+    return Lot(984,6466,2,"t","d","372","Furniture","seating_furniture",
+        datetime(2026,7,3,tzinfo=timezone.utc),0,10.0,10.0,"USD",0,False,False,None,False,
+        "s","c","st","z",None,None,"https://webassets.lqdt1.com/assets/photos/hero.jpg?cb=1",
+        "STA",False,{})
+
+def test_storage_path_is_stable_and_namespaced():
+    p = _storage_path(_lot(), 0, "https://x/hero.jpg?cb=1")
+    assert p.startswith("govdeals/984_6466_2/")
+    assert p.endswith(".jpg")
+
+def test_archive_dedups_hero_and_gallery_and_uploads_each_once():
+    lot = _lot()
+    gallery = [lot.hero_image_url, "https://webassets.lqdt1.com/assets/photos/2.jpg?cb=1"]
+    uploaded = []
+    with patch("deals.archive._download", return_value=b"bytes") as dl, \
+         patch("deals.archive._upload", side_effect=lambda path, data: uploaded.append(path) or f"https://store/{path}"):
+        urls = archive_lot_images(lot, gallery)
+    assert len(uploaded) == 2                    # hero deduped against gallery
+    assert dl.call_count == 2
+    assert all(u.startswith("https://store/") for u in urls)
