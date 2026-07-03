@@ -444,6 +444,16 @@ async def public_listing_detail(request: Request, lot_id: str):
     )
 
 
+@app.get("/deals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
+async def deal_listing(request: Request, asset_id: int, account_id: int, auction_id: int):
+    row = db.fetch_one("""SELECT * FROM deal_lots
+        WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
+        (asset_id, account_id, auction_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="lot not archived")
+    return templates.TemplateResponse(request, "deal_listing.html", {"lot": row})
+
+
 @app.get("/sell", response_class=HTMLResponse)
 async def public_sell(request: Request):
     return templates.TemplateResponse(

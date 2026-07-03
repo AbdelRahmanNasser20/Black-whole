@@ -1,0 +1,13 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>{{ lot.title }}</title></head>
+<body>
+  <h1>{{ lot.title }}</h1>
+  <p><strong>{{ lot.native_category_name }}</strong> · {{ lot.city }}, {{ lot.state }}</p>
+  <p>Current bid: {{ lot.currency_code }} {{ lot.current_bid if lot.current_bid is not none else '—' }} · {{ lot.bid_count if lot.bid_count is not none else 0 }} bids
+     {% if lot.outcome %}· <em>outcome: {{ lot.outcome }}</em>{% endif %}</p>
+  {% set hero = lot.archived_hero_url or lot.hero_image_url %}
+  {% if hero %}<img src="{{ hero }}" style="max-width:100%">{% endif %}
+  {% if lot.gallery_urls %}{% for g in lot.gallery_urls %}<img src="{{ g }}" style="max-width:100%">{% endfor %}{% endif %}
+  <h2>Description</h2>
+  <pre style="white-space:pre-wrap">{{ lot.description }}</pre>
+</body></html>
