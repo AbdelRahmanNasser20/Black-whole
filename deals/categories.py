@@ -6,6 +6,7 @@ is its OWN bucket (never folded into furniture) and must be LLM-scanned."""
 
 SEATING_FURNITURE_CODES = {"372", "47B", "47C", "47A", "46", "47D", "28E"}
 GENERAL_MERCH_CODE = "266"
+AV_EQUIPMENT_CODE = "22"   # Audio/Visual Equipment — projectors, screens, sound gear
 _VEHICLE_PREFIXES = ("94", "64", "95", "645", "643", "644", "648", "649", "642", "646", "655", "656", "657")
 
 def canonical_category(native_id: str) -> str:
@@ -14,6 +15,8 @@ def canonical_category(native_id: str) -> str:
         return "seating_furniture"
     if code == GENERAL_MERCH_CODE:
         return "general_merchandise"
+    if code == AV_EQUIPMENT_CODE:
+        return "av_equipment"
     if any(code.startswith(p) for p in _VEHICLE_PREFIXES):
         return "vehicles"
     if code in {"56", "180", "171", "56B", "149"}:

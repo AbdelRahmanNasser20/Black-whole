@@ -9,11 +9,13 @@ from deals.fees import fee_model_from_env
 from deals.store import init_schema
 
 FURNITURE = ["372","47B","47C","47A","46","47D","28E","266"]
+AV_EQUIPMENT = ["22"]              # projectors, screens, sound gear
+DEFAULT_CATEGORIES = FURNITURE + AV_EQUIPMENT
 
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    d = sub.add_parser("discover"); d.add_argument("--categories", default=",".join(FURNITURE))
+    d = sub.add_parser("discover"); d.add_argument("--categories", default=",".join(DEFAULT_CATEGORIES))
     sub.add_parser("watch-once")
     sub.add_parser("digest")
     sub.add_parser("init-schema")

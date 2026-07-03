@@ -14,3 +14,6 @@ def test_unknown_code_falls_back_to_other():
 def test_vehicle_codes_map_to_vehicles():
     assert canonical_category("94A") == "vehicles"   # Automobiles/Cars
     assert canonical_category("94D") == "vehicles"   # Vans
+
+def test_av_equipment_maps_to_av_equipment():
+    assert canonical_category("22") == "av_equipment"   # Audio/Visual Equipment (projectors etc.)
