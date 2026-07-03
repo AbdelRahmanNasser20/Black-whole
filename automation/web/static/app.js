@@ -71,6 +71,7 @@ const panels = {
   'listings-db': $('[data-pane="listings-db"]'),
   'test-scrape': $('[data-pane="test-scrape"]'),
   subscribers: $('[data-pane="subscribers"]'),
+  deals: $('[data-pane="deals"]'),
 };
 
 const TAB_STORAGE_KEY = 'admin.lastTab';
@@ -89,6 +90,7 @@ function activateTab(name, {persist = true} = {}) {
   if (name === 'inventory') loadInventory();
   if (name === 'inquiries') loadInquiries();
   if (name === 'subscribers') loadSubscribers();
+  if (name === 'deals') loadDeals();
   if (name === 'listings-db') loadListingsDb();
   if (name === 'test-scrape') $('#ts-q')?.focus();
   if (persist) {
@@ -2128,6 +2130,123 @@ function renderTestScrapeCard(it, match) {
   `;
   return card;
 }
+
+/* ── Deals tab ─────────────────────────────────────────────── */
+const deal = {q: '', category: '', state: '', zero: false, ending: '',
+              status: 'active', sort: 'ends', dir: null, offset: 0, limit: 50,
+              facetsLoaded: false};
+
+function dealEndsCell(iso) {
+  if (!iso) return '<td>—</td>';
+  const ms = new Date(iso) - Date.now();
+  const h = ms / 3.6e6;
+  const cls = h < 2 ? 'deal-ends-red' : (h < 24 ? 'deal-ends-yellow' : '');
+  const label = ms <= 0 ? 'ended'
+    : h < 1 ? `${Math.round(ms / 6e4)}m`
+    : h < 48 ? `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`
+    : `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h`;
+  return `<td class="${cls}" title="${iso}">${label}</td>`;
+}
+
+async function loadDeals() {
+  const tbody = $('#deal-rows');
+  const p = new URLSearchParams();
+  if (deal.q) p.set('q', deal.q);
+  if (deal.category) p.set('category', deal.category);
+  if (deal.state) p.set('state', deal.state);
+  if (deal.zero) p.set('max_bids', '0');
+  if (deal.ending) p.set('ending_within', deal.ending);
+  p.set('status', deal.status);
+  p.set('sort', deal.sort);
+  if (deal.dir) p.set('dir', deal.dir);
+  p.set('limit', deal.limit);
+  p.set('offset', deal.offset);
+  let body;
+  try {
+    const r = await fetch('/api/deals?' + p.toString());
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    body = await r.json();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" class="drafts-empty">deals API error: ${e}</td></tr>`;
+    return;
+  }
+  const s = body.stats || {};
+  $('#deal-stats').textContent =
+    `${s.total_lots ?? '?'} lots tracked · ${s.candidates ?? '?'} candidates (0-bid <24h) · ${s.ending_24h ?? '?'} ending <24h`;
+  if (!deal.facetsLoaded && body.facets) {
+    const fill = (sel, items) => {
+      const el = $(sel);
+      items.forEach(f => {
+        const o = document.createElement('option');
+        o.value = f.value; o.textContent = `${f.value} (${f.count})`;
+        el.appendChild(o);
+      });
+    };
+    fill('#deal-category', body.facets.categories || []);
+    fill('#deal-state', body.facets.states || []);
+    deal.facetsLoaded = true;
+  }
+  const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  if (!body.rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="drafts-empty">no lots match</td></tr>';
+  } else {
+    tbody.innerHTML = body.rows.map(r => {
+      const img = r.archived_hero_url || r.hero_image_url;
+      const thumb = img
+        ? `<img class="deal-thumb" src="${esc(img)}" loading="lazy" alt="">`
+        : '<span class="deal-thumb deal-thumb-empty">🪑</span>';
+      const outcome = r.outcome_complete
+        ? `<span class="lex ${r.outcome === 'no_bid' ? 'pending' : 'done'}">${esc(r.outcome) || 'closed'}${r.final_bid != null ? ` $${r.final_bid}` : ''}</span>`
+        : '<span class="lex running">open</span>';
+      return `<tr>
+        <td>${thumb}</td>
+        <td><a href="${esc(r.govdeals_url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
+            <a class="deal-viewer-link" href="${esc(r.viewer_url)}" target="_blank" rel="noopener" title="archived copy">⧉</a></td>
+        <td>${esc(r.canonical_category) || '—'}</td>
+        <td>${esc(r.city)}${r.state ? ', ' + esc(r.state) : ''}</td>
+        <td>${r.bid_count ?? '—'}</td>
+        <td>${r.current_bid != null ? '$' + r.current_bid : '—'}</td>
+        <td>$${r.landed_cost}</td>
+        ${dealEndsCell(r.end_utc)}
+        <td>${outcome}</td>
+      </tr>`;
+    }).join('');
+  }
+  const page = Math.floor(deal.offset / deal.limit) + 1;
+  const pages = Math.max(1, Math.ceil(body.total / deal.limit));
+  $('#deal-page-info').textContent = `${page} / ${pages} (${body.total} lots)`;
+  $('#deal-prev').disabled = deal.offset === 0;
+  $('#deal-next').disabled = deal.offset + deal.limit >= body.total;
+}
+
+let _dealQTimer;
+$('#deal-q').addEventListener('input', (e) => {
+  clearTimeout(_dealQTimer);
+  _dealQTimer = setTimeout(() => { deal.q = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 300);
+});
+$('#deal-category').addEventListener('change', (e) => { deal.category = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-state').addEventListener('change', (e) => { deal.state = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-ending').addEventListener('change', (e) => { deal.ending = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-zero-bids').addEventListener('change', (e) => { deal.zero = e.target.checked; deal.offset = 0; loadDeals(); });
+$$('#deal-status-filter .seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#deal-status-filter .seg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    deal.status = btn.dataset.value; deal.offset = 0; loadDeals();
+  });
+});
+$$('#deal-table th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (deal.sort === key) {
+      deal.dir = (deal.dir ?? (key === 'ends' ? 'asc' : 'desc')) === 'asc' ? 'desc' : 'asc';
+    } else { deal.sort = key; deal.dir = null; }
+    deal.offset = 0; loadDeals();
+  });
+});
+$('#deal-prev').addEventListener('click', () => { deal.offset = Math.max(0, deal.offset - deal.limit); loadDeals(); });
+$('#deal-next').addEventListener('click', () => { deal.offset += deal.limit; loadDeals(); });
+$('#deal-refresh').addEventListener('click', () => { deal.facetsLoaded = false; loadDeals(); });
 
 // All module-level state (`auc`, etc.) and per-tab loaders are defined above,
 // so it is now safe to restore the saved tab and trigger its loader.
