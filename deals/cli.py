@@ -5,7 +5,7 @@ from deals.adapters.govdeals import GovDealsAdapter
 from deals.discover import run_discovery
 from deals.watch import poll_once
 from deals.digest import send_daily_digest
-from deals.fees import FeeModel
+from deals.fees import fee_model_from_env
 from deals.store import init_schema
 
 FURNITURE = ["372","47B","47C","47A","46","47D","28E","266"]
@@ -27,7 +27,7 @@ def main():
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
     elif a.cmd == "digest":
-        ok, err = send_daily_digest(FeeModel(buyer_premium_pct=0.125, tax_pct=0.0, freight=0.0))
+        ok, err = send_daily_digest(fee_model_from_env())
         print("digest sent" if ok else f"digest failed: {err}")
 
 if __name__ == "__main__":
