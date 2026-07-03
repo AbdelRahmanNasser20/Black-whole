@@ -1,4 +1,5 @@
 from datetime import timezone
+import pytest
 from deals.mapping import asset_to_lot, IMAGE_BASE
 
 def _raw(**over):
@@ -44,3 +45,17 @@ def test_missing_photo_yields_empty_image():
 
 def test_canonical_category_assigned():
     assert asset_to_lot(_raw(assetCategory="47B")).canonical_category == "seating_furniture"
+
+def test_missing_current_bid_raises():
+    raw = _raw()
+    del raw["currentBid"]
+    with pytest.raises(ValueError):
+        asset_to_lot(raw)
+
+def test_nonnumeric_current_bid_raises():
+    with pytest.raises(ValueError):
+        asset_to_lot(_raw(currentBid="N/A"))
+
+def test_reserve_price_zero_is_preserved_not_nulled():
+    lot = asset_to_lot(_raw(assetStrikePrice=0.0))
+    assert lot.reserve_price == 0.0

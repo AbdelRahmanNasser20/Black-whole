@@ -11,8 +11,20 @@ def _f(v) -> float:
     try: return float(v)
     except (TypeError, ValueError): return 0.0
 
+def _price(raw: dict) -> float:
+    """Parse the tracked price strictly. currentBid is the single most
+    safety-critical field — a missing/unparseable value must fail loudly, never
+    silently become 0.0 (which would also mislabel the lot as free)."""
+    cb = raw.get("currentBid")
+    if cb is None:
+        raise ValueError(f"currentBid missing for asset {raw.get('assetId')!r}")
+    try:
+        return float(cb)
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"currentBid unparseable ({cb!r}) for asset {raw.get('assetId')!r}") from e
+
 def asset_to_lot(raw: dict) -> Lot:
-    current = _f(raw.get("currentBid"))
+    current = _price(raw)
     photo = raw.get("photo") or ""
     return Lot(
         asset_id=int(raw["assetId"]), account_id=int(raw["accountId"]),
@@ -30,7 +42,7 @@ def asset_to_lot(raw: dict) -> Lot:
         high_bidder=int(raw.get("highBidder") or 0),
         has_reserve=bool(raw.get("hasReservePrice")),
         reserve_not_met=bool(raw.get("isReserveNotMet")),
-        reserve_price=(_f(raw["assetStrikePrice"]) if raw.get("assetStrikePrice") else None),
+        reserve_price=(_f(raw["assetStrikePrice"]) if raw.get("assetStrikePrice") is not None else None),
         is_free=bool(raw.get("isFreeAsset")) or current <= 0,
         seller=(raw.get("companyName") or "").strip(),
         city=(raw.get("locationCity") or "").strip(),
