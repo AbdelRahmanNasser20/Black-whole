@@ -279,6 +279,45 @@ Full API contract, SQL schema, and the reasoning behind every decision
 live in the upstream `HANDOFF.md`. Check it before debugging scraper
 internals.
 
+## deals/ — GovDeals auction deal-tracker (v1)
+
+**What it is.** A separate, modular package (strangler-fig, built alongside
+the `automation/` monolith — merged 2026-07-03, PR #37) that sweeps *every*
+GovDeals lot, watches each one through its close, and records how it ends
+(no-bid / low-bid / final price) so we can find lots that expire cheap enough
+to buy and resell. **GovDeals-only for v1** (Public Surplus is deferred; the
+`SiteAdapter` Protocol in `deals/adapters/base.py` is the seam it plugs into).
+Full spec + rationale: `docs/superpowers/plans/2026-07-03-govdeals-deal-tracker-v1.md`.
+
+**Pipeline & modules** (all pure-logic is unit-tested — `pytest tests/deals/`):
+- `models.py` — `Lot`/`Snapshot` + `Outcome`/`Lane` enums + `lot_key`.
+- `adapters/govdeals.py` — maestro JSON sweep (reuses `auction_extractors`'s key resolver). `discover()` / `refetch()` / `fetch_gallery()`.
+- `mapping.py` — `asset_to_lot`: **price = `currentBid`** (never `assetBidPrice`), missing/garbled price **fails loud** (never silent $0), currency preserved. Hero URL = `…/assets/photos/{account_id}/{photo}` (the `{account_id}` subfolder is required — omitting it 404s).
+- `categories.py` + `classify.py` — 3-way category: native code / deterministic code-map / **LLM (Gemini)** + `category_agreement` so LLM-vs-code accuracy is measurable (esp. the ~37% "General Merchandise" catch-all).
+- `fees.py` — `landed_cost`: the bid is **not** the cost; adds buyer premium + tax + freight.
+- `watcher_logic.py` + `watch.py` — closing-watcher. Trusts `end_utc` and re-reads it each poll (absorbs the anti-snipe extension; increment is seller-configurable, never hardcoded). Closed lots vanish from search → outcome = last snapshot before the drop. **No-bid = `bid_count==0` only** (a 1-bid lot sits at the opening price).
+- `store.py` — Supabase `deal_lots` + `deal_snapshots`. PK `(asset_id, account_id, auction_id)` so a relist can't clobber a prior auction's outcome; outcome columns are never overwritten by a re-sweep; snapshots are change-gated. DDL of record: `scripts/sql/deals_schema.sql`.
+- `archive.py` — downloads hero+gallery for 0-bid seating candidates → Supabase `listing-images` bucket (content-addressed paths, idempotent).
+- `discover.py` / `digest.py` — orchestration + the 0-bid Telegram digest (`deal_candidates` view: `scripts/sql/deal_candidates_view.sql`).
+- Viewer: `GET /deals/{asset_id}/{account_id}/{auction_id}` in `automation/web/app.py` rebuilds a listing from our store after GovDeals removes the page.
+
+**How to run** (from repo root, venv active):
+```bash
+.venv/bin/python -m deals.cli init-schema                    # create tables (once)
+.venv/bin/python -c "from automation import db; from deals.digest import VIEW_SQL; db.execute(VIEW_SQL)"  # create deal_candidates view (once)
+.venv/bin/python -m deals.cli discover --categories 372      # narrow-first: furniture (cluster: 372,47B,47C,47A,46,47D,28E,266)
+.venv/bin/python -m deals.cli watch-once                     # one poll pass over lots due for polling
+.venv/bin/python -m deals.cli digest                         # format + Telegram-send the 0-bid <24h candidates
+```
+`discover` with no `--categories` sweeps the full furniture cluster + General Merchandise. Tests: `.venv/bin/python -m pytest tests/deals/ -q` (note: this venv has no `pytest` console script — use `python -m pytest`).
+
+**Config gates (not code — required for full function):**
+- `SUPABASE_STORAGE_URL` / `SUPABASE_STORAGE_KEY` — needed for image **byte**-archiving (`archive.py`). Absent → uploads no-op (rows still land, per-lot error-isolated; hero images still *display* off the CDN). Not in the current `.env`.
+- `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — needed for `digest` to actually send (else `telegram_not_configured`). Not in the current `.env`.
+- `BLACKWHOLE_DB_URL` (Supabase) + `GEMINI_API_KEY` are already in `.env`.
+
+**v1 status / follow-ups:** live-smoke done (456 furniture lots stored, 334 zero-bid, 20 candidates). Deferred: exact contested-lot final price (needs a per-lot detail endpoint not found on maestro), Public Surplus adapter, whole-site scale + proxies, per-seller premium calibration, async/batched image archiving (333 sync downloads in one sweep is slow).
+
 ## Skill / settings notes
 - `.claude/settings.json` allowlists the project's common Bash commands (venv, pip, pytest, playwright, python run.py). Re-pickup needs `/hooks` open or session restart since Claude only watches files that existed at session start.
 - For a fresh session with everything pre-allowed: `cd .../listing_automation && claude --permission-mode bypassPermissions`. CLAUDE.md (this file) auto-loads on start.
