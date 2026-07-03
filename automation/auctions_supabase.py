@@ -11,6 +11,7 @@ verbatim from the upstream module, so card output is byte-for-byte identical.
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -24,6 +25,7 @@ from auction_extractors.top_chairs import (  # noqa: E402
     _classify,
     _enrich_via_llm,
     _is_active,
+    _is_non_chair_lot,
     _price_to_float,
 )
 
@@ -89,6 +91,17 @@ def get_top_chairs(
         cat, kw = _classify(it.get("title"), it.get("description"))
         it["category"] = cat
         it["category_keyword"] = kw
+
+    # Read-time relevance filter — the served list must match the scraper's
+    # _keep: drop non-chair lots (scales/stools/recliners/…) and gate medical
+    # behind INCLUDE_MEDICAL. Without this, junk stored in auction_listings is
+    # served even though the scraper's post-store _keep dropped it from alerts.
+    include_medical = os.getenv("INCLUDE_MEDICAL") == "1"
+    items = [
+        it for it in items
+        if (include_medical if it["category"] == "medical"
+            else not _is_non_chair_lot(it.get("title")))
+    ]
 
     if category is not None:
         items = [it for it in items if it["category"] == category]

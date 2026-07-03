@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
+from zoneinfo import ZoneInfo
+
 from dateutil import parser as _date_parser
 from dateutil.parser import UnknownTimezoneWarning
 
@@ -29,6 +31,25 @@ from . import inventory
 # GovDeals end_date string. We don't need sub-hour precision for "5 minutes
 # before end" alerts.
 warnings.filterwarnings("ignore", category=UnknownTimezoneWarning)
+
+
+# GovDeals displays *every* auction's close time in US Eastern, site-wide,
+# regardless of the lot's physical location (verified: lots in CA, CO, TX, NE
+# all stamp "EDT"). Its maestro API returns a NAIVE ISO string with no zone
+# (e.g. "2026-06-15T19:50:00"), so a naive end_date means Eastern — NOT UTC.
+# Labeling it UTC shifted every close 4–5h early and fired the 6d/3d/.../5m
+# countdown alerts ahead of the real auction end. Treat naive times as ET, and
+# resolve the US zone abbreviations the DOM-timer path emits. ZoneInfo is
+# backed by system tzdata or the `tzdata` package (a hard dependency), so it
+# resolves on any host — a missing zone would silently fall back to system
+# local time, which is the exact class of bug we're fixing.
+_EASTERN = ZoneInfo("America/New_York")
+_TZINFOS = {
+    "EST": _EASTERN, "EDT": _EASTERN,
+    "CST": ZoneInfo("America/Chicago"), "CDT": ZoneInfo("America/Chicago"),
+    "MST": ZoneInfo("America/Denver"), "MDT": ZoneInfo("America/Denver"),
+    "PST": ZoneInfo("America/Los_Angeles"), "PDT": ZoneInfo("America/Los_Angeles"),
+}
 
 
 # Order matters: the scheduler walks longest → shortest so a single tick can
@@ -54,19 +75,43 @@ def _now_iso() -> str:
 
 
 def _parse_end_date(raw: str | None) -> datetime | None:
-    """Normalize a scraped end_date string to UTC. Empty / unparseable → None."""
+    """Normalize a scraped end_date string to UTC. Empty / unparseable → None.
+
+    Naive timestamps (the GovDeals maestro API's ``assetAuctionEndDate``) are
+    interpreted as US Eastern — GovDeals shows all close times in ET. Strings
+    that carry an explicit zone (the DOM-timer "... PM EDT" path, or Public
+    Surplus's "...Z") keep their own zone.
+    """
     if not raw:
         return None
     s = raw.strip()
     if not s:
         return None
     try:
-        dt = _date_parser.parse(s, fuzzy=True)
+        dt = _date_parser.parse(s, fuzzy=True, tzinfos=_TZINFOS)
     except (ValueError, TypeError, OverflowError):
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=_EASTERN)
     return dt.astimezone(timezone.utc)
+
+
+def _moved_significantly(old_iso: str | None, new_iso: str | None, tol_seconds: int = 120) -> bool:
+    """True only when two ISO end-times differ by more than tol_seconds.
+
+    Guards the alert re-arm: a scrape re-parse that drifts by a few seconds (or
+    a formatting change that parses to the same instant) must NOT wipe the
+    sent-log and re-fire every 6d/3d/2d/1d/1h/5m stage. That drift was the
+    alert flood.
+    """
+    if not old_iso or not new_iso:
+        return False
+    try:
+        a = datetime.fromisoformat(old_iso)
+        b = datetime.fromisoformat(new_iso)
+    except ValueError:
+        return old_iso != new_iso
+    return abs((b - a).total_seconds()) > tol_seconds
 
 
 @dataclass
@@ -217,8 +262,11 @@ def upsert(
                 (link, title, quantity, end_iso, end_date_raw, image_url,
                  location, now, notes, asset_id),
             )
-            # Relist: end_date moved → re-arm alerts.
-            if end_iso and old_iso and end_iso != old_iso:
+            # Relist: end_date moved SIGNIFICANTLY → re-arm alerts. The
+            # tolerance stops a trivial re-parse / formatting drift from
+            # wiping the sent-log and re-firing every countdown stage — the
+            # cause of the alert flood.
+            if _moved_significantly(old_iso, end_iso):
                 conn.execute(
                     "DELETE FROM auction_alerts_sent WHERE asset_id = %s",
                     (asset_id,),

@@ -47,6 +47,14 @@ CASES = [
     ("(370) Padded Chairs", 370),
     ("37 chair", 37),
     ("1200 chairs", 1200),
+    # ── thousands separators must not truncate the count ────────────────
+    # (2026-06-18: "Lot of 2,100 Banquet Chairs" stored as 2 and "Lot of
+    # 1,600 Banquet Chairs" as 1 because \d+ stopped at the comma, dropping
+    # both Boise lots below the min-quantity floor on the Auctions tab.)
+    ("Lot of 2,100 Banquet Chairs", 2100),
+    ("Lot of 1,600 Banquet Chairs w/ 16 Racks", 1600),
+    ("1,200 chairs", 1200),
+    ("Approx 1,050 Stackable Chairs", 1050),
     ("16- Stackable Chairs", 16),
     ("Pallet of 200 Office Chairs", 200),
     # plural counts where a common word precedes the number — must NOT be

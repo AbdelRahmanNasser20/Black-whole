@@ -1,19 +1,20 @@
 {% extends "_public_base.html" %}
-{% block title %}Current Inventory — Black Whole Liquidation{% endblock %}
+{% block title %}Chair Lots for Sale — Bulk &amp; Wholesale | Black Whole Liquidation{% endblock %}
+{% block meta_description %}Browse current bulk chair lots{% if cities %} with pickup in {{ cities | join(', ') }}{% endif %}. Banquet, stacking, and event seating sold wholesale by the lot.{% endblock %}
 {% block body_class %}page-listings{% endblock %}
 
 {% block content %}
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">MANIFEST · ACTIVE</div>
-    <h1 class="page-title"><span class="accent">◉</span>&nbsp;CURRENT&nbsp;INVENTORY</h1>
+    <h1 class="page-title"><span class="accent">◉</span> CURRENT INVENTORY</h1>
     <p class="page-lede">
       Every lot on the floor. Counted, priced by the chair, moved by the pallet.
       Click a card for the full manifest.
     </p>
   </div>
   <div class="page-head-right mono tiny">
-    <div>TOTAL&nbsp;LOTS&nbsp;<span class="tag">{{ items|length }}</span></div>
+    <div>TOTAL LOTS <span class="tag">{{ items|length }}</span></div>
   </div>
 </section>
 
@@ -33,7 +34,7 @@
     </select>
   </div>
   <div class="filter-group">
-    <label class="mono tiny">MIN&nbsp;QTY</label>
+    <label class="mono tiny">MIN QTY</label>
     <input id="f-qty" type="number" min="1" placeholder="any">
   </div>
   <div class="filter-group filter-group--grow">
@@ -53,16 +54,17 @@
      data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
      data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.city or '' }}">
     <div class="lot-img">
-      {% if item.folder_name and item.hero_image %}
-        <img src="/image/{{ item.folder_name }}/{{ item.hero_image }}" alt="{{ item.title }}" loading="lazy">
+      {% if item.hero_src %}
+        <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
       {% else %}
         <div class="lot-img-fallback">◉</div>
       {% endif %}
       <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
     </div>
     <div class="lot-body">
-      <div class="lot-meta mono">LOT #{{ item.lot_id }} · {{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>
+      <div class="lot-meta mono">{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>
       <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+      {% if item.subtitle %}<div class="lot-subtitle">{{ item.subtitle }}</div>{% endif %}
       <div class="lot-row">
         <div class="lot-qty">
           <div class="lot-qty-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</div>
@@ -96,9 +98,12 @@
   <h2>FLOOR IS CLEAR</h2>
   <p>No active lots right now. New inventory rolls in weekly —
     drop us a note and we'll ping you when the next truck lands.</p>
-  <a href="/#contact" class="btn btn-primary">NOTIFY ME</a>
+  <a href="#alerts" class="btn btn-primary">NOTIFY ME</a>
 </section>
 {% endif %}
+
+{% set subscribe_source = 'site_listings' %}
+{% include "_subscribe_form.html" %}
 {% endblock %}
 
 {% block scripts %}

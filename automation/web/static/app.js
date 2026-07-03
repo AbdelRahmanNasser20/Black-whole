@@ -70,6 +70,7 @@ const panels = {
   inquiries: $('[data-pane="inquiries"]'),
   'listings-db': $('[data-pane="listings-db"]'),
   'test-scrape': $('[data-pane="test-scrape"]'),
+  subscribers: $('[data-pane="subscribers"]'),
 };
 
 const TAB_STORAGE_KEY = 'admin.lastTab';
@@ -87,6 +88,7 @@ function activateTab(name, {persist = true} = {}) {
   if (name === 'auctions') loadAuctions();
   if (name === 'inventory') loadInventory();
   if (name === 'inquiries') loadInquiries();
+  if (name === 'subscribers') loadSubscribers();
   if (name === 'listings-db') loadListingsDb();
   if (name === 'test-scrape') $('#ts-q')?.focus();
   if (persist) {
@@ -102,13 +104,20 @@ $$('.tab').forEach(btn => {
 // Restore the last tab on load. Falls back to whichever tab the markup
 // rendered as `.active` (typically 01 Launcher) if storage is empty or the
 // saved tab no longer exists in the DOM.
-(function restoreLastTab() {
+//
+// NOTE: this is only *defined* here — it is invoked at the very bottom of the
+// file. activateTab() calls per-tab loaders (loadAuctions, loadInventory, …)
+// that read module-level `const` state (e.g. `auc`) declared further down. If
+// we invoked restoreLastTab here, restoring a saved tab like "auctions" would
+// call loadAuctions() before `const auc` is initialized → a temporal-dead-zone
+// ReferenceError that silently wedges the tab on its loading placeholder.
+function restoreLastTab() {
   let saved = null;
   try { saved = localStorage.getItem(TAB_STORAGE_KEY); } catch (_) {}
   if (saved && saved !== 'launcher') {
     activateTab(saved, {persist: false});
   }
-})();
+}
 
 // ───────── clock ─────────
 
@@ -1567,6 +1576,44 @@ $('#inv-backfill')?.addEventListener('click', async (e) => {
   });
 });
 
+// add-listing form: toggle + submit
+$('#inv-add')?.addEventListener('click', () => {
+  const f = $('#inv-add-form');
+  if (!f) return;
+  f.hidden = !f.hidden;
+  if (!f.hidden) f.querySelector('input[name="lot_id"]')?.focus();
+});
+$('#inv-add-cancel')?.addEventListener('click', () => {
+  const f = $('#inv-add-form');
+  if (f) { f.reset(); f.hidden = true; }
+});
+$('#inv-add-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = e.currentTarget;
+  const fd = new FormData(f);
+  const payload = {};
+  fd.forEach((v, k) => { v = (v || '').toString().trim(); if (v) payload[k] = v; });
+  if (!payload.lot_id || !payload.title || !payload.quantity) {
+    toast('Lot ID, title, and quantity are required.', 'err');
+    return;
+  }
+  const btn = f.querySelector('button[type="submit"]');
+  await withButtonLoading(btn, '…creating', async () => {
+    try {
+      await apiFetch('/api/inventory', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      toast(`Listing ${payload.lot_id} created.`, 'ok');
+      f.reset(); f.hidden = true;
+      loadInventory();
+    } catch (err) {
+      toast('Create failed: ' + (err.message || err), 'err');
+    }
+  });
+});
+
 // status-filter segmented control
 $$('#inv-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => {
   $$('#inv-status-filter .seg-btn').forEach(x => x.classList.remove('active'));
@@ -1669,6 +1716,117 @@ $$('#inq-status-filter .seg-btn').forEach(b => b.addEventListener('click', () =>
   b.classList.add('active');
   _inqStatusFilter = b.dataset.value;
   loadInquiries();
+}));
+
+
+// ─────────────────────────── Subscribers tab ───────────────────────────
+
+var _subStatusFilter = '';
+
+const SUB_LABELS = {
+  use_case: {church: 'church', event_venue: 'event venue', wedding_rental: 'wedding rental',
+             restaurant: 'restaurant', school: 'school', reseller: 'reseller', other: 'other'},
+  timeline: {asap: 'ASAP', month: 'within a month', flexible: 'flexible'},
+  budget_per_chair: {under_5: '<$5/chair', '5_10': '$5–10/chair', '10_20': '$10–20/chair', '20_plus': '$20+/chair'},
+  delivery: {pickup: 'pickup', delivery: 'ship', either: 'either'},
+};
+
+async function loadSubscribers() {
+  const el = $('#sub-list');
+  el.innerHTML = '<div class="drafts-empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/subscribers' + (_subStatusFilter ? `?status=${_subStatusFilter}` : ''));
+    const data = await r.json();
+    renderSubscribers(data.items || []);
+  } catch (e) {
+    el.innerHTML = `<div class="drafts-empty">Load failed: ${e}</div>`;
+  }
+}
+
+function renderSubscribers(items) {
+  const el = $('#sub-list');
+  if (!items.length) {
+    el.innerHTML = '<div class="drafts-empty">No alert signups yet. The form lives at /listings#alerts.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for (const q of items) {
+    const card = document.createElement('article');
+    card.className = `inq-card inq-${q.status}`;
+    card.dataset.id = q.id;
+    const when = q.created_at ? String(q.created_at).replace('T', ' ').slice(0, 16) : '';
+    const geo = [q.city, q.state, q.zip_code].filter(Boolean).join(' ');
+    const prefs = [
+      q.quantity_wanted ? `qty ${q.quantity_wanted}` : '',
+      geo,
+      SUB_LABELS.use_case[q.use_case] || q.use_case || '',
+      q.chair_type || '',
+      SUB_LABELS.timeline[q.timeline] || q.timeline || '',
+      SUB_LABELS.budget_per_chair[q.budget_per_chair] || q.budget_per_chair || '',
+      SUB_LABELS.delivery[q.delivery] || q.delivery || '',
+    ].filter(Boolean).join(' · ');
+    card.innerHTML = `
+      <header class="inq-head">
+        <span class="inq-kind inq-kind--buy">ALERT</span>
+        <span class="inq-lot mono tiny">${escapeHtml(q.source || '')}</span>
+        <span class="inq-when mono tiny">${when}</span>
+        <span class="inq-status-pill inq-status-${q.status}">${q.status}</span>
+      </header>
+      <div class="inq-body">
+        <div class="inq-name">${escapeHtml(q.name || '—')}</div>
+        <div class="inq-contact mono tiny">
+          ${q.email ? `<a href="mailto:${escapeAttr(q.email)}">${escapeHtml(q.email)}</a>` : ''}
+          ${q.phone ? `<a href="tel:${escapeAttr(q.phone)}">${escapeHtml(q.phone)}</a>` : ''}
+        </div>
+        ${prefs ? `<div class="inq-contact mono tiny">${escapeHtml(prefs)}</div>` : ''}
+        ${q.notes ? `<blockquote class="inq-msg">${escapeHtml(q.notes)}</blockquote>` : ''}
+      </div>
+      <footer class="inq-foot">
+        ${['new','contacted','matched','unsubscribed'].filter(s => s !== q.status)
+          .map(s => `<button class="btn btn-small" data-set-status="${s}">→ ${s}</button>`).join('')}
+        <button class="btn btn-small btn-ghost inv-danger" data-delete>✕ delete</button>
+      </footer>
+    `;
+    card.querySelectorAll('[data-set-status]').forEach(b => b.addEventListener('click', async () => {
+      const status = b.dataset.setStatus;
+      await withButtonLoading(b, '…', async () => {
+        try {
+          await apiFetch(`/api/subscribers/${q.id}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status}),
+          });
+          toast(`Subscriber #${q.id} → ${status}`, 'ok');
+          loadSubscribers();
+        } catch (err) {
+          toast('Status change failed: ' + (err.message || err), 'err');
+        }
+      });
+    }));
+    card.querySelector('[data-delete]').addEventListener('click', async (e) => {
+      if (!confirm(`Delete subscriber #${q.id}?`)) return;
+      await withButtonLoading(e.currentTarget, '…', async () => {
+        try {
+          await apiFetch(`/api/subscribers/${q.id}`, {method: 'DELETE'});
+          toast(`Subscriber #${q.id} deleted.`, 'ok');
+          loadSubscribers();
+        } catch (err) {
+          toast('Delete failed: ' + (err.message || err), 'err');
+        }
+      });
+    });
+    el.appendChild(card);
+  }
+}
+
+$('#sub-refresh')?.addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '↻ loading…', loadSubscribers);
+});
+$$('#sub-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => {
+  $$('#sub-status-filter .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  _subStatusFilter = b.dataset.value;
+  loadSubscribers();
 }));
 
 
@@ -1970,3 +2128,7 @@ function renderTestScrapeCard(it, match) {
   `;
   return card;
 }
+
+// All module-level state (`auc`, etc.) and per-tab loaders are defined above,
+// so it is now safe to restore the saved tab and trigger its loader.
+restoreLastTab();

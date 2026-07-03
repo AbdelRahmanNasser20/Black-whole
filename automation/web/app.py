@@ -10,6 +10,8 @@ Routes:
   POST /api/compare/{ts}/rate → save a star rating (matched / wrong)
   GET  /image/{folder}/{name} → serve image from a listing folder
   GET  /screenshot/{folder}/{name} → serve a Playwright screenshot
+  POST /subscribe             → public alerts signup → subscribers table
+  GET/PATCH/DELETE /api/subscribers[/{id}] → admin Subscribers tab
 
 Streams stdout from run.py as Server-Sent Events. Parses
 `<<<EVENT>>>{json}` lines emitted by automation.progress.
@@ -32,12 +34,18 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     PlainTextResponse,
+    Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import DOWNLOAD_ROOT, FACEBOOK_BUSINESS_URL
+from ..config import (
+    DOWNLOAD_ROOT,
+    FACEBOOK_BUSINESS_URL,
+    GOOGLE_SITE_VERIFICATION,
+    PUBLIC_BASE_URL,
+)
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import db
 from .. import inventory
@@ -267,15 +275,134 @@ def _public_ctx(extra: dict) -> dict:
     return {
         "now": int(time.time()),
         "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
+        "base_url": PUBLIC_BASE_URL,
+        "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
         **extra,
     }
+
+
+def _absolute(url: str | None) -> str | None:
+    """Make a site-relative image path absolute for og:image / JSON-LD."""
+    if not url:
+        return None
+    return url if url.startswith("http") else f"{PUBLIC_BASE_URL}{url}"
+
+
+def _location_str(row: dict) -> str:
+    parts = [p for p in ((row.get("city") or "").strip(),
+                         (row.get("state") or "").strip()) if p]
+    return ", ".join(parts)
+
+
+def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
+    """Title / description / JSON-LD payload for a lot detail page."""
+    qty = row.get("quantity_remaining") or row.get("quantity_original")
+    title = (row.get("title") or "Chair lot").strip()
+    loc = _location_str(row)
+
+    seo_title = f"{qty}× {title}" if qty else title
+    if loc:
+        seo_title += f" — {loc}"
+    seo_title += " | Black Whole Liquidation"
+
+    desc_bits = []
+    if qty:
+        desc_bits.append(f"{qty} available")
+    if row.get("price_per_chair"):
+        desc_bits.append(f"${row['price_per_chair']:.0f}/chair")
+    if loc:
+        desc_bits.append(f"pickup in {loc}")
+    lead = f"{title} for sale in bulk" + (f" — {' · '.join(desc_bits)}." if desc_bits else ".")
+    body = (row.get("description") or "").strip()
+    if body:
+        lead += " " + (body[:150] + "…" if len(body) > 150 else body)
+
+    address = {
+        k: v for k, v in {
+            "addressLocality": (row.get("city") or "").strip() or None,
+            "addressRegion": (row.get("state") or "").strip() or None,
+            "postalCode": (row.get("zip_code") or "").strip() or None,
+        }.items() if v
+    }
+    offer: dict = {
+        "@type": "Offer",
+        "priceCurrency": "USD",
+        "availability": (
+            "https://schema.org/InStock"
+            if (row.get("quantity_remaining") or 0) > 0
+            else "https://schema.org/SoldOut"
+        ),
+        "itemCondition": "https://schema.org/UsedCondition",
+    }
+    if row.get("price_per_chair"):
+        offer["price"] = f"{row['price_per_chair']:.2f}"
+    if address:
+        offer["availableAtOrFrom"] = {
+            "@type": "Place",
+            "address": {"@type": "PostalAddress", "addressCountry": "US", **address},
+        }
+    product: dict = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": title,
+        "sku": row.get("lot_id"),
+        "offers": offer,
+    }
+    imgs = [u for u in (_absolute(hero), *map(_absolute, images)) if u]
+    if imgs:
+        product["image"] = list(dict.fromkeys(imgs))
+    if body:
+        product["description"] = body
+
+    return {
+        "seo_title": seo_title,
+        "seo_description": lead,
+        "og_image": _absolute(hero) or (imgs[0] if imgs else None),
+        # </ escaped so a scraped description can't close the <script> tag
+        "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
+    }
+
+
+def _hero_src(row: dict) -> str | None:
+    """Cover-image URL for a row: durable cloud URL first, local /image/ fallback.
+
+    The deployed site has no local Desktop folder, so a populated
+    `hero_image_url` (Supabase Storage, BLACKWHOLE-6) is what actually renders
+    there. Locally, an un-uploaded lot still shows via the /image/ route.
+    """
+    url = (row.get("hero_image_url") or "").strip()
+    if url.startswith("http"):
+        return url
+    folder, hero = row.get("folder_name"), row.get("hero_image")
+    if folder and hero:
+        return f"/image/{folder}/{hero}"
+    return None
+
+
+def _gallery_srcs(row: dict) -> list[str]:
+    """Ordered gallery URLs: durable cloud list first, else local folder files."""
+    urls = row.get("image_urls")
+    if isinstance(urls, list) and urls:
+        return [u for u in urls if u]
+    folder = row.get("folder_name")
+    if folder:
+        return [f"/image/{folder}/{n}" for n in _folder_images(DOWNLOAD_ROOT / folder)]
+    return []
 
 
 @app.get("/", response_class=HTMLResponse)
 async def public_landing(request: Request):
     try:
         counts = inventory.stats()
-        featured = inventory.list_public()[:4]
+        # Featured carousel: Idaho lots lead (the Boise nationwide-ships
+        # campaign), then the rest in ledger order.
+        def _idaho_first(r: dict) -> int:
+            state = (r.get("state") or "").strip().upper()
+            city = (r.get("city") or "").strip().lower()
+            return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
+        featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
+        for r in featured:
+            r["hero_src"] = _hero_src(r)
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0}
         featured = []
@@ -288,6 +415,8 @@ async def public_landing(request: Request):
 @app.get("/listings", response_class=HTMLResponse)
 async def public_listings(request: Request):
     items = inventory.list_public()
+    for r in items:
+        r["hero_src"] = _hero_src(r)
     cities = sorted({(r.get("city") or "").strip() for r in items if r.get("city")})
     chair_types = sorted({(r.get("chair_type") or "").strip()
                           for r in items if r.get("chair_type")})
@@ -302,14 +431,16 @@ async def public_listing_detail(request: Request, lot_id: str):
     row = inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
         raise HTTPException(404, "listing not found")
-    imgs: list[str] = []
-    folder_name = row.get("folder_name")
-    if folder_name:
-        folder = DOWNLOAD_ROOT / folder_name
-        imgs = _folder_images(folder)
+    hero = _hero_src(row)
+    images = _gallery_srcs(row)
     return templates.TemplateResponse(
         request, "listing_detail.html",
-        _public_ctx({"item": row, "images": imgs}),
+        _public_ctx({
+            "item": row,
+            "hero": hero,
+            "images": images,
+            **_detail_seo(row, hero, images),
+        }),
     )
 
 
@@ -328,6 +459,42 @@ async def public_sell(request: Request):
     return templates.TemplateResponse(
         request, "sell.html", _public_ctx({}),
     )
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    return (
+        "User-agent: *\n"
+        "Disallow: /admin\n"
+        "Disallow: /api/\n"
+        "Allow: /\n"
+        "\n"
+        f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    )
+
+
+def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
+    tag = f"  <url>\n    <loc>{loc}</loc>\n"
+    if lastmod:
+        tag += f"    <lastmod>{lastmod}</lastmod>\n"
+    return tag + "  </url>\n"
+
+
+@app.get("/sitemap.xml")
+async def sitemap_xml():
+    body = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    for path in ("/", "/listings", "/sell"):
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
+    for row in inventory.list_public():
+        updated = row.get("updated_at")
+        lastmod = None
+        if updated is not None:
+            # timestamptz comes back as datetime from Postgres; sitemap wants a date
+            lastmod = updated.date().isoformat() if hasattr(updated, "date") else str(updated)[:10]
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}/listings/{row['lot_id']}", lastmod)
+    body += "</urlset>\n"
+    return Response(content=body, media_type="application/xml")
 
 
 @app.post("/contact")
@@ -352,6 +519,61 @@ async def public_contact(payload: dict):
     return {"ok": True, "id": row["id"]}
 
 
+async def _notify_new_subscriber(row: dict) -> None:
+    # Fire-and-forget: a lost ping must never surface as a failed signup.
+    try:
+        bits = [f"◉ NEW ALERTS SIGNUP #{row['id']}"]
+        contact = " / ".join(x for x in (row.get("email"), row.get("phone")) if x)
+        who = row.get("name") or "—"
+        bits.append(f"{who} — {contact}")
+        geo = " ".join(x for x in (row.get("city"), row.get("state"), row.get("zip_code")) if x)
+        prefs = " · ".join(
+            str(x) for x in (
+                geo or None,
+                f"qty {row['quantity_wanted']}" if row.get("quantity_wanted") else None,
+                row.get("use_case"), row.get("chair_type"), row.get("timeline"),
+                row.get("budget_per_chair"), row.get("delivery"),
+            ) if x
+        )
+        if prefs:
+            bits.append(prefs)
+        if row.get("notes"):
+            bits.append(f"“{row['notes']}”")
+        await telegram_alerts.send_message("\n".join(bits))
+    except Exception:
+        pass
+
+
+@app.post("/subscribe")
+async def public_subscribe(payload: dict):
+    payload = payload or {}
+    try:
+        row = inventory.create_subscriber(
+            name=(payload.get("name") or "").strip() or None,
+            email=(payload.get("email") or "").strip() or None,
+            phone=(payload.get("phone") or "").strip() or None,
+            city=(payload.get("city") or "").strip() or None,
+            state=(payload.get("state") or "").strip() or None,
+            zip_code=(payload.get("zip_code") or "").strip() or None,
+            quantity_wanted=(
+                int(payload["quantity_wanted"])
+                if payload.get("quantity_wanted")
+                else None
+            ),
+            use_case=(payload.get("use_case") or "").strip() or None,
+            chair_type=(payload.get("chair_type") or "").strip() or None,
+            timeline=(payload.get("timeline") or "").strip() or None,
+            budget_per_chair=(payload.get("budget_per_chair") or "").strip() or None,
+            delivery=(payload.get("delivery") or "").strip() or None,
+            notes=(payload.get("notes") or "").strip() or None,
+            source=(payload.get("source") or "site_listings").strip(),
+        )
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    asyncio.create_task(_notify_new_subscriber(row))
+    return {"ok": True, "id": row["id"]}
+
+
 @app.get("/api/runs/state")
 async def get_run_state():
     return JSONResponse(state.snapshot())
@@ -364,6 +586,8 @@ def _extra_args_from_payload(payload: dict) -> list[str]:
             extra.append("--" + flag.replace("_", "-"))
     if payload.get("price"):
         extra += ["--price", str(int(payload["price"]))]
+    if payload.get("quantity"):
+        extra += ["--quantity", str(int(payload["quantity"]))]
     return extra
 
 
@@ -1237,10 +1461,19 @@ async def _alerts_tick() -> None:
                         ).fetchone()
                         if row is None:
                             continue
-                        fresh_end = (row["end_date"] or row["time_left"] or "").strip()
-                        if not fresh_end and not f.end_date_raw:
+                        # ONLY the absolute end_date — never time_left. A
+                        # relative "2 days left" string re-parses to a new
+                        # instant every tick, which re-armed alerts endlessly
+                        # (the alert flood). No absolute date → keep snapshot.
+                        fresh_end = (row["end_date"] or "").strip()
+                        if not fresh_end:
                             continue
-                        if fresh_end == (f.end_date_raw or ""):
+                        fresh_dt = favorites._parse_end_date(fresh_end)
+                        if fresh_dt is None:
+                            continue
+                        # Compare PARSED times, not raw strings: formatting
+                        # drift must not trigger a needless re-sync/re-arm.
+                        if f.end_dt and abs((fresh_dt - f.end_dt).total_seconds()) <= 120:
                             continue
                         favorites.upsert(
                             asset_id=f.asset_id,
@@ -1432,12 +1665,9 @@ def _inventory_to_public(row: dict) -> dict:
     *whether* one is on file). Adds `buyer_cert_url` when an attachment exists.
     """
     out = dict(row)
-    folder = row.get("folder_name")
-    hero = row.get("hero_image")
-    if folder and hero:
-        out["hero_image_url"] = f"/image/{folder}/{hero}"
-    else:
-        out["hero_image_url"] = None
+    # Prefer the durable Supabase Storage URL (BLACKWHOLE-6); only synthesize a
+    # local /image/ path when no cloud URL is on file. Don't clobber the cloud URL.
+    out["hero_image_url"] = _hero_src(row)
     out["govdeals_password_set"] = bool(out.pop("govdeals_password", None))
     if out.get("buyer_cert_path"):
         out["buyer_cert_url"] = f"/api/inventory/{row['lot_id']}/buyer-cert"
@@ -1479,6 +1709,7 @@ async def inv_create(payload: dict):
             lot_id=str(payload["lot_id"]).strip(),
             title=str(payload["title"]).strip(),
             quantity=int(payload["quantity"]),
+            subtitle=payload.get("subtitle") or None,
             price_per_chair=(float(payload["price_per_chair"])
                              if payload.get("price_per_chair") else None),
             city=payload.get("city") or None,
@@ -1721,6 +1952,39 @@ async def inq_update(inquiry_id: int, payload: dict):
 @app.delete("/api/inquiries/{inquiry_id}")
 async def inq_delete(inquiry_id: int):
     ok = inventory.delete_inquiry(inquiry_id)
+    if not ok:
+        raise HTTPException(404, "not found")
+    return {"ok": True}
+
+
+# ───────────────────────────── subscribers API ─────────────────────────────
+# Alert-signup rows captured by POST /subscribe (BLACKWHOLE-10). Status-only
+# updates — subscribers aren't lot-scoped, so there is no link step.
+
+@app.get("/api/subscribers")
+async def sub_list(status: str | None = None):
+    return {"items": inventory.list_subscribers(status=status)}
+
+
+@app.patch("/api/subscribers/{subscriber_id}")
+async def sub_update(subscriber_id: int, payload: dict):
+    payload = payload or {}
+    row: dict | None = None
+    if "status" in payload:
+        try:
+            row = inventory.set_subscriber_status(subscriber_id, payload["status"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    if row is None:
+        row = inventory.get_subscriber(subscriber_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
+@app.delete("/api/subscribers/{subscriber_id}")
+async def sub_delete(subscriber_id: int):
+    ok = inventory.delete_subscriber(subscriber_id)
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}

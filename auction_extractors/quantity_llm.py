@@ -15,12 +15,22 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import Any
 
 import requests
 
 # Chunk size keeps prompts small for free-tier limits and fast failures.
 _CHUNK = int(os.getenv("LLM_QUANTITY_CHUNK", "12"))
+
+# Per-chunk reliability knobs. No single free LLM is reliable enough to carry a
+# full daily scrape on its own: Gemini suffers transient 503 outages and Groq's
+# free tier caps at 100k tokens/day. So each chunk retries its primary provider
+# a couple of times, then falls back to the next configured provider before
+# giving up and marking the chunk llm_failed.
+_RETRIES = int(os.getenv("QUANTITY_LLM_RETRIES", "2"))
+# Backoff = _BACKOFF_BASE * 2**attempt seconds. 0 disables sleeping (tests).
+_BACKOFF_BASE = float(os.getenv("QUANTITY_LLM_BACKOFF", "1.5"))
 
 # Must match tests/test_quantity_accuracy.py / any tooling that shows "what the LLM sees"
 LLM_QUANTITY_TITLE_MAX = 500
@@ -66,6 +76,25 @@ def _groq_chat(api_key: str, prompt: str, model: str = "llama-3.3-70b-versatile"
         max_tokens=4000,
     )
     return resp.choices[0].message.content or ""
+
+
+def _gemini_chat(api_key: str, prompt: str, model: str = "gemini-2.5-flash") -> str:
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=api_key)
+    # Force a JSON response — without this, gemini-2.5-flash often "helpfully"
+    # returns a Python script that *computes* the answer instead of the answer,
+    # which fails our JSON parse and marks every row in the chunk llm_failed.
+    resp = client.models.generate_content(
+        model=model,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0,
+        ),
+    )
+    return resp.text or ""
 
 
 def _claude_max_chat(prompt: str) -> str:
@@ -122,6 +151,68 @@ def _parse_json_array(text: str) -> list[dict[str, Any]]:
     raise ValueError("No JSON array in LLM response")
 
 
+def _dispatch_provider(prov: str, prompt: str, cfg: dict[str, Any]) -> str:
+    """Single text completion from one provider. Raises on missing key /
+    unknown provider so the caller can fall through to the next provider."""
+    if prov == "openai":
+        if not cfg.get("openai_api_key"):
+            raise ValueError("OPENAI_API_KEY not set")
+        return _openai_chat(cfg["openai_api_key"], prompt)
+    if prov == "groq":
+        if not cfg.get("groq_api_key"):
+            raise ValueError("GROQ_API_KEY not set")
+        return _groq_chat(cfg["groq_api_key"], prompt)
+    if prov == "gemini":
+        key = cfg.get("gemini_api_key") or os.getenv("GEMINI_API_KEY")
+        if not key:
+            raise ValueError("GEMINI_API_KEY not set")
+        return _gemini_chat(key, prompt, os.getenv("GEMINI_MODEL", "gemini-2.5-flash"))
+    if prov == "ollama":
+        return _ollama_chat(
+            cfg["ollama_base_url"], cfg["ollama_model"], prompt, cfg["ollama_timeout"]
+        )
+    if prov == "claude_max":
+        return _claude_max_chat(prompt)
+    raise ValueError(f"Unknown LLM provider: {prov}")
+
+
+def _call_with_retries(prov: str, prompt: str, cfg: dict[str, Any]) -> str:
+    """Call one provider, retrying transient failures with exponential backoff.
+    Re-raises the last exception once retries are exhausted."""
+    last: Exception | None = None
+    for attempt in range(_RETRIES + 1):
+        try:
+            return _dispatch_provider(prov, prompt, cfg)
+        except Exception as e:  # noqa: BLE001 — any failure should fall through
+            last = e
+            if attempt < _RETRIES and _BACKOFF_BASE > 0:
+                time.sleep(_BACKOFF_BASE * (2 ** attempt))
+    raise last  # type: ignore[misc]
+
+
+def _provider_chain(primary: str, cfg: dict[str, Any]) -> list[str]:
+    """Ordered list of providers to try for each chunk: primary first, then
+    fallbacks. ``QUANTITY_LLM_FALLBACK`` (comma-separated) overrides the
+    auto-selected fallbacks, which are simply whichever other providers have a
+    key configured (groq → gemini → openai)."""
+    chain = [primary]
+    env_fb = (os.getenv("QUANTITY_LLM_FALLBACK") or "").strip().lower()
+    if env_fb:
+        candidates = [x.strip() for x in env_fb.split(",") if x.strip()]
+    else:
+        candidates = []
+        if cfg.get("groq_api_key"):
+            candidates.append("groq")
+        if cfg.get("gemini_api_key") or os.getenv("GEMINI_API_KEY"):
+            candidates.append("gemini")
+        if cfg.get("openai_api_key"):
+            candidates.append("openai")
+    for p in candidates:
+        if p and p != primary and p not in chain:
+            chain.append(p)
+    return chain
+
+
 def refine_quantities_with_llm(
     listings: list[dict[str, Any]],
     *,
@@ -131,6 +222,7 @@ def refine_quantities_with_llm(
     ollama_timeout: int,
     groq_api_key: str | None,
     openai_api_key: str | None,
+    gemini_api_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """
     Set quantity, quantity_confidence, quantity_source on each listing.
@@ -141,6 +233,17 @@ def refine_quantities_with_llm(
 
     out = [dict(x) for x in listings]
     prov = (provider or "ollama").strip().lower()
+    cfg = {
+        "ollama_base_url": ollama_base_url,
+        "ollama_model": ollama_model,
+        "ollama_timeout": ollama_timeout,
+        "groq_api_key": groq_api_key,
+        "openai_api_key": openai_api_key,
+        "gemini_api_key": gemini_api_key,
+    }
+    chain = _provider_chain(prov, cfg)
+    if len(chain) > 1:
+        print(f"   quantity_llm providers: {' → '.join(chain)} (retries={_RETRIES})")
 
     for start in range(0, len(out), _CHUNK):
         chunk = out[start : start + _CHUNK]
@@ -168,6 +271,13 @@ Rules:
   • "50% polyester" → NOT 50 chairs
   If the only numbers nearby are dimensions/angles/weights, return 1 with confidence low.
 - A single retail product (e.g. "Herman Miller Caper Chair", "UMF Medical 8678 Phlebotomy Chair") is a lot of 1, even if its description mentions dimensions or rotation.
+- Count ONLY the chairs included in THIS listing. Sellers often split one batch across
+  several auctions and repeat the grand total in every description. Examples:
+  • "105 chairs total across our listings, sold in groups of 1, 4, and 12" → NOT 105;
+    use this listing's own count (title or per-lot statement). If unclear, return 1 with confidence low.
+  • "Lot of (6) chairs. (2) other sets of 8 chairs are also being posted." → 6, NOT 22.
+    Never add chairs from other listings mentioned in the description.
+  • "There are an additional 2,100 chairs available in a separate auction" → ignore the 2,100.
 - Never return 0; minimum 1.
 
 INPUT:
@@ -187,34 +297,33 @@ INPUT:
                 if raw_excerpt:
                     it["quantity_llm_raw"] = raw_excerpt[:500]
 
-        try:
-            if prov == "openai":
-                if not openai_api_key:
-                    raise ValueError("OPENAI_API_KEY not set")
-                raw = _openai_chat(openai_api_key, prompt)
-            elif prov == "groq":
-                if not groq_api_key:
-                    raise ValueError("GROQ_API_KEY not set")
-                raw = _groq_chat(groq_api_key, prompt)
-            elif prov == "ollama":
-                raw = _ollama_chat(ollama_base_url, ollama_model, prompt, ollama_timeout)
-            elif prov == "claude_max":
-                raw = _claude_max_chat(prompt)
-            else:
-                raise ValueError(f"Unknown LLM_PROVIDER: {provider}")
-        except Exception as e:
-            print(f" ! quantity_llm chunk call failed ({start}-{start + len(chunk)}): {e}")
-            _mark_chunk_failed(f"call: {e}")
-            continue
-
-        try:
-            parsed = _parse_json_array(raw)
-        except Exception as e:
-            print(
-                f" ! quantity_llm JSON parse failed ({start}-{start + len(chunk)}): {e}\n"
-                f"   raw[:300]={raw[:300]!r}"
-            )
-            _mark_chunk_failed(f"parse: {e}", raw_excerpt=raw)
+        # Walk the provider chain: primary (with retries) first, then each
+        # fallback. A provider "fails" if the call errors OR its output won't
+        # parse as a JSON array; only when every provider fails do we mark the
+        # chunk llm_failed. This is what stops a Gemini 503 outage or a Groq
+        # daily-cap 429 from silently collapsing two thirds of the scrape.
+        parsed = None
+        raw = ""
+        last_err = ""
+        span = f"{start}-{start + len(chunk)}"
+        for p in chain:
+            try:
+                raw = _call_with_retries(p, prompt, cfg)
+            except Exception as e:  # noqa: BLE001
+                last_err = f"call[{p}]: {e}"
+                print(f" ! quantity_llm chunk {span} provider {p} call failed: {str(e)[:160]}")
+                continue
+            try:
+                parsed = _parse_json_array(raw)
+                if p != chain[0]:
+                    print(f"   ↳ quantity_llm chunk {span} recovered via fallback {p}")
+                break
+            except Exception as e:
+                last_err = f"parse[{p}]: {e}"
+                print(f" ! quantity_llm chunk {span} provider {p} JSON parse failed: {str(e)[:160]}")
+                continue
+        if parsed is None:
+            _mark_chunk_failed(last_err, raw_excerpt=raw)
             continue
 
         # Map by index i

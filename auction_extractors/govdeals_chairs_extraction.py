@@ -58,6 +58,15 @@ OLLAMA_MODEL    = os.getenv("OLLAMA_MODEL", "llama3.2")
 # Groq (when LLM_PROVIDER=groq) — free tier, fast
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# Gemini (when (QUANTITY_)LLM_PROVIDER=gemini) — high free-tier daily limits
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# The quantity pass can use a different (cheaper / higher-quota) provider than
+# ranking. Groq's free tier (100k tokens/day) blows up on a full scrape and
+# silently falls back to regex — which is how "Lot of 2,100" becomes qty 2.
+# Set QUANTITY_LLM_PROVIDER=gemini in prod so quantity never hits that cap.
+QUANTITY_LLM_PROVIDER = (os.getenv("QUANTITY_LLM_PROVIDER") or LLM_PROVIDER).strip().lower()
+
 # Ollama HTTP timeout (large JSON prompts can exceed 120s on CPU)
 try:
     OLLAMA_TIMEOUT = int(os.getenv("OLLAMA_TIMEOUT", "600"))
@@ -311,6 +320,16 @@ def _fetch_govdeals_long_description(
         pass
 
     return description, _pluck_image(), pickup_zip, contact_email, contact_phone
+
+
+def _llm_quantity_enabled() -> bool:
+    """LLM quantity pass defaults ON (matches Public Surplus).
+
+    The title-only regex misreads model/fleet numbers and thousands-separated
+    counts; the LLM is the trustworthy signal and must run unless explicitly
+    disabled with ``USE_LLM_QUANTITY=0``.
+    """
+    return os.getenv("USE_LLM_QUANTITY", "1") == "1"
 
 
 def enrich_listings_with_govdeals_descriptions(listings: list) -> list:
@@ -909,6 +928,25 @@ def _fallback_rank(listings):
         listing["rank"] = i
     return safe
 
+def _alert_on_quantity_degradation(listings: list, *, provider: str) -> None:
+    """Telegram-alert when the LLM quantity pass failed for some rows so the
+    pipeline is back on the (unreliable) regex value. Silent regex fallback is
+    exactly how a "Lot of 2,100" lot becomes qty 2 and vanishes from results —
+    the operator must know the run's quantities are degraded."""
+    degraded = [
+        it for it in listings
+        if it.get("quantity_source") in ("llm_failed", "llm_missing")
+    ]
+    if not degraded:
+        return
+    reason = next((it.get("quantity_error") for it in degraded if it.get("quantity_error")), "unknown")
+    _send_telegram_plain(
+        f"⚠️ GovDeals scrape: quantity LLM ({provider}) FAILED on {len(degraded)}/{len(listings)} "
+        f"lots — falling back to regex, so counts may be wrong (big lots can disappear). "
+        f"First error: {str(reason)[:160]}"
+    )
+
+
 def _send_telegram_plain(text: str) -> None:
     """Short alert (errors, etc.); skips if Telegram not configured."""
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
@@ -1083,17 +1121,19 @@ def main():
         print("[1c] Skipping regex(fulltext) — no descriptions on any listing.")
         print("     Set FETCH_GOVDEALS_DESCRIPTION=1 in .env to enable.")
 
-    if os.getenv("USE_LLM_QUANTITY") == "1":
+    if _llm_quantity_enabled():
         print("[1d] Refining quantities with LLM (title + description when present)…")
         listings = refine_quantities_with_llm(
             listings,
-            provider=LLM_PROVIDER,
+            provider=QUANTITY_LLM_PROVIDER,
             ollama_base_url=OLLAMA_BASE_URL,
             ollama_model=OLLAMA_MODEL,
             ollama_timeout=OLLAMA_TIMEOUT,
             groq_api_key=GROQ_API_KEY,
             openai_api_key=OPENAI_API_KEY,
+            gemini_api_key=GEMINI_API_KEY,
         )
+        _alert_on_quantity_degradation(listings, provider=QUANTITY_LLM_PROVIDER)
 
     # Persist EVERY processed listing to the SQLite cache before the
     # quantity filter — including small lots we're about to drop, so future
@@ -1108,20 +1148,25 @@ def main():
             f"{cache_counts['skip']} skipped (uncacheable URL)."
         )
 
-    # Keep only chairs with quantity over MIN_CHAIR_QUANTITY (after optional LLM fixups).
-    # Exception: medical/dental lots sell as singles — gate the qty floor on category
-    # so the alert path still surfaces them. Cache already has every row regardless.
-    from top_chairs import _classify
+    # Keep only banquet/event chairs over MIN_CHAIR_QUANTITY (after LLM fixups).
+    # Drop non-chair lots that merely share a chair-ish word (scales, stools,
+    # recliners, …). Medical exam/dental lots are gated behind INCLUDE_MEDICAL
+    # (default off) for the future medical vertical. Cache keeps every row.
+    from top_chairs import _classify, _is_non_chair_lot
+    include_medical = os.getenv("INCLUDE_MEDICAL") == "1"
     def _keep(item: dict) -> bool:
-        if item.get("quantity", 0) > MIN_CHAIR_QUANTITY:
-            return True
-        cat, _ = _classify(item.get("title"), item.get("description"))
-        return cat == "medical"
+        title = item.get("title") or ""
+        cat, _ = _classify(title, item.get("description"))
+        if cat == "medical":
+            return include_medical
+        if _is_non_chair_lot(title):
+            return False
+        return item.get("quantity", 0) > MIN_CHAIR_QUANTITY
     listings = [item for item in listings if _keep(item)]
     if not listings:
-        print(f"No listings with quantity > {MIN_CHAIR_QUANTITY} (or medical). Exiting.")
+        print(f"No banquet chairs with quantity > {MIN_CHAIR_QUANTITY}. Exiting.")
         return
-    print(f" → {len(listings)} listings kept (qty > {MIN_CHAIR_QUANTITY} or medical)")
+    print(f" → {len(listings)} banquet-chair listings kept (qty > {MIN_CHAIR_QUANTITY})")
     ranked = rank_with_llm(listings)
     if not ranked:
         print("Ranking failed or returned empty. Exiting.")

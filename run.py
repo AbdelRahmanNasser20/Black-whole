@@ -12,9 +12,9 @@ from pathlib import Path
 
 import click
 
-from automation import browser, govdeals, downloader, dewatermark as dw, facebook, ebay, inventory
+from automation import browser, govdeals, downloader, dewatermark as dw, facebook, ebay, inventory, listing_images
 from automation.llm import default_extractors, run_parallel
-from automation import progress, templates
+from automation import progress
 
 
 async def _wait_for_price_confirmation(suggested: int, timeout: float) -> int | None:
@@ -63,6 +63,7 @@ async def _run(
     skip_fb: bool,
     skip_ebay: bool,
     force_republish: bool = False,
+    quantity_override: int | None = None,
 ) -> None:
     async with browser.persistent_context() as ctx:
         progress.emit("run", status="started", url=url)
@@ -99,6 +100,15 @@ async def _run(
             primary=primary.to_dict() if primary else None,
             secondary=secondary.to_dict() if secondary else None,
         )
+
+        # Manual quantity override (--quantity): the user knows the true count
+        # (e.g. several auctions are really one batch). Applied before
+        # finalize_folder so the folder name and all downstream consumers
+        # (FB/eBay/inventory) use it.
+        if quantity_override is not None:
+            print(f"  quantity: {quantity_override} (--quantity override; "
+                  f"LLM said {primary.quantity})")
+            primary.quantity = str(quantity_override)
 
         # Folder name uses the LLM-corrected quantity, chair title, and state.
         # Before this point, meta carries a provisional folder; finalize_folder()
@@ -252,18 +262,35 @@ async def _run(
                 # custom-label field. Easy to grep across systems.
                 sku = meta.lot_id
                 hero = cleaned[0].name if cleaned else None
-                # Prefer the exact FB copy we just posted; otherwise render it
-                # locally so the public site has a clean product description.
-                rendered_desc = fb_rendered_description or templates.fb_description(
-                    location=primary.location,
-                    chair_type=primary.chair_type,
-                    quantity=primary.quantity,
-                    dimensions=primary.dimensions,
-                    description_text=primary.description_text,
-                    city=primary.city or meta.city,
-                    state=primary.state or meta.state,
-                    zip_code=primary.zip_code or meta.zip_code,
-                )
+                # Mirror cleaned photos into the shared Supabase Storage bucket
+                # so the deployed site can serve them (BLACKWHOLE-6). Best-effort:
+                # if storage is unconfigured or upload fails, URLs stay None and
+                # the site falls back to local /image/ serving.
+                hero_image_url: str | None = None
+                image_urls: list[str] | None = None
+                if cleaned:
+                    progress.emit("phase", phase="upload", status="running")
+                    try:
+                        uploaded = listing_images.upload_lot_images(meta.lot_id, cleaned)
+                    except Exception as e:  # never let storage crash a run
+                        uploaded = None
+                        print(f"  [warn] image upload failed: {e!r}")
+                    if uploaded:
+                        hero_image_url = uploaded.get("hero_image_url")
+                        image_urls = uploaded.get("image_urls") or None
+                        print(f"  uploaded {len(image_urls or [])} images to storage")
+                        progress.emit(
+                            "phase", phase="upload", status="done",
+                            uploaded=len(image_urls or []), hero=hero_image_url,
+                        )
+                    else:
+                        progress.emit("phase", phase="upload", status="skipped")
+                # Persist only the plain chair prose to the ledger. The public
+                # site shows location / quantity / contact separately, so the
+                # logistics boilerplate (📍 location, 📦 qty, "to get a quote")
+                # is intentionally NOT stored here. The Facebook post still
+                # includes that boilerplate via facebook.create_draft.
+                clean_desc = (primary.description_text or "").strip() or None
                 inventory.upsert_from_run(
                     lot_id=meta.lot_id,
                     seller_id=meta.seller_id or None,
@@ -272,7 +299,7 @@ async def _run(
                     folder_path=str(meta.folder_path),
                     sku=sku,
                     title=primary.title,
-                    description=rendered_desc,
+                    description=clean_desc,
                     city=primary.city or meta.city,
                     state=primary.state or meta.state,
                     zip_code=primary.zip_code or meta.zip_code,
@@ -284,6 +311,8 @@ async def _run(
                     quantity=qty_int,
                     price_per_chair=float(confirmed) if confirmed else None,
                     hero_image=hero,
+                    hero_image_url=hero_image_url,
+                    image_urls=image_urls,
                 )
                 if fb_url:
                     inventory.set_platform_url(meta.lot_id, "facebook", fb_url)
@@ -313,18 +342,20 @@ async def _run(
 @click.argument("url", required=False)
 @click.option("--login-only", is_flag=True, help="Open browser so you can log into FB/eBay/dewatermark.ai once.")
 @click.option("--price", type=int, default=None, help="Override LLM-suggested per-chair price.")
+@click.option("--quantity", type=int, default=None, help="Override LLM-detected chair quantity.")
 @click.option("--skip-dewatermark", is_flag=True)
 @click.option("--skip-fb", is_flag=True)
 @click.option("--skip-ebay", is_flag=True)
 @click.option("--force-republish", is_flag=True,
               help="Ignore inventory ledger — create fresh FB/eBay drafts even if this lot was published before.")
-def main(url, login_only, price, skip_dewatermark, skip_fb, skip_ebay, force_republish):
+def main(url, login_only, price, quantity, skip_dewatermark, skip_fb, skip_ebay, force_republish):
     if login_only:
         asyncio.run(_login_only())
         return
     if not url:
         raise click.UsageError("URL required (or pass --login-only)")
-    asyncio.run(_run(url, price, skip_dewatermark, skip_fb, skip_ebay, force_republish))
+    asyncio.run(_run(url, price, skip_dewatermark, skip_fb, skip_ebay, force_republish,
+                     quantity_override=quantity))
 
 
 if __name__ == "__main__":

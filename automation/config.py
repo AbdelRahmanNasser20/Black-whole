@@ -27,7 +27,14 @@ DOWNLOAD_ROOT = Path(os.getenv(
 ))
 
 STATE_ROOT = HOME / ".listing_automation"
-CHROME_PROFILE = STATE_ROOT / "chrome_profile"
+# Chrome profile holding the FB + eBay sessions. Overridable via
+# LISTING_CHROME_PROFILE so the pipeline can reuse another project's profile
+# (e.g. the facebook-crm poller's chrome_profile/). When pointed at a shared
+# profile, the lock handling in browser.py refuses to kill a live owner so a
+# running poller is never taken down.
+CHROME_PROFILE = Path(os.getenv("LISTING_CHROME_PROFILE") or (STATE_ROOT / "chrome_profile"))
+# True when the profile is borrowed from elsewhere (not our own state dir).
+CHROME_PROFILE_SHARED = bool(os.getenv("LISTING_CHROME_PROFILE"))
 LOG_DIR = STATE_ROOT / "logs"
 SCRATCH_DIR = STATE_ROOT / "scratch"
 ATTACHMENTS_ROOT = STATE_ROOT / "attachments"
@@ -75,8 +82,25 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 FACEBOOK_BUSINESS_URL = os.getenv("FACEBOOK_BUSINESS_URL", "")
 
+# Canonical public origin for the customer-facing site — canonical <link>
+# tags, absolute og:image URLs, sitemap.xml entries. No trailing slash.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://black-whole.com").rstrip("/")
+
+# Google Search Console ownership token. When set, public pages render
+# <meta name="google-site-verification" content="...">. See docs/seo.md.
+GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")
+
 DEWATERMARK_API_KEY = os.getenv("DEWATERMARK_API_KEY")
 DEWATERMARK_API_URL = "https://platform.dewatermark.ai/api/object_removal/v2/erase_watermark"
+
+# Supabase Storage — durable listing images (BLACKWHOLE-6). Shared `listing-images`
+# bucket in the LIVE `blackwhole` project, one source of truth with the CRM.
+# NOTE: deliberately separate from SUPABASE_URL/ANON above, which may point at a
+# stale project — uploads MUST use these vars. Unset => uploads silently skipped
+# and the pipeline falls back to local-disk serving (dev-friendly).
+SUPABASE_STORAGE_URL = os.getenv("SUPABASE_STORAGE_URL")
+SUPABASE_STORAGE_KEY = os.getenv("SUPABASE_STORAGE_KEY")
+LISTING_IMAGES_BUCKET = os.getenv("LISTING_IMAGES_BUCKET", "listing-images")
 
 CAROUSEL_STABLE_CHECKS = 3
 CAROUSEL_MAX_CLICKS = 40

@@ -1,0 +1,101 @@
+{# Alerts signup (BLACKWHOLE-10). Include with:
+     {% set subscribe_source = 'site_listings'|'site_landing'|'site_detail' %}
+     {% include "_subscribe_form.html" %}
+   Posts to /subscribe via public.js (.js-capture-form). #}
+<section class="contact contact--slim subscribe" id="alerts">
+  <div class="contact-grid">
+    <div>
+      <div class="section-rule"></div>
+      <div class="section-eyebrow mono tiny">◉ ALERT LIST — FOR FUTURE INVENTORY</div>
+      <h2 class="section-title">FIRST DIBS ON THE NEXT TRUCK</h2>
+      <p class="contact-lede">
+        Not a message to us — a standing order. Tell us what you're hunting
+        for once, and every time matching chairs hit the floor we ping you
+        first, before they're listed anywhere else. New lots land weekly.
+      </p>
+      <p class="section-crosslink mono tiny">
+        NEED SOMETHING ON THE FLOOR <em>TODAY</em>?
+        <a href="/#contact">TALK TO A HUMAN →</a>
+      </p>
+    </div>
+    <form class="manifest-form js-capture-form" id="subscribe-form"
+          data-endpoint="/subscribe"
+          data-success="◉ YOU'RE ON THE LIST. WE'LL PING YOU WHEN THE NEXT TRUCK LANDS.">
+      <input type="hidden" name="source" value="{{ subscribe_source or 'site_listings' }}">
+      <div class="mf-row mf-row--two">
+        <label><span>NAME</span><input name="name" autocomplete="name"></label>
+        <label><span>EMAIL</span><input name="email" type="email" autocomplete="email"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+        <label><span>HOW MANY CHAIRS?</span><input name="quantity_wanted" type="number" min="1" placeholder="e.g. 200"></label>
+      </div>
+      <div class="mf-hint mono tiny">EMAIL OR PHONE — AT LEAST ONE.</div>
+      <div class="mf-row mf-row--two">
+        <label><span>CITY</span><input name="city" autocomplete="address-level2"></label>
+        <label><span>ZIP</span><input name="zip_code" inputmode="numeric" autocomplete="postal-code"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label>
+          <span>WHAT ARE THEY FOR?</span>
+          <select name="use_case">
+            <option value="">—</option>
+            <option value="church">Church / congregation</option>
+            <option value="event_venue">Event venue / banquet hall</option>
+            <option value="wedding_rental">Wedding &amp; event rental</option>
+            <option value="restaurant">Restaurant / hospitality</option>
+            <option value="school">School / auditorium</option>
+            <option value="reseller">Reselling</option>
+            <option value="other">Other</option>
+          </select>
+        </label>
+        <label>
+          <span>CHAIR TYPE</span>
+          <select name="chair_type">
+            <option value="">ANY</option>
+            <option value="banquet">Banquet</option>
+            <option value="chiavari">Chiavari</option>
+            <option value="folding">Folding</option>
+            <option value="stacking">Stacking</option>
+          </select>
+        </label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label>
+          <span>WHEN DO YOU NEED THEM?</span>
+          <select name="timeline">
+            <option value="">—</option>
+            <option value="asap">ASAP</option>
+            <option value="month">Within a month</option>
+            <option value="flexible">Flexible / watching</option>
+          </select>
+        </label>
+        <label>
+          <span>BUDGET / CHAIR</span>
+          <select name="budget_per_chair">
+            <option value="">—</option>
+            <option value="under_5">Under $5</option>
+            <option value="5_10">$5–10</option>
+            <option value="10_20">$10–20</option>
+            <option value="20_plus">$20+</option>
+          </select>
+        </label>
+      </div>
+      <div class="mf-row">
+        <label>
+          <span>DELIVERY OR PICKUP?</span>
+          <select name="delivery">
+            <option value="">EITHER WORKS</option>
+            <option value="pickup">I can pick up locally</option>
+            <option value="delivery">I need them shipped</option>
+          </select>
+        </label>
+      </div>
+      <label class="mf-row"><span>ANYTHING ELSE?</span>
+        <textarea name="notes" rows="2" placeholder="Color, padding, must-match-existing, event date…"></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">PUT ME ON THE LIST →</button>
+      <div class="mf-result" hidden></div>
+    </form>
+  </div>
+</section>
