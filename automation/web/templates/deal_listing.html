@@ -1,0 +1,11 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>{{ lot.title }}</title></head>
+<body>
+  <h1>{{ lot.title }}</h1>
+  <p><strong>{{ lot.native_category_name }}</strong> · {{ lot.city }}, {{ lot.state }}</p>
+  <p>Current bid: {{ lot.currency_code }} {{ lot.current_bid }} · {{ lot.bid_count }} bids
+     {% if lot.outcome %}· <em>outcome: {{ lot.outcome }}</em>{% endif %}</p>
+  {% if lot.hero_image_url %}<img src="{{ lot.hero_image_url }}" style="max-width:100%">{% endif %}
+  <h2>Description</h2>
+  <pre style="white-space:pre-wrap">{{ lot.description }}</pre>
+</body></html>
