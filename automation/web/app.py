@@ -34,12 +34,18 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     PlainTextResponse,
+    Response,
 )
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
-from ..config import DOWNLOAD_ROOT, FACEBOOK_BUSINESS_URL
+from ..config import (
+    DOWNLOAD_ROOT,
+    FACEBOOK_BUSINESS_URL,
+    GOOGLE_SITE_VERIFICATION,
+    PUBLIC_BASE_URL,
+)
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import db
 from .. import inventory
@@ -269,7 +275,91 @@ def _public_ctx(extra: dict) -> dict:
     return {
         "now": int(time.time()),
         "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
+        "base_url": PUBLIC_BASE_URL,
+        "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
         **extra,
+    }
+
+
+def _absolute(url: str | None) -> str | None:
+    """Make a site-relative image path absolute for og:image / JSON-LD."""
+    if not url:
+        return None
+    return url if url.startswith("http") else f"{PUBLIC_BASE_URL}{url}"
+
+
+def _location_str(row: dict) -> str:
+    parts = [p for p in ((row.get("city") or "").strip(),
+                         (row.get("state") or "").strip()) if p]
+    return ", ".join(parts)
+
+
+def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
+    """Title / description / JSON-LD payload for a lot detail page."""
+    qty = row.get("quantity_remaining") or row.get("quantity_original")
+    title = (row.get("title") or "Chair lot").strip()
+    loc = _location_str(row)
+
+    seo_title = f"{qty}× {title}" if qty else title
+    if loc:
+        seo_title += f" — {loc}"
+    seo_title += " | Black Whole Liquidation"
+
+    desc_bits = []
+    if qty:
+        desc_bits.append(f"{qty} available")
+    if row.get("price_per_chair"):
+        desc_bits.append(f"${row['price_per_chair']:.0f}/chair")
+    if loc:
+        desc_bits.append(f"pickup in {loc}")
+    lead = f"{title} for sale in bulk" + (f" — {' · '.join(desc_bits)}." if desc_bits else ".")
+    body = (row.get("description") or "").strip()
+    if body:
+        lead += " " + (body[:150] + "…" if len(body) > 150 else body)
+
+    address = {
+        k: v for k, v in {
+            "addressLocality": (row.get("city") or "").strip() or None,
+            "addressRegion": (row.get("state") or "").strip() or None,
+            "postalCode": (row.get("zip_code") or "").strip() or None,
+        }.items() if v
+    }
+    offer: dict = {
+        "@type": "Offer",
+        "priceCurrency": "USD",
+        "availability": (
+            "https://schema.org/InStock"
+            if (row.get("quantity_remaining") or 0) > 0
+            else "https://schema.org/SoldOut"
+        ),
+        "itemCondition": "https://schema.org/UsedCondition",
+    }
+    if row.get("price_per_chair"):
+        offer["price"] = f"{row['price_per_chair']:.2f}"
+    if address:
+        offer["availableAtOrFrom"] = {
+            "@type": "Place",
+            "address": {"@type": "PostalAddress", "addressCountry": "US", **address},
+        }
+    product: dict = {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": title,
+        "sku": row.get("lot_id"),
+        "offers": offer,
+    }
+    imgs = [u for u in (_absolute(hero), *map(_absolute, images)) if u]
+    if imgs:
+        product["image"] = list(dict.fromkeys(imgs))
+    if body:
+        product["description"] = body
+
+    return {
+        "seo_title": seo_title,
+        "seo_description": lead,
+        "og_image": _absolute(hero) or (imgs[0] if imgs else None),
+        # </ escaped so a scraped description can't close the <script> tag
+        "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
     }
 
 
@@ -341,12 +431,15 @@ async def public_listing_detail(request: Request, lot_id: str):
     row = inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
         raise HTTPException(404, "listing not found")
+    hero = _hero_src(row)
+    images = _gallery_srcs(row)
     return templates.TemplateResponse(
         request, "listing_detail.html",
         _public_ctx({
             "item": row,
-            "hero": _hero_src(row),
-            "images": _gallery_srcs(row),
+            "hero": hero,
+            "images": images,
+            **_detail_seo(row, hero, images),
         }),
     )
 
@@ -356,6 +449,42 @@ async def public_sell(request: Request):
     return templates.TemplateResponse(
         request, "sell.html", _public_ctx({}),
     )
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots_txt():
+    return (
+        "User-agent: *\n"
+        "Disallow: /admin\n"
+        "Disallow: /api/\n"
+        "Allow: /\n"
+        "\n"
+        f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+    )
+
+
+def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
+    tag = f"  <url>\n    <loc>{loc}</loc>\n"
+    if lastmod:
+        tag += f"    <lastmod>{lastmod}</lastmod>\n"
+    return tag + "  </url>\n"
+
+
+@app.get("/sitemap.xml")
+async def sitemap_xml():
+    body = '<?xml version="1.0" encoding="UTF-8"?>\n'
+    body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+    for path in ("/", "/listings", "/sell"):
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
+    for row in inventory.list_public():
+        updated = row.get("updated_at")
+        lastmod = None
+        if updated is not None:
+            # timestamptz comes back as datetime from Postgres; sitemap wants a date
+            lastmod = updated.date().isoformat() if hasattr(updated, "date") else str(updated)[:10]
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}/listings/{row['lot_id']}", lastmod)
+    body += "</urlset>\n"
+    return Response(content=body, media_type="application/xml")
 
 
 @app.post("/contact")

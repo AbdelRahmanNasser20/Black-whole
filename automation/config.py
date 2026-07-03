@@ -82,6 +82,14 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
 FACEBOOK_BUSINESS_URL = os.getenv("FACEBOOK_BUSINESS_URL", "")
 
+# Canonical public origin for the customer-facing site — canonical <link>
+# tags, absolute og:image URLs, sitemap.xml entries. No trailing slash.
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://black-whole.com").rstrip("/")
+
+# Google Search Console ownership token. When set, public pages render
+# <meta name="google-site-verification" content="...">. See docs/seo.md.
+GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")
+
 DEWATERMARK_API_KEY = os.getenv("DEWATERMARK_API_KEY")
 DEWATERMARK_API_URL = "https://platform.dewatermark.ai/api/object_removal/v2/erase_watermark"
 
