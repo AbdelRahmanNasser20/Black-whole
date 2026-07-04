@@ -10,7 +10,18 @@ from deals.store import init_schema
 
 FURNITURE = ["372","47B","47C","47A","46","47D","28E","266"]
 AV_EQUIPMENT = ["22"]              # projectors, screens, sound gear
-DEFAULT_CATEGORIES = FURNITURE + AV_EQUIPMENT
+# resale-vetted verticals (2026-07-03) — see deals/categories.py for the canonical mapping
+TOOLS      = ["90","249","375","28I","153","159"]   # tools, power tools, generators, compressors
+KITCHEN    = ["287","21","632","631","630","25U"]   # commercial food service + kitchen
+COMPUTERS  = ["219","217","218","29","291","220"]   # laptops, desktops, tablets, parts, monitors
+RADIOS     = ["28","28S"]                           # two-way radios / comms
+LAB        = ["57","57M"]                           # laboratory / test equipment
+MEDICAL    = ["67","301"]                           # Class I medical + hospital
+FITNESS    = ["147","208"]                          # exercise + fitness/rec
+MUSIC      = ["70"]                                 # school-band instruments
+LAWN       = ["71","373"]                           # mowing + parks/grounds
+DEFAULT_CATEGORIES = (FURNITURE + AV_EQUIPMENT + TOOLS + KITCHEN + COMPUTERS
+                      + RADIOS + LAB + MEDICAL + FITNESS + MUSIC + LAWN)
 
 def main():
     ap = argparse.ArgumentParser()
