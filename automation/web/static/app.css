@@ -1273,3 +1273,42 @@ main {
               font-family: var(--mono); font-size: 11px; color: var(--ink-mute); }
 #deal-table th.sortable { cursor: pointer; user-select: none; }
 #deal-table th.sortable:hover { color: var(--ink); }
+
+/* category tree explorer: branch = canonical bucket, twig = native category */
+.deal-layout { display: flex; gap: 16px; align-items: flex-start; }
+.deal-layout .inv-table-wrap { flex: 1; min-width: 0; }
+.deal-tree {
+  flex: 0 0 250px; position: sticky; top: 12px;
+  max-height: calc(100vh - 24px); overflow-y: auto;
+  background: var(--bg-elev); border: 1px solid var(--line);
+  font-family: var(--mono); font-size: 11px;
+}
+.deal-tree-head {
+  padding: 8px 10px; color: var(--ink-dim); letter-spacing: .08em;
+  border-bottom: 1px solid var(--line);
+  display: flex; justify-content: space-between; gap: 8px;
+}
+.deal-tree-legend { color: var(--ink-dim); letter-spacing: 0; }
+.dt-node {
+  display: flex; align-items: baseline; gap: 6px; padding: 5px 10px;
+  color: var(--ink-mute); cursor: pointer; user-select: none;
+  border-left: 2px solid transparent;
+}
+.dt-node:hover { color: var(--ink); background: var(--bg-elev-2); }
+.dt-node.active {
+  color: var(--accent); border-left-color: var(--accent);
+  background: var(--bg-elev-2);
+}
+.dt-root { border-bottom: 1px solid var(--line); }
+.dt-counts { margin-left: auto; color: var(--ink-dim); white-space: nowrap; }
+.dt-node.active .dt-counts { color: var(--accent); opacity: .8; }
+.dt-arrow {
+  background: none; border: none; color: var(--ink-dim); cursor: pointer;
+  font: inherit; padding: 0 2px; transition: transform .12s;
+}
+.dt-arrow.open { transform: rotate(90deg); }
+.dt-twigs .dt-node { padding-left: 30px; }
+@media (max-width: 900px) {
+  .deal-layout { flex-direction: column; }
+  .deal-tree { position: static; flex: none; width: 100%; max-height: 40vh; }
+}

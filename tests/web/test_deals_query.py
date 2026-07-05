@@ -35,6 +35,18 @@ def test_combined_filters_order_and_args():
     assert 0 in args and 48 in args
 
 
+def test_native_category_filter_uppercased():
+    where, args = deals_query.build_where(native="47b", status="all")
+    assert "native_category_id = %s" in where
+    assert args == ["47B"]
+
+
+def test_native_and_canonical_compose():
+    where, args = deals_query.build_where(category="tools_shop", native="375", status="all")
+    assert "canonical_category = %s" in where and "native_category_id = %s" in where
+    assert args == ["tools_shop", "375"]
+
+
 def test_order_clause_whitelist():
     assert deals_query.order_clause("ends", None) == "ORDER BY end_utc ASC NULLS LAST"
     assert deals_query.order_clause("bids", None) == "ORDER BY bid_count DESC NULLS LAST"

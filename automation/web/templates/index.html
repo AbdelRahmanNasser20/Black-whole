@@ -461,29 +461,38 @@
     </div>
   </form>
 
-  <div class="inv-table-wrap">
-    <table class="inv-table" id="deal-table">
-      <thead>
-        <tr>
-          <th></th>
-          <th>Title</th>
-          <th>Category</th>
-          <th>Location</th>
-          <th class="sortable" data-sort="bids">Bids</th>
-          <th class="sortable" data-sort="bid">Bid</th>
-          <th class="sortable" data-sort="landed" title="bid + buyer premium + tax + freight (DEALS_* env)">Landed</th>
-          <th class="sortable" data-sort="ends">Ends</th>
-          <th>Outcome</th>
-        </tr>
-      </thead>
-      <tbody id="deal-rows">
-        <tr><td colspan="9" class="drafts-empty">Loading deals…</td></tr>
-      </tbody>
-    </table>
-    <div class="deal-pager">
-      <button type="button" class="btn btn-small" id="deal-prev">‹ prev</button>
-      <span id="deal-page-info"></span>
-      <button type="button" class="btn btn-small" id="deal-next">next ›</button>
+  <div class="deal-layout">
+    <aside class="deal-tree" aria-label="Category tree">
+      <div class="deal-tree-head">CATEGORY TREE
+        <span class="deal-tree-legend" title="lots · zero-bid lots · ending &lt;24h">n · ⚑ 0-bid · ⏱ &lt;24h</span>
+      </div>
+      <div id="deal-tree-nodes"><div class="drafts-empty">Loading…</div></div>
+    </aside>
+
+    <div class="inv-table-wrap">
+      <table class="inv-table" id="deal-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Title</th>
+            <th>Category</th>
+            <th>Location</th>
+            <th class="sortable" data-sort="bids">Bids</th>
+            <th class="sortable" data-sort="bid">Bid</th>
+            <th class="sortable" data-sort="landed" title="bid + buyer premium + tax + freight (DEALS_* env)">Landed</th>
+            <th class="sortable" data-sort="ends">Ends</th>
+            <th>Outcome</th>
+          </tr>
+        </thead>
+        <tbody id="deal-rows">
+          <tr><td colspan="9" class="drafts-empty">Loading deals…</td></tr>
+        </tbody>
+      </table>
+      <div class="deal-pager">
+        <button type="button" class="btn btn-small" id="deal-prev">‹ prev</button>
+        <span id="deal-page-info"></span>
+        <button type="button" class="btn btn-small" id="deal-next">next ›</button>
+      </div>
     </div>
   </div>
 </section>

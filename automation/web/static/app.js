@@ -2132,9 +2132,9 @@ function renderTestScrapeCard(it, match) {
 }
 
 /* ── Deals tab ─────────────────────────────────────────────── */
-const deal = {q: '', category: '', state: '', zero: false, ending: '',
+const deal = {q: '', category: '', native: '', state: '', zero: false, ending: '',
               status: 'active', sort: 'ends', dir: null, offset: 0, limit: 50,
-              facetsLoaded: false};
+              facetsLoaded: false, treeStatus: null, expanded: new Set()};
 
 function dealEndsCell(iso) {
   if (!iso) return '<td>—</td>';
@@ -2148,11 +2148,85 @@ function dealEndsCell(iso) {
   return `<td class="${cls}" title="${iso}">${label}</td>`;
 }
 
+/* Category tree: branch = canonical bucket, twig = native GovDeals category.
+   Clicking a node filters the table; the arrow only expands/collapses. */
+let _dealTree = null;
+
+function renderDealTree() {
+  const host = $('#deal-tree-nodes');
+  if (!_dealTree) { host.innerHTML = '<div class="drafts-empty">no data</div>'; return; }
+  const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const counts = (o) => `<span class="dt-counts">${o.n} · ⚑${o.zero_bid} · ⏱${o.ending_24h}</span>`;
+  const total = {n: _dealTree.total,
+                 zero_bid: _dealTree.branches.reduce((a, b) => a + b.zero_bid, 0),
+                 ending_24h: _dealTree.branches.reduce((a, b) => a + b.ending_24h, 0)};
+  let html = `<div class="dt-node dt-root ${!deal.category && !deal.native ? 'active' : ''}"
+                   data-cat="" data-native="">all deals ${counts(total)}</div>`;
+  html += _dealTree.branches.map(b => {
+    const open = deal.expanded.has(b.category);
+    const branchActive = deal.category === b.category && !deal.native;
+    const twigs = b.twigs.map(t => `
+      <div class="dt-node dt-twig ${deal.native === t.native_id ? 'active' : ''}"
+           data-cat="${esc(b.category)}" data-native="${esc(t.native_id)}"
+           title="GovDeals category ${esc(t.native_id)}">
+        ${esc(t.name)} ${counts(t)}
+      </div>`).join('');
+    return `
+      <div class="dt-branch">
+        <div class="dt-node dt-b ${branchActive ? 'active' : ''}" data-cat="${esc(b.category)}" data-native="">
+          <button type="button" class="dt-arrow ${open ? 'open' : ''}" data-toggle="${esc(b.category)}"
+                  aria-label="expand ${esc(b.category)}">▸</button>
+          ${esc(b.category)} ${counts(b)}
+        </div>
+        <div class="dt-twigs" ${open ? '' : 'hidden'}>${twigs}</div>
+      </div>`;
+  }).join('');
+  host.innerHTML = html;
+}
+
+async function loadDealTree() {
+  deal.treeStatus = deal.status;
+  try {
+    const r = await fetch('/api/deals/tree?status=' + deal.status);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _dealTree = await r.json();
+  } catch (e) {
+    _dealTree = null;
+    $('#deal-tree-nodes').innerHTML = `<div class="drafts-empty">tree error: ${e}</div>`;
+    return;
+  }
+  renderDealTree();
+}
+
+$('#deal-tree-nodes').addEventListener('click', (e) => {
+  const arrow = e.target.closest('.dt-arrow');
+  if (arrow) {
+    const cat = arrow.dataset.toggle;
+    deal.expanded.has(cat) ? deal.expanded.delete(cat) : deal.expanded.add(cat);
+    renderDealTree();
+    e.stopPropagation();
+    return;
+  }
+  const node = e.target.closest('.dt-node');
+  if (!node) return;
+  deal.category = node.dataset.cat;
+  deal.native = node.dataset.native;
+  if (deal.category && deal.native) deal.expanded.add(deal.category);
+  // keep the CATEGORY dropdown honest (it only knows canonical buckets)
+  const dd = $('#deal-category');
+  dd.value = [...dd.options].some(o => o.value === deal.category) ? deal.category : '';
+  deal.offset = 0;
+  renderDealTree();
+  loadDeals();
+});
+
 async function loadDeals() {
   const tbody = $('#deal-rows');
+  if (deal.treeStatus !== deal.status) loadDealTree();
   const p = new URLSearchParams();
   if (deal.q) p.set('q', deal.q);
   if (deal.category) p.set('category', deal.category);
+  if (deal.native) p.set('native', deal.native);
   if (deal.state) p.set('state', deal.state);
   if (deal.zero) p.set('max_bids', '0');
   if (deal.ending) p.set('ending_within', deal.ending);
@@ -2224,7 +2298,10 @@ $('#deal-q').addEventListener('input', (e) => {
   clearTimeout(_dealQTimer);
   _dealQTimer = setTimeout(() => { deal.q = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 300);
 });
-$('#deal-category').addEventListener('change', (e) => { deal.category = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-category').addEventListener('change', (e) => {
+  deal.category = e.target.value; deal.native = ''; deal.offset = 0;
+  renderDealTree(); loadDeals();
+});
 $('#deal-state').addEventListener('change', (e) => { deal.state = e.target.value; deal.offset = 0; loadDeals(); });
 $('#deal-ending').addEventListener('change', (e) => { deal.ending = e.target.value; deal.offset = 0; loadDeals(); });
 $('#deal-zero-bids').addEventListener('change', (e) => { deal.zero = e.target.checked; deal.offset = 0; loadDeals(); });
@@ -2246,7 +2323,7 @@ $$('#deal-table th.sortable').forEach(th => {
 });
 $('#deal-prev').addEventListener('click', () => { deal.offset = Math.max(0, deal.offset - deal.limit); loadDeals(); });
 $('#deal-next').addEventListener('click', () => { deal.offset += deal.limit; loadDeals(); });
-$('#deal-refresh').addEventListener('click', () => { deal.facetsLoaded = false; loadDeals(); });
+$('#deal-refresh').addEventListener('click', () => { deal.facetsLoaded = false; loadDealTree(); loadDeals(); });
 
 // All module-level state (`auc`, etc.) and per-tab loaders are defined above,
 // so it is now safe to restore the saved tab and trigger its loader.

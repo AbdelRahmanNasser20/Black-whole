@@ -471,6 +471,7 @@ _DEALS_ACTIVE = "outcome_complete IS NOT TRUE AND end_utc > now()"
 async def list_deals(
     q: str | None = None,
     category: str | None = None,
+    native: str | None = None,
     state: str | None = None,
     max_bids: int | None = None,
     ending_within: int | None = None,
@@ -490,7 +491,7 @@ async def list_deals(
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
     where, args = deals_query.build_where(
-        q=q, category=category, state=state, max_bids=max_bids,
+        q=q, category=category, native=native, state=state, max_bids=max_bids,
         ending_within=ending_within, status=status,
     )
     order = deals_query.order_clause(sort, dir)
@@ -534,6 +535,53 @@ async def list_deals(
         "facets": {"categories": cats, "states": states},
         "stats": stats,
     }
+
+
+@app.get("/api/deals/tree")
+async def deals_tree(status: str = "active"):
+    """Category tree for the Deals tab explorer: canonical bucket (branch) →
+    native GovDeals category (twig), each with lot / zero-bid / ending-24h
+    counts. Same status semantics as /api/deals."""
+    if status not in ("active", "closed", "all"):
+        raise HTTPException(400, "status must be active|closed|all")
+    where, args = deals_query.build_where(status=status)
+
+    def _fetch():
+        return db.fetch_all(
+            "SELECT canonical_category, native_category_id, "
+            "min(native_category_name) AS native_category_name, "
+            "count(*) AS n, "
+            "count(*) FILTER (WHERE bid_count = 0) AS zero_bid, "
+            "count(*) FILTER (WHERE outcome_complete IS NOT TRUE "
+            "  AND end_utc > now() AND end_utc <= now() + interval '24 hours') AS ending_24h "
+            f"FROM deal_lots WHERE {where} AND canonical_category IS NOT NULL "
+            "GROUP BY canonical_category, native_category_id",
+            tuple(args),
+        )
+
+    try:
+        rows = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        raise HTTPException(503, f"deals tree query failed: {e!r}")
+
+    branches: dict[str, dict] = {}
+    for r in rows:
+        b = branches.setdefault(r["canonical_category"], {
+            "category": r["canonical_category"], "n": 0, "zero_bid": 0,
+            "ending_24h": 0, "twigs": [],
+        })
+        b["n"] += r["n"]
+        b["zero_bid"] += r["zero_bid"]
+        b["ending_24h"] += r["ending_24h"]
+        b["twigs"].append({
+            "native_id": r["native_category_id"],
+            "name": r["native_category_name"] or r["native_category_id"],
+            "n": r["n"], "zero_bid": r["zero_bid"], "ending_24h": r["ending_24h"],
+        })
+    for b in branches.values():
+        b["twigs"].sort(key=lambda t: -t["n"])
+    tree = sorted(branches.values(), key=lambda b: -b["n"])
+    return {"total": sum(b["n"] for b in tree), "branches": tree}
 
 
 @app.get("/sell", response_class=HTMLResponse)

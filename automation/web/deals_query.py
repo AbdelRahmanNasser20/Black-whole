@@ -19,6 +19,7 @@ SORTS = {
 
 
 def build_where(*, q: str | None = None, category: str | None = None,
+                native: str | None = None,
                 state: str | None = None, max_bids: int | None = None,
                 ending_within: int | None = None,
                 status: str = "active") -> tuple[str, list]:
@@ -34,6 +35,9 @@ def build_where(*, q: str | None = None, category: str | None = None,
     if category:
         where.append("canonical_category = %s")
         args.append(category)
+    if native:
+        where.append("native_category_id = %s")
+        args.append(native.upper())
     if state:
         where.append("state = %s")
         args.append(state.upper())
