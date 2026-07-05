@@ -10,3 +10,4 @@ dist/
 .claude/
 auction_extractors/state/
 auction_extractors/reports/
+.playwright-mcp/
