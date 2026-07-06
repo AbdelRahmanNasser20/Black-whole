@@ -1,13 +1,82 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>{{ lot.title }}</title></head>
-<body>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ lot.title }} · deal {{ lot.asset_id }}/{{ lot.account_id }}</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:#0d1117; color:#e6edf3;
+         font:15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 1.4rem; margin: 0 0 6px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin: 10px 0 4px; }
+  .chip { padding: 2px 10px; border-radius: 999px; font-size:.8rem;
+          border:1px solid #30363d; background:#161b22; color:#9da7b1; }
+  .chip.green { border-color:#2ea04366; color:#3fb950; }
+  .chip.red   { border-color:#f8514966; color:#f85149; }
+  .chip.amber { border-color:#d2992266; color:#d29922; }
+  .meta { color:#9da7b1; font-size:.9rem; margin: 2px 0 18px; }
+  .meta a { color:#58a6ff; text-decoration:none; }
+  .price { font-size: 1.6rem; font-weight: 700; margin: 8px 0 2px; }
+  .price small { font-size:.9rem; font-weight:400; color:#9da7b1; }
+  .gallery { display:grid; grid-template-columns: repeat(auto-fill, minmax(220px,1fr));
+             gap:10px; margin: 18px 0; }
+  .gallery a { display:block; border:1px solid #30363d; border-radius:8px; overflow:hidden;
+               background:#161b22; }
+  .gallery img { width:100%; height:200px; object-fit:cover; display:block; }
+  .gallery a:first-child { grid-column: 1 / -1; }
+  .gallery a:first-child img { height: 420px; object-fit:contain; background:#010409; }
+  h2 { font-size:1rem; color:#9da7b1; text-transform:uppercase; letter-spacing:.08em;
+       border-bottom:1px solid #21262d; padding-bottom:6px; margin-top:28px; }
+  pre.desc { white-space:pre-wrap; font:inherit; color:#c9d1d9; margin:12px 0; }
+  .grid2 { display:grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap:6px 24px; }
+  .grid2 div { padding:4px 0; font-size:.9rem; }
+  .grid2 b { color:#9da7b1; font-weight:500; display:block; font-size:.75rem;
+             text-transform:uppercase; letter-spacing:.06em; }
+</style></head>
+<body><div class="wrap">
   <h1>{{ lot.title }}</h1>
-  <p><strong>{{ lot.native_category_name }}</strong> · {{ lot.city }}, {{ lot.state }}</p>
-  <p>Current bid: {{ lot.currency_code }} {{ lot.current_bid if lot.current_bid is not none else '—' }} · {{ lot.bid_count if lot.bid_count is not none else 0 }} bids
-     {% if lot.outcome %}· <em>outcome: {{ lot.outcome }}</em>{% endif %}</p>
+  <div class="chips">
+    {% if lot.outcome %}
+      <span class="chip {{ 'green' if lot.outcome == 'no_bid' else 'amber' }}">closed · {{ lot.outcome }}</span>
+    {% else %}
+      <span class="chip green">active</span>
+    {% endif %}
+    <span class="chip">{{ lot.bid_count if lot.bid_count is not none else 0 }} bids</span>
+    {% if lot.canonical_category %}<span class="chip">{{ lot.canonical_category }}</span>{% endif %}
+    {% if lot.images_archived %}
+      <span class="chip green">images archived</span>
+    {% else %}
+      <span class="chip red">images from GovDeals CDN — not archived</span>
+    {% endif %}
+  </div>
+  <div class="price">{{ lot.currency_code or 'USD' }} {{ '%.2f'|format(lot.final_bid if lot.final_bid is not none else (lot.current_bid or 0)) }}
+    <small>{{ 'final' if lot.final_bid is not none else 'current bid' }}</small></div>
+  <div class="meta">
+    {{ lot.native_category_name }} · {{ lot.city }}, {{ lot.state }}{% if lot.seller %} · {{ lot.seller }}{% endif %}
+    {% if lot.end_utc %} · {{ 'ended' if lot.outcome else 'ends' }} {{ lot.end_utc.strftime('%b %d, %Y %H:%M UTC') }}{% endif %}
+    · <a href="https://www.govdeals.com/en/asset/{{ lot.asset_id }}/{{ lot.account_id }}" target="_blank" rel="noopener">GovDeals ↗</a>
+  </div>
+
   {% set hero = lot.archived_hero_url or lot.hero_image_url %}
-  {% if hero %}<img src="{{ hero }}" style="max-width:100%">{% endif %}
-  {% if lot.gallery_urls %}{% for g in lot.gallery_urls %}<img src="{{ g }}" style="max-width:100%">{% endfor %}{% endif %}
+  {% set gallery = lot.gallery_urls or [] %}
+  {% if hero or gallery %}
+  <div class="gallery">
+    {% if hero %}<a href="{{ hero }}" target="_blank"><img src="{{ hero }}" alt="{{ lot.title }}"></a>{% endif %}
+    {% for g in gallery %}<a href="{{ g }}" target="_blank"><img src="{{ g }}" alt="" loading="lazy"></a>{% endfor %}
+  </div>
+  {% endif %}
+
   <h2>Description</h2>
-  <pre style="white-space:pre-wrap">{{ lot.description }}</pre>
-</body></html>
+  <pre class="desc">{{ lot.description }}</pre>
+
+  <h2>Details</h2>
+  <div class="grid2">
+    <div><b>Lot key</b>{{ lot.asset_id }} / {{ lot.account_id }} / {{ lot.auction_id }}</div>
+    <div><b>Opening bid</b>{{ lot.opening_bid if lot.opening_bid is not none else '—' }}</div>
+    {% if lot.outcome %}<div><b>Final bids</b>{{ lot.final_bid_count if lot.final_bid_count is not none else '—' }}</div>{% endif %}
+    <div><b>Reserve</b>{{ 'yes' if lot.has_reserve else 'no' }}</div>
+    <div><b>First seen</b>{{ lot.first_seen_at.strftime('%b %d, %Y') if lot.first_seen_at else '—' }}</div>
+    <div><b>Native category</b>{{ lot.native_category_id }} {{ lot.native_category_name }}</div>
+  </div>
+</div></body></html>
