@@ -298,7 +298,7 @@ Full spec + rationale: `docs/superpowers/plans/2026-07-03-govdeals-deal-tracker-
 - `fees.py` — `landed_cost`: the bid is **not** the cost; adds buyer premium + tax + freight.
 - `watcher_logic.py` + `watch.py` — closing-watcher. Trusts `end_utc` and re-reads it each poll (absorbs the anti-snipe extension; increment is seller-configurable, never hardcoded). Closed lots vanish from search → outcome = last snapshot before the drop. **No-bid = `bid_count==0` only** (a 1-bid lot sits at the opening price).
 - `store.py` — Supabase `deal_lots` + `deal_snapshots`. PK `(asset_id, account_id, auction_id)` so a relist can't clobber a prior auction's outcome; outcome columns are never overwritten by a re-sweep; snapshots are change-gated. DDL of record: `scripts/sql/deals_schema.sql`.
-- `archive.py` — downloads hero+gallery for 0-bid seating candidates → Supabase `listing-images` bucket (content-addressed paths, idempotent).
+- `archive.py` — downloads hero+gallery → Supabase `listing-images` bucket (content-addressed paths keyed on the cache-buster-free URL, idempotent). Images are archived **CDN-downsized** (`?h={DEALS_ARCHIVE_IMG_HEIGHT}&webp=true`, default 800px webp ≈ 40 KB each vs 200–800 KB full-res) to control Supabase storage spend; set `DEALS_ARCHIVE_IMG_HEIGHT=0` for full-res. Two entry points: inline during `discover` for 0-bid seating candidates, and `archive-active` (CLI) which backfills every active un-archived lot zero-bid-first/soonest-ending-first with `--limit` + `--max-mb` guards. Galleries come from the **maestro per-lot detail endpoint** (`POST /assets/{asset_id}/{account_id}/false`, body `{"businessId":"GD","siteId":1}` — the body is load-bearing, without it `assetPhotos` returns empty; headers need `x-api-correlation-id`). No browser needed. The same endpoint also returns full description/specs — it's the seam for exact contested-lot final prices (previously thought not to exist).
 - `discover.py` / `digest.py` — orchestration + the 0-bid Telegram digest (`deal_candidates` view: `scripts/sql/deal_candidates_view.sql`).
 - Viewer: `GET /deals/{asset_id}/{account_id}/{auction_id}` in `automation/web/app.py` rebuilds a listing from our store after GovDeals removes the page.
 
@@ -307,19 +307,20 @@ Full spec + rationale: `docs/superpowers/plans/2026-07-03-govdeals-deal-tracker-
 .venv/bin/python -m deals.cli init-schema                    # create tables (once)
 .venv/bin/python -c "from automation import db; from deals.digest import VIEW_SQL; db.execute(VIEW_SQL)"  # create deal_candidates view (once)
 .venv/bin/python -m deals.cli discover --categories 372      # narrow-first: furniture (cluster: 372,47B,47C,47A,46,47D,28E,266)
+.venv/bin/python -m deals.cli archive-active --limit 100 --max-mb 60   # backfill images for active lots before they expire
 .venv/bin/python -m deals.cli watch-once                     # one poll pass over lots due for polling
 .venv/bin/python -m deals.cli digest                         # format + Telegram-send the 0-bid <24h candidates
 ```
 `discover` with no `--categories` sweeps the full furniture cluster + General Merchandise. Tests: `.venv/bin/python -m pytest tests/deals/ -q` (note: this venv has no `pytest` console script — use `python -m pytest`).
 
 **Config gates (not code — required for full function):**
-- `SUPABASE_STORAGE_URL` / `SUPABASE_STORAGE_KEY` — needed for image **byte**-archiving (`archive.py`). Absent → uploads no-op (rows still land, per-lot error-isolated; hero images still *display* off the CDN). Not in the current `.env`.
+- `SUPABASE_STORAGE_URL` / `SUPABASE_STORAGE_KEY` — needed for image **byte**-archiving (`archive.py`). Absent → uploads no-op (rows still land, per-lot error-isolated; hero images still *display* off the CDN). **In `.env` since 2026-07-06** (copied from `facebook_scraper_Claude/.env`; `SUPABASE_STORAGE_URL` is the project base — `archive.py`/`listing_images.py` append `/storage/v1/...`). Storage budget: Supabase free tier is 1 GB and the shared `listing-images` bucket already carries ~200 MB of inventory photos — watch `storage.objects` before big backfills.
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — needed for `digest` to actually send (else `telegram_not_configured`). Not in the current `.env`.
 - `BLACKWHOLE_DB_URL` (Supabase) + `GEMINI_API_KEY` are already in `.env`.
 
 **Deals cron (Render, 2026-07-17 spec):** four cron services in `render.yaml`, all dispatching through `scripts/deals_cron.sh` (committed script — avoids the inline `sh -c` quote-mangling that broke run_discovery.sh's predecessor): `deals-discover` (every 6h, `discover --categories all --max-pages 200` — `--categories all` sweeps the **whole site** via an empty maestro `categoryIds`), `deals-watch` (`watch-once`, every 20 min), `deals-analyze` (`analyze`, hourly), `deals-digest` (`digest`, 13:00 UTC ≈ 9am ET). All four pull `fromGroup: blackwhole-secrets`; the operator must set `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `COMPS_URL` / `COMPS_KEY` values in the Render dashboard (keys are declared in the `blackwhole-secrets` group, values are never committed).
 
-**v1 status / follow-ups:** live-smoke done (456 furniture lots stored, 334 zero-bid, 20 candidates). Deferred: exact contested-lot final price (needs a per-lot detail endpoint not found on maestro), Public Surplus adapter, whole-site scale + proxies, per-seller premium calibration, async/batched image archiving (333 sync downloads in one sweep is slow).
+**v1 status / follow-ups:** live-smoke done (456 furniture lots stored, 334 zero-bid, 20 candidates). Deferred: exact contested-lot final price (the per-lot detail endpoint **was found** 2026-07-06 — `POST maestro /assets/{a}/{acct}/false`, plus `GET /bids/bidbox/GD/{a}/{acct}/{auction}` for live bid state; wiring it into the watcher is still open), Public Surplus adapter, whole-site scale + proxies, per-seller premium calibration, async/batched image archiving (333 sync downloads in one sweep is slow).
 
 ## Skill / settings notes
 - `.claude/settings.json` allowlists the project's common Bash commands (venv, pip, pytest, playwright, python run.py). Re-pickup needs `/hooks` open or session restart since Claude only watches files that existed at session start.
