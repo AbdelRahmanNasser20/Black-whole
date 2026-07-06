@@ -61,7 +61,7 @@
   {% set hero = lot.archived_hero_url or lot.hero_image_url %}
   {% set gallery = lot.gallery_urls or [] %}
   {% if hero or gallery %}
-  <div class="gallery">
+  <div class="gallery" id="gallery">
     {% if hero %}<a href="{{ hero }}" target="_blank"><img src="{{ hero }}" alt="{{ lot.title }}"></a>{% endif %}
     {% for g in gallery %}<a href="{{ g }}" target="_blank"><img src="{{ g }}" alt="" loading="lazy"></a>{% endfor %}
   </div>
@@ -79,4 +79,15 @@
     <div><b>First seen</b>{{ lot.first_seen_at.strftime('%b %d, %Y') if lot.first_seen_at else '—' }}</div>
     <div><b>Native category</b>{{ lot.native_category_id }} {{ lot.native_category_name }}</div>
   </div>
-</div></body></html>
+</div>
+<script src="/static/deal_card.js"></script>
+<script>
+  // click an image → DealCard carousel at that image (instead of raw open-in-tab)
+  document.querySelectorAll('#gallery a').forEach((a, i) => {
+    a.addEventListener('click', (e) => {
+      e.preventDefault();
+      DealCard.open({{ lot.asset_id }}, {{ lot.account_id }}, {{ lot.auction_id }}, {index: i});
+    });
+  });
+</script>
+</body></html>
