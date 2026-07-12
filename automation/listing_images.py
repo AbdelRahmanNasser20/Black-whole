@@ -19,15 +19,27 @@ the site just falls back to local-disk serving.
 """
 from __future__ import annotations
 
+import io
 import re
 import sys
 from pathlib import Path
 
 import httpx
+from PIL import Image
 
 from . import config
 
 DEFAULT_BUCKET = "listing-images"
+
+# Web-delivery optimization (egress guard). Raw GovDeals photos run 5-9 MB
+# each; serving them full-size burned through the Supabase egress quota and
+# got the whole Storage service 402-restricted. Cap the long edge and
+# re-encode as JPEG before upload — a chair photo doesn't need more.
+MAX_IMAGE_DIM = 1600
+JPEG_QUALITY = 82
+# Objects are content-stable (upserts replace in place, and the site re-reads
+# URLs from the DB), so let browsers cache for a week.
+CACHE_CONTROL = "max-age=604800"
 
 # content-type / extension mapping (mirror of the CRM helper).
 _CT_EXT = {
@@ -115,6 +127,46 @@ def _content_type_for(path: Path) -> str:
     return _EXT_CT.get(path.suffix.lstrip(".").lower(), "image/jpeg")
 
 
+def optimize_for_web(data: bytes, ext: str) -> tuple[bytes, str, str]:
+    """Shrink an image for web delivery: cap the long edge, re-encode JPEG.
+
+    Returns ``(bytes, ext, content_type)``. Best-effort: GIFs (may animate)
+    and anything Pillow can't parse pass through untouched, and the re-encode
+    is only kept when it's actually smaller than the original — so this can
+    never make an upload worse, only cheaper.
+    """
+    original = (data, ext, _EXT_CT.get(ext, "image/jpeg"))
+    if ext == "gif":
+        return original
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        return original
+
+    if max(img.size) > MAX_IMAGE_DIM:
+        img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.LANCZOS)
+
+    # Flatten transparency onto white; JPEG has no alpha channel.
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        flat = Image.new("RGB", img.size, (255, 255, 255))
+        flat.paste(img, mask=img.split()[-1])
+        img = flat
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+
+    buf = io.BytesIO()
+    try:
+        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    except Exception:
+        return original
+    out = buf.getvalue()
+    if not out or len(out) >= len(data):
+        return original
+    return out, "jpg", "image/jpeg"
+
+
 def _post_object(client: httpx.Client, *, base, key, bucket, path, data, content_type) -> bool:
     """Idempotent upsert of raw bytes to the Storage object endpoint."""
     endpoint = f"{base.rstrip('/')}/storage/v1/object/{bucket}/{path}"
@@ -122,6 +174,7 @@ def _post_object(client: httpx.Client, *, base, key, bucket, path, data, content
         "apikey": key,
         "Authorization": f"Bearer {key}",
         "Content-Type": content_type or "image/jpeg",
+        "Cache-Control": CACHE_CONTROL,
         "x-upsert": "true",
     }
     try:
@@ -169,8 +222,7 @@ def upload_lot_images(lot_id, paths) -> dict | None:
                 continue
             if not data:
                 continue
-            ext = guess_ext(fp.name)
-            ct = _content_type_for(fp)
+            data, ext, ct = optimize_for_web(data, guess_ext(fp.name))
 
             gal_path = gallery_object_path(lot_id, i, ext=ext)
             if gal_path and _post_object(client, base=base, key=key, bucket=bucket,
