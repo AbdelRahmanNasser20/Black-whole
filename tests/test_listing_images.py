@@ -3,6 +3,19 @@ from pathlib import Path
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _isolate_from_ambient_r2(monkeypatch):
+    """Pin these tests to the Supabase transport.
+
+    `automation.config` loads .env on import, so a real R2 config on the dev box
+    would otherwise make `upload_lot_images` dispatch to R2 and fail every
+    assertion here. R2 has its own suite (tests/test_r2_images.py).
+    """
+    for var in ("R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+                "R2_BUCKET", "R2_PUBLIC_BASE"):
+        monkeypatch.delenv(var, raising=False)
+
 from automation import config, listing_images as li
 
 
@@ -222,3 +235,36 @@ def test_post_object_sends_cache_control(monkeypatch):
                          content_type="image/jpeg")
     assert ok
     assert captured["headers"]["Cache-Control"] == li.CACHE_CONTROL
+
+
+# --- EXIF orientation: phone photos must not ship sideways ----------------
+
+def _jpeg_with_orientation(orientation: int, size=(400, 300)) -> bytes:
+    """A landscape-in-memory JPEG tagged with an EXIF Orientation."""
+    import io as _io
+    from PIL import Image
+    buf = _io.BytesIO()
+    img = Image.new("RGB", size, (10, 120, 200))
+    exif = img.getexif()
+    exif[274] = orientation  # 274 = Orientation
+    img.save(buf, format="JPEG", quality=95, exif=exif)
+    return buf.getvalue()
+
+
+def test_optimize_bakes_in_exif_orientation_6():
+    """Orientation 6 = rotate 90° CW. Re-encoding drops the tag, so the rotation
+    must be applied to the pixels or the photo ships sideways (lot 9006)."""
+    import io as _io
+    from PIL import Image
+    out, _, _ = li.optimize_for_web(_jpeg_with_orientation(6, (400, 300)), "jpg")
+    img = Image.open(_io.BytesIO(out))
+    # 400x300 landscape rotated 90° -> 300x400 portrait
+    assert img.size == (300, 400), f"expected portrait after transpose, got {img.size}"
+    assert not (img.getexif() or {}).get(274), "orientation tag must not survive un-applied"
+
+
+def test_optimize_leaves_orientation_1_alone():
+    import io as _io
+    from PIL import Image
+    out, _, _ = li.optimize_for_web(_jpeg_with_orientation(1, (400, 300)), "jpg")
+    assert Image.open(_io.BytesIO(out)).size == (400, 300)

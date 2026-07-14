@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageOps
 
 from . import config
 
@@ -144,6 +144,14 @@ def optimize_for_web(data: bytes, ext: str) -> tuple[bytes, str, str]:
     except Exception:
         return original
 
+    # Bake in EXIF orientation before doing anything else. Phone cameras store
+    # pixels in sensor orientation plus an Orientation tag; re-encoding drops
+    # that tag, so without this a portrait iPhone shot ships sideways.
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+
     if max(img.size) > MAX_IMAGE_DIM:
         img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.LANCZOS)
 
@@ -200,6 +208,13 @@ def upload_lot_images(lot_id, paths) -> dict | None:
     file becomes the hero (flat key, back-compat); every file also lands under
     the gallery prefix. Idempotent upsert, so re-runs overwrite in place.
     """
+    # Storage backend: Cloudflare R2 when configured (zero egress fees), else
+    # the original Supabase bucket. R2 exists because Supabase egress overage
+    # 402-restricted Storage and took every listing photo offline.
+    from automation import r2_images  # lazy: avoids an import cycle
+    if r2_images.is_configured():
+        return r2_images.upload_lot_images(lot_id, paths)
+
     cfg = env_config()
     base_key = key_base(lot_id)
     if not cfg or not base_key:
