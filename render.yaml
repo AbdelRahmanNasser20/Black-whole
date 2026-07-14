@@ -60,6 +60,10 @@ services:
       - fromGroup: blackwhole-secrets
       - key: GOVDEALS_USE_API
         value: "1"           # JSON API path (proven from datacenter IPs)
+      - key: PUBLICSURPLUS_USE_API
+        value: "1"           # PS plain-HTTP path; this image has no Chromium
+      - key: PUBLICSURPLUS_ALLOW_BROWSER
+        value: "0"           # no Chromium here — degrade, never launch+crash
       - key: LLM_PROVIDER
         value: groq          # quantity refine via Groq API (llama-3.3-70b)
       - key: LISTINGS_DB_PATH
