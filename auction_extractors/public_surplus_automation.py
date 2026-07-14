@@ -104,6 +104,20 @@ def _use_http_fast_path() -> bool:
     fallback runs. Opt back in with ``PUBLICSURPLUS_USE_API=1`` if PS ever
     re-opens server-rendered results to non-browser clients."""
     return os.getenv("PUBLICSURPLUS_USE_API", "0") == "1"
+
+
+def _browser_fallback_enabled() -> bool:
+    """Whether we may fall back to Playwright when an HTTP fetch comes up empty.
+
+    Defaults ON — on the operator's Mac the browser is the primary path. The
+    cloud image ships no Chromium on purpose (see Dockerfile), so the discovery
+    cron sets ``PUBLICSURPLUS_ALLOW_BROWSER=0``: there, a failed HTTP fetch must
+    degrade to "skip it" rather than raise out of the run. Without this guard a
+    single flaky detail fetch launches Chromium, throws, and costs us every PS
+    row for the day."""
+    return os.getenv("PUBLICSURPLUS_ALLOW_BROWSER", "1") == "1"
+
+
 _BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
@@ -454,6 +468,15 @@ def enrich_listings_with_descriptions(listings: list) -> list:
                 print(f"   … {i + 1}/{len(needs_fetch)}")
         if not failed:
             return listings
+        if not _browser_fallback_enabled():
+            # Cloud image has no Chromium — keep the rows (quantity still comes
+            # from the title regex + LLM) instead of raising and losing the run.
+            print(f"[1b] {len(failed)} HTTP fetch failure(s); browser fallback "
+                  "disabled — keeping those listings without descriptions.")
+            for item in failed:
+                item["description"] = ""
+                item.setdefault("image_url", "")
+            return listings
         print(f"[1b] {len(failed)} HTTP fetch failure(s) — Playwright fallback for those.")
         needs_fetch = failed
 
@@ -510,6 +533,10 @@ def scrape_listings() -> list:
             print(" → HTTP scrape returned 0 listings; falling back to browser scrape.")
         except Exception as e:
             print(f" → HTTP scrape failed ({e}); falling back to browser scrape.")
+    if not _browser_fallback_enabled():
+        print(" → Browser fallback disabled (PUBLICSURPLUS_ALLOW_BROWSER=0); "
+              "no listings this run.")
+        return []
     return scrape_listings_via_browser()
 
 
