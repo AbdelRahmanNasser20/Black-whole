@@ -18,6 +18,7 @@ the Supabase path):
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 
@@ -46,9 +47,22 @@ def is_configured() -> bool:
     return env_config() is not None
 
 
-def public_url(object_path: str, *, public_base: str) -> str:
-    """Durable public URL for an object already in the bucket."""
-    return f"{public_base.rstrip('/')}/{object_path.lstrip('/')}"
+def content_version(data: bytes) -> str:
+    """Short content hash used to cache-bust a replaced object."""
+    return hashlib.sha256(data).hexdigest()[:8]
+
+
+def public_url(object_path: str, *, public_base: str, version: str | None = None) -> str:
+    """Durable public URL for an object already in the bucket.
+
+    `version` appends a `?v=<hash>` cache-buster. Object keys are stable (a
+    re-upload replaces in place), so with a week-long Cache-Control a corrected
+    image would otherwise stay invisible to anyone who already loaded the old
+    one. Keying the query on the *content* hash means a fixed image gets a new
+    URL immediately, while re-uploading identical bytes churns nothing.
+    """
+    url = f"{public_base.rstrip('/')}/{object_path.lstrip('/')}"
+    return f"{url}?v={version}" if version else url
 
 
 def client(cfg: dict | None = None):
@@ -121,14 +135,16 @@ def upload_lot_images(lot_id, paths) -> dict | None:
             continue
         data, ext, ct = li.optimize_for_web(data, li.guess_ext(fp.name))
 
+        ver = content_version(data)
+
         gal_path = li.gallery_object_path(lot_id, i, ext=ext)
         if gal_path and put_object(s3, bucket=bucket, path=gal_path, data=data, content_type=ct):
-            gallery.append(public_url(gal_path, public_base=public_base))
+            gallery.append(public_url(gal_path, public_base=public_base, version=ver))
 
         if i == 0:
             hero_path = li.hero_object_path(lot_id, ext=ext)
             if hero_path and put_object(s3, bucket=bucket, path=hero_path, data=data, content_type=ct):
-                hero_url = public_url(hero_path, public_base=public_base)
+                hero_url = public_url(hero_path, public_base=public_base, version=ver)
 
     if not gallery and not hero_url:
         return None

@@ -73,6 +73,25 @@ def test_public_base_trailing_slash_tolerated(monkeypatch, r2_env):
     assert r2.env_config()["public_base"] == "https://pub-xyz.r2.dev"
 
 
+def test_public_url_appends_content_version_when_given():
+    u = r2.public_url("31225.jpg", public_base="https://pub-xyz.r2.dev", version="deadbeef")
+    assert u == "https://pub-xyz.r2.dev/31225.jpg?v=deadbeef"
+
+
+def test_content_version_is_stable_and_content_sensitive():
+    assert r2.content_version(b"abc") == r2.content_version(b"abc")   # no churn
+    assert r2.content_version(b"abc") != r2.content_version(b"abd")   # busts on change
+
+
+def test_upload_urls_carry_cache_buster(tmp_path, monkeypatch, r2_env):
+    """Stable keys + week-long Cache-Control means a corrected image is invisible
+    to anyone holding the old one unless the URL changes."""
+    monkeypatch.setattr(r2, "client", lambda cfg=None: FakeS3())
+    out = r2.upload_lot_images("31225", [_png(tmp_path / "a.png")])
+    assert "?v=" in out["hero_image_url"]
+    assert all("?v=" in u for u in out["image_urls"])
+
+
 def test_public_url_builds_flat_path():
     assert r2.public_url("31225.jpg", public_base="https://pub-xyz.r2.dev") == \
         "https://pub-xyz.r2.dev/31225.jpg"
@@ -90,9 +109,10 @@ def test_upload_uses_shared_key_contract_and_optimizes(tmp_path, monkeypatch, r2
 
     out = r2.upload_lot_images("31225", [src])
 
-    # hero (flat) + gallery (namespaced) — identical to listing_images keys
-    assert out["hero_image_url"] == "https://pub-xyz.r2.dev/31225.jpg"
-    assert out["image_urls"] == ["https://pub-xyz.r2.dev/31225/00.jpg"]
+    # hero (flat) + gallery (namespaced) — identical to listing_images keys.
+    # URLs carry a ?v=<content-hash> cache-buster (see cache-buster tests).
+    assert out["hero_image_url"].split("?")[0] == "https://pub-xyz.r2.dev/31225.jpg"
+    assert [u.split("?")[0] for u in out["image_urls"]] == ["https://pub-xyz.r2.dev/31225/00.jpg"]
     keys = sorted(p["Key"] for p in fake.puts)
     assert keys == ["31225.jpg", "31225/00.jpg"]
     # egress guard actually ran: PNG -> smaller JPEG, long cache set

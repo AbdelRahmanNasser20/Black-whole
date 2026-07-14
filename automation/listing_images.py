@@ -25,7 +25,7 @@ import sys
 from pathlib import Path
 
 import httpx
-from PIL import Image
+from PIL import Image, ImageOps
 
 from . import config
 
@@ -143,6 +143,14 @@ def optimize_for_web(data: bytes, ext: str) -> tuple[bytes, str, str]:
         img.load()
     except Exception:
         return original
+
+    # Bake in EXIF orientation before doing anything else. Phone cameras store
+    # pixels in sensor orientation plus an Orientation tag; re-encoding drops
+    # that tag, so without this a portrait iPhone shot ships sideways.
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
 
     if max(img.size) > MAX_IMAGE_DIM:
         img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.LANCZOS)
