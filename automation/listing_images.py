@@ -200,6 +200,13 @@ def upload_lot_images(lot_id, paths) -> dict | None:
     file becomes the hero (flat key, back-compat); every file also lands under
     the gallery prefix. Idempotent upsert, so re-runs overwrite in place.
     """
+    # Storage backend: Cloudflare R2 when configured (zero egress fees), else
+    # the original Supabase bucket. R2 exists because Supabase egress overage
+    # 402-restricted Storage and took every listing photo offline.
+    from automation import r2_images  # lazy: avoids an import cycle
+    if r2_images.is_configured():
+        return r2_images.upload_lot_images(lot_id, paths)
+
     cfg = env_config()
     base_key = key_base(lot_id)
     if not cfg or not base_key:
