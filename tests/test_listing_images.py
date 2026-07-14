@@ -125,3 +125,100 @@ def test_upload_hero_falls_back_to_gallery0_when_flat_upload_fails(monkeypatch, 
     base = "https://x.supabase.co/storage/v1/object/public/listing-images"
     assert out["image_urls"] == [f"{base}/31225/00.png"]
     assert out["hero_image_url"] == f"{base}/31225/00.png"
+
+
+# ───────── web optimization (egress guard) ─────────
+
+def _png_bytes(size=(2400, 1800), mode="RGB"):
+    import io
+    from PIL import Image
+    img = Image.new(mode, size, (200, 30, 40) if mode == "RGB" else (200, 30, 40, 255))
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return buf.getvalue()
+
+
+def test_optimize_downscales_and_reencodes_large_png_to_jpeg():
+    import io
+    from PIL import Image
+    data = _png_bytes((2400, 1800))
+    out, ext, ct = li.optimize_for_web(data, "png")
+    assert ext == "jpg" and ct == "image/jpeg"
+    assert len(out) < len(data)
+    img = Image.open(io.BytesIO(out))
+    assert max(img.size) <= li.MAX_IMAGE_DIM
+    assert img.size == (1600, 1200)  # aspect ratio preserved
+
+
+def test_optimize_flattens_alpha():
+    data = _png_bytes((2000, 2000), mode="RGBA")
+    out, ext, _ = li.optimize_for_web(data, "png")
+    assert ext == "jpg"
+    assert len(out) < len(data)
+
+
+def test_optimize_passes_gif_through():
+    data = b"GIF89a-not-really"
+    assert li.optimize_for_web(data, "gif") == (data, "gif", "image/gif")
+
+
+def test_optimize_passes_unparseable_through():
+    data = b"not an image"
+    assert li.optimize_for_web(data, "jpg") == (data, "jpg", "image/jpeg")
+
+
+def test_optimize_keeps_original_when_reencode_is_not_smaller():
+    # A tiny, already-tight JPEG: re-encoding can't beat it.
+    import io
+    from PIL import Image
+    buf = io.BytesIO()
+    Image.new("RGB", (8, 8), (255, 255, 255)).save(
+        buf, format="JPEG", quality=10, optimize=True)
+    data = buf.getvalue()
+    out, ext, _ = li.optimize_for_web(data, "jpg")
+    assert out == data and ext == "jpg"
+
+
+def test_upload_keys_follow_optimized_extension(monkeypatch, tmp_path):
+    # A big source PNG must land in the bucket as .jpg (and the URLs match).
+    monkeypatch.setattr(config, "SUPABASE_STORAGE_URL", "https://x.supabase.co")
+    monkeypatch.setattr(config, "SUPABASE_STORAGE_KEY", "k")
+    monkeypatch.setattr(config, "LISTING_IMAGES_BUCKET", "listing-images")
+
+    uploaded = {}
+
+    def fake_post(client, *, base, key, bucket, path, data, content_type):
+        uploaded[path] = (len(data), content_type)
+        return True
+
+    monkeypatch.setattr(li, "_post_object", fake_post)
+
+    p = tmp_path / "hero.png"
+    raw = _png_bytes((2400, 1800))
+    p.write_bytes(raw)
+
+    out = li.upload_lot_images("31225", [p])
+    base = "https://x.supabase.co/storage/v1/object/public/listing-images"
+    assert out["hero_image_url"] == f"{base}/31225.jpg"
+    assert out["image_urls"] == [f"{base}/31225/00.jpg"]
+    size, ct = uploaded["31225.jpg"]
+    assert ct == "image/jpeg" and size < len(raw)
+
+
+def test_post_object_sends_cache_control(monkeypatch):
+    captured = {}
+
+    class FakeResp:
+        status_code = 200
+        text = ""
+
+    class FakeClient:
+        def post(self, endpoint, content=None, headers=None):
+            captured["headers"] = headers
+            return FakeResp()
+
+    ok = li._post_object(FakeClient(), base="https://x.supabase.co", key="k",
+                         bucket="b", path="p.jpg", data=b"d",
+                         content_type="image/jpeg")
+    assert ok
+    assert captured["headers"]["Cache-Control"] == li.CACHE_CONTROL
