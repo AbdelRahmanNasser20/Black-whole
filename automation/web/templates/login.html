@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, nofollow" />
+  <title>Sign in · Black Whole admin</title>
+  <style>
+    :root {
+      --bg: #0c0c0e; --bg-elev: #131316; --line: #25252c; --line-bold: #3a3a44;
+      --ink: #ece8dd; --ink-mute: #9e988a; --ink-dim: #5a5650;
+      --accent: #ffb547; --err: #ff6c4d;
+      --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      --sans: "IBM Plex Sans", system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; min-height: 100vh; background: var(--bg); color: var(--ink);
+      font-family: var(--sans); display: flex; align-items: center;
+      justify-content: center; padding: 24px;
+    }
+    .card {
+      width: 100%; max-width: 360px; background: var(--bg-elev);
+      border: 1px solid var(--line-bold); padding: 32px 28px;
+    }
+    .brand {
+      font-family: var(--mono); font-weight: 700; color: var(--accent);
+      font-size: 15px; letter-spacing: .04em; margin: 0 0 4px;
+    }
+    .brand .dot { color: var(--ink); }
+    .sub { font-family: var(--mono); font-size: 11px; color: var(--ink-dim);
+           margin: 0 0 24px; text-transform: uppercase; letter-spacing: .08em; }
+    label { display: block; font-family: var(--mono); font-size: 11px;
+            color: var(--ink-mute); text-transform: uppercase;
+            letter-spacing: .08em; margin: 0 0 6px; }
+    input {
+      width: 100%; background: var(--bg); border: 1px solid var(--line-bold);
+      color: var(--ink); font-family: var(--mono); font-size: 14px;
+      padding: 10px 12px; margin: 0 0 18px;
+    }
+    input:focus { outline: none; border-color: var(--accent); }
+    button {
+      width: 100%; background: var(--accent); border: 0; color: #1a1400;
+      font-family: var(--mono); font-weight: 700; font-size: 13px;
+      text-transform: uppercase; letter-spacing: .06em; padding: 11px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .5; cursor: default; }
+    .err { font-family: var(--mono); font-size: 12px; color: var(--err);
+           margin: 0 0 16px; min-height: 16px; }
+    .totp-row { display: none; }
+    .totp-row.show { display: block; }
+    .hint { font-family: var(--mono); font-size: 10px; color: var(--ink-dim);
+            margin: 16px 0 0; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <form class="card" id="login">
+    <p class="brand">BLACK<span class="dot">·</span>WHOLE</p>
+    <p class="sub">Admin dashboard</p>
+    <div class="err" id="err"></div>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" autocomplete="current-password" autofocus required />
+    <div class="totp-row" id="totpRow">
+      <label for="totp">Authenticator code</label>
+      <input type="text" id="totp" name="totp_code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="6" />
+    </div>
+    <button type="submit" id="submit">Sign in</button>
+    <p class="hint">Signs you in for 365 days on this device.</p>
+  </form>
+  <script>
+    const form = document.getElementById('login');
+    const errEl = document.getElementById('err');
+    const totpRow = document.getElementById('totpRow');
+    const totpEl = document.getElementById('totp');
+    const submit = document.getElementById('submit');
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      errEl.textContent = '';
+      submit.disabled = true;
+      const body = { password: document.getElementById('password').value };
+      const code = totpEl.value.trim();
+      if (code) body.totp_code = code;
+      try {
+        const r = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (r.ok) {
+          const data = await r.json();
+          if (data.totp_required) {
+            totpRow.classList.add('show');
+            totpEl.focus();
+            errEl.textContent = 'Enter the 6-digit code from your authenticator.';
+          } else {
+            window.location.href = '/admin';
+          }
+        } else if (r.status === 401) {
+          const data = await r.json().catch(() => ({}));
+          errEl.textContent = data.detail === 'bad_totp'
+            ? 'Wrong code — try again.'
+            : 'Wrong password.';
+        } else {
+          errEl.textContent = 'Login unavailable.';
+        }
+      } catch (_) {
+        errEl.textContent = 'Network error — try again.';
+      } finally {
+        submit.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
