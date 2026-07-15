@@ -34,6 +34,7 @@ from fastapi.responses import (
     HTMLResponse,
     JSONResponse,
     PlainTextResponse,
+    RedirectResponse,
     Response,
 )
 from fastapi.staticfiles import StaticFiles
@@ -52,6 +53,7 @@ from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
 from . import deals_query
+from . import auth as auth_svc
 from deals.fees import fee_model_from_env
 
 try:
@@ -74,6 +76,12 @@ PHASES = ["scrape", "llm", "download", "dewatermark", "facebook", "ebay"]
 app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+
+# "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
+# session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
+# storefront stays open. Cookie/signing mechanics + the env-var contract live
+# in automation/web/auth.py.
+app.middleware("http")(auth_svc.session_auth_middleware)
 
 
 # ───────────────────────────── run state ─────────────────────────────
@@ -268,6 +276,67 @@ async def admin(request: Request):
         "index.html",
         {"phases": PHASES, "now": int(time.time())},
     )
+
+
+# ───────────────────────────── auth (BLACKWHOLE-14) ─────────────────────────
+# "Auth once": password → 365-day signed-cookie session, optional TOTP once per
+# device. No-op until ADMIN_PASSWORD is set. See automation/web/auth.py.
+
+@app.get("/admin/login", response_class=HTMLResponse)
+async def admin_login_page(request: Request):
+    # Already signed in (or auth disabled)? Skip the form.
+    if not auth_svc.auth_enabled() or auth_svc.request_has_session(request):
+        return RedirectResponse("/admin", status_code=303)
+    return templates.TemplateResponse(request, "login.html", {})
+
+
+@app.get("/api/auth/status")
+async def auth_status(request: Request):
+    """Lets the admin UI decide whether to show a sign-out control."""
+    enabled = auth_svc.auth_enabled()
+    return {
+        "auth_enabled": enabled,
+        "authenticated": (not enabled) or auth_svc.request_has_session(request),
+        "totp_enabled": auth_svc.totp_enabled(),
+    }
+
+
+@app.post("/api/auth/login")
+async def auth_login(payload: dict, request: Request, response: Response):
+    """Password first factor; TOTP second factor once per device (env-gated).
+
+    - 200 ``{ok: true}`` — session cookie set (and device cookie, if TOTP ran).
+    - 200 ``{ok: false, totp_required: true}`` — password accepted but this
+      device isn't trusted yet: re-submit with ``totp_code``.
+    - 401 — wrong password or wrong TOTP code.
+    - 400 — auth disabled (ADMIN_PASSWORD unset).
+    """
+    payload = payload or {}
+    if not auth_svc.auth_enabled():
+        raise HTTPException(400, "auth_disabled")
+    password = str(payload.get("password") or "")
+    import secrets as _secrets
+    if not _secrets.compare_digest(password, auth_svc.admin_password()):
+        raise HTTPException(401, "bad_credentials")
+
+    if auth_svc.totp_enabled() and not auth_svc.request_has_trusted_device(request):
+        code = str(payload.get("totp_code") or "").strip()
+        if not code:
+            return {"ok": False, "totp_required": True}
+        if not auth_svc.verify_totp_code(code):
+            raise HTTPException(401, "bad_totp")
+        auth_svc.set_device_cookie(response)
+
+    auth_svc.set_session_cookie(response)
+    return {"ok": True, "totp_required": False}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(response: Response):
+    """Clear the session cookie (the trusted-device cookie survives — TOTP
+    stays 'once per device', not 'once per session')."""
+    auth_svc.clear_session_cookie(response)
+    return {"ok": True}
 
 
 # ───────────────────────────── public pages ─────────────────────────────

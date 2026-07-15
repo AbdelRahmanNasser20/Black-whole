@@ -45,6 +45,15 @@ services:
       - key: LISTING_WEB_RELOAD
         value: "0"
       # PORT is injected by Render; the Docker CMD maps it to LISTING_WEB_PORT.
+      # ── "auth once" 365-day dashboard login (BLACKWHOLE-14) ──
+      # UNSET = auth disabled (admin surface stays open, pre-feature behavior).
+      # See docs/CLOUDFLARE_365D_LOGIN.md for the full operator runbook.
+      - key: ADMIN_PASSWORD    # first factor; UNSET = login disabled (no-op)
+        sync: false
+      - key: SESSION_SECRET    # signs the 365-day session cookie; unset =
+        sync: false            # per-boot random key (everyone logged out on deploy)
+      - key: TOTP_SECRET       # OPTIONAL TOTP once-per-device (scripts/totp_provision.py)
+        sync: false
 
   # ── 2. Daily discovery scrape → Supabase ────────────────────────────────
   - type: cron

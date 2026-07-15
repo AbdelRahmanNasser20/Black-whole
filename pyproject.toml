@@ -20,6 +20,8 @@ dependencies = [
     "python-multipart>=0.0.9",
     "psycopg[binary]>=3.1",
     "tzdata>=2024.1",
+    "itsdangerous>=2.1",    # signed 365-day session/device cookies — "auth once" (BLACKWHOLE-14)
+    "pyotp>=2.9",           # optional TOTP second factor (BLACKWHOLE-14)
 ]
 
 [project.optional-dependencies]
