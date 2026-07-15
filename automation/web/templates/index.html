@@ -45,6 +45,9 @@
     <button class="tab" data-tab="subscribers">
       <span class="tab-num">09</span><span class="tab-label">Subscribers</span>
     </button>
+    <button class="tab" data-tab="deals">
+      <span class="tab-num">10</span><span class="tab-label">Deals</span>
+    </button>
   </nav>
   <div class="meta">
     <span class="status-dot" id="conn-dot"></span>
@@ -405,6 +408,92 @@
 
   <div class="inq-list" id="sub-list">
     <div class="drafts-empty">Loading subscribers…</div>
+  </div>
+</section>
+
+
+<!-- ───────────── Deals ───────────── -->
+<section class="panel" data-pane="deals" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">DEAL TRACKER / GOVDEALS</div>
+    <h1 class="hero-title">What expires cheap.</h1>
+    <p class="hero-sub" id="deal-stats">Loading…</p>
+  </div>
+
+  <form class="auction-controls deal-controls" onsubmit="return false;">
+    <div class="ac-group">
+      <span class="ac-label">SEARCH</span>
+      <input type="text" id="deal-q" placeholder="title or description…">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">CATEGORY</span>
+      <select id="deal-category"><option value="">all</option></select>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">STATE</span>
+      <select id="deal-state"><option value="">all</option></select>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">ENDING</span>
+      <select id="deal-ending">
+        <option value="">any time</option>
+        <option value="6">&lt; 6h</option>
+        <option value="24">&lt; 24h</option>
+        <option value="48">&lt; 48h</option>
+        <option value="168">&lt; 7d</option>
+      </select>
+    </div>
+    <div class="ac-group">
+      <label class="opt" title="Only lots nobody has bid on yet">
+        <input type="checkbox" id="deal-zero-bids"> 0 bids only
+      </label>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">STATUS</span>
+      <div class="seg" id="deal-status-filter">
+        <button type="button" class="seg-btn active" data-value="active">active</button>
+        <button type="button" class="seg-btn" data-value="closed">closed</button>
+        <button type="button" class="seg-btn" data-value="all">all</button>
+      </div>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="deal-refresh">↻ refresh</button>
+    </div>
+  </form>
+
+  <div class="deal-layout">
+    <aside class="deal-tree" aria-label="Category tree">
+      <div class="deal-tree-head">CATEGORY TREE
+        <span class="deal-tree-legend" title="lots · zero-bid lots · ending &lt;24h">n · ⚑ 0-bid · ⏱ &lt;24h</span>
+      </div>
+      <div id="deal-tree-nodes"><div class="drafts-empty">Loading…</div></div>
+    </aside>
+
+    <div class="inv-table-wrap">
+      <table class="inv-table" id="deal-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>Title</th>
+            <th>Category</th>
+            <th>Location</th>
+            <th class="sortable" data-sort="bids">Bids</th>
+            <th class="sortable" data-sort="bid">Bid</th>
+            <th class="sortable" data-sort="landed" title="bid + buyer premium + tax + freight (DEALS_* env)">Landed</th>
+            <th class="sortable" data-sort="ends">Ends</th>
+            <th>Outcome</th>
+          </tr>
+        </thead>
+        <tbody id="deal-rows">
+          <tr><td colspan="9" class="drafts-empty">Loading deals…</td></tr>
+        </tbody>
+      </table>
+      <div class="deal-pager">
+        <button type="button" class="btn btn-small" id="deal-prev">‹ prev</button>
+        <span id="deal-page-info"></span>
+        <button type="button" class="btn btn-small" id="deal-next">next ›</button>
+      </div>
+    </div>
   </div>
 </section>
 

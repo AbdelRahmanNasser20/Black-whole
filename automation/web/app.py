@@ -51,6 +51,8 @@ from .. import db
 from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
+from . import deals_query
+from deals.fees import fee_model_from_env
 
 try:
     # Auctions tab reads the shared Supabase `auction_listings` table. The
@@ -452,6 +454,134 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
     if not row:
         raise HTTPException(status_code=404, detail="lot not archived")
     return templates.TemplateResponse(request, "deal_listing.html", {"lot": row})
+
+
+# ── Deals dashboard API (BLACKWHOLE-12) ─────────────────────────────────────
+
+_DEALS_COLS = (
+    "asset_id, account_id, auction_id, title, canonical_category, city, state, "
+    "bid_count, current_bid, currency_code, end_utc, outcome, final_bid, "
+    "outcome_complete, first_seen_at, hero_image_url, archived_hero_url"
+)
+
+_DEALS_ACTIVE = "outcome_complete IS NOT TRUE AND end_utc > now()"
+
+
+@app.get("/api/deals")
+async def list_deals(
+    q: str | None = None,
+    category: str | None = None,
+    native: str | None = None,
+    state: str | None = None,
+    max_bids: int | None = None,
+    ending_within: int | None = None,
+    status: str = "active",
+    sort: str = "ends",
+    dir: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+):
+    """Search/filter/sort deal_lots for the admin Deals tab.
+
+    Facets reflect the full active set (not the filtered subset) — v1 keeps
+    the SQL simple; counts guide, not gate.
+    """
+    if status not in ("active", "closed", "all"):
+        raise HTTPException(400, "status must be active|closed|all")
+    limit = max(1, min(int(limit), 200))
+    offset = max(0, int(offset))
+    where, args = deals_query.build_where(
+        q=q, category=category, native=native, state=state, max_bids=max_bids,
+        ending_within=ending_within, status=status,
+    )
+    order = deals_query.order_clause(sort, dir)
+
+    def _fetch():
+        rows = db.fetch_all(
+            f"SELECT {_DEALS_COLS} FROM deal_lots WHERE {where} {order} "
+            "LIMIT %s OFFSET %s",
+            (*args, limit, offset),
+        )
+        total = db.fetch_one(
+            f"SELECT count(*) AS c FROM deal_lots WHERE {where}", tuple(args)
+        )["c"]
+        cats = db.fetch_all(
+            "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
+            f"WHERE {_DEALS_ACTIVE} AND canonical_category IS NOT NULL "
+            "GROUP BY 1 ORDER BY count DESC"
+        )
+        states = db.fetch_all(
+            "SELECT state AS value, count(*) AS count FROM deal_lots "
+            f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
+            "GROUP BY 1 ORDER BY count DESC"
+        )
+        stats = db.fetch_one(
+            "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
+            "(SELECT count(*) FROM deal_candidates) AS candidates, "
+            f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
+            "AND end_utc <= now() + interval '24 hours') AS ending_24h"
+        )
+        return rows, total, cats, states, stats
+
+    try:
+        rows, total, cats, states, stats = await asyncio.to_thread(_fetch)
+    except Exception as e:  # DB down / view missing → 503, matches /api/auctions
+        raise HTTPException(503, f"deals query failed: {e!r}")
+
+    fees = fee_model_from_env()
+    return {
+        "total": total,
+        "rows": [deals_query.enrich(dict(r), fees) for r in rows],
+        "facets": {"categories": cats, "states": states},
+        "stats": stats,
+    }
+
+
+@app.get("/api/deals/tree")
+async def deals_tree(status: str = "active"):
+    """Category tree for the Deals tab explorer: canonical bucket (branch) →
+    native GovDeals category (twig), each with lot / zero-bid / ending-24h
+    counts. Same status semantics as /api/deals."""
+    if status not in ("active", "closed", "all"):
+        raise HTTPException(400, "status must be active|closed|all")
+    where, args = deals_query.build_where(status=status)
+
+    def _fetch():
+        return db.fetch_all(
+            "SELECT canonical_category, native_category_id, "
+            "min(native_category_name) AS native_category_name, "
+            "count(*) AS n, "
+            "count(*) FILTER (WHERE bid_count = 0) AS zero_bid, "
+            "count(*) FILTER (WHERE outcome_complete IS NOT TRUE "
+            "  AND end_utc > now() AND end_utc <= now() + interval '24 hours') AS ending_24h "
+            f"FROM deal_lots WHERE {where} AND canonical_category IS NOT NULL "
+            "GROUP BY canonical_category, native_category_id",
+            tuple(args),
+        )
+
+    try:
+        rows = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        raise HTTPException(503, f"deals tree query failed: {e!r}")
+
+    branches: dict[str, dict] = {}
+    for r in rows:
+        b = branches.setdefault(r["canonical_category"], {
+            "category": r["canonical_category"], "n": 0, "zero_bid": 0,
+            "ending_24h": 0, "twigs": [],
+        })
+        b["n"] += r["n"]
+        b["zero_bid"] += r["zero_bid"]
+        b["ending_24h"] += r["ending_24h"]
+        b["twigs"].append({
+            "native_id": r["native_category_id"],
+            "name": r["native_category_name"] or r["native_category_id"],
+            "n": r["n"], "zero_bid": r["zero_bid"], "ending_24h": r["ending_24h"],
+        })
+    for b in branches.values():
+        b["twigs"].sort(key=lambda t: -t["n"])
+    tree = sorted(branches.values(), key=lambda b: -b["n"])
+    return {"total": sum(b["n"] for b in tree), "branches": tree}
 
 
 @app.get("/sell", response_class=HTMLResponse)

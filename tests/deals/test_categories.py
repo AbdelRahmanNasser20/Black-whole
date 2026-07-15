@@ -14,3 +14,27 @@ def test_unknown_code_falls_back_to_other():
 def test_vehicle_codes_map_to_vehicles():
     assert canonical_category("94A") == "vehicles"   # Automobiles/Cars
     assert canonical_category("94D") == "vehicles"   # Vans
+
+def test_av_equipment_maps_to_av_equipment():
+    assert canonical_category("22") == "av_equipment"   # Audio/Visual Equipment (projectors etc.)
+
+def test_resale_verticals_map_to_their_buckets():
+    assert canonical_category("90") == "tools_shop"       # Tools, All Types
+    assert canonical_category("375") == "tools_shop"      # Power Tools
+    assert canonical_category("153") == "tools_shop"      # Generators
+    assert canonical_category("287") == "kitchen_restaurant"  # Commercial Food Service
+    assert canonical_category("21") == "kitchen_restaurant"   # Kitchen Equipment
+    assert canonical_category("28") == "comms_radios"     # Communication & Electronic Equipment
+    assert canonical_category("57") == "lab_test_equipment"
+    assert canonical_category("67") == "medical_equipment"
+    assert canonical_category("147") == "fitness_equipment"
+    assert canonical_category("70") == "musical_instruments"
+    assert canonical_category("71") == "lawn_landscaping"  # Mowing Equipment
+
+def test_welding_95_is_tools_not_vehicles():
+    # exact code "95" (Welding) collides with the "95" vehicle prefix; set check must win
+    assert canonical_category("95") == "tools_shop"
+    assert canonical_category("95N") == "vehicles"   # School Bus keeps the prefix behavior
+
+def test_factory_furniture_28e_still_seating_not_comms():
+    assert canonical_category("28E") == "seating_furniture"

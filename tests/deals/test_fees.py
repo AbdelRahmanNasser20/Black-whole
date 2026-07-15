@@ -15,3 +15,22 @@ def test_per_unit_guards_zero_quantity():
 def test_zero_fees_is_just_bid():
     lc = landed_cost(500.0, qty=5, fees=FeeModel())
     assert lc.total == 500.0 and lc.per_unit == 100.0
+
+def test_fee_model_from_env_defaults(monkeypatch):
+    from deals.fees import fee_model_from_env
+    for k in ("DEALS_BUYER_PREMIUM_PCT", "DEALS_TAX_PCT", "DEALS_FREIGHT"):
+        monkeypatch.delenv(k, raising=False)
+    fm = fee_model_from_env()
+    assert fm.buyer_premium_pct == 0.125
+    assert fm.tax_pct == 0.0
+    assert fm.freight == 0.0
+
+def test_fee_model_from_env_overrides(monkeypatch):
+    from deals.fees import fee_model_from_env
+    monkeypatch.setenv("DEALS_BUYER_PREMIUM_PCT", "0.18")
+    monkeypatch.setenv("DEALS_TAX_PCT", "0.07")
+    monkeypatch.setenv("DEALS_FREIGHT", "40")
+    fm = fee_model_from_env()
+    assert fm.buyer_premium_pct == 0.18
+    assert fm.tax_pct == 0.07
+    assert fm.freight == 40.0

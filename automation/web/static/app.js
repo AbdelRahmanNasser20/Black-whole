@@ -71,6 +71,7 @@ const panels = {
   'listings-db': $('[data-pane="listings-db"]'),
   'test-scrape': $('[data-pane="test-scrape"]'),
   subscribers: $('[data-pane="subscribers"]'),
+  deals: $('[data-pane="deals"]'),
 };
 
 const TAB_STORAGE_KEY = 'admin.lastTab';
@@ -89,6 +90,7 @@ function activateTab(name, {persist = true} = {}) {
   if (name === 'inventory') loadInventory();
   if (name === 'inquiries') loadInquiries();
   if (name === 'subscribers') loadSubscribers();
+  if (name === 'deals') loadDeals();
   if (name === 'listings-db') loadListingsDb();
   if (name === 'test-scrape') $('#ts-q')?.focus();
   if (persist) {
@@ -2128,6 +2130,200 @@ function renderTestScrapeCard(it, match) {
   `;
   return card;
 }
+
+/* ── Deals tab ─────────────────────────────────────────────── */
+const deal = {q: '', category: '', native: '', state: '', zero: false, ending: '',
+              status: 'active', sort: 'ends', dir: null, offset: 0, limit: 50,
+              facetsLoaded: false, treeStatus: null, expanded: new Set()};
+
+function dealEndsCell(iso) {
+  if (!iso) return '<td>—</td>';
+  const ms = new Date(iso) - Date.now();
+  const h = ms / 3.6e6;
+  const cls = h < 2 ? 'deal-ends-red' : (h < 24 ? 'deal-ends-yellow' : '');
+  const label = ms <= 0 ? 'ended'
+    : h < 1 ? `${Math.round(ms / 6e4)}m`
+    : h < 48 ? `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`
+    : `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h`;
+  return `<td class="${cls}" title="${iso}">${label}</td>`;
+}
+
+/* Category tree: branch = canonical bucket, twig = native GovDeals category.
+   Clicking a node filters the table; the arrow only expands/collapses. */
+let _dealTree = null;
+
+function renderDealTree() {
+  const host = $('#deal-tree-nodes');
+  if (!_dealTree) { host.innerHTML = '<div class="drafts-empty">no data</div>'; return; }
+  const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const counts = (o) => `<span class="dt-counts">${o.n} · ⚑${o.zero_bid} · ⏱${o.ending_24h}</span>`;
+  const total = {n: _dealTree.total,
+                 zero_bid: _dealTree.branches.reduce((a, b) => a + b.zero_bid, 0),
+                 ending_24h: _dealTree.branches.reduce((a, b) => a + b.ending_24h, 0)};
+  let html = `<div class="dt-node dt-root ${!deal.category && !deal.native ? 'active' : ''}"
+                   data-cat="" data-native="">all deals ${counts(total)}</div>`;
+  html += _dealTree.branches.map(b => {
+    const open = deal.expanded.has(b.category);
+    const branchActive = deal.category === b.category && !deal.native;
+    const twigs = b.twigs.map(t => `
+      <div class="dt-node dt-twig ${deal.native === t.native_id ? 'active' : ''}"
+           data-cat="${esc(b.category)}" data-native="${esc(t.native_id)}"
+           title="GovDeals category ${esc(t.native_id)}">
+        ${esc(t.name)} ${counts(t)}
+      </div>`).join('');
+    return `
+      <div class="dt-branch">
+        <div class="dt-node dt-b ${branchActive ? 'active' : ''}" data-cat="${esc(b.category)}" data-native="">
+          <button type="button" class="dt-arrow ${open ? 'open' : ''}" data-toggle="${esc(b.category)}"
+                  aria-label="expand ${esc(b.category)}">▸</button>
+          ${esc(b.category)} ${counts(b)}
+        </div>
+        <div class="dt-twigs" ${open ? '' : 'hidden'}>${twigs}</div>
+      </div>`;
+  }).join('');
+  host.innerHTML = html;
+}
+
+async function loadDealTree() {
+  deal.treeStatus = deal.status;
+  try {
+    const r = await fetch('/api/deals/tree?status=' + deal.status);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    _dealTree = await r.json();
+  } catch (e) {
+    _dealTree = null;
+    $('#deal-tree-nodes').innerHTML = `<div class="drafts-empty">tree error: ${e}</div>`;
+    return;
+  }
+  renderDealTree();
+}
+
+$('#deal-tree-nodes').addEventListener('click', (e) => {
+  const arrow = e.target.closest('.dt-arrow');
+  if (arrow) {
+    const cat = arrow.dataset.toggle;
+    deal.expanded.has(cat) ? deal.expanded.delete(cat) : deal.expanded.add(cat);
+    renderDealTree();
+    e.stopPropagation();
+    return;
+  }
+  const node = e.target.closest('.dt-node');
+  if (!node) return;
+  deal.category = node.dataset.cat;
+  deal.native = node.dataset.native;
+  if (deal.category && deal.native) deal.expanded.add(deal.category);
+  // keep the CATEGORY dropdown honest (it only knows canonical buckets)
+  const dd = $('#deal-category');
+  dd.value = [...dd.options].some(o => o.value === deal.category) ? deal.category : '';
+  deal.offset = 0;
+  renderDealTree();
+  loadDeals();
+});
+
+async function loadDeals() {
+  const tbody = $('#deal-rows');
+  if (deal.treeStatus !== deal.status) loadDealTree();
+  const p = new URLSearchParams();
+  if (deal.q) p.set('q', deal.q);
+  if (deal.category) p.set('category', deal.category);
+  if (deal.native) p.set('native', deal.native);
+  if (deal.state) p.set('state', deal.state);
+  if (deal.zero) p.set('max_bids', '0');
+  if (deal.ending) p.set('ending_within', deal.ending);
+  p.set('status', deal.status);
+  p.set('sort', deal.sort);
+  if (deal.dir) p.set('dir', deal.dir);
+  p.set('limit', deal.limit);
+  p.set('offset', deal.offset);
+  let body;
+  try {
+    const r = await fetch('/api/deals?' + p.toString());
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    body = await r.json();
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="9" class="drafts-empty">deals API error: ${e}</td></tr>`;
+    return;
+  }
+  const s = body.stats || {};
+  $('#deal-stats').textContent =
+    `${s.total_lots ?? '?'} lots tracked · ${s.candidates ?? '?'} candidates (0-bid <24h) · ${s.ending_24h ?? '?'} ending <24h`;
+  if (!deal.facetsLoaded && body.facets) {
+    const fill = (sel, items) => {
+      const el = $(sel);
+      items.forEach(f => {
+        const o = document.createElement('option');
+        o.value = f.value; o.textContent = `${f.value} (${f.count})`;
+        el.appendChild(o);
+      });
+    };
+    fill('#deal-category', body.facets.categories || []);
+    fill('#deal-state', body.facets.states || []);
+    deal.facetsLoaded = true;
+  }
+  const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  if (!body.rows.length) {
+    tbody.innerHTML = '<tr><td colspan="9" class="drafts-empty">no lots match</td></tr>';
+  } else {
+    tbody.innerHTML = body.rows.map(r => {
+      const img = r.archived_hero_url || r.hero_image_url;
+      const thumb = img
+        ? `<img class="deal-thumb" src="${esc(img)}" loading="lazy" alt="">`
+        : '<span class="deal-thumb deal-thumb-empty">🪑</span>';
+      const outcome = r.outcome_complete
+        ? `<span class="lex ${r.outcome === 'no_bid' ? 'pending' : 'done'}">${esc(r.outcome) || 'closed'}${r.final_bid != null ? ` $${r.final_bid}` : ''}</span>`
+        : '<span class="lex running">open</span>';
+      return `<tr>
+        <td>${thumb}</td>
+        <td><a href="${esc(r.govdeals_url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
+            <a class="deal-viewer-link" href="${esc(r.viewer_url)}" target="_blank" rel="noopener" title="archived copy">⧉</a></td>
+        <td>${esc(r.canonical_category) || '—'}</td>
+        <td>${esc(r.city)}${r.state ? ', ' + esc(r.state) : ''}</td>
+        <td>${r.bid_count ?? '—'}</td>
+        <td>${r.current_bid != null ? '$' + r.current_bid : '—'}</td>
+        <td>$${r.landed_cost}</td>
+        ${dealEndsCell(r.end_utc)}
+        <td>${outcome}</td>
+      </tr>`;
+    }).join('');
+  }
+  const page = Math.floor(deal.offset / deal.limit) + 1;
+  const pages = Math.max(1, Math.ceil(body.total / deal.limit));
+  $('#deal-page-info').textContent = `${page} / ${pages} (${body.total} lots)`;
+  $('#deal-prev').disabled = deal.offset === 0;
+  $('#deal-next').disabled = deal.offset + deal.limit >= body.total;
+}
+
+let _dealQTimer;
+$('#deal-q').addEventListener('input', (e) => {
+  clearTimeout(_dealQTimer);
+  _dealQTimer = setTimeout(() => { deal.q = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 300);
+});
+$('#deal-category').addEventListener('change', (e) => {
+  deal.category = e.target.value; deal.native = ''; deal.offset = 0;
+  renderDealTree(); loadDeals();
+});
+$('#deal-state').addEventListener('change', (e) => { deal.state = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-ending').addEventListener('change', (e) => { deal.ending = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-zero-bids').addEventListener('change', (e) => { deal.zero = e.target.checked; deal.offset = 0; loadDeals(); });
+$$('#deal-status-filter .seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#deal-status-filter .seg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    deal.status = btn.dataset.value; deal.offset = 0; loadDeals();
+  });
+});
+$$('#deal-table th.sortable').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    if (deal.sort === key) {
+      deal.dir = (deal.dir ?? (key === 'ends' ? 'asc' : 'desc')) === 'asc' ? 'desc' : 'asc';
+    } else { deal.sort = key; deal.dir = null; }
+    deal.offset = 0; loadDeals();
+  });
+});
+$('#deal-prev').addEventListener('click', () => { deal.offset = Math.max(0, deal.offset - deal.limit); loadDeals(); });
+$('#deal-next').addEventListener('click', () => { deal.offset += deal.limit; loadDeals(); });
+$('#deal-refresh').addEventListener('click', () => { deal.facetsLoaded = false; loadDealTree(); loadDeals(); });
 
 // All module-level state (`auc`, etc.) and per-tab loaders are defined above,
 // so it is now safe to restore the saved tab and trigger its loader.
