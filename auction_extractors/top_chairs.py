@@ -75,6 +75,37 @@ def _price_to_float(p: str | None) -> float:
 _SANE_MAX_QUANTITY = 50_000
 
 
+# Only quantities produced by the LLM pass are trusted for ranking, the
+# MIN_CHAIR_QUANTITY filter, and Telegram alerts. Regex-seeded counts
+# (`regex_title` / `regex_fulltext`) and LLM failures (`llm_failed` /
+# `llm_missing`) are NOT trusted — the regex path routinely misreads a lot
+# number, spec, or model number as a chair count (e.g. a single electric
+# wheelchair read as qty=110). Untrusted rows stay in the cache but are
+# excluded from the read surface until a successful LLM scrape refreshes them.
+# This is the read-side guard for BLACKWHOLE-4; deleting the regex code itself
+# is separate cleanup.
+TRUSTED_QUANTITY_SOURCE = "llm"
+
+
+def trusted_quantity(row: dict) -> int | None:
+    """Return the row's chair quantity ONLY when it is LLM-verified.
+
+    Returns an int when ``quantity_source == 'llm'`` and ``quantity`` parses,
+    else ``None``. Callers should treat ``None`` as "no trustworthy count" —
+    exclude it from ranking, the qty filter, and alerts (never coerce to 0
+    and then compare, and never fall back to the regex number).
+    """
+    if (row.get("quantity_source") or "") != TRUSTED_QUANTITY_SOURCE:
+        return None
+    q = row.get("quantity")
+    if q is None:
+        return None
+    try:
+        return int(q)
+    except (TypeError, ValueError):
+        return None
+
+
 # Keyword-based vertical classifier. Runs on cached rows at query time —
 # no DB column, no LLM call. Medical and dental merge into one bucket.
 # See plan: /Users/abdelnasser/.claude/plans/1-combine-medical-and-vectorized-swing.md
@@ -149,10 +180,11 @@ def _load_from_cache(source: Source, min_quantity: int) -> list[dict]:
         FROM listings
         WHERE quantity >= ?
           AND quantity <= ?
+          AND quantity_source = ?
           AND link LIKE ?
         ORDER BY quantity DESC
         """,
-        (min_quantity, _SANE_MAX_QUANTITY, f"%{frag}%"),
+        (min_quantity, _SANE_MAX_QUANTITY, TRUSTED_QUANTITY_SOURCE, f"%{frag}%"),
     ).fetchall()
     conn.close()
     items = [dict(r) for r in rows]

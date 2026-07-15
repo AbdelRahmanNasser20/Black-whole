@@ -807,7 +807,7 @@ def main():
     # that merely share a chair-ish word (scales, stools, recliners, …).
     # Medical exam/dental gated behind INCLUDE_MEDICAL (default off). Cache
     # already has every row.
-    from top_chairs import _classify, _is_non_chair_lot
+    from top_chairs import _classify, _is_non_chair_lot, trusted_quantity
     include_medical = os.getenv("INCLUDE_MEDICAL") == "1"
     def _keep(item: dict) -> bool:
         title = item.get("title") or ""
@@ -816,7 +816,10 @@ def main():
             return include_medical
         if _is_non_chair_lot(title):
             return False
-        return item.get("quantity", 0) > MIN_CHAIR_QUANTITY
+        # Only alert on an LLM-verified count (BLACKWHOLE-4). Untrusted regex
+        # quantities / LLM failures return None and are dropped.
+        q = trusted_quantity(item)
+        return q is not None and q > MIN_CHAIR_QUANTITY
     listings = [item for item in listings if _keep(item)]
     if not listings:
         print(f"No banquet chairs with quantity > {MIN_CHAIR_QUANTITY}. Exiting.")
