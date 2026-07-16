@@ -52,6 +52,7 @@ from .. import db
 from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
+from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import auth as auth_svc
 from deals.fees import fee_model_from_env
@@ -2187,6 +2188,31 @@ async def sub_delete(subscriber_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+# ─────────────────────── alert blast (BLACKWHOLE-10) ───────────────────────
+# Admin-only (gated by the /api/* session auth middleware). The matcher +
+# provider-agnostic sender live in automation.alerts. SEND IS OFF BY DEFAULT:
+# the blast endpoint runs dry-run unless config.ALERTS_SEND_ENABLED is set AND a
+# provider is registered — so hitting it with the default config emails nothing
+# and writes no alert_sends rows. Run in a threadpool: the job is sync DB work.
+
+@app.post("/api/alerts/blast/{lot_id}/preview")
+async def alerts_blast_preview(lot_id: str):
+    """Match subscribers to a lot and return recipients + reasons. Sends nothing."""
+    report = await asyncio.to_thread(alerts_blast.preview_blast, lot_id)
+    if any("not found" in n for n in report.notes):
+        raise HTTPException(404, f"lot {lot_id} not found")
+    return report.as_dict()
+
+
+@app.post("/api/alerts/blast/{lot_id}")
+async def alerts_blast_run(lot_id: str):
+    """Run the blast for a lot. Dry-run unless send is enabled in config."""
+    report = await asyncio.to_thread(alerts_blast.run_blast, lot_id)
+    if any("not found" in n for n in report.notes):
+        raise HTTPException(404, f"lot {lot_id} not found")
+    return report.as_dict()
 
 
 # ───────────────────────────── entrypoint ─────────────────────────────
