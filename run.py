@@ -64,6 +64,8 @@ async def _run(
     skip_ebay: bool,
     force_republish: bool = False,
     quantity_override: int | None = None,
+    platforms: list[str] | None = None,
+    cities: list[str] | None = None,
 ) -> None:
     async with browser.persistent_context() as ctx:
         progress.emit("run", status="started", url=url)
@@ -187,7 +189,50 @@ async def _run(
         existing_inv = inventory.get(meta.lot_id) if meta.lot_id else None
         fb_url: str | None = None
         fb_rendered_description: str | None = None
-        if not skip_fb:
+        ebay_url: str | None = None
+
+        if platforms:
+            # ── Multi-platform fan-out (BLACKWHOLE-21) ──────────────────────
+            # One entry point publishes across the requested platforms and
+            # cities. Dry-run by default (env-gated via LISTING_PUBLISH_LIVE);
+            # unknown platforms degrade to a "no_adapter" result rather than
+            # crashing the run, so Craigslist (BLACKWHOLE-20) can arrive later.
+            from automation.publish import orchestrator, registry as _pub_registry
+
+            data = orchestrator.build_listing_data(primary, meta, confirmed, cleaned)
+            published: dict[str, str] = {}
+            if existing_inv and not force_republish:
+                if existing_inv.get("facebook_url"):
+                    published["fb"] = existing_inv["facebook_url"]
+                if existing_inv.get("ebay_url"):
+                    published["ebay"] = existing_inv["ebay_url"]
+
+            live = _pub_registry.live_publishing_enabled()
+            mode = "LIVE" if live else "dry-run"
+            print(f"[publish] platforms={platforms} cities={cities or [data.city]} ({mode})")
+            progress.emit(
+                "phase", phase="publish", status="running",
+                platforms=platforms, cities=cities or [data.city], live=live,
+            )
+            results = await orchestrator.publish_all(
+                ctx, data, platforms, cities,
+                force_republish=force_republish, published=published,
+            )
+            for r in results:
+                suffix = f" -> {r.url}" if r.url else (f" ({r.error})" if r.error else "")
+                print(f"  [{r.platform}/{r.city}] {r.status}{suffix}")
+                progress.emit(
+                    "phase", phase=f"publish:{r.platform}", status=r.status,
+                    city=r.city, url=r.url, error=r.error,
+                )
+                # Feed the inventory ledger the first draft URL per platform.
+                if r.url and r.platform == "fb" and not fb_url:
+                    fb_url = r.url
+                if r.url and r.platform == "ebay" and not ebay_url:
+                    ebay_url = r.url
+            progress.emit("phase", phase="publish", status="done")
+
+        elif not skip_fb:
             if existing_inv and existing_inv.get("facebook_url") and not force_republish:
                 fb_url = existing_inv["facebook_url"]
                 print(f"[4/5] Facebook — skipped (already published: {fb_url})")
@@ -219,8 +264,7 @@ async def _run(
             print("[4/5] skipped")
             progress.emit("phase", phase="facebook", status="skipped")
 
-        ebay_url: str | None = None
-        if not skip_ebay:
+        if not platforms and not skip_ebay:
             if existing_inv and existing_inv.get("ebay_url") and not force_republish:
                 ebay_url = existing_inv["ebay_url"]
                 print(f"[5/5] eBay — skipped (already published: {ebay_url})")
@@ -247,7 +291,7 @@ async def _run(
                 )
                 print(f"  eBay draft: {ebay_url}")
                 progress.emit("phase", phase="ebay", status="done", url=ebay_url)
-        else:
+        elif not platforms:
             print("[5/5] skipped")
             progress.emit("phase", phase="ebay", status="skipped")
 
@@ -348,14 +392,24 @@ async def _run(
 @click.option("--skip-ebay", is_flag=True)
 @click.option("--force-republish", is_flag=True,
               help="Ignore inventory ledger — create fresh FB/eBay drafts even if this lot was published before.")
-def main(url, login_only, price, quantity, skip_dewatermark, skip_fb, skip_ebay, force_republish):
+@click.option("--platforms", default=None,
+              help="Comma-separated platforms to fan out across (e.g. fb,ebay,cl). "
+                   "When set, publishing runs through the multi-platform orchestrator "
+                   "(dry-run by default; set LISTING_PUBLISH_LIVE=1 to create real drafts).")
+@click.option("--cities", default=None,
+              help="Comma-separated cities to publish across (e.g. phx,atl,la). "
+                   "Applies to city-scoped platforms (FB, Craigslist).")
+def main(url, login_only, price, quantity, skip_dewatermark, skip_fb, skip_ebay, force_republish,
+         platforms, cities):
     if login_only:
         asyncio.run(_login_only())
         return
     if not url:
         raise click.UsageError("URL required (or pass --login-only)")
+    platform_list = [p.strip() for p in platforms.split(",") if p.strip()] if platforms else None
+    city_list = [c.strip() for c in cities.split(",") if c.strip()] if cities else None
     asyncio.run(_run(url, price, skip_dewatermark, skip_fb, skip_ebay, force_republish,
-                     quantity_override=quantity))
+                     quantity_override=quantity, platforms=platform_list, cities=city_list))
 
 
 if __name__ == "__main__":
