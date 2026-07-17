@@ -115,6 +115,35 @@ def stats() -> dict:
     return {"lots": int(total), "chairs": int(chairs or 0), "cities": int(cities)}
 
 
+# Statuses whose lots belong in the Facebook Business catalog feed
+# (BLACKWHOLE-7). Deliberately narrower than PUBLIC_STATUSES: 'draft' lots are
+# unconfirmed GovDeals scrapes, not real sellable stock, so they stay off the
+# FB shop even though they show on our own /listings page.
+CATALOG_FEED_STATUSES = ("listed", "owned", "won_pickup")
+
+
+def list_catalog_feed() -> list[dict]:
+    """Sellable lots for the Facebook Business catalog feed (BLACKWHOLE-7).
+
+    ``status IN CATALOG_FEED_STATUSES`` AND ``quantity_remaining > 0`` — sold-out
+    (0/NULL), hidden, lost and draft lots are excluded. Price/image completeness
+    (FB rejects rows missing either) is enforced downstream by
+    ``automation.catalog_feed``, which drops incomplete rows. Read-only.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM inventory
+            WHERE status = ANY(%s)
+              AND quantity_remaining IS NOT NULL
+              AND quantity_remaining > 0
+            ORDER BY updated_at DESC
+            """,
+            (list(CATALOG_FEED_STATUSES),),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def upsert_from_run(
     *,
     lot_id: str,
