@@ -43,6 +43,7 @@ def main():
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
     sub.add_parser("digest")
+    sub.add_parser("rank")
     sub.add_parser("init-schema")
     a = ap.parse_args()
     adapter = GovDealsAdapter()
@@ -64,6 +65,9 @@ def main():
     elif a.cmd == "digest":
         ok, err = send_daily_digest(fee_model_from_env())
         print("digest sent" if ok else f"digest failed: {err}")
+    elif a.cmd == "rank":
+        from deals.rank import run_rank
+        print(f"ranked {run_rank()} verdicts")
 
 if __name__ == "__main__":
     main()
