@@ -11,6 +11,7 @@ from deals.geo import distance_from_home
 from deals.llm_steps import LlmStepError, extract_identity, judge_comps
 from deals.mapping import asset_to_lot
 from deals.models import Lot
+from deals.saved_search_alerts import run_saved_search_alerts
 from deals.valuation import value_from_comps, value_from_estimate
 from deals.verdict_store import insert_verdict, lots_for_analysis, mark_alerted
 from automation.telegram_alerts import send_message_sync
@@ -107,4 +108,8 @@ def run_analysis(now: datetime | None = None, env: dict | None = None) -> Analyz
         except (LlmStepError, ValueError, KeyError) as e:
             rep.errors += 1
             print(f"[analyze] error on {row.get('asset_id')}: {e}", file=sys.stderr)
+    try:
+        run_saved_search_alerts(now)
+    except Exception as e:
+        print(f"[analyze] saved-search pass failed: {e}", file=sys.stderr)
     return rep
