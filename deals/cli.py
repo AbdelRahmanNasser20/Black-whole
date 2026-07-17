@@ -40,6 +40,7 @@ def main():
     d.add_argument("--categories", default=None)
     d.add_argument("--max-pages", type=int, default=60)
     sub.add_parser("watch-once")
+    sub.add_parser("backfill-outcomes")
     sub.add_parser("digest")
     sub.add_parser("init-schema")
     a = ap.parse_args()
@@ -53,6 +54,9 @@ def main():
         print(rep)
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
+    elif a.cmd == "backfill-outcomes":
+        from deals.backfill import run_backfill
+        print(f"closed {run_backfill()} lots")
     elif a.cmd == "digest":
         ok, err = send_daily_digest(fee_model_from_env())
         print("digest sent" if ok else f"digest failed: {err}")
