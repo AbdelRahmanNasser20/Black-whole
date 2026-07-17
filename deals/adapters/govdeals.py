@@ -2,7 +2,7 @@ import sys, os, uuid, requests
 from datetime import datetime
 from typing import Iterator
 from deals.models import Lot, Snapshot, lot_key
-from deals.mapping import asset_to_lot, IMAGE_BASE
+from deals.mapping import asset_to_lot, photo_paths_to_urls
 
 # reuse the proven maestro key-resolver + constants from the existing extractor
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "auction_extractors"))
@@ -65,7 +65,19 @@ class GovDealsAdapter:
                 break
         return found
 
+    def fetch_detail(self, asset_id: int, account_id: int) -> dict:
+        """Per-lot detail from maestro. The body {businessId, siteId} is load-bearing:
+        without it the endpoint still 200s but returns assetPhotos=[]."""
+        r = requests.post(f"{_g.MAESTRO_URL}/assets/{asset_id}/{account_id}/false",
+                          json={"businessId": "GD", "siteId": 1},
+                          headers=self._headers(), timeout=30)
+        r.raise_for_status()
+        return r.json()
+
     def fetch_gallery(self, asset_id: int, account_id: int) -> list[str]:
-        # the full gallery lives on the per-lot page; reuse the monolith's photo scraper
-        url = f"https://www.govdeals.com/en/asset/{asset_id}/{account_id}"
-        return _g.scrape_asset_photos(url) if hasattr(_g, "scrape_asset_photos") else []
+        try:
+            detail = self.fetch_detail(asset_id, account_id)
+        except Exception as e:
+            print(f"[gallery] fetch failed for {asset_id}/{account_id}: {e}", file=sys.stderr)
+            return []
+        return photo_paths_to_urls(detail.get("assetPhotos") or [])

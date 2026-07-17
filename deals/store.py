@@ -109,6 +109,16 @@ def set_poll_schedule(key, next_poll_at: datetime, lane: str) -> None:
     db.execute("""UPDATE deal_lots SET next_poll_at=%s, lane=%s, updated_at=now()
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""", (next_poll_at, lane, *key))
 
+def unarchived_active(limit: int = 100, zero_bid_only: bool = False) -> list[dict]:
+    """Active lots whose images haven't been archived yet. Zero-bid lots (the
+    buy candidates) first, then soonest-ending — those pages vanish first."""
+    zb = "AND bid_count = 0" if zero_bid_only else ""
+    return db.fetch_all(f"""SELECT asset_id, account_id, auction_id, hero_image_url
+        FROM deal_lots
+        WHERE images_archived IS NOT TRUE AND end_utc > now() {zb}
+        ORDER BY (bid_count = 0) DESC, end_utc ASC
+        LIMIT %s""", (limit,))
+
 def set_archived_images(key, hero_url: str, gallery_urls: list[str]) -> None:
     db.execute("""UPDATE deal_lots SET archived_hero_url=%s, gallery_urls=%s,
         images_archived=true, updated_at=now()

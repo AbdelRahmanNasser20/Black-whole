@@ -39,6 +39,11 @@ def main():
     d = sub.add_parser("discover")
     d.add_argument("--categories", default=None)
     d.add_argument("--max-pages", type=int, default=60)
+    ar = sub.add_parser("archive-active",
+                        help="backfill image archives for active lots before their listings expire")
+    ar.add_argument("--limit", type=int, default=100)
+    ar.add_argument("--max-mb", type=float, default=200.0)
+    ar.add_argument("--zero-bid-only", action="store_true")
     sub.add_parser("watch-once")
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
@@ -54,6 +59,10 @@ def main():
         cats = sweep_categories(a.categories, os.environ)
         rep = run_discovery(adapter, categories=cats, max_pages=a.max_pages)
         print(rep)
+    elif a.cmd == "archive-active":
+        from deals.archive import archive_active
+        print(archive_active(adapter, limit=a.limit, max_mb=a.max_mb,
+                             zero_bid_only=a.zero_bid_only))
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
     elif a.cmd == "backfill-outcomes":

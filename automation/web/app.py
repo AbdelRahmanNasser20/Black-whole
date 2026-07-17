@@ -806,6 +806,31 @@ async def deals_search_delete(search_id: int):
     if not n:
         raise HTTPException(404, "search not found")
     return {"ok": True}
+def _deal_images(row: dict) -> list[str]:
+    """Ordered image list for a lot: archived copies when we have them
+    (durable Supabase URLs), else the GovDeals CDN hero."""
+    imgs = [row.get("archived_hero_url") or row.get("hero_image_url")]
+    imgs += row.get("gallery_urls") or []
+    return [u for u in imgs if u]
+
+
+@app.get("/api/deals/{asset_id}/{account_id}/{auction_id}")
+async def deal_lot_json(asset_id: int, account_id: int, auction_id: int):
+    """Lot detail for the DealCard component (static/deal_card.js)."""
+    row = db.fetch_one("""SELECT asset_id, account_id, auction_id, title, description,
+        native_category_name, canonical_category, city, state, seller,
+        bid_count, current_bid, opening_bid, currency_code, end_utc,
+        outcome, final_bid, final_bid_count, images_archived,
+        archived_hero_url, gallery_urls, hero_image_url
+        FROM deal_lots WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
+        (asset_id, account_id, auction_id))
+    if not row:
+        raise HTTPException(status_code=404, detail="lot not tracked")
+    images = _deal_images(row)
+    for k in ("archived_hero_url", "gallery_urls", "hero_image_url"):
+        row.pop(k)
+    return {**row, "images": images,
+            "image_source": "archived" if row["images_archived"] else "cdn"}
 
 
 @app.get("/sell", response_class=HTMLResponse)

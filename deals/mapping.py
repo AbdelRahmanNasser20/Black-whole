@@ -23,6 +23,20 @@ def _price(raw: dict) -> float:
     except (TypeError, ValueError) as e:
         raise ValueError(f"currentBid unparseable ({cb!r}) for asset {raw.get('assetId')!r}") from e
 
+def photo_paths_to_urls(paths: list[str]) -> list[str]:
+    """Map the detail endpoint's assetPhotos entries (relative paths like
+    '/photos/{account}/{file}.jpg?cb=...') to absolute CDN URLs."""
+    base = IMAGE_BASE.rsplit("/photos/", 1)[0]  # https://webassets.lqdt1.com/assets
+    out = []
+    for p in paths or []:
+        if not p:
+            continue
+        if p.startswith("http"):
+            out.append(p)
+        else:
+            out.append(base + (p if p.startswith("/") else "/" + p))
+    return out
+
 def _hero_url(account_id: int, photo: str) -> str:
     # The CDN serves photos under an account-id subfolder:
     # /assets/photos/{account_id}/{photo}. Omitting the subfolder 404s
