@@ -12,11 +12,12 @@ class DiscoveryReport:
     discovered: int = 0; upserted: int = 0; classified: int = 0; archived: int = 0; errors: int = 0
 
 def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool = True,
-                  archive_candidates: bool = True, now: datetime | None = None) -> DiscoveryReport:
+                  archive_candidates: bool = True, now: datetime | None = None,
+                  max_pages: int = 60) -> DiscoveryReport:
     now = now or datetime.now().astimezone()
     rep = DiscoveryReport()
     for category in categories:
-        for lot in adapter.discover(category_ids=category):
+        for lot in adapter.discover(category_ids=category, max_pages=max_pages):
             rep.discovered += 1
             try:
                 if classify and (lot.canonical_category in ("general_merchandise", "other")):
