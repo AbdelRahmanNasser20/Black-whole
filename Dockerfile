@@ -22,6 +22,7 @@ WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY automation/ ./automation/
 COPY auction_extractors/ ./auction_extractors/
+COPY deals/ ./deals/
 COPY scripts/ ./scripts/
 COPY run.py ./
 
