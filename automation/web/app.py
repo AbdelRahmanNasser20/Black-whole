@@ -55,6 +55,7 @@ from .. import telegram_alerts
 from . import deals_query
 from . import auth as auth_svc
 from deals.fees import fee_model_from_env
+from deals.geo import distance_from_home
 
 try:
     # Auctions tab reads the shared Supabase `auction_listings` table. The
@@ -530,10 +531,23 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
 _DEALS_COLS = (
     "asset_id, account_id, auction_id, title, canonical_category, city, state, "
     "bid_count, current_bid, currency_code, end_utc, outcome, final_bid, "
-    "outcome_complete, first_seen_at, hero_image_url, archived_hero_url"
+    "outcome_complete, first_seen_at, hero_image_url, archived_hero_url, "
+    "lat, lng"
 )
 
 _DEALS_ACTIVE = "outcome_complete IS NOT TRUE AND end_utc > now()"
+
+# Latest-verdict join (alias `v`) — build_where's min_margin filter and the
+# "margin" sort both reference v.margin_pct, so the same FROM clause is used
+# for the row and count queries alike.
+_DEALS_FROM = """FROM deal_lots
+LEFT JOIN LATERAL (
+    SELECT method, est_resale, margin_pct, confidence, comp_count, comps,
+           rank_score, analyzed_at
+    FROM deal_verdicts v0
+    WHERE v0.asset_id = deal_lots.asset_id AND v0.account_id = deal_lots.account_id
+      AND v0.auction_id = deal_lots.auction_id
+    ORDER BY v0.analyzed_at DESC LIMIT 1) v ON TRUE"""
 
 
 @app.get("/api/deals")
@@ -549,6 +563,10 @@ async def list_deals(
     dir: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    min_margin: float | None = None,
+    list_id: int | None = None,
+    tag: str | None = None,
+    max_distance: float | None = None,
 ):
     """Search/filter/sort deal_lots for the admin Deals tab.
 
@@ -562,17 +580,19 @@ async def list_deals(
     where, args = deals_query.build_where(
         q=q, category=category, native=native, state=state, max_bids=max_bids,
         ending_within=ending_within, status=status,
+        min_margin=min_margin, list_id=list_id, tag=tag,
     )
     order = deals_query.order_clause(sort, dir)
 
     def _fetch():
         rows = db.fetch_all(
-            f"SELECT {_DEALS_COLS} FROM deal_lots WHERE {where} {order} "
+            f"SELECT {_DEALS_COLS}, row_to_json(v.*) AS verdict "
+            f"{_DEALS_FROM} WHERE {where} {order} "
             "LIMIT %s OFFSET %s",
             (*args, limit, offset),
         )
         total = db.fetch_one(
-            f"SELECT count(*) AS c FROM deal_lots WHERE {where}", tuple(args)
+            f"SELECT count(*) AS c {_DEALS_FROM} WHERE {where}", tuple(args)
         )["c"]
         cats = db.fetch_all(
             "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
@@ -598,9 +618,17 @@ async def list_deals(
         raise HTTPException(503, f"deals query failed: {e!r}")
 
     fees = fee_model_from_env()
+    out_rows = []
+    for r in rows:
+        row = deals_query.enrich(dict(r), fees)
+        row["distance_mi"] = distance_from_home(row.get("lat"), row.get("lng"))
+        out_rows.append(row)
+    if max_distance is not None:
+        out_rows = [r for r in out_rows
+                    if r["distance_mi"] is not None and r["distance_mi"] <= max_distance]
     return {
         "total": total,
-        "rows": [deals_query.enrich(dict(r), fees) for r in rows],
+        "rows": out_rows,
         "facets": {"categories": cats, "states": states},
         "stats": stats,
     }
@@ -651,6 +679,131 @@ async def deals_tree(status: str = "active"):
         b["twigs"].sort(key=lambda t: -t["n"])
     tree = sorted(branches.values(), key=lambda b: -b["n"])
     return {"total": sum(b["n"] for b in tree), "branches": tree}
+
+
+# ── Deals browser: lists / tags / saved searches (2026-07-17 spec, T12) ─────
+# Thin db wrappers in the style of the /api/auctions/favorites handlers.
+
+
+@app.get("/api/deals/lists")
+async def deals_lists():
+    return db.fetch_all(
+        "SELECT dl.id, dl.name, count(li.list_id) AS count "
+        "FROM deal_lists dl LEFT JOIN deal_list_items li ON li.list_id = dl.id "
+        "GROUP BY dl.id, dl.name ORDER BY dl.name"
+    )
+
+
+@app.post("/api/deals/lists")
+async def deals_list_create(payload: dict):
+    name = ((payload or {}).get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    row = db.fetch_one(
+        "INSERT INTO deal_lists (name) VALUES (%s) "
+        "ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name RETURNING id, name",
+        (name,),
+    )
+    return {"id": row["id"], "name": row["name"], "count": 0}
+
+
+@app.delete("/api/deals/lists/{list_id}")
+async def deals_list_delete(list_id: int):
+    n = db.execute("DELETE FROM deal_lists WHERE id=%s", (list_id,))
+    if not n:
+        raise HTTPException(404, "list not found")
+    return {"ok": True}
+
+
+@app.put("/api/deals/lists/{list_id}/items/{asset_id}/{account_id}/{auction_id}")
+async def deals_list_item_add(list_id: int, asset_id: int, account_id: int,
+                              auction_id: int):
+    db.execute(
+        "INSERT INTO deal_list_items (list_id, asset_id, account_id, auction_id) "
+        "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+        (list_id, asset_id, account_id, auction_id),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/deals/lists/{list_id}/items/{asset_id}/{account_id}/{auction_id}")
+async def deals_list_item_remove(list_id: int, asset_id: int, account_id: int,
+                                 auction_id: int):
+    n = db.execute(
+        "DELETE FROM deal_list_items WHERE list_id=%s AND asset_id=%s "
+        "AND account_id=%s AND auction_id=%s",
+        (list_id, asset_id, account_id, auction_id),
+    )
+    if not n:
+        raise HTTPException(404, "not in list")
+    return {"ok": True}
+
+
+@app.get("/api/deals/tags")
+async def deals_tags():
+    return db.fetch_all(
+        "SELECT tag, count(*) AS count FROM deal_lot_tags "
+        "GROUP BY tag ORDER BY count DESC, tag"
+    )
+
+
+@app.put("/api/deals/tags/{asset_id}/{account_id}/{auction_id}/{tag}")
+async def deals_tag_add(asset_id: int, account_id: int, auction_id: int, tag: str):
+    tag = tag.strip()
+    if not tag:
+        raise HTTPException(400, "tag required")
+    db.execute(
+        "INSERT INTO deal_lot_tags (asset_id, account_id, auction_id, tag) "
+        "VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING",
+        (asset_id, account_id, auction_id, tag),
+    )
+    return {"ok": True}
+
+
+@app.delete("/api/deals/tags/{asset_id}/{account_id}/{auction_id}/{tag}")
+async def deals_tag_remove(asset_id: int, account_id: int, auction_id: int, tag: str):
+    n = db.execute(
+        "DELETE FROM deal_lot_tags WHERE asset_id=%s AND account_id=%s "
+        "AND auction_id=%s AND tag=%s",
+        (asset_id, account_id, auction_id, tag),
+    )
+    if not n:
+        raise HTTPException(404, "tag not on lot")
+    return {"ok": True}
+
+
+@app.get("/api/deals/searches")
+async def deals_searches():
+    return db.fetch_all(
+        "SELECT id, name, params, alert, created_at, last_run_at "
+        "FROM saved_searches ORDER BY name"
+    )
+
+
+@app.post("/api/deals/searches")
+async def deals_search_create(payload: dict):
+    payload = payload or {}
+    name = (payload.get("name") or "").strip()
+    if not name:
+        raise HTTPException(400, "name required")
+    params = payload.get("params") or {}
+    if not isinstance(params, dict):
+        raise HTTPException(400, "params must be an object")
+    row = db.fetch_one(
+        "INSERT INTO saved_searches (name, params, alert) VALUES (%s, %s, %s) "
+        "ON CONFLICT (name) DO UPDATE SET params = EXCLUDED.params, "
+        "alert = EXCLUDED.alert RETURNING id, name, params, alert",
+        (name, json.dumps(params), bool(payload.get("alert"))),
+    )
+    return row
+
+
+@app.delete("/api/deals/searches/{search_id}")
+async def deals_search_delete(search_id: int):
+    n = db.execute("DELETE FROM saved_searches WHERE id=%s", (search_id,))
+    if not n:
+        raise HTTPException(404, "search not found")
+    return {"ok": True}
 
 
 @app.get("/sell", response_class=HTMLResponse)
