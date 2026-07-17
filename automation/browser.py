@@ -32,11 +32,30 @@ CDP_CONNECT_TIMEOUT_MS = 3000
 
 
 async def _try_connect_cdp(pw):
-    """Return a Browser attached over CDP to a running local browser, or None.
+    """Return a Browser attached over CDP, or None.
+
+    Preference order:
+      1) Cloud browser (Browserbase) when the BLACKWHOLE-22 pilot is on — a
+         remote, stealthed, fresh-IP Chrome for when the local profile is
+         fingerprinted or contended. Off by default (no flag/key => skipped).
+      2) A running LOCAL browser (the facebook-crm poller) at CDP_ENDPOINT.
 
     Fast-fails (short timeout) when nothing is listening so the launch fallback
     stays snappy. Never raises.
     """
+    # 1) Cloud pilot seam — opt-in, returns None unless flag+key are set.
+    from .cloud_browser import resolve_cloud_cdp_endpoint
+    cloud_url = resolve_cloud_cdp_endpoint()
+    if cloud_url:
+        try:
+            return await pw.chromium.connect_over_cdp(
+                cloud_url, timeout=CDP_CONNECT_TIMEOUT_MS
+            )
+        except Exception:
+            # Cloud attach failed — fall through to the local browser.
+            pass
+
+    # 2) Local running browser.
     if not CDP_ENDPOINT:
         return None
     try:
