@@ -36,4 +36,9 @@ def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool
             except Exception as e:
                 rep.errors += 1
                 print(f"[discover] error on lot {lot.asset_id}/{lot.account_id}: {e}", file=sys.stderr)
+    try:
+        from deals.relist import scan_for_relists
+        scan_for_relists(now)
+    except Exception as e:
+        print(f"[discover] relist scan failed: {e}", file=sys.stderr)
     return rep
