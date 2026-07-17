@@ -22,6 +22,7 @@ dependencies = [
     "tzdata>=2024.1",
     "itsdangerous>=2.1",    # signed 365-day session/device cookies — "auth once" (BLACKWHOLE-14)
     "pyotp>=2.9",           # optional TOTP second factor (BLACKWHOLE-14)
+    "beautifulsoup4>=4.12", # canonical eBay sold-page parser (deals/ebay_parse.py)
 ]
 
 [project.optional-dependencies]

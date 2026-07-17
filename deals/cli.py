@@ -23,25 +23,51 @@ LAWN       = ["71","373"]                           # mowing + parks/grounds
 DEFAULT_CATEGORIES = (FURNITURE + AV_EQUIPMENT + TOOLS + KITCHEN + COMPUTERS
                       + RADIOS + LAB + MEDICAL + FITNESS + MUSIC + LAWN)
 
+def sweep_categories(arg: str | None, env: dict) -> list[str]:
+    """Resolve which categories to sweep. 'all' (arg or env) = whole site,
+    which the maestro API expresses as an empty categoryIds string."""
+    raw = arg if arg is not None else env.get("DEALS_SWEEP_CATEGORIES", "")
+    if raw.strip().lower() == "all":
+        return [""]
+    if raw.strip():
+        return [c.strip() for c in raw.split(",") if c.strip()]
+    return DEFAULT_CATEGORIES
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    d = sub.add_parser("discover"); d.add_argument("--categories", default=",".join(DEFAULT_CATEGORIES))
+    d = sub.add_parser("discover")
+    d.add_argument("--categories", default=None)
+    d.add_argument("--max-pages", type=int, default=60)
     sub.add_parser("watch-once")
+    sub.add_parser("backfill-outcomes")
+    sub.add_parser("analyze")
     sub.add_parser("digest")
+    sub.add_parser("rank")
     sub.add_parser("init-schema")
     a = ap.parse_args()
     adapter = GovDealsAdapter()
     if a.cmd == "init-schema":
         init_schema(); print("schema ready")
     elif a.cmd == "discover":
-        rep = run_discovery(adapter, categories=a.categories.split(","))
+        import os
+        cats = sweep_categories(a.categories, os.environ)
+        rep = run_discovery(adapter, categories=cats, max_pages=a.max_pages)
         print(rep)
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
+    elif a.cmd == "backfill-outcomes":
+        from deals.backfill import run_backfill
+        print(f"closed {run_backfill()} lots")
+    elif a.cmd == "analyze":
+        from deals.analyze import run_analysis
+        print(run_analysis())
     elif a.cmd == "digest":
         ok, err = send_daily_digest(fee_model_from_env())
         print("digest sent" if ok else f"digest failed: {err}")
+    elif a.cmd == "rank":
+        from deals.rank import run_rank
+        print(f"ranked {run_rank()} verdicts")
 
 if __name__ == "__main__":
     main()

@@ -2134,7 +2134,19 @@ function renderTestScrapeCard(it, match) {
 /* ── Deals tab ─────────────────────────────────────────────── */
 const deal = {q: '', category: '', native: '', state: '', zero: false, ending: '',
               status: 'active', sort: 'ends', dir: null, offset: 0, limit: 50,
-              facetsLoaded: false, treeStatus: null, expanded: new Set()};
+              minMargin: '', maxDist: '', listId: '', tag: '',
+              facetsLoaded: false, treeStatus: null, expanded: new Set(),
+              // Deal-browser chrome (lists / tags / saved searches).
+              // rows: last page fetched (drawer lookup). memb/tags: client-side
+              // membership knowledge, seeded by list/tag-filtered fetches and
+              // kept current by the user's own PUT/DELETEs — the /api/deals
+              // rows themselves don't carry per-lot membership in v1.
+              rows: [], lists: [], tagList: [], searches: [],
+              metaLoaded: false, memb: new Map(), lotTags: new Map()};
+
+const dealKey = (r) => `${r.asset_id}/${r.account_id}/${r.auction_id}`;
+const dealMemb = (key) => deal.memb.get(key) || (deal.memb.set(key, new Set()), deal.memb.get(key));
+const dealLotTags = (key) => deal.lotTags.get(key) || (deal.lotTags.set(key, new Set()), deal.lotTags.get(key));
 
 function dealEndsCell(iso) {
   if (!iso) return '<td>—</td>';
@@ -2146,6 +2158,26 @@ function dealEndsCell(iso) {
     : h < 48 ? `${Math.floor(h)}h ${Math.round((h % 1) * 60)}m`
     : `${Math.floor(h / 24)}d ${Math.floor(h % 24)}h`;
   return `<td class="${cls}" title="${iso}">${label}</td>`;
+}
+
+/* Verdict columns: est. resale / margin % (loudest cell) / conf / comps / rank.
+   Un-analyzed lots render em-dashes. */
+function dealVerdictCells(r, key) {
+  const v = r.verdict;
+  if (!v) return '<td>—</td><td class="deal-margin">—</td><td>—</td><td>—</td><td>—</td>';
+  const m = v.margin_pct;
+  const mCls = m == null ? '' : m >= 100 ? 'm-hot' : m >= 25 ? 'm-good' : m >= 0 ? 'm-flat' : 'm-neg';
+  const margin = m == null ? '—' : `${m > 0 ? '+' : ''}${Math.round(m)}%`;
+  const conf = `<span class="deal-conf deal-conf-${v.confidence}" title="method: ${v.method}">` +
+               `${v.confidence}${v.method !== 'comps' ? ' · est' : ''}</span>`;
+  const comps = v.comp_count > 0
+    ? `<a href="#" class="deal-comps-link" data-key="${key}" title="open comp detail">${v.comp_count}</a>`
+    : '0';
+  return `<td>${v.est_resale != null ? '$' + Math.round(v.est_resale) : '—'}</td>
+    <td class="deal-margin ${mCls}">${margin}</td>
+    <td>${conf}</td>
+    <td>${comps}</td>
+    <td>${v.rank_score != null ? Math.round(v.rank_score) : '—'}</td>`;
 }
 
 /* Category tree: branch = canonical bucket, twig = native GovDeals category.
@@ -2223,6 +2255,7 @@ $('#deal-tree-nodes').addEventListener('click', (e) => {
 async function loadDeals() {
   const tbody = $('#deal-rows');
   if (deal.treeStatus !== deal.status) loadDealTree();
+  if (!deal.metaLoaded) loadDealMeta();
   const p = new URLSearchParams();
   if (deal.q) p.set('q', deal.q);
   if (deal.category) p.set('category', deal.category);
@@ -2230,6 +2263,10 @@ async function loadDeals() {
   if (deal.state) p.set('state', deal.state);
   if (deal.zero) p.set('max_bids', '0');
   if (deal.ending) p.set('ending_within', deal.ending);
+  if (deal.minMargin !== '') p.set('min_margin', deal.minMargin);
+  if (deal.maxDist !== '') p.set('max_distance', deal.maxDist);
+  if (deal.listId) p.set('list_id', deal.listId);
+  if (deal.tag) p.set('tag', deal.tag);
   p.set('status', deal.status);
   p.set('sort', deal.sort);
   if (deal.dir) p.set('dir', deal.dir);
@@ -2241,9 +2278,13 @@ async function loadDeals() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     body = await r.json();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="9" class="drafts-empty">deals API error: ${e}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="16" class="drafts-empty">deals API error: ${e}</td></tr>`;
     return;
   }
+  deal.rows = body.rows;
+  // A list/tag-filtered result set is definitive membership knowledge.
+  if (deal.listId) body.rows.forEach(r => dealMemb(dealKey(r)).add(Number(deal.listId)));
+  if (deal.tag) body.rows.forEach(r => dealLotTags(dealKey(r)).add(deal.tag));
   const s = body.stats || {};
   $('#deal-stats').textContent =
     `${s.total_lots ?? '?'} lots tracked · ${s.candidates ?? '?'} candidates (0-bid <24h) · ${s.ending_24h ?? '?'} ending <24h`;
@@ -2262,9 +2303,10 @@ async function loadDeals() {
   }
   const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
   if (!body.rows.length) {
-    tbody.innerHTML = '<tr><td colspan="9" class="drafts-empty">no lots match</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="16" class="drafts-empty">no lots match</td></tr>';
   } else {
     tbody.innerHTML = body.rows.map(r => {
+      const key = dealKey(r);
       const img = r.archived_hero_url || r.hero_image_url;
       const thumb = img
         ? `<img class="deal-thumb" src="${esc(img)}" loading="lazy" alt="">`
@@ -2272,15 +2314,23 @@ async function loadDeals() {
       const outcome = r.outcome_complete
         ? `<span class="lex ${r.outcome === 'no_bid' ? 'pending' : 'done'}">${esc(r.outcome) || 'closed'}${r.final_bid != null ? ` $${r.final_bid}` : ''}</span>`
         : '<span class="lex running">open</span>';
+      const saved = deal.memb.get(key)?.size > 0;
+      const chips = [...(deal.lotTags.get(key) || [])].map(t =>
+        `<span class="deal-chip">${esc(t)}<button type="button" class="deal-chip-x" data-key="${key}" data-tag="${esc(t)}" title="remove tag">×</button></span>`
+      ).join('');
       return `<tr>
         <td>${thumb}</td>
+        <td><button type="button" class="deal-heart ${saved ? 'on' : ''}" data-key="${key}" title="save to a list">♥</button></td>
         <td><a href="${esc(r.govdeals_url)}" target="_blank" rel="noopener">${esc(r.title)}</a>
-            <a class="deal-viewer-link" href="${esc(r.viewer_url)}" target="_blank" rel="noopener" title="archived copy">⧉</a></td>
+            <a class="deal-viewer-link" href="${esc(r.viewer_url)}" target="_blank" rel="noopener" title="archived copy">⧉</a>
+            <span class="deal-tags">${chips}<button type="button" class="deal-tag-add" data-key="${key}" title="add tag">+</button></span></td>
         <td>${esc(r.canonical_category) || '—'}</td>
         <td>${esc(r.city)}${r.state ? ', ' + esc(r.state) : ''}</td>
+        <td>${r.distance_mi != null ? Math.round(r.distance_mi) + ' mi' : '—'}</td>
         <td>${r.bid_count ?? '—'}</td>
         <td>${r.current_bid != null ? '$' + r.current_bid : '—'}</td>
         <td>$${r.landed_cost}</td>
+        ${dealVerdictCells(r, key)}
         ${dealEndsCell(r.end_utc)}
         <td>${outcome}</td>
       </tr>`;
@@ -2323,7 +2373,309 @@ $$('#deal-table th.sortable').forEach(th => {
 });
 $('#deal-prev').addEventListener('click', () => { deal.offset = Math.max(0, deal.offset - deal.limit); loadDeals(); });
 $('#deal-next').addEventListener('click', () => { deal.offset += deal.limit; loadDeals(); });
-$('#deal-refresh').addEventListener('click', () => { deal.facetsLoaded = false; loadDealTree(); loadDeals(); });
+$('#deal-refresh').addEventListener('click', () => {
+  deal.facetsLoaded = false; deal.metaLoaded = false;
+  loadDealTree(); loadDeals();
+});
+let _dealMarginTimer;
+$('#deal-min-margin').addEventListener('input', (e) => {
+  clearTimeout(_dealMarginTimer);
+  _dealMarginTimer = setTimeout(() => { deal.minMargin = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 400);
+});
+let _dealDistTimer;
+$('#deal-max-dist').addEventListener('input', (e) => {
+  clearTimeout(_dealDistTimer);
+  _dealDistTimer = setTimeout(() => { deal.maxDist = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 400);
+});
+$('#deal-list').addEventListener('change', (e) => { deal.listId = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-tag').addEventListener('change', (e) => { deal.tag = e.target.value; deal.offset = 0; loadDeals(); });
+
+/* ── Deal browser chrome: lists / tags / saved searches / comps drawer ── */
+
+const _dealEsc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+async function loadDealMeta() {
+  deal.metaLoaded = true;
+  const get = async (url) => {
+    const r = await fetch(url);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json();
+  };
+  try {
+    [deal.lists, deal.tagList, deal.searches] = await Promise.all([
+      get('/api/deals/lists'), get('/api/deals/tags'), get('/api/deals/searches'),
+    ]);
+  } catch (e) {
+    deal.metaLoaded = false;
+    console.warn('deal meta load failed:', e);
+    return;
+  }
+  const fillSel = (sel, items, cur) => {
+    const el = $(sel);
+    el.innerHTML = '<option value="">all</option>' + items.map(i =>
+      `<option value="${_dealEsc(i.value)}">${_dealEsc(i.text)}</option>`).join('');
+    el.value = [...el.options].some(o => o.value === String(cur)) ? String(cur) : '';
+  };
+  fillSel('#deal-list', deal.lists.map(l => ({value: l.id, text: `${l.name} (${l.count})`})), deal.listId);
+  fillSel('#deal-tag', deal.tagList.map(t => ({value: t.tag, text: `${t.tag} (${t.count})`})), deal.tag);
+  renderDealSearches();
+}
+
+/* saved-search chips above the filter bar: click = apply, × = delete */
+function renderDealSearches() {
+  const host = $('#deal-searches');
+  host.hidden = !deal.searches.length;
+  host.innerHTML = deal.searches.map(s =>
+    `<span class="deal-search-chip" data-id="${s.id}" title="${_dealEsc(JSON.stringify(s.params))}">
+       ★ ${_dealEsc(s.name)}${s.alert ? ' 🔔' : ''}
+       <button type="button" class="deal-search-x" data-id="${s.id}" title="delete saved search">×</button>
+     </span>`).join('');
+}
+
+function currentDealParams() {
+  const p = {};
+  if (deal.q) p.q = deal.q;
+  if (deal.category) p.category = deal.category;
+  if (deal.native) p.native = deal.native;
+  if (deal.state) p.state = deal.state;
+  if (deal.zero) p.max_bids = 0;
+  if (deal.ending) p.ending_within = Number(deal.ending);
+  if (deal.minMargin !== '') p.min_margin = Number(deal.minMargin);
+  if (deal.listId) p.list_id = Number(deal.listId);
+  if (deal.tag) p.tag = deal.tag;
+  p.status = deal.status;
+  return p;
+}
+
+function applyDealSearch(params) {
+  deal.q = params.q || '';
+  deal.category = params.category || '';
+  deal.native = params.native || '';
+  deal.state = params.state || '';
+  deal.zero = params.max_bids === 0;
+  deal.ending = params.ending_within != null ? String(params.ending_within) : '';
+  deal.minMargin = params.min_margin != null ? String(params.min_margin) : '';
+  deal.listId = params.list_id != null ? String(params.list_id) : '';
+  deal.tag = params.tag || '';
+  deal.status = params.status || 'active';
+  deal.offset = 0;
+  // sync controls back to the restored state
+  $('#deal-q').value = deal.q;
+  const syncSel = (sel, val) => {
+    const el = $(sel);
+    el.value = [...el.options].some(o => o.value === val) ? val : '';
+  };
+  syncSel('#deal-category', deal.category);
+  syncSel('#deal-state', deal.state);
+  syncSel('#deal-ending', deal.ending);
+  syncSel('#deal-list', deal.listId);
+  syncSel('#deal-tag', deal.tag);
+  $('#deal-zero-bids').checked = deal.zero;
+  $('#deal-min-margin').value = deal.minMargin;
+  $('#deal-max-dist').value = deal.maxDist;
+  $$('#deal-status-filter .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.value === deal.status));
+  renderDealTree();
+  loadDeals();
+}
+
+$('#deal-searches').addEventListener('click', async (e) => {
+  const x = e.target.closest('.deal-search-x');
+  if (x) {
+    try {
+      const r = await fetch(`/api/deals/searches/${x.dataset.id}`, {method: 'DELETE'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      deal.searches = deal.searches.filter(s => String(s.id) !== x.dataset.id);
+      renderDealSearches();
+    } catch (err) { toast(`delete failed: ${err}`, 'err'); }
+    return;
+  }
+  const chip = e.target.closest('.deal-search-chip');
+  if (!chip) return;
+  const s = deal.searches.find(s => String(s.id) === chip.dataset.id);
+  if (s) applyDealSearch(s.params || {});
+});
+
+/* one shared floating-popover lifecycle: position near anchor, close on outside click */
+function openDealPop(pop, anchor, html) {
+  closeDealPops();
+  pop.innerHTML = html;
+  pop.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = `${Math.round(r.bottom + 6)}px`;
+  pop.style.left = `${Math.round(Math.min(r.left, window.innerWidth - 280))}px`;
+  setTimeout(() => document.addEventListener('click', _dealPopOutside), 0);
+}
+function closeDealPops() {
+  document.removeEventListener('click', _dealPopOutside);
+  $('#deal-listpop').hidden = true;
+  $('#deal-searchpop').hidden = true;
+}
+function _dealPopOutside(e) {
+  if (e.target.closest('.deal-pop')) return;
+  closeDealPops();
+}
+
+/* ♥ popover: checkbox per list + inline "new list" input */
+function openListPop(heartBtn, key) {
+  const memb = dealMemb(key);
+  const boxes = deal.lists.map(l => `
+    <label class="deal-pop-row">
+      <input type="checkbox" data-list="${l.id}" ${memb.has(l.id) ? 'checked' : ''}>
+      ${_dealEsc(l.name)} <span class="deal-pop-count">${l.count}</span>
+    </label>`).join('') || '<div class="deal-pop-empty">no lists yet</div>';
+  openDealPop($('#deal-listpop'), heartBtn, `
+    <div class="deal-pop-head">SAVE TO LIST</div>
+    ${boxes}
+    <div class="deal-pop-new">
+      <input type="text" id="deal-newlist-name" placeholder="new list…">
+      <button type="button" class="btn btn-small" id="deal-newlist-add">+</button>
+    </div>`);
+  const pop = $('#deal-listpop');
+  pop.querySelectorAll('input[type=checkbox]').forEach(cb => {
+    cb.addEventListener('change', async () => {
+      const listId = Number(cb.dataset.list);
+      const method = cb.checked ? 'PUT' : 'DELETE';
+      try {
+        const r = await fetch(`/api/deals/lists/${listId}/items/${key}`, {method});
+        if (!r.ok && r.status !== 404) throw new Error(`HTTP ${r.status}`);
+        cb.checked ? memb.add(listId) : memb.delete(listId);
+        const l = deal.lists.find(l => l.id === listId);
+        if (l) l.count = Math.max(0, Number(l.count) + (cb.checked ? 1 : -1));
+        heartBtn.classList.toggle('on', memb.size > 0);
+      } catch (err) {
+        cb.checked = !cb.checked;
+        toast(`list update failed: ${err}`, 'err');
+      }
+    });
+  });
+  const addNew = async () => {
+    const name = $('#deal-newlist-name').value.trim();
+    if (!name) return;
+    try {
+      let r = await fetch('/api/deals/lists', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name}),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const created = await r.json();
+      r = await fetch(`/api/deals/lists/${created.id}/items/${key}`, {method: 'PUT'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      memb.add(created.id);
+      heartBtn.classList.add('on');
+      deal.metaLoaded = false;
+      await loadDealMeta();
+      openListPop(heartBtn, key);   // re-render with the new list visible
+    } catch (err) { toast(`create list failed: ${err}`, 'err'); }
+  };
+  $('#deal-newlist-add').addEventListener('click', addNew);
+  $('#deal-newlist-name').addEventListener('keydown', (e) => { if (e.key === 'Enter') addNew(); });
+}
+
+/* comps detail drawer: verdict summary + each kept comp title/price/url */
+function openDealDrawer(key) {
+  const row = deal.rows.find(r => dealKey(r) === key);
+  const v = row?.verdict;
+  if (!v) return;
+  const comps = (v.comps || []).map(c => `
+    <div class="deal-drawer-comp">
+      <a href="${_dealEsc(c.url)}" target="_blank" rel="noopener">${_dealEsc(c.title)}</a>
+      <span class="deal-drawer-price">$${Number(c.price).toFixed(0)}</span>
+    </div>`).join('') || '<div class="deal-pop-empty">no kept comps</div>';
+  const d = $('#deal-drawer');
+  d.innerHTML = `
+    <div class="deal-drawer-head">
+      <span>COMPS · ${v.comp_count} kept</span>
+      <button type="button" class="btn btn-small" id="deal-drawer-close">× close</button>
+    </div>
+    <div class="deal-drawer-title">${_dealEsc(row.title)}</div>
+    <div class="deal-drawer-meta">
+      method <b>${_dealEsc(v.method)}</b> · est. resale <b>$${Math.round(v.est_resale)}</b>
+      · margin <b>${Math.round(v.margin_pct)}%</b> · ${_dealEsc(v.confidence)} confidence
+    </div>
+    ${comps}`;
+  d.hidden = false;
+  $('#deal-drawer-close').addEventListener('click', () => { d.hidden = true; });
+}
+
+/* row-level delegation: hearts, tag chips, comps links */
+$('#deal-rows').addEventListener('click', async (e) => {
+  const heart = e.target.closest('.deal-heart');
+  if (heart) {
+    e.stopPropagation();
+    openListPop(heart, heart.dataset.key);
+    return;
+  }
+  const chipX = e.target.closest('.deal-chip-x');
+  if (chipX) {
+    const {key, tag} = chipX.dataset;
+    try {
+      const r = await fetch(`/api/deals/tags/${key}/${encodeURIComponent(tag)}`, {method: 'DELETE'});
+      if (!r.ok && r.status !== 404) throw new Error(`HTTP ${r.status}`);
+      dealLotTags(key).delete(tag);
+      chipX.closest('.deal-chip').remove();
+      deal.metaLoaded = false;   // tag counts changed
+    } catch (err) { toast(`remove tag failed: ${err}`, 'err'); }
+    return;
+  }
+  const tagAdd = e.target.closest('.deal-tag-add');
+  if (tagAdd) {
+    const key = tagAdd.dataset.key;
+    const tag = (prompt('Tag this lot:') || '').trim().toLowerCase();
+    if (!tag) return;
+    try {
+      const r = await fetch(`/api/deals/tags/${key}/${encodeURIComponent(tag)}`, {method: 'PUT'});
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      dealLotTags(key).add(tag);
+      const chip = document.createElement('span');
+      chip.className = 'deal-chip';
+      chip.innerHTML = `${_dealEsc(tag)}<button type="button" class="deal-chip-x" data-key="${key}" data-tag="${_dealEsc(tag)}" title="remove tag">×</button>`;
+      tagAdd.before(chip);
+      deal.metaLoaded = false;
+    } catch (err) { toast(`add tag failed: ${err}`, 'err'); }
+    return;
+  }
+  const compsLink = e.target.closest('.deal-comps-link');
+  if (compsLink) {
+    e.preventDefault();
+    openDealDrawer(compsLink.dataset.key);
+  }
+});
+
+/* ★ save-search popover: name + alert checkbox → POST /api/deals/searches */
+$('#deal-save-search').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openDealPop($('#deal-searchpop'), e.currentTarget, `
+    <div class="deal-pop-head">SAVE THIS SEARCH</div>
+    <div class="deal-pop-new">
+      <input type="text" id="deal-search-name" placeholder="name…">
+    </div>
+    <label class="deal-pop-row">
+      <input type="checkbox" id="deal-search-alert"> Telegram-alert on new matches
+    </label>
+    <div class="deal-pop-new">
+      <button type="button" class="btn btn-small btn-primary" id="deal-search-save">★ save</button>
+    </div>`);
+  $('#deal-search-name').focus();
+  const save = async () => {
+    const name = $('#deal-search-name').value.trim();
+    if (!name) { toast('name required', 'err'); return; }
+    try {
+      const r = await fetch('/api/deals/searches', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({name, params: currentDealParams(),
+                              alert: $('#deal-search-alert').checked}),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      closeDealPops();
+      deal.metaLoaded = false;
+      await loadDealMeta();
+      toast(`saved search “${name}”`, 'ok');
+    } catch (err) { toast(`save failed: ${err}`, 'err'); }
+  };
+  $('#deal-search-save').addEventListener('click', save);
+  $('#deal-search-name').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); });
+});
 
 // All module-level state (`auc`, etc.) and per-tab loaders are defined above,
 // so it is now safe to restore the saved tab and trigger its loader.

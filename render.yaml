@@ -28,6 +28,14 @@ envVarGroups:
         sync: false
       - key: LISTING_IMAGES_BUCKET  # listing-images
         sync: false
+      - key: TELEGRAM_BOT_TOKEN     # deals digests + margin/relist alerts
+        sync: false
+      - key: TELEGRAM_CHAT_ID
+        sync: false
+      - key: COMPS_URL              # Pi sold-comps service (tunnel URL)
+        sync: false
+      - key: COMPS_KEY
+        sync: false
 
 services:
   # ── 1. Always-on website ────────────────────────────────────────────────
@@ -77,3 +85,41 @@ services:
         value: groq          # quantity refine via Groq API (llama-3.3-70b)
       - key: LISTINGS_DB_PATH
         value: /tmp/listings.db   # ephemeral staging buffer; Supabase is durable
+
+  # ── 3. Deals tracker — continuous loop (2026-07-17 spec) ────────────────
+  - type: cron
+    name: deals-discover
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "15 */6 * * *"     # every 6h
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh discover --categories all --max-pages 200
+    envVars:
+      - fromGroup: blackwhole-secrets
+  - type: cron
+    name: deals-watch
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "*/20 * * * *"     # every 20 min
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh watch-once
+    envVars:
+      - fromGroup: blackwhole-secrets
+  - type: cron
+    name: deals-analyze
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "45 * * * *"       # hourly
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh analyze
+    envVars:
+      - fromGroup: blackwhole-secrets
+  - type: cron
+    name: deals-digest
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 13 * * *"       # 13:00 UTC ≈ 9am ET
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh digest
+    envVars:
+      - fromGroup: blackwhole-secrets

@@ -56,6 +56,8 @@ CREATE INDEX IF NOT EXISTS ix_deal_snap_key ON deal_snapshots(asset_id,account_i
 def init_schema() -> None:
     for stmt in filter(str.strip, DDL.split(";")):
         db.execute(stmt)
+    from deals.verdict_store import init_verdict_schema
+    init_verdict_schema()
 
 def lot_row(lot: Lot) -> tuple:
     return (lot.asset_id, lot.account_id, lot.auction_id, lot.title, lot.description,

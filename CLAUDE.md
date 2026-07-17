@@ -317,6 +317,8 @@ Full spec + rationale: `docs/superpowers/plans/2026-07-03-govdeals-deal-tracker-
 - `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` — needed for `digest` to actually send (else `telegram_not_configured`). Not in the current `.env`.
 - `BLACKWHOLE_DB_URL` (Supabase) + `GEMINI_API_KEY` are already in `.env`.
 
+**Deals cron (Render, 2026-07-17 spec):** four cron services in `render.yaml`, all dispatching through `scripts/deals_cron.sh` (committed script — avoids the inline `sh -c` quote-mangling that broke run_discovery.sh's predecessor): `deals-discover` (every 6h, `discover --categories all --max-pages 200` — `--categories all` sweeps the **whole site** via an empty maestro `categoryIds`), `deals-watch` (`watch-once`, every 20 min), `deals-analyze` (`analyze`, hourly), `deals-digest` (`digest`, 13:00 UTC ≈ 9am ET). All four pull `fromGroup: blackwhole-secrets`; the operator must set `TELEGRAM_BOT_TOKEN` / `TELEGRAM_CHAT_ID` / `COMPS_URL` / `COMPS_KEY` values in the Render dashboard (keys are declared in the `blackwhole-secrets` group, values are never committed).
+
 **v1 status / follow-ups:** live-smoke done (456 furniture lots stored, 334 zero-bid, 20 candidates). Deferred: exact contested-lot final price (needs a per-lot detail endpoint not found on maestro), Public Surplus adapter, whole-site scale + proxies, per-seller premium calibration, async/batched image archiving (333 sync downloads in one sweep is slow).
 
 ## Skill / settings notes
