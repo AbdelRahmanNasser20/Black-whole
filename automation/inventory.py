@@ -17,7 +17,9 @@ Supabase (managed via migrations), not created at runtime.
 """
 from __future__ import annotations
 
+import secrets
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -606,30 +608,91 @@ def create_subscriber(
     if source not in SUBSCRIBER_SOURCES:
         raise ValueError(f"invalid source: {source}")
     now = _now()
+    # Server-side unsubscribe capability token (PRD §6): >=32 urlsafe bytes,
+    # generated at insert so every subscriber has a working one-click unsubscribe
+    # the moment the blast job can email them. The column only exists after
+    # migration 002 — insert it when present, degrade gracefully before that
+    # (the blast composer already handles a null token).
+    token = generate_unsubscribe_token()
+    has_token_col = _subscribers_has_unsub_token()
+
+    cols = [
+        "name", "email", "phone", "city", "state", "zip_code", "quantity_wanted",
+        "use_case", "chair_type", "timeline", "budget_per_chair", "delivery",
+        "notes", "source", "status", "created_at",
+    ]
+    vals = [
+        (name or "").strip() or None,
+        (email or "").strip() or None, (phone or "").strip() or None,
+        (city or "").strip() or None, (state or "").strip() or None,
+        (zip_code or "").strip() or None, quantity_wanted,
+        (use_case or "").strip() or None, (chair_type or "").strip() or None,
+        (timeline or "").strip() or None, (budget_per_chair or "").strip() or None,
+        (delivery or "").strip() or None, (notes or "").strip() or None,
+        source, "new", now,
+    ]
+    if has_token_col:
+        cols.append("unsubscribe_token")
+        vals.append(token)
+
+    placeholders = ", ".join(["%s"] * len(vals))
     with connect() as conn:
         cur = conn.execute(
-            """
-            INSERT INTO subscribers (
-                name, email, phone, city, state, zip_code, quantity_wanted,
-                use_case, chair_type, timeline, budget_per_chair, delivery,
-                notes, source, status, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'new', %s)
-            RETURNING id
-            """,
-            (
-                (name or "").strip() or None,
-                (email or "").strip() or None, (phone or "").strip() or None,
-                (city or "").strip() or None, (state or "").strip() or None,
-                (zip_code or "").strip() or None, quantity_wanted,
-                (use_case or "").strip() or None, (chair_type or "").strip() or None,
-                (timeline or "").strip() or None, (budget_per_chair or "").strip() or None,
-                (delivery or "").strip() or None, (notes or "").strip() or None,
-                source, now,
-            ),
+            f"INSERT INTO subscribers ({', '.join(cols)}) "
+            f"VALUES ({placeholders}) RETURNING id",
+            tuple(vals),
         )
         subscriber_id = cur.fetchone()["id"]
         conn.commit()
     return get_subscriber(subscriber_id)
+
+
+def generate_unsubscribe_token() -> str:
+    """A urlsafe capability token for the unsubscribe link (>=32 bytes entropy)."""
+    return secrets.token_urlsafe(32)
+
+
+@lru_cache(maxsize=1)
+def _subscribers_has_unsub_token() -> bool:
+    """True if `subscribers.unsubscribe_token` exists (i.e. migration 002 applied).
+
+    Cached: schema doesn't change under a running process (a migration + deploy
+    restarts it). Any failure (no DB configured, table absent) => treat as absent
+    so signup never breaks pre-migration.
+    """
+    try:
+        row = db.fetch_one(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'subscribers' "
+            "AND column_name = 'unsubscribe_token' LIMIT 1"
+        )
+        return row is not None
+    except Exception:
+        return False
+
+
+def unsubscribe_by_token(token: str) -> bool:
+    """Flip a subscriber to 'unsubscribed' by their capability token.
+
+    Returns True if a row was updated. Idempotent-safe: re-unsubscribing an
+    already-unsubscribed row still matches the token and returns True. Empty /
+    unknown tokens match nothing and return False — the caller renders the same
+    page either way (no oracle, PRD §6). Degrades to False if the token column
+    doesn't exist yet (pre-migration 002).
+    """
+    token = (token or "").strip()
+    if not token or not _subscribers_has_unsub_token():
+        return False
+    try:
+        affected = db.execute(
+            "UPDATE subscribers "
+            "SET status = 'unsubscribed', unsubscribed_at = %s "
+            "WHERE unsubscribe_token = %s",
+            (_now(), token),
+        )
+    except Exception:
+        return False
+    return affected > 0
 
 
 def get_subscriber(subscriber_id: int) -> dict | None:

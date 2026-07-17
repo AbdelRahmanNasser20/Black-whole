@@ -67,6 +67,33 @@ MAX_API_CALLS_PER_DAY = _env_int("MAX_API_CALLS_PER_DAY", 250)
 # Ships OFF. Set DEWATERMARK_OFFLINE=1 in .env to suppress real API calls during tests.
 DEWATERMARK_OFFLINE = _env_bool("DEWATERMARK_OFFLINE", False)
 
+# ── new-inventory alert blast (BLACKWHOLE-10) ───────────────────────────────
+# SEND IS OFF BY DEFAULT. The blast job runs dry-run (log/preview only) until
+# BOTH of these are set: ALERTS_SEND_ENABLED=1 and a registered provider name.
+# No provider is picked yet, so leaving these unset is the safe production
+# default — nothing is emailed.
+ALERTS_SEND_ENABLED = _env_bool("ALERTS_SEND_ENABLED", False)
+# Provider pick (BLACKWHOLE-10, Abdel's decision): Resend (resend.com) free tier.
+# Default is "resend" so that flipping ALERTS_SEND_ENABLED=1 is the *only* switch
+# needed to go live — but send still stays OFF until ALERTS_SEND_ENABLED is true
+# (see email_sender.build_email_sender). "" or "dry_run" forces dry-run too.
+ALERTS_EMAIL_PROVIDER = os.getenv("ALERTS_EMAIL_PROVIDER", "resend")
+# Resend API key — required ONLY when send is enabled AND provider=resend. Unset
+# in prod today (send disabled), so the ResendEmailSender is never instantiated.
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+# Default match radius for a subscriber with no explicit radius_miles (the
+# shipped `subscribers` table has no radius column yet — see migration 002).
+# 0 anywhere / interest-only.
+ALERTS_DEFAULT_RADIUS_MILES = _env_int("ALERTS_DEFAULT_RADIUS_MILES", 100)
+# Daily send ceiling (same spirit as the CRM's MAX_SENDS_PER_DAY). Overflow is
+# left un-sent for the next run.
+MAX_ALERTS_PER_DAY = _env_int("MAX_ALERTS_PER_DAY", 100)
+# CAN-SPAM footer + envelope. From/reply-to default to a black-whole.com address
+# but are overridable; postal address is required copy for a real send.
+ALERTS_FROM_EMAIL = os.getenv("ALERTS_FROM_EMAIL", "alerts@black-whole.com")
+ALERTS_REPLY_TO = os.getenv("ALERTS_REPLY_TO", "")  # operator Gmail (PRD §8)
+ALERTS_POSTAL_ADDRESS = os.getenv("ALERTS_POSTAL_ADDRESS", "")
+
 DEFAULT_PRICE_PER_CHAIR = 20
 FB_PACKAGE_WEIGHT_LB = 12
 FB_PACKAGE_WEIGHT_OZ = 0
