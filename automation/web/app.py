@@ -49,6 +49,7 @@ from ..config import (
 )
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import db
+from .. import catalog_feed
 from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
@@ -694,6 +695,20 @@ async def sitemap_xml():
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}/listings/{row['lot_id']}", lastmod)
     body += "</urlset>\n"
     return Response(content=body, media_type="application/xml")
+
+
+@app.get("/catalog/facebook.csv")
+async def facebook_catalog_feed():
+    """Facebook Business product-catalog feed (BLACKWHOLE-7).
+
+    Public, read-only, no secrets — Commerce Manager pulls this URL on a
+    schedule. One row per sellable lot (see `inventory.list_catalog_feed` for
+    the status/quantity filter; `catalog_feed` drops rows FB would reject).
+    Every product's `link` points back to `/listings/{lot_id}`. Operator setup
+    is in docs/fb_catalog_feed_runbook.md.
+    """
+    body = catalog_feed.rows_to_csv(inventory.list_catalog_feed())
+    return PlainTextResponse(body, media_type="text/csv; charset=utf-8")
 
 
 @app.post("/contact")
