@@ -122,8 +122,10 @@ def test_build_email_sender_defaults_to_dry_run():
 
 
 def test_build_email_sender_unknown_provider_raises_when_enabled():
+    # 'resend' is now a registered provider (Abdel's pick), so use a genuinely
+    # unregistered name to prove a misconfig fails loudly rather than no-ops.
     with pytest.raises(RuntimeError, match="not registered"):
-        es.build_email_sender(provider="resend", send_enabled=True)
+        es.build_email_sender(provider="sendgrid", send_enabled=True)
 
 
 def test_register_provider_then_build():
@@ -140,6 +142,103 @@ def test_register_provider_then_build():
         assert s.send(es.EmailMessage(to="a", subject="b", html="c", text="d")).ok
     finally:
         es._PROVIDERS.pop("fake", None)
+
+
+# ───────── Resend provider adapter (mocked HTTP — NO real emails) ─────────
+
+from automation.alerts import resend_sender as rs  # noqa: E402
+
+
+class _FakeResponse:
+    def __init__(self, status_code, payload=None, text=""):
+        self.status_code = status_code
+        self._payload = payload
+        self.text = text
+
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+def _msg():
+    return es.EmailMessage(
+        to="buyer@example.com", subject="New chairs near you",
+        html="<p>hi</p>", text="hi",
+        from_email="alerts@black-whole.com", reply_to="ops@gmail.com",
+        headers={"List-Unsubscribe": "<https://black-whole.com/alerts/unsubscribe?token=t>",
+                 "List-Unsubscribe-Post": "List-Unsubscribe=One-Click"},
+    )
+
+
+def test_resend_is_registered():
+    assert "resend" in es.available_providers()
+
+
+def test_resend_requires_api_key(monkeypatch):
+    monkeypatch.setattr(rs.config, "RESEND_API_KEY", "")
+    with pytest.raises(RuntimeError, match="RESEND_API_KEY"):
+        rs.ResendEmailSender()
+
+
+def test_build_email_sender_resolves_resend_when_enabled(monkeypatch):
+    monkeypatch.setattr(rs.config, "RESEND_API_KEY", "re_test_123")
+    sender = es.build_email_sender(provider="resend", send_enabled=True)
+    assert sender.name == "resend"
+
+
+def test_resend_send_success_posts_expected_payload(monkeypatch):
+    captured = {}
+
+    def fake_post(url, *, json, headers, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        captured["headers"] = headers
+        return _FakeResponse(200, {"id": "resend-msg-1"})
+
+    monkeypatch.setattr(rs.httpx, "post", fake_post)
+    sender = rs.ResendEmailSender(api_key="re_live_key")
+    result = sender.send(_msg())
+
+    assert result.ok is True
+    assert result.provider_message_id == "resend-msg-1"
+    assert captured["url"] == rs.RESEND_API_URL
+    assert captured["headers"]["Authorization"] == "Bearer re_live_key"
+    body = captured["json"]
+    assert body["to"] == ["buyer@example.com"]
+    assert body["from"] == "alerts@black-whole.com"
+    assert body["reply_to"] == "ops@gmail.com"
+    # RFC 8058 headers passed straight through for Gmail one-click.
+    assert body["headers"]["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+
+
+def test_resend_send_error_returns_failure(monkeypatch):
+    monkeypatch.setattr(
+        rs.httpx, "post",
+        lambda *a, **k: _FakeResponse(422, {"message": "domain not verified"}),
+    )
+    result = rs.ResendEmailSender(api_key="k").send(_msg())
+    assert result.ok is False
+    assert "422" in result.error and "domain not verified" in result.error
+
+
+def test_resend_send_transport_error_returns_failure(monkeypatch):
+    def boom(*a, **k):
+        raise rs.httpx.ConnectError("network down")
+
+    monkeypatch.setattr(rs.httpx, "post", boom)
+    result = rs.ResendEmailSender(api_key="k").send(_msg())
+    assert result.ok is False
+    assert "transport error" in result.error
+
+
+def test_resend_bounce_flagged_suppressed(monkeypatch):
+    monkeypatch.setattr(
+        rs.httpx, "post",
+        lambda *a, **k: _FakeResponse(403, {"message": "recipient on suppression list"}),
+    )
+    result = rs.ResendEmailSender(api_key="k").send(_msg())
+    assert result.ok is False and result.suppressed is True
 
 
 # ───────── compose ─────────

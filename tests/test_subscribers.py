@@ -38,6 +38,62 @@ def test_set_subscriber_status_rejects_unknown_status():
         inventory.set_subscriber_status(1, "blast_sent")
 
 
+# ───────── unsubscribe token generation (DB stubbed) ─────────
+
+def test_generate_unsubscribe_token_is_urlsafe_and_long():
+    tok = inventory.generate_unsubscribe_token()
+    assert len(tok) >= 32
+    assert tok == tok.strip() and " " not in tok
+
+
+class _FakeCur:
+    def fetchone(self):
+        return {"id": 42}
+
+
+class _FakeConn:
+    def __init__(self, sink):
+        self._sink = sink
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def execute(self, sql, params):
+        self._sink["sql"] = sql
+        self._sink["params"] = params
+        return _FakeCur()
+
+    def commit(self):
+        pass
+
+
+def test_create_subscriber_stores_token_when_column_present(monkeypatch):
+    sink = {}
+    monkeypatch.setattr(inventory, "connect", lambda: _FakeConn(sink))
+    monkeypatch.setattr(inventory, "_subscribers_has_unsub_token", lambda: True)
+    monkeypatch.setattr(inventory, "get_subscriber", lambda i: {"id": i})
+
+    inventory.create_subscriber(email="buyer@x.com")
+
+    assert "unsubscribe_token" in sink["sql"]
+    token = sink["params"][-1]  # appended last
+    assert isinstance(token, str) and len(token) >= 32
+
+
+def test_create_subscriber_skips_token_pre_migration(monkeypatch):
+    sink = {}
+    monkeypatch.setattr(inventory, "connect", lambda: _FakeConn(sink))
+    monkeypatch.setattr(inventory, "_subscribers_has_unsub_token", lambda: False)
+    monkeypatch.setattr(inventory, "get_subscriber", lambda i: {"id": i})
+
+    inventory.create_subscriber(email="buyer@x.com")
+
+    assert "unsubscribe_token" not in sink["sql"]
+
+
 # ───────── routes (inventory + telegram stubbed) ─────────
 
 SAMPLE = {
@@ -152,3 +208,47 @@ def test_api_subscribers_delete(client, monkeypatch):
     assert client.delete("/api/subscribers/7").status_code == 200
     monkeypatch.setattr(web_app.inventory, "delete_subscriber", lambda i: False)
     assert client.delete("/api/subscribers/999").status_code == 404
+
+
+# ───────── public unsubscribe (capability URL, no DB) ─────────
+
+def test_unsubscribe_get_flips_status_and_renders_page(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        web_app.inventory, "unsubscribe_by_token",
+        lambda t: calls.append(t) or True,
+    )
+    r = client.get("/alerts/unsubscribe?token=cap-token-abc")
+    assert r.status_code == 200
+    assert "off the list" in r.text.lower()
+    assert calls == ["cap-token-abc"]
+
+
+def test_unsubscribe_unknown_token_renders_same_page_no_oracle(client, monkeypatch):
+    monkeypatch.setattr(web_app.inventory, "unsubscribe_by_token", lambda t: False)
+    r = client.get("/alerts/unsubscribe?token=nope")
+    assert r.status_code == 200
+    assert "off the list" in r.text.lower()
+
+
+def test_unsubscribe_post_one_click_rfc8058(client, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        web_app.inventory, "unsubscribe_by_token",
+        lambda t: calls.append(t) or True,
+    )
+    # RFC 8058 one-click: provider POSTs with the token in the query string.
+    r = client.post("/alerts/unsubscribe?token=xyz",
+                    data={"List-Unsubscribe": "One-Click"})
+    assert r.status_code == 200
+    assert calls == ["xyz"]
+
+
+def test_unsubscribe_survives_db_error(client, monkeypatch):
+    def boom(t):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(web_app.inventory, "unsubscribe_by_token", boom)
+    r = client.get("/alerts/unsubscribe?token=abc")
+    assert r.status_code == 200
+    assert "off the list" in r.text.lower()

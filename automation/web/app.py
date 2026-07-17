@@ -28,7 +28,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -772,6 +772,49 @@ async def public_subscribe(payload: dict):
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
+
+
+# ── unsubscribe (public capability URL, BLACKWHOLE-10 / PRD §6) ──────────────
+# The token in the email's List-Unsubscribe link / footer. GET is the human
+# click; POST is RFC 8058 one-click (Gmail native "Unsubscribe"). Both flip
+# status='unsubscribed' and render the SAME page regardless of whether the token
+# matched — no oracle, idempotent, honored instantly (CAN-SPAM). Not under a
+# protected prefix, so it stays public even with admin auth on.
+_UNSUBSCRIBE_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Unsubscribed — BLACKWHOLE</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+max-width:34rem;margin:12vh auto;padding:0 1.25rem;color:#1a1a1a;line-height:1.5}
+h1{font-size:1.4rem;margin:0 0 .5rem}p{color:#555}a{color:#1a1a1a}</style></head>
+<body><h1>You're off the list.</h1>
+<p>You won't get any more new-inventory alerts from BLACKWHOLE. No further action
+needed — this takes effect immediately.</p>
+<p>Changed your mind? <a href="{base}/listings">Browse current listings</a>.</p>
+</body></html>"""
+
+
+async def _do_unsubscribe(token: str) -> HTMLResponse:
+    # Best-effort: never leak whether the token existed. Swallow DB errors so the
+    # page always renders (an errored unsubscribe must not 500 in the user's face).
+    try:
+        await asyncio.to_thread(inventory.unsubscribe_by_token, token)
+    except Exception:
+        pass
+    return HTMLResponse(_UNSUBSCRIBE_PAGE.replace("{base}", PUBLIC_BASE_URL))
+
+
+@app.get("/alerts/unsubscribe", response_class=HTMLResponse)
+async def alerts_unsubscribe(token: str = Query("")):
+    return await _do_unsubscribe(token)
+
+
+@app.post("/alerts/unsubscribe", response_class=HTMLResponse)
+async def alerts_unsubscribe_one_click(token: str = Query("")):
+    # RFC 8058 List-Unsubscribe-Post=One-Click. Token rides in the query string
+    # (that's how compose_email builds the URL); the form body is ignored.
+    return await _do_unsubscribe(token)
 
 
 @app.get("/api/runs/state")

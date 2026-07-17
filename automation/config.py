@@ -73,7 +73,14 @@ DEWATERMARK_OFFLINE = _env_bool("DEWATERMARK_OFFLINE", False)
 # No provider is picked yet, so leaving these unset is the safe production
 # default — nothing is emailed.
 ALERTS_SEND_ENABLED = _env_bool("ALERTS_SEND_ENABLED", False)
-ALERTS_EMAIL_PROVIDER = os.getenv("ALERTS_EMAIL_PROVIDER", "")  # "" => dry-run
+# Provider pick (BLACKWHOLE-10, Abdel's decision): Resend (resend.com) free tier.
+# Default is "resend" so that flipping ALERTS_SEND_ENABLED=1 is the *only* switch
+# needed to go live — but send still stays OFF until ALERTS_SEND_ENABLED is true
+# (see email_sender.build_email_sender). "" or "dry_run" forces dry-run too.
+ALERTS_EMAIL_PROVIDER = os.getenv("ALERTS_EMAIL_PROVIDER", "resend")
+# Resend API key — required ONLY when send is enabled AND provider=resend. Unset
+# in prod today (send disabled), so the ResendEmailSender is never instantiated.
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 # Default match radius for a subscriber with no explicit radius_miles (the
 # shipped `subscribers` table has no radius column yet — see migration 002).
 # 0 anywhere / interest-only.

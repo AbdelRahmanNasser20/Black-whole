@@ -1,22 +1,27 @@
 """Provider-agnostic email-sender interface for the alert blast (BLACKWHOLE-10).
 
-Abdel has **not** picked an email provider yet (Resend / SendGrid / SES / …),
-so this module deliberately hardcodes none of them and requires none of their
-credentials. It defines the *shape* a provider must satisfy and ships exactly
-one implementation — `DryRunEmailSender` — which is the default and never sends
-a real email.
+This module defines the *shape* a provider must satisfy (`EmailSender` /
+`EmailSenderProtocol`) and stays vendor-free itself — it imports no SDK and
+reads no credentials. Providers register into it at runtime.
 
-Wiring a real provider later is three steps, no changes to the matcher or blast
-orchestration:
+Two senders exist:
+  - `DryRunEmailSender` (name ``"dry_run"``) — the default. Logs what *would*
+    go out and never touches the network. Always available.
+  - `ResendEmailSender` (name ``"resend"``, in `resend_sender.py`) — Abdel's
+    picked provider (Resend free tier). Self-registers on import but is only
+    *instantiated* when send is actually enabled, so importing this package
+    still pulls in no credentials.
 
-  1. Write a class with a ``send(EmailMessage) -> SendResult`` method (subclass
+Send is OFF by default — a hard requirement of this ticket. `build_email_sender`
+returns the dry-run sender unless **both** ``ALERTS_SEND_ENABLED=1`` is set AND
+a real registered provider is named (``ALERTS_EMAIL_PROVIDER`` defaults to
+``resend``). To go live, Abdel sets ``ALERTS_SEND_ENABLED=1`` + ``RESEND_API_KEY``.
+
+Adding another provider later is three steps, no matcher/blast changes:
+  1. Write a class with ``send(EmailMessage) -> SendResult`` (subclass
      `EmailSender` or just match the Protocol).
-  2. Register it: ``register_provider("resend", ResendEmailSender)``.
-  3. Set env ``ALERTS_EMAIL_PROVIDER=resend`` **and** ``ALERTS_SEND_ENABLED=1``
-     plus whatever creds that class reads (e.g. ``RESEND_API_KEY``).
-
-Until *both* env flags are set, `build_email_sender()` returns the dry-run
-sender. Send is OFF by default — that is a hard requirement of this ticket.
+  2. Register it: ``register_provider("name", TheSender)``.
+  3. Point ``ALERTS_EMAIL_PROVIDER=name`` and set its creds + ``ALERTS_SEND_ENABLED=1``.
 """
 from __future__ import annotations
 
