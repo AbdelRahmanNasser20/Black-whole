@@ -131,7 +131,13 @@ def _claude_max_chat(prompt: str) -> str:
     from claude_agent_sdk import ClaudeAgentOptions, query
     from claude_agent_sdk.types import AssistantMessage, TextBlock
 
-    model = os.getenv("CLAUDE_MAX_MODEL", "claude-sonnet-4-5")
+    # Alias, not a pinned ID: the CLI resolves "sonnet" to its current Sonnet,
+    # and the alias returns raw JSON where the pinned ID wraps it in ```json
+    # fences (the parser strips them, but clean output is one less thing to
+    # break). Sonnet is the right tier here — quantity extraction is short-text
+    # structured output, but it IS load-bearing (a wheelchair misread as
+    # qty=110 is the whole reason BLACKWHOLE-4 exists), so don't drop to Haiku.
+    model = os.getenv("CLAUDE_MAX_MODEL", "sonnet")
 
     async def _run() -> str:
         options = ClaudeAgentOptions(
