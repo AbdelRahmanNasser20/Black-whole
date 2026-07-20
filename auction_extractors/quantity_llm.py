@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from typing import Any
 
@@ -31,6 +32,29 @@ _CHUNK = int(os.getenv("LLM_QUANTITY_CHUNK", "12"))
 _RETRIES = int(os.getenv("QUANTITY_LLM_RETRIES", "2"))
 # Backoff = _BACKOFF_BASE * 2**attempt seconds. 0 disables sleeping (tests).
 _BACKOFF_BASE = float(os.getenv("QUANTITY_LLM_BACKOFF", "1.5"))
+
+# Rate limits (429) get their OWN, larger budget, because a 429 usually tells
+# us exactly how long to wait — unlike a 503, which may never recover and so
+# keeps the small generic budget above.
+#
+# Groq's free tier enforces BOTH a per-minute token cap (8k-12k TPM, depending
+# on model) and a per-DAY one (100k TPD). A full GovDeals run is ~56 chunks of
+# 2.5k-7.6k tokens = 140k-400k tokens, which clears neither. The two failures
+# need opposite responses, which is what the helpers below sort out:
+#   - TPM: a leaky bucket that refills. Honor the stated wait; that pacing is
+#     what lets the run finish. The generic 2 retries (1.5s + 3.0s) gave up
+#     ~55s early, which is why chunks kept dying.
+#   - TPD (and a depleted balance): will not clear inside this run. Waiting is
+#     pure waste — fail over to the next provider immediately.
+# Either way the old code marked the chunk llm_failed, BLACKWHOLE-4 NULLed its
+# quantity, and the read path (`WHERE quantity >= 50`) dropped the row: on
+# 2026-07-20 that hid 625 of 661 rows and emptied the admin Auctions tab.
+_RATE_LIMIT_RETRIES = int(os.getenv("QUANTITY_LLM_RATE_LIMIT_RETRIES", "6"))
+# Longest single wait worth taking, as a backstop for hints with no stated
+# limit type. Per-minute limits are a leaky bucket: when a run is deeply over
+# budget the stated wait can run well past 60s, and honoring it IS the pacing
+# mechanism that lets the run finish — so this is generous, not tight.
+_RATE_LIMIT_MAX_WAIT = float(os.getenv("QUANTITY_LLM_RATE_LIMIT_MAX_WAIT", "120"))
 
 # Must match tests/test_quantity_accuracy.py / any tooling that shows "what the LLM sees"
 LLM_QUANTITY_TITLE_MAX = 500
@@ -176,17 +200,124 @@ def _dispatch_provider(prov: str, prompt: str, cfg: dict[str, Any]) -> str:
     raise ValueError(f"Unknown LLM provider: {prov}")
 
 
+# "Please try again in 4.065s" / "... in 1m2s" / "... in 23h59m59s". Groq and
+# OpenAI both phrase the wait this way; larger units are absent for short waits.
+_RETRY_HINT_RE = re.compile(
+    r"try again in\s+(?:([\d.]+)h)?\s*(?:([\d.]+)m)?\s*(?:([\d.]+)s)?", re.I
+)
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """Is this a 429 / quota error (recoverable by waiting) rather than a
+    generic transient failure like a 503 (which may never recover)?"""
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if status == 429:
+        return True
+    msg = str(exc).lower()
+    return any(s in msg for s in ("rate limit", "429", "tokens per minute", "tpm", "too many requests"))
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """How long the server asked us to wait, or None if it didn't say."""
+    hdrs = getattr(getattr(exc, "response", None), "headers", None) or {}
+    for key in ("retry-after", "Retry-After"):
+        raw = hdrs.get(key) if hasattr(hdrs, "get") else None
+        if raw:
+            try:
+                return float(raw)
+            except (TypeError, ValueError):
+                pass
+    m = _RETRY_HINT_RE.search(str(exc))
+    if not m or not any(m.groups()):
+        return None
+    h, mi, s = m.groups()
+    return float(h or 0) * 3600.0 + float(mi or 0) * 60.0 + float(s or 0)
+
+
+# A 429 that will NOT clear by waiting: a per-day cap, or an account that is
+# simply out of credit. Retrying these is pure waste — a depleted Gemini key
+# retried 6x with exponential backoff burns ~95s per chunk (~88min over a full
+# 56-chunk run) and still fails. Fail over to the next provider immediately.
+_UNRECOVERABLE_LIMIT_MARKERS = (
+    "per day", "(tpd)", "(rpd)", "daily",
+    "credits are depleted", "credits depleted", "prepayment",
+    "billing", "insufficient_quota", "insufficient quota",
+)
+
+
+def _is_unrecoverable_limit(exc: Exception) -> bool:
+    """Is this a 429 that waiting cannot fix (daily cap / no credit) rather
+    than the per-minute window that clears on its own?
+
+    Groq and OpenAI name the limit in the message ("tokens per day (TPD)");
+    Gemini reports a depleted balance as a generic RESOURCE_EXHAUSTED 429, so
+    we key on the billing wording rather than the status code.
+    """
+    msg = str(exc).lower()
+    return any(s in msg for s in _UNRECOVERABLE_LIMIT_MARKERS)
+
+
+def _rate_limit_wait(exc: Exception, attempt: int) -> float | None:
+    """Seconds to sleep before retrying a rate-limited call, or None when
+    waiting isn't worth it.
+
+    Prefer the server's own hint, plus a small buffer so we don't wake a hair
+    too early — honoring it is what paces the run to the allowed rate.
+
+    Never sleep a *truncated* amount: retrying before the window clears just
+    429s again and burns the retry budget (observed live: 6 x 75s wasted on one
+    chunk, which is why the cap is a fail-over signal rather than a clamp).
+
+    A limit that waiting cannot fix (daily cap, depleted credit), or a wait
+    past the backstop, returns None = "don't wait, fail over now".
+    """
+    if _is_unrecoverable_limit(exc):
+        return None
+    hint = _retry_after_seconds(exc)
+    if hint is None:
+        return min(_BACKOFF_BASE * (2 ** attempt), _RATE_LIMIT_MAX_WAIT)
+    if hint > _RATE_LIMIT_MAX_WAIT:
+        return None
+    return hint + 0.5
+
+
 def _call_with_retries(prov: str, prompt: str, cfg: dict[str, Any]) -> str:
     """Call one provider, retrying transient failures with exponential backoff.
-    Re-raises the last exception once retries are exhausted."""
+    Re-raises the last exception once retries are exhausted.
+
+    Rate limits (429) draw on their own, larger budget and honor the server's
+    stated wait — a saturated per-minute token window needs ~60s to roll over,
+    which is far longer than the generic backoff allows. Generic failures keep
+    the small budget so a hard-down provider fails fast to the next one.
+    """
     last: Exception | None = None
-    for attempt in range(_RETRIES + 1):
+    generic_used = 0
+    rate_used = 0
+    while True:
         try:
             return _dispatch_provider(prov, prompt, cfg)
         except Exception as e:  # noqa: BLE001 — any failure should fall through
             last = e
-            if attempt < _RETRIES and _BACKOFF_BASE > 0:
-                time.sleep(_BACKOFF_BASE * (2 ** attempt))
+            if _is_rate_limit_error(e):
+                if rate_used >= _RATE_LIMIT_RETRIES:
+                    break
+                wait = _rate_limit_wait(e, rate_used)
+                if wait is None:
+                    # Daily cap / no credit — waiting won't clear it this run.
+                    print(f" ! quantity_llm {prov} limit will not clear by waiting; failing over")
+                    break
+                rate_used += 1
+                if _BACKOFF_BASE > 0:
+                    print(f"   ↳ quantity_llm {prov} rate-limited; waiting {wait:.1f}s (retry {rate_used}/{_RATE_LIMIT_RETRIES})")
+                    time.sleep(wait)
+            else:
+                if generic_used >= _RETRIES:
+                    break
+                if _BACKOFF_BASE > 0:
+                    time.sleep(_BACKOFF_BASE * (2 ** generic_used))
+                generic_used += 1
     raise last  # type: ignore[misc]
 
 
