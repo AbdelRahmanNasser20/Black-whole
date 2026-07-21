@@ -47,8 +47,9 @@ def _load_from_supabase(source: Source, min_quantity: int) -> list[dict]:
         f"""
         SELECT {_SELECT_COLS}
         FROM auction_listings
-        WHERE quantity >= %s AND quantity <= %s AND link ILIKE %s
-        ORDER BY quantity DESC
+        WHERE (quantity IS NULL OR (quantity >= %s AND quantity <= %s))
+          AND link ILIKE %s
+        ORDER BY quantity DESC NULLS LAST
         """,
         (min_quantity, _SANE_MAX_QUANTITY, f"%{frag}%"),
     )
@@ -58,8 +59,14 @@ def _load_from_supabase(source: Source, min_quantity: int) -> list[dict]:
         ls = r.get("last_seen_at")
         if isinstance(ls, datetime):
             r["last_seen_at"] = ls.isoformat()
+    # NULL quantity (a failed-LLM lot) sorts last — it's shown as a degraded
+    # 'qty unknown' card, never dropped, so an LLM outage looks like an outage
+    # instead of "no chairs."
     rows.sort(
-        key=lambda x: (-int(x.get("quantity") or 0), _price_to_float(x.get("price")))
+        key=lambda x: (
+            -(int(x["quantity"]) if x.get("quantity") is not None else -1),
+            _price_to_float(x.get("price")),
+        )
     )
     return rows
 
@@ -134,10 +141,12 @@ def get_top_chairs(
 
     out = []
     for i, (it, en) in enumerate(zip(top, enrich), start=1):
+        qty_raw = it.get("quantity")
         out.append(
             {
                 "rank": i,
-                "quantity": int(it.get("quantity") or 0),
+                "quantity": int(qty_raw) if qty_raw is not None else 0,
+                "quantity_unknown": qty_raw is None,
                 "title": en["title"],
                 "raw_title": it.get("title") or "",
                 "price": it.get("price") or "",

@@ -978,7 +978,7 @@ function renderAuctionCard(it) {
     <div class="auction-body">
       <h3 class="auction-title">${esc(it.title || it.raw_title || '—')}</h3>
       <div class="auction-meta">
-        <span class="auction-qty">${(it.quantity||0).toLocaleString()} ×</span>
+        <span class="auction-qty">${it.quantity_unknown ? 'QTY UNKNOWN' : `${(it.quantity||0).toLocaleString()} ×`}</span>
         ${it.price ? `<span class="auction-price">${esc(it.price)}</span>` : ''}
         ${condPill}
       </div>
