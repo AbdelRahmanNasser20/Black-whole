@@ -47,11 +47,12 @@
 {% if items %}
 <section class="lot-grid" id="lot-grid">
   {% for item in items %}
-  <a class="lot-card"
+  <a class="lot-card{% if item.is_sold %} lot-card--sold{% endif %}"
      href="/listings/{{ item.lot_id }}"
      data-type="{{ item.chair_type or '' }}"
      data-city="{{ item.city or '' }}"
      data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
+     data-sold="{{ '1' if item.is_sold else '0' }}"
      data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.city or '' }}">
     <div class="lot-img">
       {% if item.hero_src %}
@@ -59,7 +60,7 @@
       {% else %}
         <div class="lot-img-fallback">◉</div>
       {% endif %}
-      <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
+      <div class="lot-stamp{% if item.is_sold %} lot-stamp--sold{% endif %}">{% if item.is_sold %}SOLD OUT{% elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
     </div>
     <div class="lot-body">
       <div class="lot-meta mono">{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>

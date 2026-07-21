@@ -71,14 +71,14 @@
   </div>
   <div class="featured-track" id="featured-track">
     {% for item in featured %}
-    <a class="lot-card" href="/listings/{{ item.lot_id }}">
+    <a class="lot-card{% if item.is_sold %} lot-card--sold{% endif %}" href="/listings/{{ item.lot_id }}">
       <div class="lot-img">
         {% if item.hero_src %}
           <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}
-        <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
+        <div class="lot-stamp{% if item.is_sold %} lot-stamp--sold{% endif %}">{% if item.is_sold %}SOLD OUT{% elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
       </div>
       <div class="lot-body">
         <div class="lot-meta mono">{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>

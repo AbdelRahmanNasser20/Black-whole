@@ -402,9 +402,10 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         "@type": "Offer",
         "priceCurrency": "USD",
         "availability": (
-            "https://schema.org/InStock"
-            if (row.get("quantity_remaining") or 0) > 0
-            else "https://schema.org/SoldOut"
+            "https://schema.org/SoldOut"
+            if row.get("status") in inventory.SOLD_PUBLIC_STATUSES
+            or (row.get("quantity_remaining") or 0) <= 0
+            else "https://schema.org/InStock"
         ),
         "itemCondition": "https://schema.org/UsedCondition",
     }
@@ -474,7 +475,10 @@ async def public_landing(request: Request):
             state = (r.get("state") or "").strip().upper()
             city = (r.get("city") or "").strip().lower()
             return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
-        featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
+        public = inventory.list_public(include_sold=True)
+        avail = [r for r in public if not r.get("is_sold")]
+        sold = [r for r in public if r.get("is_sold")]
+        featured = (sorted(avail, key=_idaho_first) + sold)[:12]
         for r in featured:
             r["hero_src"] = _hero_src(r)
     except Exception:
@@ -488,7 +492,9 @@ async def public_landing(request: Request):
 
 @app.get("/listings", response_class=HTMLResponse)
 async def public_listings(request: Request):
-    items = inventory.list_public()
+    # include_sold appends recently sold/lost lots after the available set
+    # (list_public already orders them last) — social proof, don't re-sort.
+    items = inventory.list_public(include_sold=True)
     for r in items:
         r["hero_src"] = _hero_src(r)
     cities = sorted({(r.get("city") or "").strip() for r in items if r.get("city")})
@@ -507,12 +513,15 @@ async def public_listing_detail(request: Request, lot_id: str):
         raise HTTPException(404, "listing not found")
     hero = _hero_src(row)
     images = _gallery_srcs(row)
+    is_sold = row.get("status") in inventory.SOLD_PUBLIC_STATUSES
     return templates.TemplateResponse(
         request, "listing_detail.html",
         _public_ctx({
             "item": row,
             "hero": hero,
             "images": images,
+            "is_sold": is_sold,
+            "sold_label": inventory.SOLD_PUBLIC_LABEL,
             **_detail_seo(row, hero, images),
         }),
     )

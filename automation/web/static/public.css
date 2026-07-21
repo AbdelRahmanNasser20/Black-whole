@@ -328,6 +328,18 @@ a:hover { color: var(--accent); }
   font-size: 14px; padding: 10px 18px;
   top: 20px; right: 20px;
 }
+/* Recently-sold social proof: solid red stamp, dimmed photo, struck price. */
+.lot-stamp--sold {
+  background: #C0261B;
+  color: #fff;
+  border-color: #C0261B;
+}
+.lot-card--sold .lot-img img { filter: grayscale(0.4); opacity: 0.6; }
+.lot-card--sold .lot-price-num { text-decoration: line-through; opacity: 0.7; }
+.sold-note {
+  font-size: 12px; letter-spacing: 0.16em; color: #C0261B;
+  border: 1.5px solid #C0261B; padding: 10px 14px; display: inline-block;
+}
 .lot-body { padding: 18px 20px 22px 20px; display: flex; flex-direction: column; gap: 10px; }
 .lot-meta { font-size: 10px; color: var(--muted); letter-spacing: 0.16em; }
 .lot-title {

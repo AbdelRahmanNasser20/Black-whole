@@ -43,7 +43,7 @@ ROW = {
 
 @pytest.fixture
 def client(monkeypatch):
-    monkeypatch.setattr(web_app.inventory, "list_public", lambda: [dict(ROW)])
+    monkeypatch.setattr(web_app.inventory, "list_public", lambda **kw: [dict(ROW)])
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: dict(ROW) if lot_id == "10340" else None)
     monkeypatch.setattr(web_app.inventory, "stats", lambda: {"lots": 1, "chairs": 100, "cities": 1})
     return TestClient(web_app.app)

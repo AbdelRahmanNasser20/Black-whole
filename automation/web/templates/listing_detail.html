@@ -25,8 +25,8 @@
         <img id="gal-main-img"
              src="{{ hero or images[0] }}"
              alt="{{ item.title }}">
-        <div class="lot-stamp lot-stamp--big">
-          {% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}
+        <div class="lot-stamp lot-stamp--big{% if is_sold %} lot-stamp--sold{% endif %}">
+          {% if is_sold %}{{ sold_label }}{% elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}
         </div>
       </div>
       {% if images|length > 1 %}
@@ -39,7 +39,10 @@
       </div>
       {% endif %}
     {% else %}
-      <div class="gal-main"><div class="lot-img-fallback lot-img-fallback--big">◉</div></div>
+      <div class="gal-main">
+        <div class="lot-img-fallback lot-img-fallback--big">◉</div>
+        {% if is_sold %}<div class="lot-stamp lot-stamp--big lot-stamp--sold">{{ sold_label }}</div>{% endif %}
+      </div>
     {% endif %}
   </div>
 
@@ -65,14 +68,24 @@
     </div>
     {% endif %}
 
+    {% if is_sold %}
+    <div class="detail-ctas">
+      <div class="sold-note mono">◉ THIS LOT HAS SOLD.</div>
+    </div>
+    {% else %}
     <div class="detail-ctas">
       <a href="#contact-form" class="btn btn-primary">I WANT THIS LOT →</a>
       {% if item.facebook_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.facebook_url }}">VIEW ON FACEBOOK</a>{% endif %}
       {% if item.ebay_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.ebay_url }}">VIEW ON EBAY</a>{% endif %}
     </div>
+    {% endif %}
   </div>
 </section>
 
+{% if is_sold %}
+{% set subscribe_source = 'site_detail' %}
+{% include "_subscribe_form.html" %}
+{% else %}
 <section class="contact contact--slim" id="contact">
   <div class="contact-grid">
     <div>
@@ -107,6 +120,7 @@
 <div class="alerts-strip mono tiny">
   NOT THIS LOT? <a href="/listings#alerts">GET PINGED WHEN NEW INVENTORY LANDS →</a>
 </div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
