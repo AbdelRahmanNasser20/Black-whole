@@ -34,9 +34,16 @@ from .config import ATTACHMENTS_ROOT
 connect = db.connect
 
 PUBLIC_STATUSES = ("listed", "draft", "owned", "won_pickup")
+# Sold/lost lots shown on the public site as social proof. `sold_out` = we
+# genuinely sold it; `lost_sold_out` = we bid and lost. Both render the same
+# public label; the distinction is internal bookkeeping only.
+SOLD_PUBLIC_STATUSES = ("sold_out", "lost_sold_out")
+SOLD_PUBLIC_LABEL = "SOLD OUT"
+SOLD_RECENT_LIMIT = 8
+SOLD_RECENT_DAYS = 90
 ALL_STATUSES = (
     "draft", "listed", "hidden", "sold_out",
-    "owned", "won_pickup", "active_bid", "lost",
+    "owned", "won_pickup", "active_bid", "lost", "lost_sold_out",
 )
 
 
@@ -72,12 +79,14 @@ def list_all(status: str | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def list_public() -> list[dict]:
-    """Rows customers should see on /listings — visible and actually have stock.
+def list_public(include_sold: bool = False) -> list[dict]:
+    """Rows customers see on /listings. Available lots first (flagged
+    is_sold=False). When include_sold=True, up to SOLD_RECENT_LIMIT recently
+    sold/lost lots (status in SOLD_PUBLIC_STATUSES, sold within
+    SOLD_RECENT_DAYS) are appended, flagged is_sold=True — social proof.
 
-    Includes everything in PUBLIC_STATUSES: marketplace listings/drafts AND lots
-    we own or won at auction (`owned` / `won_pickup`) — those are real available
-    inventory, not just GovDeals drafts. `lost` / `hidden` / `sold_out` stay off.
+    Available set = PUBLIC_STATUSES with stock: marketplace listings/drafts AND
+    lots we own or won at auction. `lost` / `hidden` stay off entirely.
     """
     with connect() as conn:
         rows = conn.execute(
@@ -92,7 +101,27 @@ def list_public() -> list[dict]:
             """,
             (list(PUBLIC_STATUSES),),
         ).fetchall()
-    return [dict(r) for r in rows]
+        available = [dict(r) for r in rows]
+        for r in available:
+            r["is_sold"] = False
+
+        sold: list[dict] = []
+        if include_sold:
+            srows = conn.execute(
+                """
+                SELECT * FROM inventory
+                WHERE status = ANY(%s)
+                  AND sold_at IS NOT NULL
+                  AND sold_at >= now() - make_interval(days => %s)
+                ORDER BY sold_at DESC
+                LIMIT %s
+                """,
+                (list(SOLD_PUBLIC_STATUSES), SOLD_RECENT_DAYS, SOLD_RECENT_LIMIT),
+            ).fetchall()
+            sold = [dict(r) for r in srows]
+            for r in sold:
+                r["is_sold"] = True
+    return available + sold
 
 
 def stats() -> dict:
@@ -106,12 +135,14 @@ def stats() -> dict:
         ).fetchone()["n"]
         chairs = conn.execute(
             "SELECT COALESCE(SUM(quantity_remaining), 0) AS n FROM inventory "
-            "WHERE status = ANY(%s)",
+            "WHERE status = ANY(%s) "
+            "AND (quantity_remaining IS NULL OR quantity_remaining > 0)",
             (statuses,),
         ).fetchone()["n"]
         cities = conn.execute(
             "SELECT COUNT(DISTINCT city) AS n FROM inventory "
-            "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)",
+            "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s) "
+            "AND (quantity_remaining IS NULL OR quantity_remaining > 0)",
             (statuses,),
         ).fetchone()["n"]
     return {"lots": int(total), "chairs": int(chairs or 0), "cities": int(cities)}
