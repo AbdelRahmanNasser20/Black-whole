@@ -72,11 +72,27 @@ COLS = [
 ]
 TS_COLS = {"description_fetched_at", "first_seen_at", "last_seen_at"}
 
+# quantity: a failed-LLM run sends NULL; COALESCE keeps the last verified count
+# instead of erasing it. Every other column takes the fresh value. The trailing
+# WHERE guard stops a stale re-transfer (e.g. the dashboard reading the
+# checked-in state/listings.db) from pushing last_seen_at — and every other
+# column — backward over fresher Supabase rows.
+_UPDATE_SET = ", ".join(
+    (
+        "quantity = COALESCE(EXCLUDED.quantity, auction_listings.quantity)"
+        if c == "quantity"
+        else f"{c} = EXCLUDED.{c}"
+    )
+    for c in COLS
+    if c != "asset_id"
+)
+
 UPSERT = f"""
 INSERT INTO auction_listings ({", ".join(COLS)})
 VALUES ({", ".join(["%s"] * len(COLS))})
 ON CONFLICT (asset_id) DO UPDATE SET
-{", ".join(f"{c} = EXCLUDED.{c}" for c in COLS if c != "asset_id")}
+{_UPDATE_SET}
+WHERE EXCLUDED.last_seen_at > auction_listings.last_seen_at
 """
 
 
