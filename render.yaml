@@ -86,6 +86,21 @@ services:
       - key: LISTINGS_DB_PATH
         value: /tmp/listings.db   # ephemeral staging buffer; Supabase is durable
 
+  # ── 2b. Discovery watchdog — daily health alert ─────────────────────────
+  # Independent of the scrape: reads Supabase directly and Telegrams if either
+  # source is stale or degraded. Runs 90 min after discovery (08:00) so a run
+  # that produced all-null quantities (or crashed) is caught the same morning.
+  # Needs TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID in blackwhole-secrets to send.
+  - type: cron
+    name: black-whole-health
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "30 9 * * *"    # 09:30 UTC daily (after 08:00 discovery)
+    autoDeploy: true
+    dockerCommand: python scripts/discovery_health_check.py
+    envVars:
+      - fromGroup: blackwhole-secrets
+
   # ── 3. Deals tracker — continuous loop (2026-07-17 spec) ────────────────
   - type: cron
     name: deals-discover
