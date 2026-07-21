@@ -44,6 +44,17 @@ if os.path.exists(_LOCAL_ENV):
 # Telegram (optional; if both set, final output is sent to Telegram)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOPIC_DEALS  = os.getenv("TELEGRAM_TOPIC_DEALS")
+TELEGRAM_TOPIC_HEALTH = os.getenv("TELEGRAM_TOPIC_HEALTH")
+
+
+def _tg_thread(raw):
+    """message_thread_id fragment for forum-topic routing (BLACKWHOLE-24).
+    Empty dict when unset so behavior is unchanged."""
+    try:
+        return {"message_thread_id": int(raw)} if raw and str(raw).strip() else {}
+    except (TypeError, ValueError):
+        return {}
 
 # LLM: "openai" | "ollama" | "groq" (default: ollama — run: curl -fsSL https://ollama.com/install.sh | sh && ollama pull llama3.2)
 LLM_PROVIDER = (os.getenv("LLM_PROVIDER") or "ollama").strip().lower()
@@ -958,7 +969,8 @@ def _send_telegram_plain(text: str) -> None:
     try:
         r = requests.post(
             url,
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "disable_web_page_preview": True},
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "disable_web_page_preview": True,
+                  **_tg_thread(TELEGRAM_TOPIC_HEALTH)},
             timeout=15,
         )
         r.raise_for_status()
@@ -1044,7 +1056,8 @@ def send_telegram(listings):
     try:
         r = requests.post(
             url,
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": body, "disable_web_page_preview": True},
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": body, "disable_web_page_preview": True,
+                  **_tg_thread(TELEGRAM_TOPIC_DEALS)},
             timeout=10,
         )
         r.raise_for_status()

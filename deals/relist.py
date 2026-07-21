@@ -1,6 +1,7 @@
 """Detect no-bid lots reappearing under a new auction (same seller account).
 A relist is the second chance to buy at opening price — alert immediately."""
 import json
+import os
 import re
 import sys
 from datetime import datetime, timedelta
@@ -8,6 +9,18 @@ from automation import db
 from automation.telegram_alerts import send_message_sync
 
 SIM_THRESHOLD = 0.6
+
+
+def _alert_categories() -> set[str]:
+    """Canonical categories whose relists are worth a Telegram alert.
+
+    Defaults to furniture only — without this gate the sweep alerts on the
+    whole GovDeals site (perfume, watches, a Mercedes, raw land). Every relist
+    is still *recorded* in ``deal_lots.relist_of``; this only gates the ping.
+    Set DEALS_RELIST_CATEGORIES to a comma list of canonical categories to
+    widen it (empty string = alert on all)."""
+    raw = os.getenv("DEALS_RELIST_CATEGORIES", "seating_furniture")
+    return {c.strip() for c in raw.split(",") if c.strip()}
 
 def _tokens(s: str) -> set[str]:
     return {t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) > 1}
@@ -32,7 +45,9 @@ def find_relist(lot_row: dict, closed_rows: list[dict]) -> dict | None:
 
 def scan_for_relists(now: datetime | None = None) -> int:
     now = now or datetime.now().astimezone()
-    fresh = db.fetch_all("""SELECT asset_id, account_id, auction_id, title, current_bid
+    cats = _alert_categories()
+    fresh = db.fetch_all("""SELECT asset_id, account_id, auction_id, title,
+               current_bid, canonical_category
         FROM deal_lots WHERE relist_of IS NULL AND outcome IS NULL
           AND first_seen_at > %s""", (now - timedelta(days=2),))
     if not fresh:
@@ -55,10 +70,14 @@ def scan_for_relists(now: datetime | None = None) -> int:
                              "final_bid": m["final_bid"],
                              "closed_at": str(m["closed_at"])}, default=str),
                  lot["asset_id"], lot["account_id"], lot["auction_id"]))
-            url = f"https://www.govdeals.com/en/asset/{lot['asset_id']}/{lot['account_id']}"
-            send_message_sync(f"♻️ RELIST: {lot['title'][:60]}\n"
-                              f"previously closed no-bid — now ${float(lot['current_bid'] or 0):.0f}\n{url}")
             hits += 1
+            # Alert only for categories we'd actually buy (furniture by
+            # default); the relist is recorded above regardless.
+            if not cats or lot.get("canonical_category") in cats:
+                url = f"https://www.govdeals.com/en/asset/{lot['asset_id']}/{lot['account_id']}"
+                send_message_sync(f"♻️ RELIST: {lot['title'][:60]}\n"
+                                  f"previously closed no-bid — now ${float(lot['current_bid'] or 0):.0f}\n{url}",
+                                  topic="deals")
         except Exception as e:
             print(f"[relist] error on {lot['asset_id']}: {e}", file=sys.stderr)
     return hits

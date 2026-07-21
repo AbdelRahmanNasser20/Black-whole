@@ -100,7 +100,7 @@ def run_analysis(now: datetime | None = None, env: dict | None = None) -> Analyz
                 rep.degraded += 1
             if should_alert(verdict, env):
                 dist = distance_from_home(lot.lat, lot.lng, env)
-                ok, _ = send_message_sync(format_verdict_alert(lot, verdict, dist))
+                ok, _ = send_message_sync(format_verdict_alert(lot, verdict, dist), topic="deals")
                 if ok:
                     mark_alerted((lot.asset_id, lot.account_id, lot.auction_id),
                                  verdict["analyzed_at"])

@@ -124,7 +124,7 @@ def run_dmv_sourcing_alert(
     if send_enabled and resolved is None:
         from automation import telegram_alerts as tg
         if tg.is_configured():
-            resolved = tg.send_message_sync
+            resolved = lambda t: tg.send_message_sync(t, topic="deals")
     dry_run = not (send_enabled and resolved is not None)
 
     report = SourcingReport(

@@ -37,7 +37,7 @@ def run_saved_search_alerts(now: datetime | None = None) -> int:
                     ORDER BY v0.analyzed_at DESC LIMIT 1) v ON TRUE
                 WHERE {where} ORDER BY end_utc ASC LIMIT 100""", args)
             if rows:
-                ok, _ = send_message_sync(format_search_alert(s["name"], rows))
+                ok, _ = send_message_sync(format_search_alert(s["name"], rows), topic="deals")
                 sent += 1 if ok else 0
             db.execute("UPDATE saved_searches SET last_run_at=%s WHERE id=%s", (now, s["id"]))
         except Exception as e:
