@@ -8,13 +8,11 @@
 # cron just runs `sh scripts/run_discovery.sh`.
 set -e
 
-echo "[discovery] GovDeals scrape -> staging DB"
-python auction_extractors/govdeals_chairs_extraction.py
-
-# Public Surplus was absent here until 2026-07-14, so PS rows only ever landed
-# when someone ran a scrape from the dashboard by hand. They last did on 06-17,
-# and /api/auctions drops anything not re-seen within max_stale_days=2 — so the
-# Auctions tab showed zero PS listings regardless of what PS actually had.
+# Public Surplus runs FIRST. Both scrapers share one Groq key for the quantity
+# LLM; whichever runs second inherits an exhausted quota and gets 429'd on every
+# chunk (→ 100% null quantities). PS used to run last and went fully dark; now
+# it runs first so it gets a clean quota, and GovDeals (second) degrades
+# gracefully via the 'qty unknown' path instead of vanishing.
 #
 # PS has no JSON API and this image ships no Chromium (see Dockerfile), so run
 # the plain-HTTP path and forbid the Playwright fallback. Non-fatal on purpose:
@@ -23,6 +21,9 @@ echo "[discovery] Public Surplus scrape -> staging DB"
 PUBLICSURPLUS_USE_API=1 PUBLICSURPLUS_ALLOW_BROWSER=0 \
   python auction_extractors/public_surplus_automation.py \
   || echo "[discovery] Public Surplus scrape FAILED — continuing with GovDeals rows only"
+
+echo "[discovery] GovDeals scrape -> staging DB"
+python auction_extractors/govdeals_chairs_extraction.py
 
 echo "[discovery] transfer staged listings -> Supabase"
 python scripts/transfer_listings_to_supabase.py
