@@ -199,6 +199,17 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
     final_email = new_email or (existing["contact_email"] if "contact_email" in existing.keys() else "") or ""
     final_phone = new_phone or (existing["contact_phone"] if "contact_phone" in existing.keys() else "") or ""
     final_desc_fetched_at = desc_fetched_at or existing["description_fetched_at"]
+    # A failed-LLM re-scrape sends quantity=None; keep the last good count
+    # (and its source/confidence) rather than nulling a verified value.
+    incoming_qty = listing.get("quantity")
+    if incoming_qty is None:
+        final_quantity = existing["quantity"]
+        final_quantity_source = existing["quantity_source"]
+        final_quantity_confidence = existing["quantity_confidence"]
+    else:
+        final_quantity = incoming_qty
+        final_quantity_source = listing.get("quantity_source", existing["quantity_source"])
+        final_quantity_confidence = listing.get("quantity_confidence", existing["quantity_confidence"])
     conn.execute(
         """
         UPDATE listings SET
@@ -225,9 +236,9 @@ def upsert_listing(conn: sqlite3.Connection, listing: dict) -> str:
             listing.get("link", existing["link"]),
             listing.get("title", existing["title"]),
             final_desc,
-            listing.get("quantity", existing["quantity"]),
-            listing.get("quantity_source", existing["quantity_source"]),
-            listing.get("quantity_confidence", existing["quantity_confidence"]),
+            final_quantity,
+            final_quantity_source,
+            final_quantity_confidence,
             listing.get("price", existing["price"]),
             listing.get("location", existing["location"]),
             listing.get("lot_number", existing["lot_number"]),
