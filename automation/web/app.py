@@ -925,7 +925,7 @@ async def _notify_new_subscriber(row: dict) -> None:
                 geo or None,
                 f"qty {row['quantity_wanted']}" if row.get("quantity_wanted") else None,
                 row.get("use_case"), row.get("chair_type"), row.get("timeline"),
-                row.get("budget_per_chair"), row.get("delivery"),
+                row.get("delivery"),
             ) if x
         )
         if prefs:
