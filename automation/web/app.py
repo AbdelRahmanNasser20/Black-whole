@@ -890,6 +890,31 @@ async def facebook_catalog_feed():
     return PlainTextResponse(body, media_type="text/csv; charset=utf-8")
 
 
+async def _notify_new_inquiry(row: dict) -> None:
+    # Fire-and-forget: a customer reaching out is the highest-value ping we
+    # get — but a lost Telegram send must never fail the contact form.
+    try:
+        kind = (row.get("kind") or "buy").strip()
+        bits = [f"🟢 NEW LEAD · {kind} #{row['id']}"]
+        contact = " / ".join(x for x in (row.get("email"), row.get("phone")) if x)
+        who = row.get("name") or "—"
+        bits.append(f"{who}{(' — ' + contact) if contact else ''}")
+        meta = " · ".join(
+            str(x) for x in (
+                f"qty {row['quantity_interested']}" if row.get("quantity_interested") else None,
+                f"lot {row['lot_id']}" if row.get("lot_id") else None,
+            ) if x
+        )
+        if meta:
+            bits.append(meta)
+        if row.get("message"):
+            bits.append(f"“{str(row['message'])[:240]}”")
+        bits.append("→ blackwhole.com/admin (Inquiries)")
+        await telegram_alerts.send_message("\n".join(bits), topic="leads")
+    except Exception:
+        pass
+
+
 @app.post("/contact")
 async def public_contact(payload: dict):
     payload = payload or {}
@@ -909,6 +934,7 @@ async def public_contact(payload: dict):
         )
     except ValueError as e:
         raise HTTPException(400, str(e))
+    asyncio.create_task(_notify_new_inquiry(row))
     return {"ok": True, "id": row["id"]}
 
 
@@ -932,7 +958,7 @@ async def _notify_new_subscriber(row: dict) -> None:
             bits.append(prefs)
         if row.get("notes"):
             bits.append(f"“{row['notes']}”")
-        await telegram_alerts.send_message("\n".join(bits))
+        await telegram_alerts.send_message("\n".join(bits), topic="leads")
     except Exception:
         pass
 
@@ -1835,7 +1861,8 @@ async def telegram_test():
     token + chat_id are wired up before counting on countdown alerts."""
     ok, err = await telegram_alerts.send_message(
         "✅ listing_automation: Telegram alerts are wired up. "
-        "You'll get pings as your favorite auctions wind down."
+        "You'll get pings as your favorite auctions wind down.",
+        topic="health",
     )
     if ok:
         return {"ok": True}
@@ -1940,7 +1967,7 @@ async def _alerts_tick() -> None:
             return
         for fav, label in due:
             text = _format_alert(fav.to_dict(), label)
-            ok, err = await telegram_alerts.send_message(text)
+            ok, err = await telegram_alerts.send_message(text, topic="deals")
             if ok:
                 favorites.mark_sent(fav.asset_id, label)
                 print(f"[favorites] alert sent: {fav.asset_id} {label}")

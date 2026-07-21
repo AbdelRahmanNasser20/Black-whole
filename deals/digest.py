@@ -25,4 +25,4 @@ def format_digest(rows: list[dict], fees: FeeModel) -> str:
 
 def send_daily_digest(fees: FeeModel) -> tuple[bool, str | None]:
     rows = db.fetch_all("SELECT * FROM deal_candidates")
-    return send_message_sync(format_digest(rows, fees))
+    return send_message_sync(format_digest(rows, fees), topic="deals")

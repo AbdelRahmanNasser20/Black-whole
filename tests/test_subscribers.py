@@ -110,7 +110,7 @@ SAMPLE = {
 def client(monkeypatch):
     sent: list[str] = []
 
-    async def fake_send(text: str):
+    async def fake_send(text: str, *, topic=None):
         sent.append(text)
         return True, None
 

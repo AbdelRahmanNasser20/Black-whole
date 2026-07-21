@@ -30,7 +30,18 @@ envVarGroups:
         sync: false
       - key: TELEGRAM_BOT_TOKEN     # deals digests + margin/relist alerts
         sync: false
-      - key: TELEGRAM_CHAT_ID
+      - key: TELEGRAM_CHAT_ID       # -100… "BlackWhole Alerts" supergroup id (BLACKWHOLE-24)
+        sync: false
+      # Forum-topic routing (BLACKWHOLE-24): each value is the message_thread_id
+      # of a tab in the supergroup. Set these in the dashboard TOGETHER WITH the
+      # new group TELEGRAM_CHAT_ID; empty = post to the group's General topic.
+      - key: TELEGRAM_TOPIC_LEADS   # new inquiries + alert signups
+        sync: false
+      - key: TELEGRAM_TOPIC_DEALS   # margin/relist/digest/saved-search/sourcing/countdowns
+        sync: false
+      - key: TELEGRAM_TOPIC_HEALTH  # scrape degradation + poller crashes
+        sync: false
+      - key: TELEGRAM_TOPIC_POLLER  # FB poller chatter (used by the poller repo)
         sync: false
       - key: COMPS_URL              # Pi sold-comps service (tunnel URL)
         sync: false

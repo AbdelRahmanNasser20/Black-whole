@@ -15,6 +15,15 @@ except ImportError:
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+# Forum-topic routing (BLACKWHOLE-24): each alert class posts to its own tab
+# in the "BlackWhole Alerts" supergroup instead of one firehose chat. Unset →
+# the message lands in the group's General topic (or, while TELEGRAM_CHAT_ID
+# still points at the old bot DM, the DM) — so this is backward-compatible.
+TELEGRAM_TOPIC_LEADS = os.getenv("TELEGRAM_TOPIC_LEADS")
+TELEGRAM_TOPIC_DEALS = os.getenv("TELEGRAM_TOPIC_DEALS")
+TELEGRAM_TOPIC_HEALTH = os.getenv("TELEGRAM_TOPIC_HEALTH")
+TELEGRAM_TOPIC_POLLER = os.getenv("TELEGRAM_TOPIC_POLLER")
+
 # Supabase Postgres connection string for the shared `blackwhole` DB. Consumed
 # by automation/db.py. URL is loaded from .env above.
 BLACKWHOLE_DB_URL = os.getenv("BLACKWHOLE_DB_URL")
