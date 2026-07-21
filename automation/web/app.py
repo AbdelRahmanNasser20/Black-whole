@@ -438,6 +438,28 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
     }
 
 
+_FOLDER_BUCKETS = ("_active", "_sold", "_lost", "_archive")
+
+
+def _resolve_folder_dir(folder_name: str):
+    """Physical dir for a lot folder — flat (legacy) or inside a status bucket.
+
+    ``folder_name`` stays a flat basename (it is the /image/ URL segment and the
+    Supabase Storage key prefix); the file on disk may have moved under
+    _active/_sold/_lost/_archive (folder reorg). Check flat first, then buckets.
+    """
+    if not folder_name:
+        return None
+    flat = DOWNLOAD_ROOT / folder_name
+    if flat.is_dir():
+        return flat
+    for bucket in _FOLDER_BUCKETS:
+        cand = DOWNLOAD_ROOT / bucket / folder_name
+        if cand.is_dir():
+            return cand
+    return None
+
+
 def _hero_src(row: dict) -> str | None:
     """Cover-image URL for a row: durable cloud URL first, local /image/ fallback.
 
@@ -461,7 +483,9 @@ def _gallery_srcs(row: dict) -> list[str]:
         return [u for u in urls if u]
     folder = row.get("folder_name")
     if folder:
-        return [f"/image/{folder}/{n}" for n in _folder_images(DOWNLOAD_ROOT / folder)]
+        fdir = _resolve_folder_dir(folder)
+        if fdir:
+            return [f"/image/{folder}/{n}" for n in _folder_images(fdir)]
     return []
 
 
@@ -1143,18 +1167,28 @@ async def stream_run(request: Request):
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
+_SKIP_FOLDERS = {"General listing", "Lost biddings", "Listing Automations",
+                 "Listing_automation_html"}
+
+
 def _list_listing_folders() -> list[Path]:
     if not DOWNLOAD_ROOT.exists():
         return []
-    folders = []
+    folders: list[Path] = []
     for p in DOWNLOAD_ROOT.iterdir():
-        if not p.is_dir():
+        if not p.is_dir() or p.name.startswith("."):
             continue
-        # skip non-listing buckets
-        if p.name.startswith(".") or p.name in {"General listing", "Lost biddings",
-                                                 "Listing Automations", "Listing_automation_html"}:
+        if p.name == "_docs":
             continue
-        folders.append(p)
+        if p.name in _FOLDER_BUCKETS:
+            # status bucket — the lot folders live one level down
+            for child in p.iterdir():
+                if child.is_dir() and not child.name.startswith("."):
+                    folders.append(child)
+            continue
+        if p.name in _SKIP_FOLDERS:
+            continue
+        folders.append(p)          # legacy flat lot folder
     folders.sort(key=lambda x: x.stat().st_mtime, reverse=True)
     return folders
 
@@ -1231,7 +1265,9 @@ async def list_drafts():
 
 @app.get("/image/{folder}/{name}")
 async def serve_image(folder: str, name: str):
-    folder_path = DOWNLOAD_ROOT / folder
+    folder_path = _resolve_folder_dir(folder)
+    if folder_path is None:
+        raise HTTPException(404, "not found")
     target = (folder_path / name).resolve()
     if not str(target).startswith(str(folder_path.resolve())):
         raise HTTPException(403, "path traversal")
@@ -1242,8 +1278,11 @@ async def serve_image(folder: str, name: str):
 
 @app.get("/screenshot/{folder}/{name}")
 async def serve_screenshot(folder: str, name: str):
-    target = (DOWNLOAD_ROOT / folder / "_screenshots" / name).resolve()
-    base = (DOWNLOAD_ROOT / folder / "_screenshots").resolve()
+    fdir = _resolve_folder_dir(folder)
+    if fdir is None:
+        raise HTTPException(404, "not found")
+    base = (fdir / "_screenshots").resolve()
+    target = (base / name).resolve()
     if not str(target).startswith(str(base)):
         raise HTTPException(403, "path traversal")
     if not target.exists():
