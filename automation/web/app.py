@@ -1300,8 +1300,9 @@ async def rate_compare(cid: str, payload: dict):
 _SCRAPE_SCRIPTS = {
     "gd": "govdeals_chairs_extraction.py",
     "ps": "public_surplus_automation.py",
+    "bs": "bidspotter_automation.py",
 }
-_SCRAPE_LABELS = {"gd": "GovDeals", "ps": "Public Surplus"}
+_SCRAPE_LABELS = {"gd": "GovDeals", "ps": "Public Surplus", "bs": "BidSpotter"}
 
 # Maps the `[n]` / `[nX]` prefixes the scrapers emit to human labels that
 # render in the SCRAPE strip. Prefix order mirrors the scrapers' pipeline:
@@ -1437,8 +1438,8 @@ async def _pump_scrape_stream(stream: asyncio.StreamReader, kind: str) -> None:
 
 
 async def _run_scraper(source: str, test_mode: bool) -> None:
-    """Run one or both scrapers sequentially (gd → ps when source='both')."""
-    steps: list[str] = ["gd", "ps"] if source == "both" else [source]
+    """Run one or all scrapers sequentially (gd → ps → bs when source='both')."""
+    steps: list[str] = ["gd", "ps", "bs"] if source == "both" else [source]
     overall_rc = 0
 
     for step in steps:
@@ -1456,7 +1457,7 @@ async def _run_scraper(source: str, test_mode: bool) -> None:
         })
         script = AUCTION_EXTRACTORS_DIR / _SCRAPE_SCRIPTS[step]
         cmd = [sys.executable, "-u", str(script)]
-        if step == "ps" and test_mode:
+        if step in ("ps", "bs") and test_mode:
             cmd.append("--test")
 
         env = os.environ.copy()
@@ -1571,8 +1572,8 @@ async def _run_scraper(source: str, test_mode: bool) -> None:
 async def scrape_start(payload: dict):
     payload = payload or {}
     source = (payload.get("source") or "gd").strip()
-    if source not in ("gd", "ps", "both"):
-        raise HTTPException(400, "source must be 'gd', 'ps', or 'both'")
+    if source not in ("gd", "ps", "bs", "both"):
+        raise HTTPException(400, "source must be 'gd', 'ps', 'bs', or 'both'")
     test_mode = bool(payload.get("test"))
 
     async with scrape_state.lock:
@@ -1646,8 +1647,8 @@ async def list_auctions(
 ):
     if get_top_chairs is None:
         raise HTTPException(503, "auction_extractors package not available")
-    if source not in ("gd", "ps"):
-        raise HTTPException(400, "source must be 'gd' or 'ps'")
+    if source not in ("gd", "ps", "bs"):
+        raise HTTPException(400, "source must be 'gd', 'ps', or 'bs'")
     _CATS = {"banquet", "medical", "other"}
     if category in ("", "all"):
         category = None
@@ -1730,7 +1731,7 @@ def _test_scrape_sync(source: str, q: str, pages: int) -> list[dict]:
             if len(assets) < gd.GOVDEALS_API_ROWS:
                 break
         cards = gd._dedup_listings(cards)
-    else:
+    elif source == "ps":
         import requests
         import public_surplus_automation as ps
         cards = []
@@ -1745,6 +1746,19 @@ def _test_scrape_sync(source: str, q: str, pages: int) -> list[dict]:
             if len(page_cards) < ps.PS_PAGE_SIZE:
                 break
         cards = ps._dedup(cards)
+    elif source == "bs":
+        # Lazy import: the scraper file may not exist yet — importing app.py
+        # must never require it at module load.
+        import bidspotter_automation as bs
+        cards = []
+        for page in range(1, pages + 1):
+            html = bs._fetch_search_page(q, page)
+            page_cards = bs._parse_search_cards(html)
+            if not page_cards:
+                break
+            cards.extend(page_cards)
+    else:
+        raise ValueError(source)
     return [{k: c.get(k) for k in _TEST_SCRAPE_FIELDS} for c in cards]
 
 
@@ -1753,8 +1767,8 @@ async def test_scrape(q: str, source: str = "gd", pages: int = 1):
     q = (q or "").strip()
     if not q:
         raise HTTPException(400, "q (search keyword) is required")
-    if source not in ("gd", "ps"):
-        raise HTTPException(400, "source must be 'gd' or 'ps'")
+    if source not in ("gd", "ps", "bs"):
+        raise HTTPException(400, "source must be 'gd', 'ps', or 'bs'")
     pages = max(1, min(int(pages), 5))
     try:
         items = await asyncio.to_thread(_test_scrape_sync, source, q, pages)
@@ -1771,6 +1785,7 @@ def _asset_id_from_link(link: str) -> str:
 
     GovDeals: ``/asset/<a>/<b>`` → ``"<a>/<b>"``.
     PublicSurplus: ``?auc=<n>`` → ``"ps:<n>"``.
+    BidSpotter: ``bidspotter.com/…/lot-<guid>`` → ``"bs:<guid>"``.
     """
     if not link:
         return ""
@@ -1780,6 +1795,13 @@ def _asset_id_from_link(link: str) -> str:
     m = re.search(r"[?&]auc=(\d+)", link)
     if m:
         return f"ps:{m.group(1)}"
+    m = re.search(
+        r"bidspotter\.com/.*/lot-"
+        r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        link,
+    )
+    if m:
+        return f"bs:{m.group(1)}"
     return ""
 
 
@@ -1991,7 +2013,7 @@ async def auctions_cache_stats():
 
 @app.get("/api/listings")
 async def list_raw_listings(
-    source: str = "all",           # 'all' | 'gd' | 'ps'
+    source: str = "all",           # 'all' | 'gd' | 'ps' | 'bs'
     q: str = "",                   # text search over title + description
     min_qty: int = 1,
     max_qty: int = 99999,
@@ -2022,6 +2044,8 @@ async def list_raw_listings(
         where.append("link LIKE '%govdeals.com%'")
     elif source == "ps":
         where.append("link LIKE '%publicsurplus.com%'")
+    elif source == "bs":
+        where.append("link LIKE '%bidspotter.com%'")
     if q.strip():
         where.append("(title LIKE ? OR description LIKE ?)")
         like = f"%{q.strip()}%"
@@ -2075,6 +2099,7 @@ async def list_raw_listings(
     def _source_of(link: str) -> str:
         if "govdeals.com" in link: return "gd"
         if "publicsurplus.com" in link: return "ps"
+        if "bidspotter.com" in link: return "bs"
         return "other"
 
     for r in rows:

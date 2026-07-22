@@ -24,6 +24,13 @@ PUBLICSURPLUS_USE_API=1 PUBLICSURPLUS_ALLOW_BROWSER=0 \
   python auction_extractors/public_surplus_automation.py \
   || echo "[discovery] Public Surplus scrape FAILED — continuing with GovDeals rows only"
 
+# BidSpotter is plain-HTTP (AWS WAF handled by in-script retries) — safe in
+# this Chromium-less image. Non-fatal: a BS failure must never cost us the
+# GovDeals/PS sync below.
+echo "[discovery] BidSpotter scrape -> staging DB"
+python auction_extractors/bidspotter_automation.py \
+  || echo "[discovery] BidSpotter scrape FAILED — continuing without BS rows"
+
 echo "[discovery] transfer staged listings -> Supabase"
 python scripts/transfer_listings_to_supabase.py
 

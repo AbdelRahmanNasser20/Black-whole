@@ -26,6 +26,9 @@ cd "${PROJECT}/auction_extractors"
   echo "--- Public Surplus ---"
   "$PY" public_surplus_automation.py || fail=$((fail + 1))
   echo ""
+  echo "--- BidSpotter ---"
+  "$PY" bidspotter_automation.py || fail=$((fail + 1))
+  echo ""
 
   echo "=== $(date -Iseconds) daily_scrape finished (fail=$fail) ==="
   exit "$fail"

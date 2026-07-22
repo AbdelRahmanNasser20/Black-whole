@@ -546,12 +546,16 @@ const auc = {
   telegramConfigured: false,
 };
 
+const SOURCE_NAMES = { gd: 'GovDeals', ps: 'Public Surplus', bs: 'BidSpotter' };
+
 function _assetIdFromLink(link) {
   if (!link) return '';
   let m = link.match(/\/asset\/(\d+)\/(\d+)/);
   if (m) return `${m[1]}/${m[2]}`;
   m = link.match(/[?&]auc=(\d+)/);
   if (m) return `ps:${m[1]}`;
+  m = link.match(/bidspotter\.com\/.*\/lot-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
+  if (m) return `bs:${m[1]}`;
   return '';
 }
 
@@ -925,7 +929,7 @@ function renderAuctions(items, maxStaleDays) {
     const stats = auc.stats;
     const total = stats?.by_source?.[auc.source]?.count ?? 0;
     const msg = total === 0
-      ? `Cache is empty for ${auc.source === 'gd' ? 'GovDeals' : 'Public Surplus'}. Hit ⟳ scrape now to populate.`
+      ? `Cache is empty for ${SOURCE_NAMES[auc.source] || auc.source}. Hit ⟳ scrape now to populate.`
       : `No listings matched the current filters. See details above.`;
     grid.innerHTML = `<div class="drafts-empty">${msg}</div>`;
     return;
@@ -1907,7 +1911,7 @@ function renderListingsDb(items) {
   for (const r of items) {
     const tr = document.createElement('tr');
     tr.className = 'ldb-row';
-    const srcClass = r.source === 'gd' ? 'src-gd' : (r.source === 'ps' ? 'src-ps' : 'src-other');
+    const srcClass = ['gd', 'ps', 'bs'].includes(r.source) ? `src-${r.source}` : 'src-other';
     const qty = r.quantity == null ? '—' : r.quantity.toLocaleString();
     const price = r.price || '—';
     const loc = r.location || '—';
@@ -2041,7 +2045,7 @@ async function runTestScrape() {
   const q = ($('#ts-q').value || '').trim();
   if (!q) { toast('Enter a keyword to test', 'err'); $('#ts-q').focus(); return; }
   const pages = Math.max(1, Math.min(Number($('#ts-pages').value) || 1, 5));
-  const sources = _ts.source === 'both' ? ['gd', 'ps'] : [_ts.source];
+  const sources = _ts.source === 'both' ? ['gd', 'ps', 'bs'] : [_ts.source];
 
   const grid = $('#ts-grid');
   const status = $('#ts-status');
@@ -2057,7 +2061,7 @@ async function runTestScrape() {
     const errs = [];
     const perSource = [];
     results.forEach((r, i) => {
-      const name = sources[i] === 'gd' ? 'GovDeals' : 'Public Surplus';
+      const name = SOURCE_NAMES[sources[i]] || sources[i];
       if (r.status === 'fulfilled') {
         perSource.push(`${name}: ${r.value.count}`);
         items.push(...r.value.items.map(it => ({...it, _source: sources[i]})));
@@ -2109,7 +2113,7 @@ function renderTestScrapeCard(it, match) {
     : `<div class="auction-img-fallback">📦</div>`;
 
   const ends = it.end_date || it.time_left || '';
-  const srcName = it._source === 'gd' ? 'GovDeals' : 'Public Surplus';
+  const srcName = SOURCE_NAMES[it._source] || it._source;
 
   card.innerHTML = `
     <div class="auction-img">${img}</div>
