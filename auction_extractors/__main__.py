@@ -42,7 +42,7 @@ def main() -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     top = sub.add_parser("top", help="top-N chair listings as JSON")
-    top.add_argument("--source", choices=("gd", "ps"), default="gd")
+    top.add_argument("--source", choices=("gd", "ps", "bs"), default="gd")
     top.add_argument("--n", type=int, default=15)
     top.add_argument("--min-qty", type=int, default=50)
     top.add_argument(

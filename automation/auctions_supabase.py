@@ -22,6 +22,7 @@ from . import db
 from auction_extractors.top_chairs import (  # noqa: E402
     CATEGORIES,
     _SANE_MAX_QUANTITY,
+    TRUSTED_QUANTITY_SOURCES,
     _classify,
     _enrich_via_llm,
     _is_active,
@@ -29,9 +30,9 @@ from auction_extractors.top_chairs import (  # noqa: E402
     _price_to_float,
 )
 
-Source = Literal["gd", "ps"]
+Source = Literal["gd", "ps", "bs"]
 
-_SOURCE_FRAG = {"gd": "govdeals.com", "ps": "publicsurplus.com"}
+_SOURCE_FRAG = {"gd": "govdeals.com", "ps": "publicsurplus.com", "bs": "bidspotter.com"}
 
 _SELECT_COLS = (
     "asset_id, link, title, description, quantity, quantity_source, "
@@ -47,10 +48,12 @@ def _load_from_supabase(source: Source, min_quantity: int) -> list[dict]:
         f"""
         SELECT {_SELECT_COLS}
         FROM auction_listings
-        WHERE quantity >= %s AND quantity <= %s AND link ILIKE %s
+        WHERE quantity >= %s AND quantity <= %s
+          AND quantity_source = ANY(%s)
+          AND link ILIKE %s
         ORDER BY quantity DESC
         """,
-        (min_quantity, _SANE_MAX_QUANTITY, f"%{frag}%"),
+        (min_quantity, _SANE_MAX_QUANTITY, list(TRUSTED_QUANTITY_SOURCES), f"%{frag}%"),
     )
     # last_seen_at comes back as a datetime (timestamptz); the upstream
     # _is_active helper expects an ISO string. Normalize so it parses.
@@ -80,8 +83,8 @@ def get_top_chairs(
     contact_email, contact_phone, category, category_keyword, condition,
     condition_note).
     """
-    if source not in ("gd", "ps"):
-        raise ValueError(f"source must be 'gd' or 'ps', got {source!r}")
+    if source not in _SOURCE_FRAG:
+        raise ValueError(f"source must be one of {sorted(_SOURCE_FRAG)}, got {source!r}")
     if category is not None and category not in CATEGORIES:
         raise ValueError(f"category must be one of {CATEGORIES} or None, got {category!r}")
 
@@ -169,13 +172,14 @@ def cache_stats() -> dict:
         SELECT CASE
                  WHEN link ILIKE %s THEN 'gd'
                  WHEN link ILIKE %s THEN 'ps'
+                 WHEN link ILIKE %s THEN 'bs'
                  ELSE 'other'
                END AS src,
                count(*) AS n,
                max(last_seen_at) AS newest
         FROM auction_listings GROUP BY 1
         """,
-        (f"%{_SOURCE_FRAG['gd']}%", f"%{_SOURCE_FRAG['ps']}%"),
+        (f"%{_SOURCE_FRAG['gd']}%", f"%{_SOURCE_FRAG['ps']}%", f"%{_SOURCE_FRAG['bs']}%"),
     )
 
     def _iso(v):
