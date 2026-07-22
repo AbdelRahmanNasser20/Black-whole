@@ -85,13 +85,15 @@ def _now() -> str:
 
 
 def extract_asset_id(url: str) -> str:
-    """Return a stable cache key for a listing URL across both supported sites.
+    """Return a stable cache key for a listing URL across supported sites.
 
     GovDeals: ``/en/asset/<assetId>/<sellerId>`` → ``<assetId>/<sellerId>``
               (legacy format — kept unprefixed for back-compat with existing rows).
     PublicSurplus: ``/sms/auction/view?auc=<aucId>`` → ``ps:<aucId>``.
+    BidSpotter: ``bidspotter.com/…/lot-<lotGuid>`` → ``bs:<lotGuid>``
+                (relists mint a new GUID, so one key = one auction round).
 
-    Returns empty string if the URL matches neither pattern (uncacheable).
+    Returns empty string if the URL matches none (uncacheable).
     """
     u = url or ""
     m = re.search(r"/asset/(\d+)/(\d+)", u)
@@ -100,6 +102,13 @@ def extract_asset_id(url: str) -> str:
     m = re.search(r"[?&]auc=(\d+)", u)
     if m:
         return f"ps:{m.group(1)}"
+    m = re.search(
+        r"bidspotter\.com/.*/lot-"
+        r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})",
+        u,
+    )
+    if m:
+        return f"bs:{m.group(1)}"
     return ""
 
 

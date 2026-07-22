@@ -1132,6 +1132,7 @@ main {
 }
 .src-pill.src-gd    { color: var(--accent); }
 .src-pill.src-ps    { color: var(--info); }
+.src-pill.src-bs    { color: var(--accent-2); }
 .src-pill.src-other { color: var(--ink-dim); }
 
 .ldb-pager {
@@ -1248,6 +1249,7 @@ main {
   color: var(--ink-mute);
 }
 .ts-source-pill[data-source="gd"] { border-color: var(--accent); color: var(--accent); }
+.ts-source-pill[data-source="bs"] { border-color: var(--accent-2); color: var(--accent-2); }
 
 .ts-miss { outline: 1px dashed var(--err); outline-offset: -1px; opacity: .85; }
 .ts-miss-pill {

@@ -49,12 +49,20 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:120b-cloud")
 
 # URL patterns identify which site a cached row came from — the asset_id
-# column is prefixed "ps:" for Public Surplus and left unprefixed for GovDeals.
+# column is prefixed "ps:" for Public Surplus, "bs:" for BidSpotter, and left
+# unprefixed for GovDeals.
 _GOVDEALS_URL_FRAG = "govdeals.com"
 _PUBLIC_SURPLUS_URL_FRAG = "publicsurplus.com"
+_BIDSPOTTER_URL_FRAG = "bidspotter.com"
+
+_SOURCE_FRAGS = {
+    "gd": _GOVDEALS_URL_FRAG,
+    "ps": _PUBLIC_SURPLUS_URL_FRAG,
+    "bs": _BIDSPOTTER_URL_FRAG,
+}
 
 
-Source = Literal["gd", "ps"]
+Source = Literal["gd", "ps", "bs"]
 
 
 def _price_to_float(p: str | None) -> float:
@@ -75,27 +83,30 @@ def _price_to_float(p: str | None) -> float:
 _SANE_MAX_QUANTITY = 50_000
 
 
-# Only quantities produced by the LLM pass are trusted for ranking, the
-# MIN_CHAIR_QUANTITY filter, and Telegram alerts. Regex-seeded counts
-# (`regex_title` / `regex_fulltext`) and LLM failures (`llm_failed` /
-# `llm_missing`) are NOT trusted — the regex path routinely misreads a lot
-# number, spec, or model number as a chair count (e.g. a single electric
-# wheelchair read as qty=110). Untrusted rows stay in the cache but are
-# excluded from the read surface until a successful LLM scrape refreshes them.
-# This is the read-side guard for BLACKWHOLE-4; deleting the regex code itself
-# is separate cleanup.
-TRUSTED_QUANTITY_SOURCE = "llm"
+# Only quantities from a trusted provenance are used for ranking, the
+# MIN_CHAIR_QUANTITY filter, and Telegram alerts:
+#   "llm"        — verified by the LLM pass over title+description.
+#   "structured" — read from a site's structured quantity field (BidSpotter
+#                  exposes one; GovDeals/PublicSurplus do not).
+# Regex-seeded counts (`regex_title` / `regex_fulltext`) and LLM failures
+# (`llm_failed` / `llm_missing`) are NOT trusted — the regex path routinely
+# misreads a lot number, spec, or model number as a chair count (e.g. a single
+# electric wheelchair read as qty=110). Untrusted rows stay in the cache but
+# are excluded from the read surface until a successful LLM scrape refreshes
+# them. (Read-side guard for BLACKWHOLE-4; widened for BidSpotter 2026-07-21.
+# Deleting the regex code itself is separate cleanup.)
+TRUSTED_QUANTITY_SOURCES = frozenset({"llm", "structured"})
 
 
 def trusted_quantity(row: dict) -> int | None:
-    """Return the row's chair quantity ONLY when it is LLM-verified.
+    """Return the row's chair quantity ONLY when its provenance is trusted.
 
-    Returns an int when ``quantity_source == 'llm'`` and ``quantity`` parses,
-    else ``None``. Callers should treat ``None`` as "no trustworthy count" —
-    exclude it from ranking, the qty filter, and alerts (never coerce to 0
-    and then compare, and never fall back to the regex number).
+    Returns an int when ``quantity_source`` ∈ ``TRUSTED_QUANTITY_SOURCES``
+    and ``quantity`` parses, else ``None``. Callers must treat ``None`` as
+    "no trustworthy count" — exclude from ranking, the qty filter, and
+    alerts (never coerce to 0, never fall back to the regex number).
     """
-    if (row.get("quantity_source") or "") != TRUSTED_QUANTITY_SOURCE:
+    if (row.get("quantity_source") or "") not in TRUSTED_QUANTITY_SOURCES:
         return None
     q = row.get("quantity")
     if q is None:
@@ -166,11 +177,12 @@ def _load_from_cache(source: Source, min_quantity: int) -> list[dict]:
 
     Sort: quantity DESC, then price ASC (same tiebreak the scrapers use).
     """
-    frag = _PUBLIC_SURPLUS_URL_FRAG if source == "ps" else _GOVDEALS_URL_FRAG
+    frag = _SOURCE_FRAGS[source]
     # Use listings_db.connect() so the schema migrations (e.g. pickup_zip)
     # run before we SELECT against columns added in newer versions.
     import listings_db
     conn = listings_db.connect()
+    trusted = sorted(TRUSTED_QUANTITY_SOURCES)
     rows = conn.execute(
         """
         SELECT asset_id, link, title, description, quantity,
@@ -180,11 +192,11 @@ def _load_from_cache(source: Source, min_quantity: int) -> list[dict]:
         FROM listings
         WHERE quantity >= ?
           AND quantity <= ?
-          AND quantity_source = ?
+          AND quantity_source IN (?, ?)
           AND link LIKE ?
         ORDER BY quantity DESC
         """,
-        (min_quantity, _SANE_MAX_QUANTITY, TRUSTED_QUANTITY_SOURCE, f"%{frag}%"),
+        (min_quantity, _SANE_MAX_QUANTITY, trusted[0], trusted[1], f"%{frag}%"),
     ).fetchall()
     conn.close()
     items = [dict(r) for r in rows]
@@ -348,7 +360,8 @@ def get_top_chairs(
     """Return the top-``n`` chair listings from the cache.
 
     Args:
-        source: ``"gd"`` (GovDeals) or ``"ps"`` (Public Surplus).
+        source: ``"gd"`` (GovDeals), ``"ps"`` (Public Surplus) or
+            ``"bs"`` (BidSpotter).
         n: Number of listings to return after filtering.
         min_quantity: Only include listings whose inferred chair count is
             at least this. Default 50.
@@ -378,8 +391,8 @@ def get_top_chairs(
     The function is read-only — it reads the SQLite cache populated by the
     scrapers. It does NOT trigger a scrape.
     """
-    if source not in ("gd", "ps"):
-        raise ValueError(f"source must be 'gd' or 'ps', got {source!r}")
+    if source not in _SOURCE_FRAGS:
+        raise ValueError(f"source must be one of {sorted(_SOURCE_FRAGS)}, got {source!r}")
     if category is not None and category not in CATEGORIES:
         raise ValueError(f"category must be one of {CATEGORIES} or None, got {category!r}")
     items = _load_from_cache(source, min_quantity=max(1, int(min_quantity)))
@@ -475,7 +488,7 @@ def _print_table(listings: list[dict], source: str) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--source", choices=("gd", "ps"), default="gd")
+    ap.add_argument("--source", choices=("gd", "ps", "bs"), default="gd")
     ap.add_argument("--n", type=int, default=15)
     ap.add_argument("--min-qty", type=int, default=50)
     ap.add_argument("--no-condition", action="store_true", help="skip the condition-scoring LLM")
