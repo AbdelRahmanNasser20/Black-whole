@@ -27,6 +27,21 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/public.css?v={{ now }}">
+  <script>
+    // Apollo.io website-visitor tracking (public pages only — admin excluded).
+    function initApollo() {
+      var n = Math.random().toString(36).substring(7);
+      var o = document.createElement("script");
+      o.src = "https://assets.apollo.io/micro/website-tracker/tracker.iife.js?nocache=" + n;
+      o.async = true;
+      o.defer = true;
+      o.onload = function () {
+        window.trackingFunctions.onLoad({ appId: "6a61afb66ec4770010b5f4b8" });
+      };
+      document.head.appendChild(o);
+    }
+    initApollo();
+  </script>
 </head>
 <body class="{% block body_class %}{% endblock %}">
   <div class="grain" aria-hidden="true"></div>
