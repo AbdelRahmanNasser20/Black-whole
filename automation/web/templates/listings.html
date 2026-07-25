@@ -50,9 +50,9 @@
   <a class="lot-card"
      href="/listings/{{ item.lot_id }}"
      data-type="{{ item.chair_type or '' }}"
-     data-city="{{ item.city or '' }}"
+     data-city="{{ item.location_labels | join('|') }}"
      data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
-     data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.city or '' }}">
+     data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.location_labels | join(' ') }}">
     <div class="lot-img">
       {% if item.hero_src %}
         <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
@@ -62,7 +62,7 @@
       <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
     </div>
     <div class="lot-body">
-      <div class="lot-meta mono">{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</div>
+      <div class="lot-meta mono">{{ item.location_labels | join(' · ') or '—' }}{% if item.zip_code and item.location_labels | length < 2 %} {{ item.zip_code }}{% endif %}</div>
       <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
       {% if item.subtitle %}<div class="lot-subtitle">{{ item.subtitle }}</div>{% endif %}
       <div class="lot-row">
@@ -99,6 +99,73 @@
   <p>No active lots right now. New inventory rolls in weekly —
     drop us a note and we'll ping you when the next truck lands.</p>
   <a href="#alerts" class="btn btn-primary">NOTIFY ME</a>
+</section>
+{% endif %}
+
+{% if sold_items %}
+{% set moved = sold_items | sum(attribute='quantity_original') %}
+<section class="sold-archive" id="sold">
+  <div class="page-head">
+    <div class="page-head-left">
+      <div class="mono tiny">MANIFEST · CLEARED</div>
+      <h2 class="page-title"><span class="accent">✕</span> ALREADY MOVED</h2>
+      <p class="page-lede">
+        Lots that came through the floor and left. We buy sets like these every
+        week — if one of them is what you were after, tell us and we'll flag the
+        next one before it hits the site.
+      </p>
+    </div>
+    <div class="page-head-right mono tiny">
+      <div>CHAIRS MOVED <span class="tag">{{ "{:,}".format(moved) }}</span></div>
+    </div>
+  </div>
+
+  <div class="lot-grid lot-grid--sold">
+    {% for item in sold_items %}
+    <a class="lot-card lot-card--sold" href="/listings/{{ item.lot_id }}">
+      <div class="lot-img">
+        {% if item.hero_src %}
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
+        {% else %}
+          <div class="lot-img-fallback">◉</div>
+        {% endif %}
+        <div class="lot-stamp lot-stamp--sold">SOLD</div>
+      </div>
+      <div class="lot-body">
+        <div class="lot-meta mono">{{ item.location_labels | join(' · ') or '—' }}</div>
+        <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+        {% if item.subtitle %}<div class="lot-subtitle">{{ item.subtitle }}</div>{% endif %}
+        <div class="lot-row">
+          <div class="lot-qty">
+            <div class="lot-qty-num">{{ item.quantity_original or '—' }}</div>
+            <div class="lot-qty-label">CHAIRS</div>
+          </div>
+          <div class="lot-price">
+            {% if item.price_per_chair %}
+              <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
+              <div class="lot-price-label">SOLD AT / CHAIR</div>
+            {% else %}
+              <div class="lot-price-num">—</div>
+              <div class="lot-price-label">SOLD</div>
+            {% endif %}
+          </div>
+        </div>
+        {% if item.chair_type %}
+          <div class="lot-tag mono tiny">{{ item.chair_type|upper }}</div>
+        {% endif %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="sold-cta">
+    <div>
+      <div class="mono tiny">WANT ONE OF THESE?</div>
+      <p>Say which lot and how many — we source these every week and can tell
+        you what's landing next.</p>
+    </div>
+    <a href="#alerts" class="btn btn-primary">ASK FOR THE NEXT LOT →</a>
+  </div>
 </section>
 {% endif %}
 

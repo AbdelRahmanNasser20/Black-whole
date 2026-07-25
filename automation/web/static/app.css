@@ -740,6 +740,15 @@ main {
 .inv-contact {
   color: var(--ink); opacity: 0.85;
 }
+.inv-locs { margin-top: 4px; }
+.inv-loc-input {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--line);
+  color: inherit;
+  padding: 2px 5px;
+}
+.inv-loc-input:focus { border-style: solid; outline: none; }
 .inv-extras {
   display: flex; flex-wrap: wrap; gap: 4px;
   margin-top: 4px;

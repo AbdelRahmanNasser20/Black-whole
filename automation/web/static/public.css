@@ -365,6 +365,49 @@ a:hover { color: var(--accent); }
 }
 
 /* =========================================================================
+   sold archive — lots that already moved (BLACKWHOLE-29)
+   Proof of volume, not stock. Deliberately reads as a ledger of past work:
+   desaturated photos, ink-on-ink stamp, no orange price accent competing
+   with the live grid above it.
+   ========================================================================= */
+.sold-archive { border-top: 1.5px solid var(--ink); background: var(--paper-2); }
+.sold-archive .page-head { border-bottom: 1.5px dashed var(--ink); }
+.lot-card--sold { background: var(--paper); }
+.lot-card--sold .lot-img img { filter: grayscale(0.85) contrast(0.95); }
+.lot-card--sold:hover .lot-img img { filter: grayscale(0.2); }
+.lot-card--sold .lot-price-num { color: var(--muted); }
+.lot-stamp--sold {
+  background: var(--ink); color: var(--paper); border-color: var(--ink);
+  transform: rotate(-6deg);
+}
+.sold-cta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 32px; flex-wrap: wrap;
+  padding: 8px 48px 56px 48px;
+}
+.sold-cta p { margin: 6px 0 0 0; max-width: 520px; color: #3a3731; }
+
+/* SOLD banner on a sold lot's detail page */
+.sold-banner {
+  display: flex; align-items: flex-start; gap: 16px;
+  padding: 16px 18px; margin-bottom: 22px;
+  background: var(--ink); color: var(--paper);
+}
+.sold-banner-mark {
+  font-size: 13px; letter-spacing: 0.24em;
+  border: 1.5px solid var(--paper); padding: 6px 10px; white-space: nowrap;
+}
+.sold-banner p { margin: 0; font-size: 15px; line-height: 1.45; }
+
+/* location chips — one lot, several pickup cities */
+.loc-chips { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+.loc-chip {
+  font-family: var(--f-mono); font-size: 11px; letter-spacing: 0.08em;
+  padding: 3px 8px;
+  background: var(--paper-2); border: 1px solid var(--ink);
+}
+
+/* =========================================================================
    contact / manifest form
    ========================================================================= */
 .contact { background: var(--paper-2); }
@@ -487,6 +530,9 @@ a:hover { color: var(--accent); }
   padding: 96px 48px; text-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 14px;
 }
+/* `display:flex` above outranks the UA stylesheet's `[hidden] {display:none}`,
+   so the "no lots match" panel rendered permanently under a full grid. */
+.empty-filter[hidden] { display: none; }
 .empty-mark { font-family: var(--f-display); font-size: 100px; color: var(--accent); }
 
 /* =========================================================================
@@ -635,6 +681,7 @@ a:hover { color: var(--accent); }
   .page-head { flex-direction: column; align-items: flex-start; padding: 40px 24px 20px 24px; }
   .filter-bar { padding: 16px 24px; }
   .lot-grid { padding: 28px 24px; }
+  .sold-cta { padding: 4px 24px 40px 24px; }
   .detail-top { grid-template-columns: 1fr; }
   .detail-gallery { border-right: none; border-bottom: 1.5px solid var(--ink); padding: 24px; }
   .detail-info { padding: 28px 24px; }
@@ -668,7 +715,7 @@ a:hover { color: var(--accent); }
   .filter-bar { flex-wrap: wrap; gap: 10px; }
   .filter-group { min-width: calc(50% - 10px); }
   .filter-group--grow { min-width: 100%; }
-  .page-head, .lot-grid { padding-left: 16px; padding-right: 16px; }
+  .page-head, .lot-grid, .sold-cta { padding-left: 16px; padding-right: 16px; }
   .filter-bar { padding-left: 16px; padding-right: 16px; }
   .detail-gallery, .detail-info { padding: 20px 16px; }
   .foot-row { grid-template-columns: 1fr; }

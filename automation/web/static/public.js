@@ -99,7 +99,8 @@ function bindCaptureForm(form) {
       const cardQty = parseInt(card.dataset.qty || '0', 10) || 0;
       const searchBag = (card.dataset.search || '').toLowerCase();
       const typeOk = !t || cardType === t;
-      const cityOk = !c || cardCity === c;
+      // data-city is a `|`-joined list — a lot can sit in several places.
+      const cityOk = !c || cardCity.split('|').includes(c);
       const qtyOk = cardQty >= minQ;
       const searchOk = !search || searchBag.includes(search);
       const show = typeOk && cityOk && qtyOk && searchOk;

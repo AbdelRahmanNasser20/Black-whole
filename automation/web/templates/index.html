@@ -276,6 +276,9 @@
       One row per lot. <span class="lex done">listed</span> means published
       somewhere; <span class="lex running">draft</span> means not yet.
       Edit qty inline — zero flips to <span class="lex error">sold_out</span> automatically.
+      <span class="lex error">sold_out</span> and <span class="lex error">lost_sold_out</span>
+      (a lot we never owned but show as sold) both render in the public
+      <em>ALREADY MOVED</em> archive — that's the point, not a leak.
     </p>
   </div>
 
@@ -288,6 +291,7 @@
         <button type="button" class="seg-btn" data-value="draft">draft</button>
         <button type="button" class="seg-btn" data-value="hidden">hidden</button>
         <button type="button" class="seg-btn" data-value="sold_out">sold_out</button>
+        <button type="button" class="seg-btn" data-value="lost_sold_out">lost_sold_out</button>
       </div>
     </div>
     <div class="ac-actions">

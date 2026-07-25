@@ -1285,6 +1285,12 @@ function renderInvTable(items) {
         ${(item.contact_email || item.contact_phone || item.contact_name) ? `
           <div class="inv-sub mono tiny inv-contact">☎ ${escapeHtml([item.contact_name, item.contact_phone, item.contact_email].filter(Boolean).join(' · '))}</div>
         ` : ''}
+        <div class="inv-sub inv-locs">
+          <input class="inv-loc-input mono tiny" data-field="locations_text"
+                 value="${escapeAttr(item.locations_text || '')}"
+                 placeholder="extra locations — Baltimore, MD x1200; Orlando, FL"
+                 title="Every place this lot sits. Blank = single location (uses the city above).">
+        </div>
         <div class="inv-sub inv-extras">
           <button class="btn btn-small btn-ghost inv-acct" data-act="acct" title="Set the GovDeals login that owns this lot">
             🔐 ${item.govdeals_username
@@ -1306,7 +1312,7 @@ function renderInvTable(items) {
       </td>
       <td>
         <select class="inv-status" data-field="status">
-          ${['draft','listed','hidden','sold_out','owned','won_pickup','active_bid','lost'].map(s =>
+          ${['draft','listed','hidden','sold_out','lost_sold_out','owned','won_pickup','active_bid','lost'].map(s =>
             `<option value="${s}" ${s===item.status?'selected':''}>${s}</option>`).join('')}
         </select>
       </td>

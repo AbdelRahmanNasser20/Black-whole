@@ -51,9 +51,13 @@
       <div class="stat-num">{{ "%d"|format(stats.cities) }}</div>
       <div class="stat-label">PICKUP CITIES</div>
     </div>
+    {# Chairs already moved beats a decorative "NOW" tile as a trust signal —
+       it's the number a buyer sizing us up actually wants. #}
     <div class="stat stat--accent">
-      <div class="stat-num">NOW</div>
-      <div class="stat-label">INTAKE STATUS</div>
+      <div class="stat-num">
+        {%- if stats.moved %}{{ "{:,}".format(stats.moved) }}{% else %}NOW{% endif -%}
+      </div>
+      <div class="stat-label">{% if stats.moved %}CHAIRS MOVED{% else %}INTAKE STATUS{% endif %}</div>
     </div>
   </div>
 </section>

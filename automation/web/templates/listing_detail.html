@@ -25,8 +25,10 @@
         <img id="gal-main-img"
              src="{{ hero or images[0] }}"
              alt="{{ item.title }}">
-        <div class="lot-stamp lot-stamp--big">
-          {% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}
+        <div class="lot-stamp lot-stamp--big{% if item.is_sold %} lot-stamp--sold{% endif %}">
+          {% if item.is_sold %}SOLD
+          {%- elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE
+          {%- else %}INQUIRE{% endif %}
         </div>
       </div>
       {% if images|length > 1 %}
@@ -44,16 +46,44 @@
   </div>
 
   <div class="detail-info">
+    {% if item.is_sold %}
+    <div class="sold-banner">
+      <div class="sold-banner-mark mono">SOLD OUT</div>
+      <p>This lot is gone. We buy sets like it every week — tell us what you
+        need below and we'll flag the next one before it goes up.</p>
+    </div>
+    {% endif %}
     <h1 class="detail-title">{{ item.title or 'Untitled lot' }}</h1>
     {% if item.subtitle %}<div class="detail-subtitle">{{ item.subtitle }}</div>{% endif %}
     {% if item.chair_type %}<div class="detail-type">{{ item.chair_type }}</div>{% endif %}
 
     <dl class="spec-sheet">
-      <div><dt>QUANTITY</dt><dd class="big-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</dd></div>
-      <div><dt>PRICE / CHAIR</dt><dd class="big-num">{% if item.price_per_chair %}${{ "%.0f"|format(item.price_per_chair) }}{% else %}INQUIRE{% endif %}</dd></div>
-      <div><dt>LOCATION</dt><dd>{{ item.city or '—' }}{% if item.state %}, {{ item.state }}{% endif %}{% if item.zip_code %} {{ item.zip_code }}{% endif %}</dd></div>
+      <div>
+        <dt>{% if item.is_sold %}LOT SIZE{% else %}QUANTITY{% endif %}</dt>
+        <dd class="big-num">
+          {%- if item.is_sold %}{{ item.quantity_original or '—' }}
+          {%- else %}{{ item.quantity_remaining or item.quantity_original or '—' }}{% endif -%}
+        </dd>
+      </div>
+      <div>
+        <dt>{% if item.is_sold %}SOLD AT / CHAIR{% else %}PRICE / CHAIR{% endif %}</dt>
+        <dd class="big-num">{% if item.price_per_chair %}${{ "%.0f"|format(item.price_per_chair) }}{% else %}INQUIRE{% endif %}</dd>
+      </div>
+      <div>
+        <dt>{% if item.location_labels | length > 1 %}LOCATIONS{% else %}LOCATION{% endif %}</dt>
+        <dd>
+          {%- if item.location_labels %}
+            <span class="loc-chips">
+              {%- for label in item.location_labels %}<span class="loc-chip">{{ label }}</span>{% endfor -%}
+            </span>
+            {%- if item.zip_code and item.location_labels | length < 2 %} {{ item.zip_code }}{% endif -%}
+          {%- else %}—{% endif -%}
+        </dd>
+      </div>
       {% if item.dimensions %}<div><dt>DIMENSIONS</dt><dd>{{ item.dimensions }}</dd></div>{% endif %}
+      {% if not item.is_sold %}
       <div><dt>PICKUP</dt><dd>Local preferred · Freight quotes on request</dd></div>
+      {% endif %}
       <div><dt>CONDITION</dt><dd>Used — inspected · see photos</dd></div>
     </dl>
 
@@ -66,7 +96,9 @@
     {% endif %}
 
     <div class="detail-ctas">
-      <a href="#contact-form" class="btn btn-primary">I WANT THIS LOT →</a>
+      <a href="#contact-form" class="btn btn-primary">
+        {%- if item.is_sold %}FIND ME ONE LIKE THIS →{% else %}I WANT THIS LOT →{% endif -%}
+      </a>
       {% if item.facebook_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.facebook_url }}">VIEW ON FACEBOOK</a>{% endif %}
       {% if item.ebay_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.ebay_url }}">VIEW ON EBAY</a>{% endif %}
     </div>
@@ -77,11 +109,17 @@
   <div class="contact-grid">
     <div>
       <div class="section-rule"></div>
-      <h2 class="section-title">REQUEST A QUOTE</h2>
+      <h2 class="section-title">{% if item.is_sold %}WANT THE NEXT ONE?{% else %}REQUEST A QUOTE{% endif %}</h2>
       <p class="contact-lede">
+        {%- if item.is_sold %}
+        This lot sold, but we buy sets like it constantly. Tell us how many you
+        need and where they're headed — we'll come back when the next one lands,
+        usually with pricing before it hits the site.
+        {%- else %}
         Tell us how many you need and where they're headed — we'll come back
         with pricing, freight options, and what's in stock. Better rates on
         large orders, and we'll work with your budget.
+        {%- endif %}
       </p>
     </div>
     <form class="manifest-form" id="contact-form" data-mode="detail">
