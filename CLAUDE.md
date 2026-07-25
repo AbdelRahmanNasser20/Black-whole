@@ -107,7 +107,15 @@ from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute
 
 **Preserved on re-upsert:** user edits never get stomped by a re-run. The upsert keeps existing `quantity_remaining`, `status`, `price_per_chair` (if set), `hero_image` (if set), and both platform URLs. It only refreshes the "as-parsed" metadata columns.
 
-**Auto-sold-out rule:** editing `quantity_remaining` to 0 via the admin tab auto-flips `status` to `sold_out` (unless the same PATCH also sets `status` explicitly). Sold-out rows disappear from the public `/listings`.
+**Auto-sold-out rule:** editing `quantity_remaining` to 0 via the admin tab auto-flips `status` to `sold_out` (unless the same PATCH also sets `status` explicitly).
+
+**Sold archive + multi-location (BLACKWHOLE-29, 2026-07-25):** sold-out rows no longer vanish from the site — `inventory.list_sold_showcase()` feeds an `ALREADY MOVED` strip under the live grid on `/listings`, stamped SOLD, showing the lot size and the price it sold at. Its job is social proof: a buyer who sees ~4,900 chairs already moved trusts the ones on the floor, and a sold lot's detail page swaps its CTA to "FIND ME ONE LIKE THIS". Rules worth keeping:
+- Showcase set = `status IN ('sold_out','lost_sold_out')` AND `quantity_original > 0` AND the row has a photo. Half-imported folder stubs are filtered out by that last clause — don't loosen it without a plan for the junk rows.
+- `lost_sold_out` = a lot we never owned but present as sold; it's in the DB CHECK constraint and now in `ALL_STATUSES` too (it wasn't, so the admin couldn't set it). Pairs with `fake_sold_out`, which the CRM honors by refusing to offer the lot to a buyer.
+- `status` → sold stamps `sold_at` once (first transition only).
+- **The FB catalog feed and CRM recommendations are unaffected** — both are status-gated (`CATALOG_FEED_STATUSES` / the CRM's `ROUTABLE_STATUSES`), so an archived lot can never be offered as stock. Keep it that way.
+- `inventory.locations` (JSONB, migration `scripts/sql/003_inventory_locations.sql`) lets one lot list several pickup cities: `[{"city","state","quantity"}]`. `city`/`state` stay the PRIMARY location — every existing query reads those. The admin edits it as one text cell (`Baltimore, MD x1200; Orlando, FL`); `inventory.parse_locations()` accepts that, a JSON string, or the list shape.
+- Seeded by `scripts/seed_sold_showcase.py` (idempotent).
 
 **Backfill path for pre-tracking listings:** `POST /api/inventory/backfill` walks `~/Desktop/Banquet chiars Pictures/`, imports any folder missing from the ledger as a `draft` row with best-effort metadata from the matching `llm_compare_logs` row (Supabase). FB/eBay URLs stay NULL — admin uses the "paste URL" cell on the Inventory tab for each row.
 

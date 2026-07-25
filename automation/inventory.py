@@ -17,6 +17,7 @@ Supabase (managed via migrations), not created at runtime.
 """
 from __future__ import annotations
 
+import re
 import secrets
 from datetime import datetime, timezone
 from functools import lru_cache
@@ -34,10 +35,17 @@ from .config import ATTACHMENTS_ROOT
 connect = db.connect
 
 PUBLIC_STATUSES = ("listed", "draft", "owned", "won_pickup")
+# 'lost_sold_out' = a lot we never actually owned (outbid, or the seller went
+# elsewhere) that we still show as SOLD. It has been in the DB CHECK constraint
+# and in real rows since the July ops pass; leaving it out of this tuple meant
+# `set_fields` rejected it and the admin couldn't set it from the UI.
 ALL_STATUSES = (
     "draft", "listed", "hidden", "sold_out",
-    "owned", "won_pickup", "active_bid", "lost",
+    "owned", "won_pickup", "active_bid", "lost", "lost_sold_out",
 )
+# Lots the storefront shows in the SOLD ARCHIVE (BLACKWHOLE-29) — proof we move
+# volume, and a hook for "when's the next one like this?" inquiries.
+SOLD_STATUSES = ("sold_out", "lost_sold_out")
 
 
 def _now() -> str:
@@ -46,6 +54,133 @@ def _now() -> str:
 
 def _row_to_dict(row: dict | None) -> dict | None:
     return dict(row) if row else None
+
+
+# ─────────────────────────── locations (BLACKWHOLE-29) ──────────────────────
+# A lot can sit in several places at once — the 3,000 blue banquet chairs lived
+# in Maryland, Atlanta and Orlando. `city`/`state` stay the primary location
+# (the catalog feed and the CRM geo-router read those); `locations` is the full
+# list, rendered as chips on the storefront.
+
+# Admin text form: "Baltimore, MD x1200; Atlanta, GA x399; Orlando, FL"
+_LOCATION_SEP = ";"
+# The quantity marker is a FREE-STANDING trailing `x…`, never a letter inside a
+# name — otherwise "Lexington, KY" parses as city "Le", quantity "ington, KY".
+_QUANTITY_RE = re.compile(r"\sx\s*(\S+)\s*$", re.IGNORECASE)
+
+
+def _parse_location_text(chunk: str) -> dict | None:
+    """One `City, ST x1200` chunk → a location dict. None if it's blank."""
+    text = chunk.strip()
+    if not text:
+        return None
+    quantity: int | None = None
+    m = _QUANTITY_RE.search(text)
+    if m:
+        raw = m.group(1)
+        try:
+            quantity = int(raw.replace(",", ""))
+        except ValueError:
+            raise ValueError(
+                f"bad quantity {raw!r} in location {text!r} "
+                f"(expected e.g. 'Baltimore, MD x1200')"
+            ) from None
+        text = text[: m.start()].strip().rstrip(",").strip()
+    city, _, state = text.partition(",")
+    city = city.strip()
+    if not city:
+        return None
+    out: dict = {"city": city}
+    if state.strip():
+        out["state"] = state.strip()
+    if quantity is not None:
+        out["quantity"] = quantity
+    return out
+
+
+def parse_locations(value: Any) -> list[dict] | None:
+    """Normalize whatever the caller has into the stored `locations` shape.
+
+    Accepts the list-of-dicts shape, a JSON string of it, or the one-cell admin
+    text form. Empty / all-blank input returns None, which clears the column —
+    a lot with no extra locations should read as a single-location lot, not as
+    an empty list the templates have to special-case.
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        if text.startswith("["):
+            import json as _json
+            try:
+                value = _json.loads(text)
+            except ValueError as e:
+                raise ValueError(f"locations is not valid JSON: {e}") from None
+        else:
+            parsed = [_parse_location_text(c) for c in text.split(_LOCATION_SEP)]
+            out = [p for p in parsed if p]
+            return out or None
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("locations must be a list of {city, state?, quantity?}")
+
+    out = []
+    for entry in value:
+        if isinstance(entry, str):
+            parsed = _parse_location_text(entry)
+            if parsed:
+                out.append(parsed)
+            continue
+        if not isinstance(entry, dict):
+            raise ValueError(f"bad location entry: {entry!r}")
+        city = str(entry.get("city") or "").strip()
+        if not city:
+            continue                      # a location with no city is noise
+        item: dict = {"city": city}
+        state = str(entry.get("state") or "").strip()
+        if state:
+            item["state"] = state
+        qty = entry.get("quantity")
+        if qty not in (None, ""):
+            try:
+                item["quantity"] = int(qty)
+            except (TypeError, ValueError):
+                raise ValueError(f"bad quantity {qty!r} for {city}") from None
+        out.append(item)
+    return out or None
+
+
+def location_labels(row: dict) -> list[str]:
+    """Human labels for every place this lot sits, primary location first."""
+    locations = (row or {}).get("locations")
+    if isinstance(locations, str):          # tolerate an un-decoded jsonb text
+        try:
+            locations = parse_locations(locations)
+        except ValueError:
+            locations = None
+    if isinstance(locations, list) and locations:
+        labels = []
+        for loc in locations:
+            if not isinstance(loc, dict):
+                continue
+            city = str(loc.get("city") or "").strip()
+            if not city:
+                continue
+            state = str(loc.get("state") or "").strip()
+            labels.append(f"{city}, {state}" if state else city)
+        if labels:
+            return labels
+    city = str((row or {}).get("city") or "").strip()
+    state = str((row or {}).get("state") or "").strip()
+    if not city:
+        return [state] if state else []
+    return [f"{city}, {state}" if state else city]
+
+
+def is_sold(row: dict) -> bool:
+    """True when the storefront should show this lot with a SOLD stamp."""
+    return (row or {}).get("status") in SOLD_STATUSES
 
 
 def get(lot_id: str) -> dict | None:
@@ -95,6 +230,47 @@ def list_public() -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# A sold lot only earns a spot in the public archive if it can actually carry a
+# card: a real headcount and a photo. Half-imported folder rows (qty 0, title =
+# folder name, no image) would read as clutter, not credibility.
+_SOLD_SHOWCASE_WHERE = """
+    status = ANY(%s)
+    AND COALESCE(quantity_original, 0) > 0
+    AND (
+        hero_image_url IS NOT NULL
+        OR jsonb_array_length(COALESCE(image_urls, '[]'::jsonb)) > 0
+        OR (folder_name IS NOT NULL AND hero_image IS NOT NULL)
+    )
+"""
+
+
+def list_sold_showcase(limit: int | None = None) -> list[dict]:
+    """Sold lots to display as proof of volume (BLACKWHOLE-29).
+
+    Includes `lost_sold_out` — lots we never owned but present as sold. That is
+    deliberate marketing copy the operator sets per lot, not an accident: see
+    the `fake_sold_out` flag, which the CRM already honors by refusing to offer
+    those lots to a buyer.
+    """
+    sql = f"""
+        SELECT * FROM inventory
+        WHERE {_SOLD_SHOWCASE_WHERE}
+        -- Biggest lot first: the archive's job is to show scale. Ordering by
+        -- sold_at would shuffle on every bulk re-flag (they all land in the
+        -- same minute) and bury the 3,000-chair proof behind a 100-chair one.
+        ORDER BY COALESCE(quantity_original, 0) DESC,
+                 sold_at DESC NULLS LAST,
+                 updated_at DESC
+    """
+    params: list[Any] = [list(SOLD_STATUSES)]
+    if limit:
+        sql += " LIMIT %s"
+        params.append(int(limit))
+    with connect() as conn:
+        rows = conn.execute(sql, params).fetchall()
+    return [dict(r) for r in rows]
+
+
 def stats() -> dict:
     """Headline counts for the landing page (same visible set as list_public)."""
     statuses = list(PUBLIC_STATUSES)
@@ -114,7 +290,18 @@ def stats() -> dict:
             "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)",
             (statuses,),
         ).fetchone()["n"]
-    return {"lots": int(total), "chairs": int(chairs or 0), "cities": int(cities)}
+        # Chairs already moved — the landing page's credibility number.
+        moved = conn.execute(
+            f"SELECT COALESCE(SUM(quantity_original), 0) AS n FROM inventory "
+            f"WHERE {_SOLD_SHOWCASE_WHERE}",
+            (list(SOLD_STATUSES),),
+        ).fetchone()["n"]
+    return {
+        "lots": int(total),
+        "chairs": int(chairs or 0),
+        "cities": int(cities),
+        "moved": int(moved or 0),
+    }
 
 
 # Statuses whose lots belong in the Facebook Business catalog feed
@@ -331,6 +518,7 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         "title", "subtitle", "description", "chair_type", "dimensions", "city", "state",
         "zip_code", "contact_name", "contact_email", "contact_phone",
         "govdeals_username", "govdeals_password",
+        "locations", "fake_sold_out", "sold_at",
     }
     clean = {k: v for k, v in fields.items() if k in allowed}
     if not clean:
@@ -345,6 +533,15 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         clean["status"] = "sold_out"
     if "status" in clean and clean["status"] not in ALL_STATUSES:
         raise ValueError(f"invalid status: {clean['status']}")
+    if "locations" in clean:
+        parsed = parse_locations(clean["locations"])
+        clean["locations"] = Jsonb(parsed) if parsed else None
+    # Stamp the sale date the first time a lot goes sold, so the archive can
+    # order by "most recently moved" without the operator filling a date field.
+    if clean.get("status") in SOLD_STATUSES and "sold_at" not in clean:
+        current = get(lot_id) or {}
+        if not current.get("sold_at"):
+            clean["sold_at"] = _now()
     clean["updated_at"] = _now()
     cols = ", ".join(f"{k} = %s" for k in clean)
     params = list(clean.values()) + [str(lot_id)]
@@ -459,24 +656,35 @@ def insert_manual(
     description: str | None = None,
     folder_name: str | None = None,
     hero_image: str | None = None,
+    locations: Any = None,
+    status: str = "draft",
 ) -> dict:
     """Admin-created row for a lot that was never run through the pipeline."""
     if get(lot_id):
         raise ValueError(f"lot_id {lot_id} already exists")
+    if status not in ALL_STATUSES:
+        raise ValueError(f"invalid status: {status}")
+    parsed_locations = parse_locations(locations)
     now = _now()
+    # A row created straight into a sold status is an archive entry (the
+    # operator back-filling a lot we already moved) — stamp it as sold now so
+    # it sorts correctly in the showcase.
+    sold_at = now if status in SOLD_STATUSES else None
+    remaining = 0 if status in SOLD_STATUSES else quantity
     with connect() as conn:
         conn.execute(
             """
             INSERT INTO inventory (
                 lot_id, title, subtitle, description, city, state, zip_code, chair_type,
                 dimensions, quantity_original, quantity_remaining, price_per_chair,
-                folder_name, hero_image, status, parsed_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'draft', %s, %s)
+                folder_name, hero_image, locations, status, sold_at, parsed_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 str(lot_id), title, subtitle, description, city, state, zip_code, chair_type,
-                dimensions, quantity, quantity, price_per_chair, folder_name,
-                hero_image, now, now,
+                dimensions, quantity, remaining, price_per_chair, folder_name,
+                hero_image, Jsonb(parsed_locations) if parsed_locations else None,
+                status, sold_at, now, now,
             ),
         )
         conn.commit()

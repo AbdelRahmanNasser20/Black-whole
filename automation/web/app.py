@@ -370,9 +370,12 @@ def _location_str(row: dict) -> str:
 
 def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
     """Title / description / JSON-LD payload for a lot detail page."""
-    qty = row.get("quantity_remaining") or row.get("quantity_original")
+    sold = inventory.is_sold(row)
+    qty = (row.get("quantity_original") if sold
+           else (row.get("quantity_remaining") or row.get("quantity_original")))
     title = (row.get("title") or "Chair lot").strip()
-    loc = _location_str(row)
+    # A multi-location lot advertises every city it sat in, not just the first.
+    loc = " · ".join(inventory.location_labels(row)) or _location_str(row)
 
     seo_title = f"{qty}× {title}" if qty else title
     if loc:
@@ -381,12 +384,19 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
 
     desc_bits = []
     if qty:
-        desc_bits.append(f"{qty} available")
+        desc_bits.append(f"{qty} sold" if sold else f"{qty} available")
     if row.get("price_per_chair"):
         desc_bits.append(f"${row['price_per_chair']:.0f}/chair")
     if loc:
-        desc_bits.append(f"pickup in {loc}")
-    lead = f"{title} for sale in bulk" + (f" — {' · '.join(desc_bits)}." if desc_bits else ".")
+        desc_bits.append(("sourced from " if sold else "pickup in ") + loc)
+    if sold:
+        lead = f"{title} — this lot has sold" + (
+            f" ({' · '.join(desc_bits)})." if desc_bits else "."
+        ) + " We buy sets like it every week; ask us about the next one."
+    else:
+        lead = f"{title} for sale in bulk" + (
+            f" — {' · '.join(desc_bits)}." if desc_bits else "."
+        )
     body = (row.get("description") or "").strip()
     if body:
         lead += " " + (body[:150] + "…" if len(body) > 150 else body)
@@ -478,7 +488,7 @@ async def public_landing(request: Request):
         for r in featured:
             r["hero_src"] = _hero_src(r)
     except Exception:
-        counts = {"lots": 0, "chairs": 0, "cities": 0}
+        counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
     return templates.TemplateResponse(
         request, "landing.html",
@@ -486,17 +496,28 @@ async def public_landing(request: Request):
     )
 
 
+def _decorate(row: dict) -> dict:
+    """Attach the derived fields every public card/page needs."""
+    row["hero_src"] = _hero_src(row)
+    row["location_labels"] = inventory.location_labels(row)
+    row["is_sold"] = inventory.is_sold(row)
+    return row
+
+
 @app.get("/listings", response_class=HTMLResponse)
 async def public_listings(request: Request):
-    items = inventory.list_public()
-    for r in items:
-        r["hero_src"] = _hero_src(r)
-    cities = sorted({(r.get("city") or "").strip() for r in items if r.get("city")})
+    items = [_decorate(r) for r in inventory.list_public()]
+    # Sold lots are shown too (BLACKWHOLE-29) — a buyer who sees 4,000 chairs
+    # already moved trusts the 200 on the floor. They render in their own
+    # archive strip, stamped SOLD, and are not filterable stock.
+    sold_items = [_decorate(r) for r in inventory.list_sold_showcase()]
+    cities = sorted({label for r in items for label in r["location_labels"]})
     chair_types = sorted({(r.get("chair_type") or "").strip()
                           for r in items if r.get("chair_type")})
     return templates.TemplateResponse(
         request, "listings.html",
-        _public_ctx({"items": items, "cities": cities, "chair_types": chair_types}),
+        _public_ctx({"items": items, "sold_items": sold_items,
+                     "cities": cities, "chair_types": chair_types}),
     )
 
 
@@ -505,6 +526,7 @@ async def public_listing_detail(request: Request, lot_id: str):
     row = inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
         raise HTTPException(404, "listing not found")
+    _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
     return templates.TemplateResponse(
@@ -865,7 +887,9 @@ async def sitemap_xml():
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     for path in ("/", "/listings", "/sell"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
-    for row in inventory.list_public():
+    # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
+    # should land on our archive page and convert into a next-lot inquiry.
+    for row in [*inventory.list_public(), *inventory.list_sold_showcase()]:
         updated = row.get("updated_at")
         lastmod = None
         if updated is not None:
@@ -2157,6 +2181,14 @@ def _inventory_to_public(row: dict) -> dict:
     # local /image/ path when no cloud URL is on file. Don't clobber the cloud URL.
     out["hero_image_url"] = _hero_src(row)
     out["govdeals_password_set"] = bool(out.pop("govdeals_password", None))
+    # One editable cell on the Inventory tab: "Baltimore, MD x1200; Atlanta, GA".
+    out["locations_text"] = "; ".join(
+        loc["city"]
+        + (f", {loc['state']}" if loc.get("state") else "")
+        + (f" x{loc['quantity']}" if loc.get("quantity") else "")
+        for loc in (row.get("locations") or [])
+        if isinstance(loc, dict) and loc.get("city")
+    )
     if out.get("buyer_cert_path"):
         out["buyer_cert_url"] = f"/api/inventory/{row['lot_id']}/buyer-cert"
     else:
@@ -2180,8 +2212,11 @@ async def inv_get(lot_id: str):
 
 @app.patch("/api/inventory/{lot_id}")
 async def inv_update(lot_id: str, payload: dict):
+    payload = dict(payload or {})
+    if "locations_text" in payload:
+        payload["locations"] = payload.pop("locations_text")
     try:
-        row = inventory.set_fields(lot_id, **(payload or {}))
+        row = inventory.set_fields(lot_id, **payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
     if not row:
@@ -2208,6 +2243,8 @@ async def inv_create(payload: dict):
             description=payload.get("description") or None,
             folder_name=payload.get("folder_name") or None,
             hero_image=payload.get("hero_image") or None,
+            locations=payload.get("locations") or payload.get("locations_text") or None,
+            status=(payload.get("status") or "draft"),
         )
     except (KeyError, ValueError) as e:
         raise HTTPException(400, str(e))
