@@ -42,17 +42,30 @@ QUERY = f"""
 
 
 def check_http(urls: list[str], limit: int) -> list[tuple[int | str, str]]:
-    """HEAD each URL; return the ones that aren't 200."""
+    """Fetch the first byte of each URL; return the ones that don't come back.
+
+    A ranged GET, NOT a HEAD: the r2.dev public bucket answers HEAD with 403
+    while serving the identical GET with 200. This used to HEAD, so it failed
+    every lot it checked — and a canary that always cries wolf is one you stop
+    reading, which defeats the point of the script.
+
+    ``Range: bytes=0-0`` keeps it to a single byte per URL, so proving liveness
+    never pulls hundreds of KB of image. Servers honoring the range answer 206;
+    ones ignoring it answer 200 and the body is dropped unread.
+    """
     import httpx
 
     bad: list[tuple[int | str, str]] = []
     with httpx.Client(timeout=20.0, follow_redirects=True) as client:
         for url in urls[:limit]:
             try:
-                code: int | str = client.head(url).status_code
+                with client.stream(
+                    "GET", url, headers={"Range": "bytes=0-0"}
+                ) as resp:
+                    code: int | str = resp.status_code
             except Exception as exc:  # noqa: BLE001 - a network blip is a finding
                 code = type(exc).__name__
-            if code != 200:
+            if code not in (200, 206):
                 bad.append((code, url))
     return bad
 
