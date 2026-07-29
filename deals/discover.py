@@ -10,6 +10,7 @@ from deals.archive import archive_lot_images
 @dataclass
 class DiscoveryReport:
     discovered: int = 0; upserted: int = 0; classified: int = 0; archived: int = 0; errors: int = 0
+    classify_failed: int = 0
 
 def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool = True,
                   archive_candidates: bool = True, now: datetime | None = None,
@@ -21,7 +22,14 @@ def run_discovery(adapter: SiteAdapter, *, categories: list[str], classify: bool
             rep.discovered += 1
             try:
                 if classify and (lot.canonical_category in ("general_merchandise", "other")):
-                    apply_classification(lot); rep.classified += 1
+                    apply_classification(lot)
+                    # Count answers, not attempts. Counting attempts is how a
+                    # dead API key reported "classified: 2,937" every night for
+                    # weeks while storing nothing but nulls.
+                    if lot.llm_category is not None:
+                        rep.classified += 1
+                    else:
+                        rep.classify_failed += 1
                 upsert_lot(lot); rep.upserted += 1
                 lane = schedule_lane(lot.end_utc, now)
                 delay = next_poll_delay(lot.end_utc, now, lane)
