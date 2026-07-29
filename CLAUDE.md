@@ -95,6 +95,19 @@ from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute
 2. `python -m automation.web` — public site at http://127.0.0.1:8765/, admin dashboard at http://127.0.0.1:8765/admin.
 3. Paste GovDeals URL on the Launcher tab → Run. Confirm price when prompted. Drafts appear under the Drafts tab. Inventory ledger picks up the row automatically (see next section).
 
+## Creating a Marketplace listing — READ BEFORE TOUCHING facebook.py
+
+`docs/fb_marketplace_listing_playbook.md` is the step-by-step FB Marketplace
+process, walked live in the UI on 2026-07-29: which title formula actually pulls
+buyers (measured off `contacts`), the three-step form, and the traps —
+Meta AI now auto-drafts every listing from the photos and can clobber fields
+written before it settles; Category is a tree picker (free text lands on the
+wrong node); Location lives on step 2 and silently defaults to whatever city the
+account is currently in; the location autocomplete lists foreign namesakes above
+the US city. It also tables where `automation/facebook.py` has drifted from the
+live form (`FB_CONDITION` string, category navigation, the step-2 weight fields)
+and the up-to-20-group cross-post on step 3 that the pipeline never uses.
+
 ## Inventory ledger — READ BEFORE TOUCHING run.py OR APP.PY
 
 **Why it exists:** FB/eBay draft URLs used to be emitted as progress events and thrown away. Re-running the pipeline on the same lot would burn API budget a second time. The ledger is now the single source of truth for "what we've parsed, what's up where, how many are left to sell."
