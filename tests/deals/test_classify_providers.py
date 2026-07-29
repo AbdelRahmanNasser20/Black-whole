@@ -116,15 +116,17 @@ class TestCircuitBreaker:
 
 
 class TestProviderSelection:
-    def test_prefers_cerebras_then_groq_then_gemini(self):
+    def test_prefers_groq_then_cerebras_then_gemini(self):
+        # Groq leads because it is the only one free at our volume: Gemini's
+        # prepay is spent, and a new Cerebras org 402s on every call.
         env = {"CEREBRAS_API_KEY": "c", "GROQ_API_KEY": "g", "GEMINI_API_KEY": "m"}
-        assert active_provider(env) == ("cerebras", "c")
-        assert active_provider({"GROQ_API_KEY": "g", "GEMINI_API_KEY": "m"}) == ("groq", "g")
+        assert active_provider(env) == ("groq", "g")
+        assert active_provider({"CEREBRAS_API_KEY": "c", "GEMINI_API_KEY": "m"}) == ("cerebras", "c")
         assert active_provider({"GEMINI_API_KEY": "m"}) == ("gemini", "m")
 
     def test_explicit_choice_wins(self):
-        env = {"DEALS_LLM_PROVIDER": "groq", "CEREBRAS_API_KEY": "c", "GROQ_API_KEY": "g"}
-        assert active_provider(env) == ("groq", "g")
+        env = {"DEALS_LLM_PROVIDER": "cerebras", "CEREBRAS_API_KEY": "c", "GROQ_API_KEY": "g"}
+        assert active_provider(env) == ("cerebras", "c")
 
     def test_explicit_choice_without_its_key_does_not_fall_through(self):
         # Naming a provider you haven't configured should surface as "not

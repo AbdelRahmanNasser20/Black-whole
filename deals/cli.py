@@ -56,6 +56,12 @@ def main():
     tb.add_argument("--min-bids", type=int, default=0,
                     help="only lots with at least N bids (an un-bid lot has no bidder to name)")
     tb.add_argument("--limit", type=int, default=100)
+    bc = sub.add_parser("backfill-classify",
+                        help="fill in lots the str.format bug left unclassified")
+    bc.add_argument("--limit", type=int, default=450)
+    bc.add_argument("--rpm", type=int, default=18)
+    bc.add_argument("--reset-fakes", action="store_true",
+                    help="blank the provably-fake other/0.0 rows, then exit")
     sub.add_parser("watch-once")
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
@@ -87,6 +93,9 @@ def main():
                 min_bids=a.min_bids)
         print(f"sampling {len(keys)} lots")
         print(bidders.track_bidders(adapter, keys))
+    elif a.cmd == "backfill-classify":
+        from deals.backfill_classify import run as run_backfill_classify
+        print(run_backfill_classify(limit=a.limit, rpm=a.rpm, reset=a.reset_fakes))
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
     elif a.cmd == "backfill-outcomes":

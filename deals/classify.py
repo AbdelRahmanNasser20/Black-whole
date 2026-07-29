@@ -22,9 +22,11 @@ Three consequences of that, all deliberate:
    more often than what we want to ask it. Cerebras and Groq are both
    OpenAI-compatible, so they share a code path and differ only by base URL.
 
-Set `DEALS_LLM_PROVIDER` to `cerebras` | `groq` | `gemini`; leaving it unset
-picks the first provider whose key is present, in that order — most free
-capacity first.
+Set `DEALS_LLM_PROVIDER` to `groq` | `cerebras` | `gemini`; leaving it unset
+picks the first provider whose key is present, in that order. Groq leads
+because it is the only one of the three currently free at our volume — Gemini's
+prepay balance is spent and a new Cerebras org starts at $0.00 and 402s on every
+call. Verify any change with `python scripts/check_llm_provider.py`.
 """
 import json
 import os
@@ -59,12 +61,25 @@ def build_prompt(title: str, description: str) -> str:
             f"Title: {title[:200]}\n"
             f"Description: {(description or '')[:800]}")
 
-# OpenAI-compatible providers: (env key, base URL, default model). Cerebras'
-# free tier is the only one whose daily token budget covers a full sweep;
-# Groq's caps out on requests-per-day, so it sits second as spillover.
+# OpenAI-compatible providers: (env key, base URL, default model).
+#
+# Model choice here is set by requests-per-DAY, not by quality, because the sweep
+# classifies ~3,100 lots/day. Measured on this account (2026-07-29, via
+# `scripts/check_llm_provider.py --headroom`):
+#
+#   llama-3.3-70b-versatile   1,000 req/day   ← would drop ~2/3 of every sweep
+#   llama-3.1-8b-instant     14,400 req/day   ← covers the sweep with room spare
+#
+# On 15 real general-merchandise lots the two agreed on 14; the one split was a
+# hex-key set, a lot type this taxonomy has no bucket for either way. A model
+# that answers every lot beats a better model that answers a third of them.
+#
+# Cerebras is kept wired but is NOT free on a new org: a fresh account starts at
+# $0.00 and every request returns HTTP 402 payment_required. Set
+# CEREBRAS_API_KEY only alongside real credits.
 _OPENAI_COMPATIBLE = {
     "cerebras": ("CEREBRAS_API_KEY", "https://api.cerebras.ai/v1", "gpt-oss-120b"),
-    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"),
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
 }
 # Flash-Lite, not Flash: Flash is a thinking model and bills the hidden
 # reasoning tokens, which is a large part of how a prepay balance vanished on a
@@ -129,7 +144,8 @@ def active_provider(env=None) -> tuple[str, str] | None:
     """
     env = os.environ if env is None else env
     named = (env.get("DEALS_LLM_PROVIDER") or "").strip().lower()
-    order = [named] if named else ["cerebras", "groq", "gemini"]
+    # Groq first: it's the only one of the three free at our daily volume today.
+    order = [named] if named else ["groq", "cerebras", "gemini"]
     for provider in order:
         if provider in _OPENAI_COMPATIBLE:
             key = env.get(_OPENAI_COMPATIBLE[provider][0])

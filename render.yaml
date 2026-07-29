@@ -131,6 +131,24 @@ services:
     envVars:
       - fromGroup: blackwhole-secrets
   - type: cron
+    name: deals-backfill-classify
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Drains the ~41k lots left unclassified by the str.format bug (every call
+    # raised KeyError before reaching the network; a bare except stored
+    # `other`/0.0). 450/hour ≈ 10,800/day sits under Groq's free 14,400 req/day
+    # with room for the discovery sweep's own ~3,100. Self-terminating: once
+    # nothing is pending the run prints "nothing pending" and exits 0, so this
+    # can stay scheduled forever rather than needing to be remembered and
+    # removed.
+    schedule: "30 * * * *"
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh backfill-classify --limit 450 --rpm 18
+    envVars:
+      - fromGroup: blackwhole-secrets
+      - key: DEALS_LLM_PROVIDER
+        value: groq
+  - type: cron
     name: deals-analyze
     runtime: docker
     dockerfilePath: ./Dockerfile
