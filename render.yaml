@@ -107,6 +107,10 @@ services:
     dockerCommand: sh scripts/deals_cron.sh discover --categories all --max-pages 200
     envVars:
       - fromGroup: blackwhole-secrets
+      # Explicit rather than relying on auto-order, so adding a CEREBRAS key
+      # later can't silently move ~3,100 calls/day onto a billed account.
+      - key: DEALS_LLM_PROVIDER
+        value: groq
   - type: cron
     name: deals-watch
     runtime: docker
@@ -157,6 +161,11 @@ services:
     dockerCommand: sh scripts/deals_cron.sh analyze
     envVars:
       - fromGroup: blackwhole-secrets
+      # Was hardcoded to gemini-2.5-flash and died with that key's prepay
+      # balance. Its prompts are ~5x the classify prompt, so the provider paces
+      # on estimated tokens — 50 lots/hour lands well inside the free tier.
+      - key: DEALS_LLM_PROVIDER
+        value: groq
   - type: cron
     name: deals-digest
     runtime: docker

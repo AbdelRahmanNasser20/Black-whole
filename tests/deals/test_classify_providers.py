@@ -8,8 +8,8 @@ import pytest
 
 from datetime import datetime, timezone
 
-from deals import classify
-from deals.classify import (ClassificationUnavailable, active_provider,
+from deals import classify, llm_provider
+from deals.classify import (ClassificationUnavailable, LlmUnavailable, active_provider,
                             apply_classification, build_prompt, classify_category,
                             parse_response)
 from deals.models import Lot
@@ -60,7 +60,7 @@ class TestBuildPrompt:
 class TestFailureIsNotAnAnswer:
     def test_unreachable_model_leaves_columns_null(self):
         def dead(t, d):
-            raise ClassificationUnavailable("429 prepayment credits are depleted")
+            raise LlmUnavailable("429 prepayment credits are depleted")
 
         lot = apply_classification(_lot(), classifier=dead)
         # The bug: this used to be ('other', 0.0), indistinguishable from a real read.
@@ -70,7 +70,7 @@ class TestFailureIsNotAnAnswer:
 
     def test_lot_is_still_returned_so_ingestion_continues(self):
         def dead(t, d):
-            raise ClassificationUnavailable("no key")
+            raise LlmUnavailable("no key")
 
         assert apply_classification(_lot(), classifier=dead) is not None
 
@@ -84,11 +84,11 @@ class TestCircuitBreaker:
         monkeypatch.setenv("CEREBRAS_API_KEY", "k")
         calls = []
 
-        def boom(provider, key, prompt):
+        def boom(provider, key, prompt, max_tokens):
             calls.append(provider)
-            raise ClassificationUnavailable("HTTP 429")
+            raise LlmUnavailable("HTTP 429")
 
-        monkeypatch.setattr(classify, "_chat_openai_compatible", boom)
+        monkeypatch.setattr(llm_provider, "_chat_openai_compatible", boom)
         for _ in range(8):
             with pytest.raises(ClassificationUnavailable):
                 classify_category("t", "d")
@@ -101,13 +101,13 @@ class TestCircuitBreaker:
         monkeypatch.setenv("CEREBRAS_API_KEY", "k")
         replies = iter(["boom", "boom", '{"label":"seating_furniture","confidence":0.9}'])
 
-        def flaky(provider, key, prompt):
+        def flaky(provider, key, prompt, max_tokens):
             nxt = next(replies)
             if nxt == "boom":
-                raise ClassificationUnavailable("HTTP 500")
+                raise LlmUnavailable("HTTP 500")
             return nxt
 
-        monkeypatch.setattr(classify, "_chat_openai_compatible", flaky)
+        monkeypatch.setattr(llm_provider, "_chat_openai_compatible", flaky)
         for _ in range(2):
             with pytest.raises(ClassificationUnavailable):
                 classify_category("t", "d")

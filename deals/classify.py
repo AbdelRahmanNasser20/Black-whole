@@ -1,37 +1,22 @@
-"""Canonical-category classification for a lot, via whichever LLM we can afford.
+"""Canonical-category classification for a lot.
+
+Transport (provider choice, pacing, circuit breaker) lives in
+`deals/llm_provider.py` and is shared with the analyze pass. What's left here is
+the one thing specific to classification: the prompt, and the rule that a
+failure is not an answer.
 
 **The failure this file was rewritten to prevent.** The original swallowed every
 exception and returned `("other", 0.0)`, which is indistinguishable from a
-genuine "I read it and it's other". Gemini's prepay credits ran dry and the
-sweep kept calling it ~3,000 times a day for weeks: **37,934 lots classified,
-every one of them `other` at confidence 0.0, zero real answers**, and nothing
-anywhere said so. A classifier that can't reach its model must leave
+genuine "I read it and it's other". The table ended up holding **39,758 lots
+classified, every one `other` at confidence 0.0, zero real answers**, and
+nothing anywhere said so. A classifier that can't reach its model must leave
 `llm_category` NULL — an empty column is a question you can still answer later;
 a fake label is a wrong answer nobody will ever go back and check.
-
-Three consequences of that, all deliberate:
-
-1. `classify_category` raises `ClassificationUnavailable` instead of returning a
-   default. `apply_classification` catches it and leaves the LLM columns None,
-   so the lot is still stored — classification failing must never cost us the row.
-2. A run-scoped circuit breaker. Once the provider has failed
-   `_BREAKER_THRESHOLD` times in a row it stops calling for the rest of the
-   process. The old code spent three thousand doomed HTTPS round-trips per
-   sweep rediscovering the same dead key.
-3. Provider is env-driven, because "which LLM is free this month" changes far
-   more often than what we want to ask it. Cerebras and Groq are both
-   OpenAI-compatible, so they share a code path and differ only by base URL.
-
-Set `DEALS_LLM_PROVIDER` to `groq` | `cerebras` | `gemini`; leaving it unset
-picks the first provider whose key is present, in that order. Groq leads
-because it is the only one of the three currently free at our volume — Gemini's
-prepay balance is spent and a new Cerebras org starts at $0.00 and 402s on every
-call. Verify any change with `python scripts/check_llm_provider.py`.
 """
 import json
-import os
-import sys
 
+from deals.llm_provider import (LlmUnavailable, active_provider, breaker_state,  # noqa: F401
+                                chat, reset_breaker)
 from deals.models import Lot
 
 CANONICAL_LABELS = ["seating_furniture", "general_merchandise", "vehicles",
@@ -44,6 +29,12 @@ _INSTRUCTIONS = (
 )
 
 
+class ClassificationUnavailable(LlmUnavailable):
+    """Kept as a distinct name because callers catch it by meaning, not by
+    transport. Subclasses `LlmUnavailable` so a bare provider failure is caught
+    by either name."""
+
+
 def build_prompt(title: str, description: str) -> str:
     """Assemble the prompt by concatenation, NOT `str.format`.
 
@@ -51,7 +42,7 @@ def build_prompt(title: str, description: str) -> str:
     contains the literal JSON example `{"label": …}`. `str.format` reads that as
     a replacement field named `"label"` and raises `KeyError('"label"')` — on
     the first statement inside the try, before any network call. Wrapped in a
-    bare `except`, that produced 37,934 lots labelled `other`/0.0 without a
+    bare `except`, that produced 39,758 lots labelled `other`/0.0 without a
     single request ever leaving the machine. Escaping the braces would also
     work, and would break again the next time someone edits the example; not
     running `.format` over a string that contains JSON is the fix that stays
@@ -60,102 +51,6 @@ def build_prompt(title: str, description: str) -> str:
     return (f"{_INSTRUCTIONS}\n"
             f"Title: {title[:200]}\n"
             f"Description: {(description or '')[:800]}")
-
-# OpenAI-compatible providers: (env key, base URL, default model).
-#
-# Model choice here is set by requests-per-DAY, not by quality, because the sweep
-# classifies ~3,100 lots/day. Measured on this account (2026-07-29, via
-# `scripts/check_llm_provider.py --headroom`):
-#
-#   llama-3.3-70b-versatile   1,000 req/day   ← would drop ~2/3 of every sweep
-#   llama-3.1-8b-instant     14,400 req/day   ← covers the sweep with room spare
-#
-# On 15 real general-merchandise lots the two agreed on 14; the one split was a
-# hex-key set, a lot type this taxonomy has no bucket for either way. A model
-# that answers every lot beats a better model that answers a third of them.
-#
-# Cerebras is kept wired but is NOT free on a new org: a fresh account starts at
-# $0.00 and every request returns HTTP 402 payment_required. Set
-# CEREBRAS_API_KEY only alongside real credits.
-_OPENAI_COMPATIBLE = {
-    "cerebras": ("CEREBRAS_API_KEY", "https://api.cerebras.ai/v1", "gpt-oss-120b"),
-    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
-}
-# Flash-Lite, not Flash: Flash is a thinking model and bills the hidden
-# reasoning tokens, which is a large part of how a prepay balance vanished on a
-# workload whose real answer is fifteen tokens of JSON.
-_GEMINI_MODEL = "gemini-2.5-flash-lite"
-
-_BREAKER_THRESHOLD = 5
-
-
-class ClassificationUnavailable(Exception):
-    """The model could not be reached, or its answer was unusable.
-
-    Distinct from "the model says this lot is `other`" — that is a real result
-    with a real confidence. This is the *absence* of a result.
-    """
-
-
-class _Breaker:
-    """Run-scoped consecutive-failure counter. Deliberately not thread-safe:
-    discovery is one sequential sweep, and a lock here would imply a concurrency
-    story this module doesn't have."""
-
-    def __init__(self):
-        self.consecutive = 0
-        self.tripped = False
-        self.first_error: str | None = None
-
-    def record_failure(self, err: str) -> None:
-        if self.first_error is None:
-            self.first_error = err
-        self.consecutive += 1
-        if self.consecutive >= _BREAKER_THRESHOLD and not self.tripped:
-            self.tripped = True
-            print(f"[classify] {_BREAKER_THRESHOLD} consecutive failures — disabling "
-                  f"classification for this run. First error: {self.first_error}",
-                  file=sys.stderr)
-
-    def record_success(self) -> None:
-        self.consecutive = 0
-
-
-_breaker = _Breaker()
-
-
-def reset_breaker() -> None:
-    """Test seam, and an escape hatch for any long-lived process."""
-    global _breaker
-    _breaker = _Breaker()
-
-
-def breaker_state() -> dict:
-    return {"tripped": _breaker.tripped, "consecutive_failures": _breaker.consecutive,
-            "first_error": _breaker.first_error}
-
-
-def active_provider(env=None) -> tuple[str, str] | None:
-    """Resolve (provider, api_key) from the environment, or None if no key exists.
-
-    An explicit `DEALS_LLM_PROVIDER` whose key is missing returns None rather
-    than quietly falling through to a different provider — if you named one, you
-    want to hear that it isn't configured, not get billed somewhere else.
-    """
-    env = os.environ if env is None else env
-    named = (env.get("DEALS_LLM_PROVIDER") or "").strip().lower()
-    # Groq first: it's the only one of the three free at our daily volume today.
-    order = [named] if named else ["groq", "cerebras", "gemini"]
-    for provider in order:
-        if provider in _OPENAI_COMPATIBLE:
-            key = env.get(_OPENAI_COMPATIBLE[provider][0])
-        elif provider == "gemini":
-            key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
-        else:
-            continue
-        if key:
-            return (provider, key)
-    return None
 
 
 def parse_response(text: str) -> tuple[str, float]:
@@ -174,9 +69,11 @@ def parse_response(text: str) -> tuple[str, float]:
     try:
         data = json.loads(cleaned)
     except (json.JSONDecodeError, TypeError) as e:
-        raise ClassificationUnavailable(f"unparseable model reply: {(text or '')[:120]!r}") from e
+        raise ClassificationUnavailable(
+            f"unparseable model reply: {(text or '')[:120]!r}") from e
     if not isinstance(data, dict):
-        raise ClassificationUnavailable(f"model reply was not an object: {(text or '')[:120]!r}")
+        raise ClassificationUnavailable(
+            f"model reply was not an object: {(text or '')[:120]!r}")
     label = data.get("label", "other")
     try:
         confidence = float(data.get("confidence", 0.0))
@@ -185,54 +82,14 @@ def parse_response(text: str) -> tuple[str, float]:
     return (label if label in CANONICAL_LABELS else "other", confidence)
 
 
-def _chat_openai_compatible(provider: str, api_key: str, prompt: str) -> str:
-    import requests
-    _, base_url, default_model = _OPENAI_COMPATIBLE[provider]
-    model = os.getenv("DEALS_LLM_MODEL") or default_model
-    r = requests.post(
-        f"{base_url}/chat/completions",
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        json={"model": model, "messages": [{"role": "user", "content": prompt}],
-              "temperature": 0, "max_tokens": 64},
-        timeout=30)
-    if r.status_code != 200:
-        # Body kept verbatim: "429" alone doesn't distinguish "slow down" from
-        # "your balance is gone", and that difference decides whether we wait or
-        # switch providers.
-        raise ClassificationUnavailable(f"{provider} HTTP {r.status_code}: {r.text[:200]}")
-    return r.json()["choices"][0]["message"]["content"]
-
-
-def _chat_gemini(api_key: str, prompt: str) -> str:
-    from google import genai
-    model = os.getenv("DEALS_LLM_MODEL") or _GEMINI_MODEL
-    resp = genai.Client(api_key=api_key).models.generate_content(model=model, contents=prompt)
-    return resp.text or ""
-
-
 def classify_category(title: str, description: str) -> tuple[str, float]:
     """Place a lot in our taxonomy. Raises `ClassificationUnavailable` on any
     provider problem — the caller decides what an absent answer means."""
-    if _breaker.tripped:
-        raise ClassificationUnavailable("circuit breaker open for this run")
-    resolved = active_provider()
-    if resolved is None:
-        raise ClassificationUnavailable(
-            "no LLM key configured (set CEREBRAS_API_KEY, GROQ_API_KEY or GEMINI_API_KEY)")
-    provider, api_key = resolved
-    prompt = build_prompt(title, description)
     try:
-        text = (_chat_gemini(api_key, prompt) if provider == "gemini"
-                else _chat_openai_compatible(provider, api_key, prompt))
-        result = parse_response(text)
-    except ClassificationUnavailable as e:
-        _breaker.record_failure(str(e))
-        raise
-    except Exception as e:
-        _breaker.record_failure(f"{type(e).__name__}: {e}")
-        raise ClassificationUnavailable(f"{provider}: {type(e).__name__}: {e}") from e
-    _breaker.record_success()
-    return result
+        text = chat(build_prompt(title, description), max_tokens=64)
+    except LlmUnavailable as e:
+        raise ClassificationUnavailable(str(e)) from e
+    return parse_response(text)
 
 
 def apply_classification(lot: Lot, classifier=classify_category) -> Lot:
@@ -241,7 +98,7 @@ def apply_classification(lot: Lot, classifier=classify_category) -> Lot:
     want stored."""
     try:
         label, conf = classifier(lot.title, lot.description)
-    except ClassificationUnavailable:
+    except LlmUnavailable:
         lot.llm_category = None
         lot.llm_category_confidence = None
         lot.category_agreement = None
