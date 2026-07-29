@@ -44,6 +44,18 @@ def main():
     ar.add_argument("--limit", type=int, default=100)
     ar.add_argument("--max-mb", type=float, default=200.0)
     ar.add_argument("--zero-bid-only", action="store_true")
+    tb = sub.add_parser("track-bidders",
+                        help="sample who is leading the lots we care about (GovDeals bidbox)")
+    tb.add_argument("--favorites", action="store_true",
+                    help="only the lots starred on the Auctions tab")
+    tb.add_argument("--category", default="seating_furniture",
+                    help="canonical category to sample; 'all' for no filter")
+    tb.add_argument("--title-like", default=None, help="extra title filter, e.g. 'chair'")
+    tb.add_argument("--ending-within", type=int, default=None,
+                    help="only lots closing within N hours (where lead changes are unrecoverable)")
+    tb.add_argument("--min-bids", type=int, default=0,
+                    help="only lots with at least N bids (an un-bid lot has no bidder to name)")
+    tb.add_argument("--limit", type=int, default=100)
     sub.add_parser("watch-once")
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
@@ -63,6 +75,18 @@ def main():
         from deals.archive import archive_active
         print(archive_active(adapter, limit=a.limit, max_mb=a.max_mb,
                              zero_bid_only=a.zero_bid_only))
+    elif a.cmd == "track-bidders":
+        from deals import bidders, store
+        if a.favorites:
+            keys = bidders.favorite_targets(adapter)
+        else:
+            keys = store.bidder_targets(
+                limit=a.limit,
+                category=(None if a.category == "all" else a.category),
+                title_like=a.title_like, ending_within_hours=a.ending_within,
+                min_bids=a.min_bids)
+        print(f"sampling {len(keys)} lots")
+        print(bidders.track_bidders(adapter, keys))
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
     elif a.cmd == "backfill-outcomes":

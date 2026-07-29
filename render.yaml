@@ -117,6 +117,20 @@ services:
     envVars:
       - fromGroup: blackwhole-secrets
   - type: cron
+    name: deals-bidders
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Every 30 min. GovDeals keeps no bid history, so a lead change only exists
+    # while it's live — an hourly cadence would silently lose most of them.
+    # Targets are ordered soonest-closing first, so the LIMIT drops the lots
+    # that are still days out (and will be picked up on a later pass), never
+    # the ones about to close.
+    schedule: "*/30 * * * *"
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh track-bidders --category all --title-like chair --min-bids 1 --limit 150
+    envVars:
+      - fromGroup: blackwhole-secrets
+  - type: cron
     name: deals-analyze
     runtime: docker
     dockerfilePath: ./Dockerfile
