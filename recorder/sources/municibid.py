@@ -30,19 +30,41 @@ LIVE RECON (verified 2026-07-31, this task):
   `<a class="srp-card" href="/Listing/Details/{id}">...<span
   class="srp-card-bids" title="Bids">{n}</span>` card markup, which IS on the
   same response as the JSON marker but is **paginated at 40 cards/page**
-  (`page` query param, confirmed 0-indexed: UI "page 2" link is
-  `&page=1`). `_fetch_search_page()` parses page-0's cards with
-  `bs4` (already a project dependency — `deals/ebay_parse.py` — just not
-  previously installed in this worktree's venv; installed here) into an
-  `{id: bid_count}` map and merges it onto the JSON items by id. **Known
-  limitation**: for a query whose result set exceeds 40 items, only the
-  first 40 get a real `bid_count` — the rest carry `bid_count=None`. No
-  pagination loop implemented (would multiply request volume for a
-  Phase-0 "crude, correct" adapter); documented here and in the report.
-  Verified live: `FullTextQuery=chairs&StatusFilter=active_only` → 34 JSON
-  items, 34 cards, 34/34 matched (fits on one page). The same query with
-  `StatusFilter=completed_only` → 70 JSON items, 40 cards on page 0, so only
-  40/70 get a real bid_count.
+  (`page` query param, confirmed 0-indexed: UI "page 2" link is `&page=1`;
+  requesting a page past the last one returns HTTP 200 with an EMPTY card
+  grid, not an error — verified live 2026-07-31 on
+  `office+furniture&StatusFilter=completed_only&page=7` (264 items, 7 pages
+  needed) and `&page=8`, both 200/0 cards). `_fetch_search_page()` parses one
+  page's cards with `bs4` (already a project dependency —
+  `deals/ebay_parse.py` — just not previously installed in this worktree's
+  venv; installed here) into an `{id: bid_count}` map.
+  **`_fetch_search_full()`** (fix round 1, 2026-07-31 — see task-3 review
+  finding #2) drives `_fetch_search_page()` across as many additional pages
+  as needed to cover every item id's `bid_count`, capped at
+  `MAX_BID_COUNT_PAGES = 10` per term with a loud `WARNING` if the cap
+  truncates coverage; a page that comes back with 0 cards stops pagination
+  early (natural end of the result set) without waiting for the cap. Sized
+  against the live worst case found in this recon: `office furniture` /
+  `completed_only` needed exactly 7 pages (264 items ÷ 40/page) — the
+  largest of any of the 6 `FURNITURE_TERMS` × 2 `StatusFilter` combinations
+  checked live (`chairs`/`completed_only` needed 2, everything else needed
+  0–1). 10 leaves headroom without risking an unbounded request burst
+  against a Cloudflare-fronted host. Before this fix, `sold_sweep()`'s live
+  smoke showed only 74/278 closed observations with a real `bid_count`
+  (page-0-only). After the fix, a live re-run showed dramatically better but
+  still NOT 100% coverage (see the task-3 fix-round-1 report for the exact
+  numbers) — investigating why surfaced a real second bug (also fixed in the
+  same round): a page coming back naturally empty was silently treated as
+  "done", even when the id set captured from page 0 wasn't fully covered.
+  Municibid is a live, constantly-changing auction site — the id set from
+  page 0 can legitimately shrink by the time a later page is fetched
+  (throttled `>=1s` apart), so "this page is empty" does NOT always mean
+  "we've covered everything page 0 promised". `_fetch_search_full()` now
+  prints a loud `WARNING` whenever it stops with coverage still incomplete,
+  for ANY reason (cap hit, a later page's fetch failing, OR a naturally
+  empty page that still leaves ids uncovered) — never silently. A lot the
+  site genuinely never renders a card for in this run still carries an
+  honest `bid_count=None` rather than a guessed value.
 - `discover()`/`sold_sweep()` sweep `FURNITURE_TERMS` (brief's instruction),
   issuing one `_fetch_search_page(term, status_filter)` call per term and
   merging/deduping by id across terms (a lot matching two terms — e.g.
@@ -116,13 +138,27 @@ passed; otherwise (not yet ended, or end_date unknown) nothing is emitted
 this round, matching the shared contract and GSA/Purple Wave's rule for
 absence.
 
+poll()'s `raw` (fix round 1, 2026-07-31 — see task-3 review finding #1): a
+found lot's `raw` is `{"detail_page": {"url", "status_marker",
+"current_bid_raw", "bid_count_raw", "end_date_raw"}}` — the `*_raw` fields
+are the LITERAL matched source substrings (e.g. `current_bid_raw="25.00"`
+straight from the `NumberPart` span, `bid_count_raw="1"` straight from
+`data-previous-value`, `end_date_raw="08/04/2026 08:27:00"` straight from
+`data-initial-dttm`, `status_marker` is the literal heading text that
+decided active-vs-closed), not the already-parsed `Decimal`/`int`/`datetime`
+values (those still populate `Observation.current_bid`/`bid_count`/
+`end_date` directly) — so a future parser fix (e.g. a money-parsing bug) can
+recompute every field from `raw` alone without re-scraping the lot.
+
 Fixtures captured live 2026-07-31 under `tests/recorder/fixtures/municibid/`
 (trimmed HTML — real `srp-markers-data` JSON + real `srp-card` markup for the
 search pages; real anchor blocks for the detail pages — unrelated chrome
 removed, see per-file comments): `discover_active_chairs.html` (34 items/34
 cards, `FullTextQuery=chairs&StatusFilter=active_only`), `sold_sweep_chairs.
-html` (70 items/40 cards, `StatusFilter=completed_only` — the pagination gap
-case), `detail_active_84516049.html`, `detail_closed_82394410.html`,
+html` + `sold_sweep_chairs_page1.html` (the real page-0 (40 cards) and
+page-1 (30 cards) captures of the same 70-item `StatusFilter=completed_only`
+"chairs" query — fix round 1's pagination fixture pair, added 2026-07-31),
+`detail_active_84516049.html`, `detail_closed_82394410.html`,
 `detail_not_found.html`.
 """
 from __future__ import annotations
@@ -236,19 +272,23 @@ def _to_observation(item: dict, *, status: str, bid_count: int | None) -> Observ
     )
 
 
-def _fetch_search_page(full_text_query: str, status_filter: str) -> tuple[list[dict], dict[int, int]] | None:
-    """One page-0 fetch of `Search/Results?FullTextQuery=...&StatusFilter=...`.
-    Returns `(json_items, bid_count_by_id)` or `None` on ANY fetch failure
-    (network exception, blocked, non-200, missing/bad JSON marker) — never an
-    empty tuple, so callers can tell "fetch failed" apart from "fetch
-    succeeded and there's genuinely nothing there."
+def _fetch_search_page(full_text_query: str, status_filter: str, page: int = 0) -> tuple[list[dict], dict[int, int]] | None:
+    """One page fetch of `Search/Results?FullTextQuery=...&StatusFilter=...`
+    (`page=N`, 0-indexed, omitted for page 0 to keep the request byte-
+    identical to before this existed). Returns `(json_items, bid_count_by_id)`
+    or `None` on ANY fetch failure (network exception, blocked, non-200,
+    missing/bad JSON marker) — never an empty tuple, so callers can tell
+    "fetch failed" apart from "fetch succeeded and there's genuinely nothing
+    there." `json_items` is the FULL page-independent result set every time
+    (see module docstring) — only `bid_count_by_id` differs per page.
     """
+    params = {"FullTextQuery": full_text_query, "StatusFilter": status_filter}
+    if page:
+        params["page"] = page
     try:
-        resp = polite_get(
-            SEARCH_URL, params={"FullTextQuery": full_text_query, "StatusFilter": status_filter}
-        )
+        resp = polite_get(SEARCH_URL, params=params)
     except requests.exceptions.RequestException as e:
-        print(f"[municibid] RECORDER ERROR: request failed ({full_text_query!r}, {status_filter}): {e}")
+        print(f"[municibid] RECORDER ERROR: request failed ({full_text_query!r}, {status_filter}, page={page}): {e}")
         return None
     if resp.status_code in (403, 429):
         print(
@@ -275,14 +315,103 @@ def _fetch_search_page(full_text_query: str, status_filter: str) -> tuple[list[d
     return items, _bid_counts_from_cards(html)
 
 
+# Hard cap on additional card-grid pages fetched per FURNITURE_TERMS query
+# while filling in bid_count coverage — see `_fetch_search_full`. Verified
+# live 2026-07-31: the single largest live query needed was
+# `office+furniture&StatusFilter=completed_only` at 264 items / 7 pages
+# (40/page) — 10 leaves headroom without risking unbounded request bursts
+# against a Cloudflare-fronted host.
+MAX_BID_COUNT_PAGES = 10
+
+
+def _fetch_search_full(
+    full_text_query: str, status_filter: str, max_pages: int = MAX_BID_COUNT_PAGES
+) -> tuple[list[dict], dict[int, int]] | None:
+    """Fetch page 0 (the authoritative `json_items` list — page-independent,
+    see module docstring), then fetch ADDITIONAL card-grid pages (bid counts
+    only) until every item id has a known `bid_count`, a page comes back
+    with no cards (natural end of the result set — verified live: requesting
+    a page past the last one returns HTTP 200 with an empty card grid, not
+    an error), or `max_pages` pages have been fetched for this term (loud
+    `WARNING`, since Municibid is Cloudflare-fronted and a real, larger
+    result set shouldn't turn into an unbounded request burst).
+
+    Whenever pagination stops with the page-0 id set still not fully
+    covered — for ANY reason (cap hit, a later page's fetch failed, or a
+    page came back naturally empty before covering every id) — this prints
+    ONE loud `WARNING` naming the reason and how many ids are still missing.
+    That last "naturally empty but still incomplete" case is real and
+    observed live 2026-07-31 (see task-3 fix-round-1 report): Municibid is a
+    live, constantly-changing auction site, and `_fetch_search_page` calls
+    for the same term are `>=1s` apart (per-host throttle) — the id set
+    captured from page 0 can legitimately shrink by the time a later page is
+    fetched (lots closing/relisting), making that later page empty relative
+    to page 0's `ids` even though it isn't the true last page of a STABLE
+    result set. Silently swallowing that case (the original cut of this fix)
+    is exactly the kind of quiet gap this whole recorder exists to avoid.
+
+    Returns `None` only if the page-0 fetch itself fails — nothing else
+    (including a later page failing) makes this return `None`, only the
+    unified warning above and whatever `bid_counts` were already collected.
+    """
+    first = _fetch_search_page(full_text_query, status_filter, page=0)
+    if first is None:
+        return None
+    items, bid_counts = first
+    ids = {it["id"] for it in items if it.get("id") is not None}
+    page = 1
+    stop_reason: str | None = None
+    # NOTE: deliberately `ids - set(bid_counts.keys())` (set DIFFERENCE),
+    # never `set(bid_counts.keys()) < ids` (proper-SUBSET comparison). A
+    # later page can carry ids that AREN'T in page 0's `ids` snapshot — a
+    # live auction closing mid-sweep and entering the `completed_only`
+    # result set between throttled page fetches — which makes
+    # `bid_counts.keys()` a non-subset of `ids` and would make `<` false
+    # (loop-exits-immediately) even though none of `ids` had been covered
+    # yet. This was a real bug caught live 2026-07-31 on
+    # `office+furniture&StatusFilter=completed_only` (see the fix-round-1
+    # report) — the subset check ended the loop after page 0 alone with
+    # 105/264 ids still missing bid_count and no warning printed (`page`
+    # never advanced past 1, so the cap check didn't fire either). The
+    # difference-based check only cares whether `ids` (not "whatever's in
+    # bid_counts") is fully covered, which is unaffected by extra/foreign
+    # ids showing up on later pages.
+    while (ids - set(bid_counts.keys())) and page < max_pages:
+        result = _fetch_search_page(full_text_query, status_filter, page=page)
+        if result is None:
+            stop_reason = f"page {page} fetch failed"
+            break
+        _, page_bid_counts = result
+        if not page_bid_counts:
+            stop_reason = (
+                f"page {page} came back with no cards (natural end of the result set as fetched, "
+                "but the id set captured from page 0 wasn't fully covered — Municibid's live "
+                "result set can shift between throttled page fetches)"
+            )
+            break
+        bid_counts.update(page_bid_counts)
+        page += 1
+    else:
+        if page >= max_pages:
+            stop_reason = f"hit the {max_pages}-page cap"
+    missing = ids - set(bid_counts.keys())
+    if missing:
+        print(
+            f"[municibid] WARNING: bid_count pagination for {full_text_query!r}/{status_filter} "
+            f"stopped ({stop_reason}) — {len(missing)} lot(s) still missing bid_count"
+        )
+    return items, bid_counts
+
+
 def _sweep(status_filter: str) -> tuple[dict[int, dict], dict[int, int], bool]:
     """Sweep FURNITURE_TERMS at the given StatusFilter, merging/deduping by
-    id across terms. Returns (items_by_id, bid_counts_by_id, any_term_ok)."""
+    id across terms, paginating each term's bid_count coverage via
+    `_fetch_search_full`. Returns (items_by_id, bid_counts_by_id, any_term_ok)."""
     items_by_id: dict[int, dict] = {}
     bid_counts: dict[int, int] = {}
     any_ok = False
     for term in FURNITURE_TERMS:
-        result = _fetch_search_page(term, status_filter)
+        result = _fetch_search_full(term, status_filter)
         if result is None:
             continue
         any_ok = True
@@ -301,8 +430,14 @@ def _fetch_detail(lot_id: str) -> dict | None:
       unrecognized page shape) — caller must emit no observation.
     - `{"not_found": True, "http_status": int}` if the lot is confirmed
       absent (200 + "Listing not found" title, or a real 404).
-    - `{"not_found": False, "url", "status", "current_bid", "bid_count",
-      "end_date", ...}` for a found lot, status re-derived from the page.
+    - `{"not_found": False, "url", "status", "status_marker", "current_bid",
+      "current_bid_raw", "bid_count", "bid_count_raw", "end_date",
+      "end_date_raw", ...}` for a found lot, status re-derived from the
+      page. The `*_raw` fields are the LITERAL matched source substrings
+      (the exact `NumberPart`/`data-previous-value`/`data-initial-dttm`
+      text, and which status heading matched) so a future parser fix can
+      recompute `current_bid`/`bid_count`/`end_date` from `raw` without
+      re-scraping — see `poll()`'s `raw` construction below.
     """
     url = DETAIL_URL_TMPL.format(id=lot_id)
     try:
@@ -332,24 +467,34 @@ def _fetch_detail(lot_id: str) -> dict | None:
         )
         return None
     end_m = END_ROW_RE.search(html)
-    end_date = _parse_detail_end(end_m.group(1) if end_m else None)
+    end_date_raw = end_m.group(1) if end_m else None
+    end_date = _parse_detail_end(end_date_raw)
+    bid_count_raw = None
     bid_count = None
     bc_m = BID_COUNT_RE.search(html)
     if bc_m:
-        bid_count = int(bc_m.group(1))
+        bid_count_raw = bc_m.group(1)
+        bid_count = int(bid_count_raw)
     if is_active:
         status = "active"
+        status_marker = "This Auction Ends in:"
         price_m = ACTIVE_PRICE_RE.search(html)
     else:
         status = "closed"
+        status_marker = "Auction Ended:"
         price_m = CLOSED_PRICE_RE.search(html)
+    current_bid_raw = price_m.group(1) if price_m else None
     return {
         "not_found": False,
         "url": resp.url,
         "status": status,
-        "current_bid": _parse_money(price_m.group(1)) if price_m else None,
+        "status_marker": status_marker,
+        "current_bid": _parse_money(current_bid_raw) if current_bid_raw else None,
+        "current_bid_raw": current_bid_raw,
         "bid_count": bid_count,
+        "bid_count_raw": bid_count_raw,
         "end_date": end_date,
+        "end_date_raw": end_date_raw,
     }
 
 
@@ -407,9 +552,13 @@ class MunicibidSource:
                 status=detail["status"],
                 raw={"detail_page": {
                     "url": detail["url"],
-                    "status": detail["status"],
-                    "current_bid": str(detail["current_bid"]) if detail["current_bid"] is not None else None,
-                    "bid_count": detail["bid_count"],
+                    # literal matched source substrings — never re-derived
+                    # values — so a future parser fix can recompute
+                    # current_bid/bid_count/end_date from raw alone.
+                    "status_marker": detail["status_marker"],
+                    "current_bid_raw": detail["current_bid_raw"],
+                    "bid_count_raw": detail["bid_count_raw"],
+                    "end_date_raw": detail["end_date_raw"],
                 }},
                 current_bid=detail["current_bid"],
                 bid_count=detail["bid_count"],

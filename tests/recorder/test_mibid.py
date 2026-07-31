@@ -180,6 +180,58 @@ def test_sold_sweep_returns_empty_on_fetch_failure(monkeypatch):
     assert mibid.MiBidSource().sold_sweep() == []
 
 
+def test_sold_sweep_enrichment_failure_falls_back_to_bulk_current_bid_with_none_bid_count(monkeypatch, discover_html):
+    # _to_observation's enrichment fallback (mibid.py _to_observation): when
+    # GetBasicInfo fails for a discover()/sold_sweep() match, current_bid
+    # falls back to the bulk embed's (independently verified-accurate, see
+    # module docstring) currentBid, but bid_count stays honestly None — the
+    # bulk embed's numberOfBids is known-unreliable (always 0) and must
+    # never be used as a silent fallback value.
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        if url == mibid.HOME_URL:
+            return _FakeResponse(text=discover_html)
+        assert url == mibid.BASIC_INFO_URL
+        return _FakeResponse(status_code=500)
+
+    monkeypatch.setattr(mibid, "polite_get", fake_get)
+    obs = mibid.MiBidSource().sold_sweep()
+    assert len(obs) == 8
+    items = _sample_items(discover_html)
+    by_guid = {it["guid"]: it for it in items}
+    for o in obs:
+        assert o.bid_count is None
+        assert o.current_bid == Decimal(str(by_guid[o.source_lot_id]["currentBid"]))
+        assert o.raw == by_guid[o.source_lot_id]  # raw untouched regardless of enrichment outcome
+
+
+def test_discover_enrichment_failure_falls_back_to_bulk_current_bid_with_none_bid_count(monkeypatch, discover_html, basic_info_closed):
+    # same fallback, exercised through discover()'s active path (via the
+    # synthetic status-override — see test_discover_active_furniture_path_
+    # via_synthetic_status_override for why that's needed).
+    items = _sample_items(discover_html)
+    real_item = next(it for it in items if it["id"] == 5342).copy()
+    real_item["status"] = 1
+    real_item["isCanceled"] = False
+    page = (
+        "<script>let AuctionListViewModel = function () { this.rawAuctions = "
+        "ko.observableArray(" + json.dumps([real_item]) + "); };</script>"
+    )
+
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        if url == mibid.HOME_URL:
+            return _FakeResponse(text=page)
+        assert url == mibid.BASIC_INFO_URL
+        return _FakeResponse(status_code=500)
+
+    monkeypatch.setattr(mibid, "polite_get", fake_get)
+    obs = mibid.MiBidSource().discover()
+    assert len(obs) == 1
+    o = obs[0]
+    assert o.bid_count is None
+    assert o.current_bid == Decimal(str(real_item["currentBid"]))
+    assert o.raw == real_item
+
+
 def _stub_basic_info(monkeypatch, basic_info_by_guid):
     orig_polite_get = mibid.polite_get
 
@@ -208,6 +260,11 @@ def test_poll_active_lot_derives_status_from_end_date_not_hardcoded(monkeypatch,
     assert o.end_date == datetime(2026, 8, 3, 14, 0, 0, tzinfo=timezone.utc)  # 10:00 AM EDT (UTC-4)
     assert o.current_bid == Decimal("520.00")
     assert o.bid_count == 3
+    # fix round 1: raw must carry the literal matched dayjs(...) source
+    # string, not just the derived end_date, so a future parser fix can
+    # recompute it from raw alone without re-scraping.
+    assert o.raw["detail_page"]["end_date_raw"] == "8/3/2026 10:00:00 AM"
+    assert o.raw["basic_info"] == basic_info_active
 
 
 def test_poll_closed_lot_derives_status_from_past_end_date(monkeypatch, detail_closed_html, basic_info_closed):
@@ -224,6 +281,8 @@ def test_poll_closed_lot_derives_status_from_past_end_date(monkeypatch, detail_c
     assert o.end_date == datetime(2025, 8, 18, 14, 10, 0, tzinfo=timezone.utc)  # 10:10 AM EDT (UTC-4)
     assert o.current_bid == Decimal("82.00")
     assert o.bid_count == 33
+    assert o.raw["detail_page"]["end_date_raw"] == "8/18/2025 10:10:00 AM"
+    assert o.raw["basic_info"] == basic_info_closed
 
 
 def test_poll_soft_locked_page_after_end_date_emits_gone(monkeypatch, detail_locked_html):
@@ -346,6 +405,11 @@ def test_discover_returns_empty_and_prints_loud_error_on_connection_exception(mo
 # --- parsing helpers --------------------------------------------------------
 
 def test_status_from_code_maps_active_and_closed():
+    # fix round 1: this is no longer dead code — discover()/sold_sweep() now
+    # filter via _status_from_code(...) instead of duplicating the
+    # ACTIVE_STATUS_CODES/CLOSED_STATUS_CODE membership check inline (see
+    # test_discover_excludes_closed_scheduled_and_canceled and the
+    # sold_sweep "closed" filter test above for the integration coverage).
     assert mibid._status_from_code(1) == "active"
     assert mibid._status_from_code(2) == "active"
     assert mibid._status_from_code(3) == "active"

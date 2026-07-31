@@ -38,6 +38,11 @@ def sold_html():
 
 
 @pytest.fixture
+def sold_html_page1():
+    return _load("sold_sweep_chairs_page1.html")
+
+
+@pytest.fixture
 def detail_active_html():
     return _load("detail_active_84516049.html")
 
@@ -131,14 +136,121 @@ def test_sold_sweep_returns_closed_observations(monkeypatch, sold_html):
     assert all(isinstance(o.current_bid, Decimal) for o in obs)
 
 
-def test_sold_sweep_has_documented_bid_count_pagination_gap(monkeypatch, sold_html):
-    # 70 JSON items but only 40 cards render on page 0 — see module docstring.
-    monkeypatch.setattr(mb, "polite_get", lambda *a, **k: _FakeResponse(sold_html))
+def test_sold_sweep_achieves_full_bid_count_coverage_via_pagination(monkeypatch, sold_html, sold_html_page1):
+    # fix round 1: 70 JSON items, only 40 cards on page 0 — but page 1 (real
+    # capture) has the remaining 30, and _fetch_search_full now paginates to
+    # get them, closing the gap that used to leave 30/70 with bid_count=None.
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        page = (params or {}).get("page", 0)
+        return _FakeResponse(sold_html if not page else sold_html_page1)
+
+    monkeypatch.setattr(mb, "polite_get", fake_get)
     obs = mb.MunicibidSource().sold_sweep()
-    with_bid_count = [o for o in obs if o.bid_count is not None]
-    without_bid_count = [o for o in obs if o.bid_count is None]
-    assert len(with_bid_count) == 40
-    assert len(without_bid_count) == 30
+    assert len(obs) == 70
+    assert all(o.bid_count is not None for o in obs)
+
+
+def test_fetch_search_full_paginates_to_full_coverage_on_real_two_page_set(monkeypatch, sold_html, sold_html_page1):
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        page = (params or {}).get("page", 0)
+        return _FakeResponse(sold_html if not page else sold_html_page1)
+
+    monkeypatch.setattr(mb, "polite_get", fake_get)
+    items, bid_counts = mb._fetch_search_full("chairs", "completed_only")
+    ids = {it["id"] for it in items}
+    assert len(ids) == 70
+    assert set(bid_counts.keys()) == ids
+    # converged after page 0 + page 1 — not the 10-page cap
+    assert len(bid_counts) == 70
+
+
+def test_fetch_search_full_stops_at_a_naturally_empty_page_but_warns_if_still_incomplete(monkeypatch, sold_html, capsys):
+    # requesting a page past the last one returns HTTP 200 with an empty
+    # card grid (verified live 2026-07-31, see module docstring) — pagination
+    # must stop there rather than grinding to the max_pages cap. But (fix
+    # round 1, live evidence in the report) a naturally-empty page doesn't
+    # mean the id set from page 0 got fully covered — Municibid's live
+    # result set can shift between throttled fetches — so this must still
+    # warn loudly rather than silently swallowing the gap.
+    calls = {"n": 0}
+    empty_cards_html = (
+        mb.MARKERS_RE.search(sold_html).group(0)
+        + '<div class="srp-body"><div class="srp-split"><div class="srp-cards"></div></div></div>'
+    )
+
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        calls["n"] += 1
+        page = (params or {}).get("page", 0)
+        return _FakeResponse(sold_html if not page else empty_cards_html)
+
+    monkeypatch.setattr(mb, "polite_get", fake_get)
+    items, bid_counts = mb._fetch_search_full("chairs", "completed_only", max_pages=10)
+    assert len(bid_counts) == 40  # only page 0's cards — page 1 was empty, so it stopped there
+    assert calls["n"] == 2  # page 0 + one empty page 1, never reached the cap
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "30" in out  # 70 - 40 still missing bid_count
+
+
+def test_fetch_search_full_hits_cap_and_warns_when_coverage_never_completes(monkeypatch, sold_html, capsys):
+    # a source that keeps re-serving the same 40 cards forever (never empty,
+    # never covers the remaining 30 ids) must stop at max_pages, not loop
+    # forever, and must say so loudly.
+    monkeypatch.setattr(mb, "polite_get", lambda *a, **k: _FakeResponse(sold_html))
+    items, bid_counts = mb._fetch_search_full("chairs", "completed_only", max_pages=3)
+    assert len(items) == 70
+    assert len(bid_counts) == 40  # never grew past page-0's ids
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "cap" in out.lower()
+    assert "30 closed lot(s)" in out or "30" in out
+
+
+def test_fetch_search_full_returns_none_when_page_zero_fails(monkeypatch):
+    monkeypatch.setattr(mb, "polite_get", lambda *a, **k: _FakeResponse("", status_code=403))
+    assert mb._fetch_search_full("chairs", "completed_only") is None
+
+
+def test_fetch_search_full_keeps_partial_bid_counts_when_a_later_page_fails(monkeypatch, sold_html, capsys):
+    calls = {"n": 0}
+
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        calls["n"] += 1
+        page = (params or {}).get("page", 0)
+        if page == 1:
+            return _FakeResponse("", status_code=403)
+        return _FakeResponse(sold_html)
+
+    monkeypatch.setattr(mb, "polite_get", fake_get)
+    items, bid_counts = mb._fetch_search_full("chairs", "completed_only")
+    assert len(items) == 70
+    assert len(bid_counts) == 40  # page 0's coverage preserved despite page 1 failing
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+
+
+def test_fetch_search_page_omits_page_param_for_page_zero(monkeypatch, discover_html):
+    captured = {}
+
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        captured["params"] = params
+        return _FakeResponse(discover_html)
+
+    monkeypatch.setattr(mb, "polite_get", fake_get)
+    mb._fetch_search_page("chairs", "active_only", page=0)
+    assert "page" not in captured["params"]
+
+
+def test_fetch_search_page_includes_page_param_when_nonzero(monkeypatch, discover_html):
+    captured = {}
+
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        captured["params"] = params
+        return _FakeResponse(discover_html)
+
+    monkeypatch.setattr(mb, "polite_get", fake_get)
+    mb._fetch_search_page("chairs", "active_only", page=2)
+    assert captured["params"]["page"] == 2
 
 
 def test_sold_sweep_request_uses_completed_only_status_filter(monkeypatch, sold_html):
@@ -173,7 +285,14 @@ def test_poll_active_lot_reparses_status_price_bids_enddate(monkeypatch, detail_
     assert o.current_bid == Decimal("25.00")
     assert o.bid_count == 1
     assert o.end_date == datetime(2026, 8, 4, 12, 27, tzinfo=timezone.utc)
-    assert o.raw["detail_page"]["status"] == "active"
+    # fix round 1: raw must carry the literal matched source substrings, not
+    # just the already-derived values, so a future parser fix can recompute
+    # current_bid/bid_count/end_date from raw alone without re-scraping.
+    assert o.raw["detail_page"]["status_marker"] == "This Auction Ends in:"
+    assert o.raw["detail_page"]["current_bid_raw"] == "25.00"
+    assert o.raw["detail_page"]["bid_count_raw"] == "1"
+    assert o.raw["detail_page"]["end_date_raw"] == "08/04/2026 08:27:00"
+    assert o.raw["detail_page"]["url"] == "https://municibid.com/Listing/Details/84516049/banquet-chairs"
 
 
 def test_poll_closed_lot_reparses_as_closed_with_final_bid(monkeypatch, detail_closed_html):
@@ -185,6 +304,10 @@ def test_poll_closed_lot_reparses_as_closed_with_final_bid(monkeypatch, detail_c
     assert o.current_bid == Decimal("21.00")
     assert o.bid_count == 8
     assert o.end_date == datetime(2026, 5, 4, 12, 6, tzinfo=timezone.utc)
+    assert o.raw["detail_page"]["status_marker"] == "Auction Ended:"
+    assert o.raw["detail_page"]["current_bid_raw"] == "21.00"
+    assert o.raw["detail_page"]["bid_count_raw"] == "8"
+    assert o.raw["detail_page"]["end_date_raw"] == "05/04/2026 08:06:00"
 
 
 def test_poll_never_hardcodes_active_status(monkeypatch, detail_closed_html):

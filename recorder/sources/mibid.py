@@ -63,8 +63,12 @@ LIVE RECON (verified 2026-07-31, this task):
   real, viewable, **not-yet-started** auctions the homepage's default view
   simply hides (their `startTime` was also in the future). `status:5` was
   never observed live (0 of 2,253). Neither 5 nor 6 maps cleanly onto our
-  `{active, closed, gone}` enum — `discover()`/`sold_sweep()` exclude both
-  (matching the site's own default view), and if `poll()` ever encountered
+  `{active, closed, gone}` enum — `_status_from_code()` returns `None` for
+  both, and `discover()`/`sold_sweep()` filter on `_status_from_code(...) ==
+  "active"`/`"closed"` (fix round 1, 2026-07-31 — wires the previously-
+  unused helper in as the single source of truth for the code→enum mapping,
+  replacing two duplicated inline membership checks), which excludes 5/6 the
+  same way the site's own default view does. If `poll()` ever encountered
   one on a tracked lot it wouldn't come from `status` at all (poll() derives
   status purely from `end_date` vs now — see "poll()" below).
 - **`FURNITURE_TERMS` matches, live**: 36 titles matched (exact
@@ -117,6 +121,18 @@ LIVE RECON (verified 2026-07-31, this task):
   the correct per-lot re-check (never hardcoded), matching the brief: "a
   post-end poll that still serves the lot with a final price maps to
   status='closed'".
+
+poll()'s `raw` (fix round 1, 2026-07-31 — see task-3 review finding #1):
+`{"detail_page": {"url", "end_date_raw"}, "basic_info": info}`.
+`end_date_raw` is the LITERAL matched `dayjs('...', 'M/D/YYYY h:mm:ss A')`
+source string (e.g. `"8/3/2026 10:00:00 AM"`), not just the already-parsed
+`end_date` — previously `detail_page` carried only a URL, dropping this
+literal. `basic_info` was already the untouched `GetBasicInfo` JSON response
+dict (itself the literal source payload: `currentBid`/`numberOfBids`/
+`endDateTime` exactly as the API returned them) — unchanged, already
+satisfied the "raw is sacred" guarantee. Together, a future parser fix can
+recompute `current_bid`/`bid_count`/`end_date` from `raw` alone, without
+re-scraping the lot.
 
 Fixtures captured live 2026-07-31 under `tests/recorder/fixtures/mibid/`:
 `discover_sample.html` (hand-curated real items: 8 of the 36 real closed
@@ -314,8 +330,12 @@ def _fetch_detail_page(guid: str) -> dict | None:
       emit no observation.
     - `{"not_found": True, "http_status": int}` for a confirmed real 404 or
       the "Locked - MiBid" soft-404 (see module docstring).
-    - `{"not_found": False, "url": str, "end_date": datetime}` for a found
-      lot.
+    - `{"not_found": False, "url": str, "end_date": datetime, "end_date_raw":
+      str}` for a found lot. `end_date_raw` is the LITERAL matched
+      `dayjs('...', 'M/D/YYYY h:mm:ss A')` string (e.g. `"8/3/2026 10:00:00
+      AM"`) — kept alongside the parsed `end_date` so `poll()`'s `raw` can
+      carry the actual source text, not just the derived value (see
+      `poll()`'s `raw` construction below).
     """
     url = DETAIL_URL_TMPL.format(guid=guid)
     try:
@@ -340,11 +360,12 @@ def _fetch_detail_page(guid: str) -> dict | None:
     if end_m is None:
         print(f"[mibid] RECORDER ERROR: poll() could not find endDateTime literal for guid {guid} on {resp.url} — unrecognized page shape")
         return None
-    end_date = _parse_detail_dt(end_m.group(1))
+    end_date_raw = end_m.group(1)
+    end_date = _parse_detail_dt(end_date_raw)
     if end_date is None:
-        print(f"[mibid] RECORDER ERROR: poll() could not parse endDateTime {end_m.group(1)!r} for guid {guid}")
+        print(f"[mibid] RECORDER ERROR: poll() could not parse endDateTime {end_date_raw!r} for guid {guid}")
         return None
-    return {"not_found": False, "url": resp.url, "end_date": end_date}
+    return {"not_found": False, "url": resp.url, "end_date": end_date, "end_date_raw": end_date_raw}
 
 
 class MiBidSource:
@@ -357,7 +378,7 @@ class MiBidSource:
             return []
         matches = [
             it for it in items
-            if it.get("status") in ACTIVE_STATUS_CODES
+            if _status_from_code(it.get("status")) == "active"
             and not it.get("isCanceled")
             and _is_furniture(it.get("title", ""))
         ]
@@ -405,7 +426,13 @@ class MiBidSource:
                 source_lot_id=guid,
                 status=status,
                 raw={
-                    "detail_page": {"url": detail["url"]},
+                    # end_date_raw is the literal matched dayjs(...) source
+                    # string, not the derived datetime — see
+                    # _fetch_detail_page's docstring.
+                    "detail_page": {"url": detail["url"], "end_date_raw": detail["end_date_raw"]},
+                    # basic_info is the untouched GetBasicInfo JSON response
+                    # itself (already the literal source payload — currentBid/
+                    # numberOfBids/endDateTime as the API returned them).
                     "basic_info": info,
                 },
                 current_bid=current_bid,
@@ -421,7 +448,7 @@ class MiBidSource:
             return []
         matches = [
             it for it in items
-            if it.get("status") == CLOSED_STATUS_CODE
+            if _status_from_code(it.get("status")) == "closed"
             and not it.get("isCanceled")
             and _is_furniture(it.get("title", ""))
         ]
