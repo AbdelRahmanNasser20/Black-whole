@@ -125,7 +125,7 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 
 # SEED DEFAULTS ONLY — the live deposit rule lives in the `site_settings` table
 # and is edited from the admin Deposits tab. These values are what a fresh DB
-# gets seeded with (see scripts/sql/004_deposits.sql) and what
+# gets seeded with (see scripts/sql/005_deposits.sql) and what
 # automation/site_settings.py falls back to if the DB is unreachable, so a
 # public page never 500s over a settings lookup. Changing them does NOT change
 # the rule on a DB that already has rows.
