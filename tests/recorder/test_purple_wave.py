@@ -4,7 +4,7 @@ verified endpoint + params). No network calls — polite_get is monkeypatched.
 """
 import json
 from decimal import Decimal
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -129,6 +129,11 @@ def test_sold_sweep_raw_roundtrips_unmodified(monkeypatch, sold_items):
         assert raws[str(item["id"])] == item
 
 
+def test_sold_sweep_returns_empty_on_fetch_failure(monkeypatch):
+    monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(None, status_code=403))
+    assert pw.PurpleWaveSource().sold_sweep() == []
+
+
 # --- poll() --------------------------------------------------------
 
 def test_poll_returns_active_observation_for_still_present_lot(monkeypatch, discover_items):
@@ -142,15 +147,61 @@ def test_poll_returns_active_observation_for_still_present_lot(monkeypatch, disc
     assert obs[0].raw == target
 
 
-def test_poll_returns_gone_for_vanished_lot(monkeypatch, discover_items):
+def test_poll_returns_gone_for_vanished_lot_after_its_end_date(monkeypatch, discover_items):
+    # fix round 1: 'gone' requires (a) a healthy fetch and (b) the tracked
+    # lot's own end_date to have already passed — not mere absence.
     monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(discover_items))
-    lots = [{"source_lot_id": "not-a-real-id-999999"}]
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    lots = [{"source_lot_id": "not-a-real-id-999999", "end_date": past_end}]
     obs = pw.PurpleWaveSource().poll(lots)
     assert len(obs) == 1
     assert obs[0].status == "gone"
     assert obs[0].raw["recorder_probe"]["result"] == "not_found"
     assert obs[0].raw["recorder_probe"]["http_status"] == 200
     assert obs[0].raw["recorder_probe"]["url"] == pw.SEARCH_URL
+
+
+def test_poll_absent_lot_before_end_date_emits_nothing(monkeypatch, discover_items):
+    monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(discover_items))
+    future_end = datetime.now(timezone.utc) + timedelta(hours=1)
+    lots = [{"source_lot_id": "not-a-real-id-999999", "end_date": future_end}]
+    obs = pw.PurpleWaveSource().poll(lots)
+    assert obs == []
+
+
+def test_poll_absent_lot_with_unknown_end_date_emits_nothing(monkeypatch, discover_items):
+    monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(discover_items))
+    lots = [{"source_lot_id": "not-a-real-id-999999", "end_date": None}]
+    obs = pw.PurpleWaveSource().poll(lots)
+    assert obs == []
+
+
+def test_poll_fetch_failure_emits_no_observations_even_for_past_end_lots(monkeypatch, capsys):
+    # a transient HTTP failure must never mass-mark tracked lots 'gone' —
+    # append-only means that mistake would be permanent.
+    monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(None, status_code=403))
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    lots = [
+        {"source_lot_id": "would-be-gone-1", "end_date": past_end},
+        {"source_lot_id": "would-be-active-2", "end_date": None},
+    ]
+    obs = pw.PurpleWaveSource().poll(lots)
+    assert obs == []
+    err = capsys.readouterr().out
+    assert "RECORDER ERROR" in err
+    assert "purple_wave" in err
+
+
+def test_poll_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+    def raise_connection_error(*a, **k):
+        raise pw.requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(pw, "polite_get", raise_connection_error)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    obs = pw.PurpleWaveSource().poll([{"source_lot_id": "x", "end_date": past_end}])
+    assert obs == []
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
 
 
 def test_poll_empty_lots_makes_no_request(monkeypatch):
@@ -171,6 +222,24 @@ def test_discover_returns_empty_on_403_without_raising(monkeypatch):
 def test_discover_returns_empty_on_non_list_payload(monkeypatch):
     monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse({"unexpected": "shape"}))
     assert pw.PurpleWaveSource().discover() == []
+
+
+def test_discover_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+    def raise_connection_error(*a, **k):
+        raise pw.requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(pw, "polite_get", raise_connection_error)
+    assert pw.PurpleWaveSource().discover() == []
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+
+
+def test_discover_warns_loudly_on_healthy_but_empty_result(monkeypatch, capsys):
+    monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse([]))
+    assert pw.PurpleWaveSource().discover() == []
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "0 furniture observations" in out
 
 
 # --- money parsing edge cases (mixed str/int in real payloads) -------------

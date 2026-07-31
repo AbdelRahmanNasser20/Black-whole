@@ -39,9 +39,17 @@ LIVE RECON (verified 2026-07-31, this task):
 - No sold/closed feed exists — GSA simply drops a lot from the active list
   once it closes. `sold_sweep()` returns `[]` per the brief; the close
   itself is detected by `poll()`: a tracked lot's `(saleNo, lotNo)` missing
-  from a fresh full-list fetch is reported `status='gone'` (last known
-  snapshot is the de-facto final price — `capture_method` stays
-  `last_snapshot`, decided at the `sold_comps` view layer, not here).
+  from a HEALTHY fresh full-list fetch, **after its own `end_date` has
+  passed**, is reported `status='gone'` (last known snapshot is the de-facto
+  final price — `capture_method` stays `last_snapshot`, decided at the
+  `sold_comps` view layer, not here). A lot missing before its `end_date` (or
+  with an unknown `end_date`) is not yet eligible to be "gone" — it emits no
+  observation this round and is retried on the next due poll. See "poll()
+  gone semantics" below — this is a fix-round-1 correction; the original cut
+  of this adapter inferred 'gone' from mere absence, which both violated the
+  brief (task-2-brief.md:24 — 'gone' means confirmed-absent, not just
+  not-found-this-round) and meant a single failed HTTP call would mass-mark
+  every tracked lot 'gone' (append-only — unrecoverable).
 - Money: `highBidAmount` is a bare float or `null` — `Decimal(str(value))`
   when present.
 - Dates: `aucEndDt`/`aucStartDt` are date-only strings with NO time
@@ -55,11 +63,28 @@ LIVE RECON (verified 2026-07-31, this task):
   printed warning (DEMO_KEY is shared/rate-limited; sign up free at
   https://api.data.gov/signup/).
 
+poll() gone semantics (fix round 1): `_fetch_auctions()` returns `None` to
+mean "the fetch itself failed" (network exception, non-200, bad JSON, bad
+shape) — distinct from a healthy fetch that happens to return an empty or
+non-matching list. `poll()` treats a failed fetch as "no information this
+round": it emits NO observations at all (not even 'gone' ones) and prints a
+loud `RECORDER ERROR` line naming the source and reason, so a transient
+outage never gets misrecorded as every tracked lot vanishing. Only a HEALTHY
+fetch in which a tracked lot's id is absent, AND that lot's own `end_date`
+(supplied by the caller via `store.tracked_active()`'s row) is not None and
+has already passed, produces a `status='gone'` observation.
+
+poll() also re-derives status from the found item's own `auctionStatus`
+(`_status_from_auction_status`) rather than hardcoding `'active'` — GSA
+hasn't been observed to publish a "closed"/"sold" status value (it simply
+drops closed lots), but re-checking rather than assuming keeps `poll()`
+consistent with `discover()` and correct if that ever changes.
+
 Fixture captured live 2026-07-31 under
-`tests/recorder/fixtures/gsa/discover_sample.json` — 20 items (15 furniture
-matches across several categories + 5 non-furniture control items, including
-the one stray lowercase `"preview"` status item), full untouched dicts inside
-the same `{"Results": [...]}` wrapper the real API returns.
+`tests/recorder/fixtures/gsa/discover_sample.json` — 20 items: 7 furniture
+matches + 13 non-furniture control items (including the one stray lowercase
+`"preview"` status item), full untouched dicts inside the same
+`{"Results": [...]}` wrapper the real API returns.
 """
 from __future__ import annotations
 
@@ -67,6 +92,8 @@ import os
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+import requests
 
 from recorder.models import Observation
 from recorder.sources.base import FURNITURE_TERMS, polite_get
@@ -133,6 +160,20 @@ def _is_furniture(item: dict) -> bool:
     return any(term in text for term in FURNITURE_TERMS)
 
 
+def _status_from_auction_status(item: dict) -> str:
+    """Re-derive status from the item's own auctionStatus rather than assuming.
+
+    GSA hasn't been observed to publish an explicit closed/sold status (it
+    just drops closed lots from the feed — see module docstring), but if it
+    ever does, map it sensibly instead of blindly reporting 'active' for any
+    found item.
+    """
+    text = str(item.get("auctionStatus", "")).lower()
+    if "closed" in text or "sold" in text:
+        return "closed"
+    return "active"
+
+
 def _to_observation(item: dict) -> Observation | None:
     lot_id = _lot_id(item)
     if lot_id is None:
@@ -141,7 +182,7 @@ def _to_observation(item: dict) -> Observation | None:
     return Observation(
         source=SOURCE,
         source_lot_id=lot_id,
-        status="active",
+        status=_status_from_auction_status(item),
         raw=item,
         current_bid=_parse_money(item.get("highBidAmount")),
         bid_count=_int_or_none(item.get("biddersCount")),
@@ -149,26 +190,36 @@ def _to_observation(item: dict) -> Observation | None:
     )
 
 
-def _fetch_auctions() -> list[dict]:
-    resp = polite_get(AUCTIONS_URL, params={"api_key": _api_key(), "format": "JSON"})
+def _fetch_auctions() -> list[dict] | None:
+    """Fetch the full active-auctions list. Returns None on ANY fetch failure
+    (network exception, blocked, non-200, bad JSON, unexpected shape) — never
+    an empty list, so callers can tell "fetch failed" apart from "fetch
+    succeeded and there's genuinely nothing there." See module docstring's
+    "poll() gone semantics" for why this distinction is load-bearing.
+    """
+    try:
+        resp = polite_get(AUCTIONS_URL, params={"api_key": _api_key(), "format": "JSON"})
+    except requests.exceptions.RequestException as e:
+        print(f"[gsa] RECORDER ERROR: request failed: {e}")
+        return None
     if resp.status_code in (403, 429):
-        print(f"[gsa] blocked: HTTP {resp.status_code} on {resp.url} — backing off, returning what we have")
-        return []
+        print(f"[gsa] RECORDER ERROR: blocked HTTP {resp.status_code} on {resp.url} — backing off, no data this round")
+        return None
     if resp.status_code != 200:
-        print(f"[gsa] ERROR: unexpected HTTP {resp.status_code} on {resp.url}")
-        return []
+        print(f"[gsa] RECORDER ERROR: unexpected HTTP {resp.status_code} on {resp.url}")
+        return None
     try:
         data = resp.json()
     except ValueError:
-        print(f"[gsa] ERROR: non-JSON response from {resp.url}")
-        return []
+        print(f"[gsa] RECORDER ERROR: non-JSON response from {resp.url}")
+        return None
     if not isinstance(data, dict) or "Results" not in data:
-        print(f"[gsa] ERROR: unexpected response shape (no 'Results' key) from {resp.url}")
-        return []
+        print(f"[gsa] RECORDER ERROR: unexpected response shape (no 'Results' key) from {resp.url}")
+        return None
     results = data.get("Results")
     if not isinstance(results, list):
-        print(f"[gsa] ERROR: 'Results' is not a list in response from {resp.url}")
-        return []
+        print(f"[gsa] RECORDER ERROR: 'Results' is not a list in response from {resp.url}")
+        return None
     return results
 
 
@@ -177,33 +228,54 @@ class GSASource:
 
     def discover(self) -> list[Observation]:
         items = _fetch_auctions()
+        if items is None:
+            print("[gsa] RECORDER ERROR: discover() aborted — fetch failed, 0 observations")
+            return []
         active_furniture = [
             it for it in items
             if str(it.get("auctionStatus", "")).lower() == "active" and _is_furniture(it)
         ]
         out = [_to_observation(it) for it in active_furniture]
-        return [o for o in out if o is not None]
+        result = [o for o in out if o is not None]
+        if not result:
+            print(
+                f"[gsa] WARNING: discover() found 0 furniture-matched active lots "
+                f"out of {len(items)} total fetched — check FURNITURE_TERMS / "
+                f"auctionStatus filter for drift"
+            )
+        return result
 
     def poll(self, lots: list[dict]) -> list[Observation]:
-        tracked_ids = {str(lot["source_lot_id"]) for lot in lots}
-        if not tracked_ids:
+        if not lots:
             return []
         items = _fetch_auctions()
+        if items is None:
+            print(
+                f"[gsa] RECORDER ERROR: poll() fetch failed — skipping gone-detection "
+                f"this round for {len(lots)} tracked lot(s), emitting no observations"
+            )
+            return []
+        now = datetime.now(timezone.utc)
         by_id = {lid: it for it in items if (lid := _lot_id(it)) is not None}
         observations: list[Observation] = []
-        for lot_id in tracked_ids:
+        for lot in lots:
+            lot_id = str(lot["source_lot_id"])
             item = by_id.get(lot_id)
             if item is not None:
                 obs = _to_observation(item)
                 if obs is not None:
                     observations.append(obs)
-            else:
+                continue
+            end_date = lot.get("end_date")
+            if end_date is not None and end_date <= now:
                 observations.append(Observation(
                     source=SOURCE,
                     source_lot_id=lot_id,
                     status="gone",
                     raw={"recorder_probe": {"result": "not_found", "http_status": 200, "url": AUCTIONS_URL}},
                 ))
+            # else: absent from a healthy fetch but not yet past end_date (or
+            # end_date unknown) — emit nothing this round, retried later.
         return observations
 
     def sold_sweep(self) -> list[Observation]:

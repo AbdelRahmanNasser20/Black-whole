@@ -38,8 +38,7 @@ LIVE RECON (verified 2026-07-31, this task):
   silently ignored by the API — same no-op as `q`). `poll()` therefore re-runs
   the same `family_category_id:646` sweep (current volume is tiny, ~38 active
   items, so `perPage=500` always covers it in one page) and matches tracked
-  ids against the fresh result set; a tracked id absent from that set is
-  reported `gone`.
+  ids against the fresh result set.
 - Money: `current_bid` comes back as either a decimal string ("55.00") or a
   bare number (325) depending on the item — always parsed via
   `Decimal(str(value))`.
@@ -52,6 +51,22 @@ LIVE RECON (verified 2026-07-31, this task):
   id — matches the `purplewave-{id}` pattern already used elsewhere in this
   project's research (`docs/blackwhole-28/research/R2-data-model.md`).
 
+poll() gone semantics (fix round 1): `_fetch_search()` returns `None` to mean
+"the fetch itself failed" (network exception, blocked, non-200, bad JSON, bad
+shape) — distinct from a healthy fetch that returns an empty or
+non-matching list. `poll()` treats a failed fetch as "no information this
+round": it emits NO observations at all (not even 'gone' ones) and prints a
+loud `RECORDER ERROR` line, so a transient outage is never misrecorded as
+every tracked lot vanishing (append-only — that mistake would be permanent).
+Only a HEALTHY fetch in which a tracked lot's id is absent, AND that lot's
+own `end_date` (supplied by the caller via `store.tracked_active()`'s row) is
+not None and has already passed, produces a `status='gone'` observation. A
+lot absent from a healthy fetch but not yet past its end_date (or with an
+unknown end_date) emits nothing this round — it's retried on the next due
+poll. This corrects the original cut of this adapter, which inferred 'gone'
+from mere absence regardless of end_date or fetch health, violating
+task-2-brief.md:24.
+
 Fixtures captured live 2026-07-31 under `tests/recorder/fixtures/purple_wave/`
 (trimmed to 6 items each — full untouched item dicts, just a shorter list):
 `discover_furniture.json` (the family_category_id:646 active sweep) and
@@ -62,6 +77,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+
+import requests
 
 from recorder.models import Observation
 from recorder.sources.base import FURNITURE_TERMS, polite_get  # noqa: F401  (FURNITURE_TERMS kept per contract; unused — see docstring)
@@ -139,28 +156,38 @@ def _to_observation(item: dict, *, status: str | None = None) -> Observation | N
     )
 
 
-def _fetch_search(*, extra_params: dict | None = None) -> list[dict]:
+def _fetch_search(*, extra_params: dict | None = None) -> list[dict] | None:
+    """Run the family_category_id:646 search. Returns None on ANY fetch
+    failure (network exception, blocked, non-200, bad JSON, unexpected shape)
+    — never an empty list, so callers can tell "fetch failed" apart from
+    "fetch succeeded and there's genuinely nothing there." See module
+    docstring's "poll() gone semantics" for why this distinction matters.
+    """
     params = {
         "perPage": SEARCH_PER_PAGE,
         "filters": f"family_category_id:{FURNITURE_FAMILY_CATEGORY_ID}",
     }
     if extra_params:
         params.update(extra_params)
-    resp = polite_get(SEARCH_URL, params=params)
+    try:
+        resp = polite_get(SEARCH_URL, params=params)
+    except requests.exceptions.RequestException as e:
+        print(f"[purple_wave] RECORDER ERROR: request failed: {e}")
+        return None
     if resp.status_code in (403, 429):
-        print(f"[purple_wave] blocked: HTTP {resp.status_code} on {resp.url} — backing off, returning what we have")
-        return []
+        print(f"[purple_wave] RECORDER ERROR: blocked HTTP {resp.status_code} on {resp.url} — backing off, no data this round")
+        return None
     if resp.status_code != 200:
-        print(f"[purple_wave] ERROR: unexpected HTTP {resp.status_code} on {resp.url}")
-        return []
+        print(f"[purple_wave] RECORDER ERROR: unexpected HTTP {resp.status_code} on {resp.url}")
+        return None
     try:
         data = resp.json()
     except ValueError:
-        print(f"[purple_wave] ERROR: non-JSON response from {resp.url}")
-        return []
+        print(f"[purple_wave] RECORDER ERROR: non-JSON response from {resp.url}")
+        return None
     if not isinstance(data, list):
-        print(f"[purple_wave] ERROR: unexpected response shape (not a list) from {resp.url}")
-        return []
+        print(f"[purple_wave] RECORDER ERROR: unexpected response shape (not a list) from {resp.url}")
+        return None
     return data
 
 
@@ -169,32 +196,56 @@ class PurpleWaveSource:
 
     def discover(self) -> list[Observation]:
         items = _fetch_search()
+        if items is None:
+            print("[purple_wave] RECORDER ERROR: discover() aborted — fetch failed, 0 observations")
+            return []
         out = [_to_observation(it) for it in items]
-        return [o for o in out if o is not None]
+        result = [o for o in out if o is not None]
+        if not result:
+            print(
+                f"[purple_wave] WARNING: discover() found 0 furniture observations "
+                f"out of {len(items)} raw items — check family_category_id for drift"
+            )
+        return result
 
     def poll(self, lots: list[dict]) -> list[Observation]:
-        tracked_ids = {str(lot["source_lot_id"]) for lot in lots}
-        if not tracked_ids:
+        if not lots:
             return []
         items = _fetch_search()
+        if items is None:
+            print(
+                f"[purple_wave] RECORDER ERROR: poll() fetch failed — skipping "
+                f"gone-detection this round for {len(lots)} tracked lot(s), "
+                f"emitting no observations"
+            )
+            return []
+        now = datetime.now(timezone.utc)
         by_id = {str(it["id"]): it for it in items if it.get("id") is not None}
         observations: list[Observation] = []
-        for lot_id in tracked_ids:
+        for lot in lots:
+            lot_id = str(lot["source_lot_id"])
             item = by_id.get(lot_id)
             if item is not None:
                 obs = _to_observation(item)
                 if obs is not None:
                     observations.append(obs)
-            else:
+                continue
+            end_date = lot.get("end_date")
+            if end_date is not None and end_date <= now:
                 observations.append(Observation(
                     source=SOURCE,
                     source_lot_id=lot_id,
                     status="gone",
                     raw={"recorder_probe": {"result": "not_found", "http_status": 200, "url": SEARCH_URL}},
                 ))
+            # else: absent from a healthy fetch but not yet past end_date (or
+            # end_date unknown) — emit nothing this round, retried later.
         return observations
 
     def sold_sweep(self) -> list[Observation]:
         items = _fetch_search(extra_params={"dateType": "past"})
+        if items is None:
+            print("[purple_wave] RECORDER ERROR: sold_sweep() aborted — fetch failed, 0 observations")
+            return []
         out = [_to_observation(it, status="closed") for it in items]
         return [o for o in out if o is not None]
