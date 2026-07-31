@@ -48,11 +48,14 @@ from ..config import (
     PUBLIC_BASE_URL,
 )
 from ..progress import EVENT_PREFIX, parse as parse_event
+from .. import config as app_config
 from .. import db
 from .. import catalog_feed
 from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
+from .. import deposits
+from .. import stripe_gateway
 from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import auth as auth_svc
@@ -344,6 +347,33 @@ async def auth_logout(response: Response):
 
 # ───────────────────────────── public pages ─────────────────────────────
 
+def _reserve_enabled() -> bool:
+    """The Reserve feature's single on/off switch — no Stripe key, no feature.
+
+    Read at request time (not import time) so flipping the key doesn't need a
+    redeploy and tests can monkeypatch it.
+    """
+    return stripe_gateway.enabled()
+
+
+def _reservable(row: dict | None) -> bool:
+    """Can a buyer put money down on this lot right now?
+
+    Deliberately stricter than "is it visible": a lot with no price has no
+    quote, and a lot at zero remaining has nothing to hold. Hidden/sold lots
+    still render their detail page (BLACKWHOLE-29 sold archive) — they just
+    don't get a Reserve button.
+    """
+    if not row or row.get("status") == "hidden" or inventory.is_sold(row):
+        return False
+    try:
+        price = float(row.get("price_per_chair") or 0)
+        remaining = int(row.get("quantity_remaining") or 0)
+    except (TypeError, ValueError):
+        return False
+    return price > 0 and remaining > 0
+
+
 def _public_ctx(extra: dict) -> dict:
     """Common context for every public-page template (footer link etc)."""
     return {
@@ -351,6 +381,7 @@ def _public_ctx(extra: dict) -> dict:
         "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
         "base_url": PUBLIC_BASE_URL,
         "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
+        "reserve_enabled": _reserve_enabled(),
         **extra,
     }
 
@@ -939,6 +970,70 @@ async def _notify_new_inquiry(row: dict) -> None:
         pass
 
 
+_DEPOSIT_ALERT_HEADS = {
+    "checkout.session.completed": "💰 DEPOSIT PAID",
+    "checkout.session.async_payment_succeeded": "💰 DEPOSIT PAID",
+    "checkout.session.async_payment_failed": "✗ ACH FAILED",
+    "checkout.session.expired": "✗ CHECKOUT EXPIRED",
+    "charge.refunded": "↩ REFUNDED",
+}
+
+
+def _dollars(cents: Any) -> str:
+    return f"${(int(cents or 0) / 100):,.2f}"
+
+
+async def _notify_deposit(row: dict, event_type: str) -> None:
+    """Money moved — tell the operator. Best-effort, exactly like the lead ping.
+
+    Only called when `deposits.transition()` reported `changed=True`, so a
+    Stripe retry of an already-applied event stays silent.
+    """
+    try:
+        status = (row or {}).get("status") or ""
+        head = _DEPOSIT_ALERT_HEADS.get(event_type, "◉ DEPOSIT UPDATE")
+        # A completed session that only reached 'processing' is an ACH debit in
+        # flight, not money in the bank — say so rather than crying "PAID".
+        if status == "processing":
+            head = "🏦 ACH INITIATED"
+        elif status == "failed":
+            head = "✗ ACH FAILED"
+        elif status == "refunded":
+            head = "↩ REFUNDED"
+        elif status == "canceled":
+            head = "✗ CHECKOUT EXPIRED"
+
+        kind = (row.get("kind") or "deposit").strip()
+        bits = [f"{head} · #{row.get('id')}"]
+        bits.append(
+            f"{_dollars(row.get('amount_cents'))} "
+            f"({'deposit' if kind == 'deposit' else 'paid in full'})"
+            + (f" · via {row['payment_method']}" if row.get("payment_method") else "")
+        )
+        lot_id = row.get("lot_id")
+        qty = row.get("quantity")
+        lot_line = f"{PUBLIC_BASE_URL}/listings/{lot_id}" if lot_id else "—"
+        bits.append(f"lot {lot_id or '—'} × {qty or '—'} — {lot_line}")
+
+        contact = " / ".join(
+            x for x in (row.get("buyer_email"), row.get("buyer_phone")) if x
+        )
+        who = row.get("buyer_name") or "—"
+        bits.append(f"{who}{(' — ' + contact) if contact else ''}")
+
+        if row.get("failure_reason"):
+            bits.append(f"reason: {row['failure_reason']}")
+
+        if status == "paid":
+            bits.append(
+                "⚠ inventory NOT auto-decremented — adjust qty on the Inventory tab"
+            )
+        bits.append(f"→ {PUBLIC_BASE_URL}/admin (Deposits)")
+        await telegram_alerts.send_message("\n".join(bits), topic="leads")
+    except Exception:
+        pass
+
+
 @app.post("/contact")
 async def public_contact(payload: dict):
     payload = payload or {}
@@ -1015,6 +1110,189 @@ async def public_subscribe(payload: dict):
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
+
+
+# ── Reserve with deposit (Stripe Checkout) ───────────────────────────────────
+# All of these are PUBLIC paths, deliberately outside `/api/`: `auth.py`'s
+# PROTECTED_PREFIXES gate `/admin`, `/api/`, `/screenshot/`, so a buyer can
+# still reach Checkout with operator auth switched on. Don't move them.
+#
+# ROUTE ORDER IS LOAD-BEARING: `/reserve/success` must be registered BEFORE
+# `/reserve/{lot_id}` or the path param swallows "success" and every buyer
+# coming back from Stripe lands on a 404.
+
+
+def _reserve_lot_or_404(lot_id: str) -> dict:
+    """Dark feature, unknown lot and hidden lot all look the same from outside."""
+    if not _reserve_enabled():
+        raise HTTPException(404, "not found")
+    row = inventory.get(lot_id)
+    if not row or row.get("status") == "hidden":
+        raise HTTPException(404, "listing not found")
+    return row
+
+
+@app.get("/reserve/success", response_class=HTMLResponse)
+async def reserve_success(request: Request, session_id: str = Query("")):
+    """Where Stripe drops the buyer after Checkout.
+
+    The redirect races the webhook, and on ACH it beats it by days — so this
+    page reads our row and says what's actually true: `paid` => confirmed,
+    anything else => "we've got your payment initiated". It never asserts a
+    payment landed on the strength of the redirect alone.
+    """
+    if not _reserve_enabled():
+        raise HTTPException(404, "not found")
+    row = await asyncio.to_thread(deposits.get_by_session, session_id)
+    if not row:
+        raise HTTPException(404, "reservation not found")
+    return templates.TemplateResponse(
+        request, "reserve_success.html",
+        _public_ctx({
+            "deposit": row,
+            "is_paid": row.get("status") == "paid",
+            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+        }),
+    )
+
+
+@app.get("/reserve/{lot_id}", response_class=HTMLResponse)
+async def reserve_page(request: Request, lot_id: str):
+    row = _reserve_lot_or_404(lot_id)
+    if not _reservable(row):
+        # Sold out, unpriced, or nothing left — there's no quote to show, so
+        # send them back to the lot page instead of a form that can't submit.
+        return RedirectResponse(f"/listings/{lot_id}", status_code=303)
+    _decorate(row)
+    # deposit_rules() reads site_settings (DB) — off the event loop.
+    pct, min_cents = await asyncio.to_thread(deposits.deposit_rules, row)
+    return templates.TemplateResponse(
+        request, "reserve.html",
+        _public_ctx({
+            "item": row,
+            "hero": row.get("hero_src"),
+            "pct": pct,
+            "min_cents": min_cents,
+            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+            "canceled": request.query_params.get("canceled") == "1",
+        }),
+    )
+
+
+@app.post("/reserve/{lot_id}/checkout")
+async def reserve_checkout(lot_id: str, payload: dict):
+    """Turn a quantity into a Stripe Checkout URL.
+
+    Everything the client sends is a *request*, not a fact. The quantity is
+    re-bounded against `quantity_remaining`, and the amount is re-derived from
+    the lot's own price by `deposits.quote_for_lot` — an `amount` field in the
+    payload is read by nobody. The row is written BEFORE the session so a
+    session we never hear about still has something to reconcile against.
+    """
+    row = _reserve_lot_or_404(lot_id)
+    if not _reservable(row):
+        raise HTTPException(400, "lot is not reservable")
+    payload = payload or {}
+
+    remaining = int(row.get("quantity_remaining") or 0)
+    try:
+        quantity = int(payload.get("quantity"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quantity required")
+    if quantity < 1 or quantity > remaining:
+        raise HTTPException(400, f"quantity must be between 1 and {remaining}")
+
+    kind = (payload.get("kind") or "deposit").strip()
+    if kind not in deposits.DEPOSIT_KINDS:
+        raise HTTPException(400, "kind must be 'deposit' or 'full'")
+
+    # Same contact rule as the contact form: a name plus at least one way to
+    # reach them. A deposit we can't chase to a pickup is worse than no deposit.
+    name = (payload.get("name") or "").strip()
+    email = (payload.get("email") or "").strip() or None
+    phone = (payload.get("phone") or "").strip() or None
+    if not name:
+        raise HTTPException(400, "name required")
+    if not email and not phone:
+        raise HTTPException(400, "email or phone required")
+
+    try:
+        quote = await asyncio.to_thread(
+            deposits.quote_for_lot, row, quantity=quantity, kind=kind
+        )
+        deposit = await asyncio.to_thread(
+            deposits.create_pending,
+            lot_id=row.get("lot_id") or lot_id,
+            quantity=quantity,
+            price_per_chair=row.get("price_per_chair"),
+            quote=quote,
+            buyer_name=name,
+            buyer_email=email,
+            buyer_phone=phone,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    try:
+        session = await asyncio.to_thread(
+            stripe_gateway.create_checkout_session, deposit=deposit, lot=row
+        )
+    except Exception:
+        # Close the row out rather than leaving a pending record no webhook can
+        # ever resolve (there is no session to expire).
+        await asyncio.to_thread(
+            deposits.transition, deposit["id"], "canceled",
+            failure_reason="session_create_failed",
+        )
+        raise HTTPException(502, "checkout_unavailable")
+
+    await asyncio.to_thread(deposits.attach_session, deposit["id"], session.id)
+    return {"ok": True, "url": session.url, "deposit_id": deposit["id"]}
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def public_terms(request: Request):
+    """The deposit policy, on a stable URL.
+
+    Renders even when the feature is dark — the policy is the trust artifact and
+    gets linked from DMs and emails whether or not Checkout is live. Only the
+    call-to-action copy is gated on `reserve_enabled`.
+    """
+    return templates.TemplateResponse(
+        request, "terms.html",
+        _public_ctx({"policy": stripe_gateway.REFUND_POLICY_SHORT}),
+    )
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe's side of the ledger.
+
+    The signature is the ONLY authentication this endpoint has, so an
+    unverifiable body is a 400 and nothing else happens. Once verified, the
+    answer is always 2xx — an unknown event type, a replay, and a row we can't
+    match are all *fine*; returning non-2xx just makes Stripe redeliver for
+    three days.
+
+    Note for go-live: Cloudflare Bot Fight Mode blocks Stripe's POSTs. A WAF
+    skip rule for this path is part of the runbook.
+    """
+    if not _reserve_enabled() or not app_config.STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(404, "not found")
+
+    raw = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    try:
+        event = await asyncio.to_thread(stripe_gateway.verify_webhook, raw, signature)
+    except Exception:
+        raise HTTPException(400, "invalid signature")
+
+    row, changed = await asyncio.to_thread(deposits.apply_stripe_event, event)
+    # `changed` is what keeps a Stripe retry from re-pinging the operator: the
+    # state machine no-ops the second delivery and reports False.
+    if changed and row:
+        asyncio.create_task(_notify_deposit(row, event.get("type") or ""))
+    return {"ok": True}
 
 
 # ── unsubscribe (public capability URL, BLACKWHOLE-10 / PRD §6) ──────────────
