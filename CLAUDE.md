@@ -126,6 +126,51 @@ from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute
 
 **Dashboard URL migration (breaking):** the admin console moved from `/` → `/admin` to make room for the public site. JS/API paths under `/api/*`, `/image/*`, `/screenshot/*`, `/static/*` are unchanged. Bookmarks and any external scripts hitting `/` now land on the customer-facing landing page instead.
 
+## Freight estimates + deposits (storefront) — READ BEFORE TOUCHING MONEY OR QUOTE CODE
+
+Two paired features on the public site (branch `freight-quotes-and-deposits`):
+
+**Freight estimate widget** (`/listings/{lot_id}` → "FREIGHT TO YOUR ZIP").
+- `automation/freight_estimate.py` is the vendored estimator core, copied from the CRM's
+  `origin/BWCRM-19-feature-freight-quote-engine` branch TIP (**PR #43 is NOT rebased and NOT
+  touched** — it stays a separate ticket). Stdlib-only, zero network on the estimator path,
+  no DB. Distance = committed 3-digit-ZIP centroid table (`automation/zip_centroids.py`,
+  regen via `scripts/gen_zip_centroids.py`, GeoNames CC-BY) — do NOT add pgeocode/pandas.
+- **HARD RULE: never invent a freight number.** Lane failures (international, offshore,
+  Alaska 995–999, unresolvable ZIP) raise `FreightUnavailable` → the endpoint returns
+  `{"ok": false, "reason": "unquotable"}` and the widget hands off to the contact form.
+  A Warp carrier-API failure falls back to the estimator (deliberate divergence from the
+  CRM, which raises). `WARP_API_KEY` set = live carrier rates, unset = estimator; both fine.
+- Public endpoint `POST /freight-estimate` (+ `/freight-estimate/email`) — deliberately NOT
+  under `/api/` (that prefix is auth-walled). Rate-limited in-process (`web/rate_limit.py`,
+  Cloudflare fronts it). Every estimate logs best-effort to the shared `freight_quotes`
+  table with `source='storefront'` (migration `scripts/sql/006_freight_quotes_storefront.sql`)
+  — these are hot leads; a Telegram `leads` ping fires per estimate.
+- `lbs_per_chair=13.0` is still an UNMEASURED placeholder — weigh a chair, update the
+  calibration in `freight_estimate.py`, ranges tighten everywhere.
+
+**Reserve with deposit** (Stripe Checkout).
+- **Dark-ship gate:** `STRIPE_SECRET_KEY` unset → no Reserve button renders, `/reserve/*`
+  and `/stripe/webhook` 404. Safe to deploy any time; flipping live = setting the two
+  `STRIPE_*` keys in Render (`blackwhole-secrets`). Go-live steps: `docs/stripe_deposits_runbook.md`.
+- Deposit rule = 15% of qty × price/chair, floor $200 — **live values in `site_settings`**
+  (admin Deposits tab edits them; env `DEPOSIT_*_DEFAULT` are seed fallbacks only). Per-lot
+  `inventory.deposit_pct_override` wins over the global pct. Rails: deposit = card + ACH;
+  pay-in-full = ACH only. Amounts are computed SERVER-SIDE in int cents
+  (`automation/deposits.py::quote`) — never trust a client amount.
+- `automation/stripe_gateway.py` is the ONLY module importing `stripe` (lazy). Webhook
+  events flow through `deposits.apply_stripe_event` → a status state machine
+  (`pending→processing→paid→refunded`, illegal moves are no-ops) whose `changed` flag gates
+  Telegram alerts — replays never double-alert. ACH settles async: `checkout.session.completed`
+  may only reach `processing`; `async_payment_succeeded/failed` finish it.
+- A paid deposit does **NOT** auto-decrement `quantity_remaining` (v1) — the alert + admin
+  tab say so; operator adjusts inventory by hand. Refunds happen in the Stripe dashboard;
+  `charge.refunded` syncs the row.
+- Migration `scripts/sql/005_deposits.sql` (deposits + site_settings + override column).
+  Both 005 and 006 are hand-applied to Supabase; header stamps say PENDING until then.
+- Route-order gotcha: `/reserve/success` is registered BEFORE `/reserve/{lot_id}` — keep it
+  that way or `lot_id="success"` swallows it.
+
 ## Current status
 
 **End-to-end pipeline is working.** First full successful run finished 2026-04-17 on `https://www.govdeals.com/en/asset/305/10340`:
