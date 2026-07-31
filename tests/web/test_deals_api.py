@@ -12,7 +12,8 @@ def _client(monkeypatch, rows):
 
     def fake_fetch_all(sql, params=()):
         captured.setdefault("sqls", []).append(sql)
-        if "FROM deal_lots WHERE" in sql and "count(*)" not in sql and "GROUP BY" not in sql:
+        # The rows query is the only one selecting the lateral verdict join.
+        if "row_to_json(v.*) AS verdict" in sql:
             captured["rows_sql"] = sql
             captured["rows_params"] = params
             return [dict(r) for r in rows]

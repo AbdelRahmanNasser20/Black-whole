@@ -34,6 +34,8 @@ FEED_COLUMNS = [
 AVAILABILITY = "in stock"
 CONDITION = "used"
 BRAND = "BLACKWHOLE Liquidation"
+# Attribution for clicks arriving from the FB catalog (Apollo/analytics read these).
+UTM_QUERY = "utm_source=facebook&utm_medium=catalog&utm_campaign=fb_shop"
 CURRENCY = "USD"
 
 # Stay comfortably under FB's field limits (title 200, description 9999).
@@ -116,7 +118,7 @@ def feed_row(row: dict, base_url: str | None = None) -> dict | None:
         "availability": AVAILABILITY,
         "condition": CONDITION,
         "price": price,
-        "link": f"{base}/listings/{lot_id}",
+        "link": f"{base}/listings/{lot_id}?{UTM_QUERY}",
         "image_link": image,
         "brand": BRAND,
     }

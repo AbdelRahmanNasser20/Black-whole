@@ -11,7 +11,7 @@ import io
 import pytest
 from fastapi.testclient import TestClient
 
-from automation import inventory
+from automation import catalog_feed, inventory
 from automation.web import app as app_mod
 from automation.web import auth as auth_svc
 from automation.web.app import app
@@ -55,7 +55,8 @@ def test_feed_returns_csv_rows(monkeypatch):
     assert len(parsed) == 1
     assert parsed[0]["id"] == "snap_06_asu_event_phoenix"
     assert parsed[0]["price"] == "28.00 USD"
-    assert parsed[0]["link"].endswith("/listings/snap_06_asu_event_phoenix")
+    assert parsed[0]["link"].endswith(
+        f"/listings/snap_06_asu_event_phoenix?{catalog_feed.UTM_QUERY}")
     assert parsed[0]["brand"] == "BLACKWHOLE Liquidation"
 
 
@@ -81,7 +82,7 @@ def test_feed_honors_site_base_url_env(monkeypatch):
     monkeypatch.setattr(inventory, "list_catalog_feed", lambda: [_lot(lot_id="x")])
     r = _client().get("/catalog/facebook.csv")
     row = next(csv.DictReader(io.StringIO(r.text)))
-    assert row["link"] == "https://staging.example.com/listings/x"
+    assert row["link"] == f"https://staging.example.com/listings/x?{catalog_feed.UTM_QUERY}"
 
 
 def test_feed_public_even_with_admin_auth_enabled(monkeypatch):
