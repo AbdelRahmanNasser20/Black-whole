@@ -1,13 +1,25 @@
-"""Gemini steps of the analyze pipeline: identity extraction + comp judging.
+"""LLM steps of the analyze pipeline: identity extraction + comp judging.
 
 Retrieval-then-reasoning: the LLM identifies and filters; prices come only
 from retrieved sold comps (deals/valuation.py). est_resale_per_unit is the
-degraded-mode fallback and is always confidence='low' downstream."""
+degraded-mode fallback and is always confidence='low' downstream.
+
+Provider comes from `deals/llm_provider.py` — the same dispatch classification
+uses. This was hardcoded to `gemini-2.5-flash` until 2026-07-29, which meant the
+whole analyze pass died the moment that key's prepay balance ran out, with no
+way to point it anywhere else. `2.5-flash` was also a poor fit on its own terms:
+it's a *thinking* model, billing hidden reasoning tokens for an answer that is a
+few dozen tokens of JSON.
+
+These two prompts are ~5x larger than the classify prompt, which is why the
+provider paces on estimated tokens rather than a flat requests-per-minute — see
+the module docstring there.
+"""
 import json
 from dataclasses import dataclass, field
 from deals.comps import Comp
+from deals.llm_provider import LlmUnavailable, chat
 from deals.models import Lot
-from automation import config
 
 class LlmStepError(Exception):
     pass
@@ -70,18 +82,14 @@ def parse_judge_response(text: str, comps: list[Comp]) -> list[Comp]:
     return [comps[i] for i in idx
             if isinstance(i, int) and 0 <= i < len(comps)]
 
-def _gemini(prompt: str) -> str:
-    from google import genai
-    client = genai.Client(api_key=config.GEMINI_API_KEY)
-    resp = client.models.generate_content(model="gemini-2.5-flash", contents=prompt)
-    return resp.text or ""
-
 def extract_identity(lot: Lot) -> LotIdentity:
+    # 300 output tokens: the reply carries up to three search queries plus the
+    # identity fields, and a truncated JSON object parses as a hard failure.
     try:
-        text = _gemini(_IDENTITY_PROMPT.format(
-            title=lot.title[:200], desc=(lot.description or "")[:1500]))
-    except Exception as e:
-        raise LlmStepError(f"gemini identity call failed: {e}") from e
+        text = chat(_IDENTITY_PROMPT.format(
+            title=lot.title[:200], desc=(lot.description or "")[:1500]), max_tokens=300)
+    except LlmUnavailable as e:
+        raise LlmStepError(f"identity call failed: {e}") from e
     return parse_identity_response(text)
 
 def judge_comps(identity: LotIdentity, comps: list[Comp]) -> list[Comp]:
@@ -90,7 +98,12 @@ def judge_comps(identity: LotIdentity, comps: list[Comp]) -> list[Comp]:
     listings = "\n".join(f"{i}: {c.title} (${c.price:.0f})" for i, c in enumerate(comps[:40]))
     ident_str = " ".join(filter(None, [identity.brand, identity.model, identity.item_type]))
     try:
-        text = _gemini(_JUDGE_PROMPT.format(identity=ident_str, listings=listings))
-    except Exception:
+        text = chat(_JUDGE_PROMPT.format(identity=ident_str, listings=listings),
+                    max_tokens=200)
+    except LlmUnavailable:
+        # Keeping nothing is the safe read: downstream falls back to the
+        # estimate path at confidence='low' rather than valuing off unvetted
+        # comps. Deliberately not raising — one unreachable judge call must not
+        # cost us the whole lot's analysis.
         return []
     return parse_judge_response(text, comps[:40])

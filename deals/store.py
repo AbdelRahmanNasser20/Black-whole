@@ -53,8 +53,25 @@ CREATE TABLE IF NOT EXISTS deal_snapshots (
 CREATE INDEX IF NOT EXISTS ix_deal_snap_key ON deal_snapshots(asset_id,account_id,auction_id,observed_at DESC);
 """
 
+BID_OBS_COLUMNS = ["asset_id","account_id","auction_id","observed_at","bid_count",
+    "current_bid","currency_code","high_bidder","high_bidder_username","bid_increment",
+    "visitors","hits","watcher_count","end_utc","status"]
+
+def _bid_obs_ddl() -> str:
+    """Read the bidder DDL from its file of record rather than restating it here.
+
+    `deal_lots`/`deal_snapshots` keep a second copy of their schema in
+    scripts/sql/deals_schema.sql and the two have to be hand-synced; there's no
+    reason to repeat that for a new table when the file already ships with the
+    repo."""
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "scripts" / "sql" / "deal_bid_observations.sql"
+    return p.read_text()
+
 def init_schema() -> None:
     for stmt in filter(str.strip, DDL.split(";")):
+        db.execute(stmt)
+    for stmt in filter(str.strip, _bid_obs_ddl().split(";")):
         db.execute(stmt)
     from deals.verdict_store import init_verdict_schema
     init_verdict_schema()
@@ -142,3 +159,69 @@ def due_for_poll(now: datetime) -> list[Lot]:
         except ValueError as e:
             print(f"deals.store.due_for_poll: skipping malformed stored row: {e}", file=sys.stderr)
     return lots
+
+# ── rival-bidder observations ────────────────────────────────────────────────
+# See deals/bidders.py for why these live apart from deal_snapshots.
+
+def append_bid_observation(state) -> bool:
+    """Write one observation, change-gated. Returns True if a row was written."""
+    from deals.bidders import is_bid_change
+    prev = latest_bid_observation((state.asset_id, state.account_id, state.auction_id))
+    if not is_bid_change(prev, state):
+        return False
+    cols = ",".join(BID_OBS_COLUMNS)
+    ph = ",".join(["%s"] * len(BID_OBS_COLUMNS))
+    db.execute(f"INSERT INTO deal_bid_observations ({cols}) VALUES ({ph})",
+        (state.asset_id, state.account_id, state.auction_id, state.observed_at,
+         state.bid_count, state.current_bid, state.currency_code, state.high_bidder,
+         state.high_bidder_username, state.bid_increment, state.visitors, state.hits,
+         state.watcher_count, state.end_utc, state.status))
+    return True
+
+def latest_bid_observation(key: tuple[int, int, int]):
+    from deals.bidders import BidState
+    r = db.fetch_one(f"""SELECT {','.join(BID_OBS_COLUMNS)} FROM deal_bid_observations
+        WHERE asset_id=%s AND account_id=%s AND auction_id=%s
+        ORDER BY observed_at DESC LIMIT 1""", key)
+    if not r:
+        return None
+    return BidState(**{c: (float(r[c]) if c in ("current_bid", "bid_increment") and r[c] is not None
+                          else r[c]) for c in BID_OBS_COLUMNS})
+
+def favorite_asset_ids() -> list[str]:
+    """Raw `asset_id` keys the operator starred on the Auctions tab."""
+    return [r["asset_id"] for r in db.fetch_all(
+        "SELECT asset_id FROM auction_favorites ORDER BY starred_at DESC")]
+
+def live_auction_id(asset_id: int, account_id: int) -> int | None:
+    """Newest still-open auction we've stored for this asset."""
+    r = db.fetch_one("""SELECT auction_id FROM deal_lots
+        WHERE asset_id=%s AND account_id=%s AND end_utc > now()
+        ORDER BY auction_id DESC LIMIT 1""", (asset_id, account_id))
+    return r["auction_id"] if r else None
+
+def bidder_targets(limit: int = 200, *, category: str | None = "seating_furniture",
+                   title_like: str | None = None, ending_within_hours: int | None = None,
+                   min_bids: int = 0) -> list[tuple[int, int, int]]:
+    """Open lots worth sampling for bidder identity, soonest-closing first.
+
+    Soonest-first is the whole ordering rationale: a lead change on a lot that
+    closes tomorrow is unrecoverable, one on a lot closing in nine days can be
+    caught next pass. `min_bids=1` narrows to contested lots — a lot with no
+    bids has no bidder to identify, so sampling it spends a request to learn
+    nothing."""
+    where = ["end_utc > now()", "outcome_complete IS NOT TRUE"]
+    params: list = []
+    if min_bids:
+        where.append("bid_count >= %s"); params.append(min_bids)
+    if category:
+        where.append("canonical_category = %s"); params.append(category)
+    if title_like:
+        where.append("title ILIKE %s"); params.append(f"%{title_like}%")
+    if ending_within_hours:
+        where.append("end_utc < now() + make_interval(hours => %s)")
+        params.append(ending_within_hours)
+    params.append(limit)
+    rows = db.fetch_all(f"""SELECT asset_id, account_id, auction_id FROM deal_lots
+        WHERE {' AND '.join(where)} ORDER BY end_utc ASC LIMIT %s""", tuple(params))
+    return [(r["asset_id"], r["account_id"], r["auction_id"]) for r in rows]

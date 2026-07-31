@@ -74,6 +74,23 @@ class GovDealsAdapter:
         r.raise_for_status()
         return r.json()
 
+    def fetch_bid_state(self, asset_id: int, account_id: int, auction_id: int) -> dict:
+        """Live bid state for one lot — the ONLY endpoint that names a bidder.
+
+        The search firehose carries `highBidder` (a numeric id) but no name;
+        this one adds `highBidderUsername` masked to two characters, plus the
+        competition signals `visitors` / `hits` / `watcherCount`. Costs one
+        request per lot, so it's driven off a target list (see
+        `store.bidder_targets`), never the whole sweep.
+
+        Same asset-then-account arg order as the lot URL and `fetch_detail` —
+        swapped args return an empty body, not an error.
+        """
+        r = requests.get(f"{_g.MAESTRO_URL}/bids/bidbox/GD/{asset_id}/{account_id}/{auction_id}",
+                         headers=self._headers(), timeout=30)
+        r.raise_for_status()
+        return r.json() if r.content else {}
+
     def fetch_gallery(self, asset_id: int, account_id: int) -> list[str]:
         try:
             detail = self.fetch_detail(asset_id, account_id)

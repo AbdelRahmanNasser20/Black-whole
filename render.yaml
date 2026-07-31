@@ -109,6 +109,10 @@ services:
     dockerCommand: sh scripts/deals_cron.sh discover --categories all --max-pages 200
     envVars:
       - fromGroup: blackwhole-secrets
+      # Explicit rather than relying on auto-order, so adding a CEREBRAS key
+      # later can't silently move ~3,100 calls/day onto a billed account.
+      - key: DEALS_LLM_PROVIDER
+        value: groq
   - type: cron
     name: deals-watch
     runtime: docker
@@ -119,6 +123,38 @@ services:
     envVars:
       - fromGroup: blackwhole-secrets
   - type: cron
+    name: deals-bidders
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Every 30 min. GovDeals keeps no bid history, so a lead change only exists
+    # while it's live — an hourly cadence would silently lose most of them.
+    # Targets are ordered soonest-closing first, so the LIMIT drops the lots
+    # that are still days out (and will be picked up on a later pass), never
+    # the ones about to close.
+    schedule: "*/30 * * * *"
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh track-bidders --category all --title-like chair --min-bids 1 --limit 150
+    envVars:
+      - fromGroup: blackwhole-secrets
+  - type: cron
+    name: deals-backfill-classify
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    # Drains the ~41k lots left unclassified by the str.format bug (every call
+    # raised KeyError before reaching the network; a bare except stored
+    # `other`/0.0). 450/hour ≈ 10,800/day sits under Groq's free 14,400 req/day
+    # with room for the discovery sweep's own ~3,100. Self-terminating: once
+    # nothing is pending the run prints "nothing pending" and exits 0, so this
+    # can stay scheduled forever rather than needing to be remembered and
+    # removed.
+    schedule: "30 * * * *"
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh backfill-classify --limit 450 --rpm 18
+    envVars:
+      - fromGroup: blackwhole-secrets
+      - key: DEALS_LLM_PROVIDER
+        value: groq
+  - type: cron
     name: deals-analyze
     runtime: docker
     dockerfilePath: ./Dockerfile
@@ -127,6 +163,11 @@ services:
     dockerCommand: sh scripts/deals_cron.sh analyze
     envVars:
       - fromGroup: blackwhole-secrets
+      # Was hardcoded to gemini-2.5-flash and died with that key's prepay
+      # balance. Its prompts are ~5x the classify prompt, so the provider paces
+      # on estimated tokens — 50 lots/hour lands well inside the free tier.
+      - key: DEALS_LLM_PROVIDER
+        value: groq
   - type: cron
     name: deals-digest
     runtime: docker
