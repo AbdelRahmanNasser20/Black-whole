@@ -23,6 +23,7 @@ dependencies = [
     "itsdangerous>=2.1",    # signed 365-day session/device cookies — "auth once" (BLACKWHOLE-14)
     "pyotp>=2.9",           # optional TOTP second factor (BLACKWHOLE-14)
     "beautifulsoup4>=4.12", # canonical eBay sold-page parser (deals/ebay_parse.py)
+    "stripe>=9",            # Checkout deposits; imported ONLY by stripe_gateway.py, and only when STRIPE_SECRET_KEY is set
 ]
 
 [project.optional-dependencies]

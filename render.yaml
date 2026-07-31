@@ -49,6 +49,12 @@ envVarGroups:
         sync: false
       - key: GSA_API_KEY            # recorder's gsa.py source (BLACKWHOLE-28 Phase 0);
         sync: false                 # falls back to the shared/rate-limited DEMO_KEY if unset
+      # Reserve-with-deposit (Stripe Checkout). BOTH UNSET = feature dark: no
+      # Reserve button on the storefront, /reserve/* and /stripe/webhook 404.
+      - key: STRIPE_SECRET_KEY      # sk_test_… while testing, sk_live_… at go-live
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET  # whsec_… from the live webhook endpoint; unset = webhook closed
+        sync: false
 
 services:
   # ── 1. Always-on website ────────────────────────────────────────────────
