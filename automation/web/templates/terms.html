@@ -1,0 +1,42 @@
+{% extends "_public_base.html" %}
+{# placeholder: replaced in Wave 4 (B3 storefront UI). Context contract this
+   page is guaranteed: policy (the short form shown at Stripe Checkout) and
+   reserve_enabled (from _public_ctx). The #deposits section below is the FULL
+   locked policy — it is the thing a buyer is agreeing to, so change the wording
+   only with the operator, and keep it in sync with
+   automation/stripe_gateway.REFUND_POLICY_SHORT. #}
+{% block title %}Terms · Deposits & Refunds | Black Whole Liquidation{% endblock %}
+{% block meta_description %}Deposit, refund, and delivery terms for bulk chair lots from Black Whole Liquidation.{% endblock %}
+
+{% block content %}
+<section class="terms">
+  <h1>TERMS</h1>
+
+  <h2 id="deposits">DEPOSITS &amp; REFUNDS</h2>
+  <ul>
+    <li><strong>Fully refundable until freight is booked.</strong> Change your
+        mind before we schedule a truck and you get every cent back.</li>
+    <li><strong>After freight is booked</strong>, the deposit covers the freight
+        cost if you cancel. That booking is a real commitment we make to a
+        carrier on your behalf.</li>
+    <li><strong>The deposit applies to your balance.</strong> It is not a fee —
+        it comes off what you owe.</li>
+    <li><strong>The balance is payable at delivery</strong> by Zelle or cash.</li>
+    <li>Deposits are taken by card or bank transfer. Pay-in-full is bank
+        transfer only.</li>
+    <li>Refunds are issued to the original payment method.</li>
+  </ul>
+  <p class="policy">{{ policy }}</p>
+
+  <h2 id="pickup">PICKUP &amp; FREIGHT</h2>
+  <p>Local pickup is always free. Freight quotes are estimates until the truck is
+     booked; the chair price is separate and firm.</p>
+
+  {% if reserve_enabled %}
+  <p><a href="/listings">Browse current lots and reserve one →</a></p>
+  {% else %}
+  <p><a href="/listings">Browse current lots →</a> or
+     <a href="/#contact">ask us about a lot</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

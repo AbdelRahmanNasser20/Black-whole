@@ -1,0 +1,33 @@
+{% extends "_public_base.html" %}
+{# placeholder: replaced in Wave 4 (B3 storefront UI). Context contract this
+   page is guaranteed: item, hero, pct, min_cents, policy, canceled,
+   reserve_enabled. Keep those names when the real markup lands. #}
+{% block title %}Reserve {{ item.title or item.lot_id }} | Black Whole Liquidation{% endblock %}
+{% block meta_description %}Lock this lot with a refundable deposit.{% endblock %}
+{% block head_extra %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<section class="reserve">
+  <h1>RESERVE — {{ item.title or item.lot_id }}</h1>
+  {% if canceled %}<p class="notice">Checkout canceled — nothing was charged.</p>{% endif %}
+  {% if hero %}<img src="{{ hero }}" alt="{{ item.title or item.lot_id }}" style="max-width:100%">{% endif %}
+  <dl>
+    <dt>LOT</dt><dd>{{ item.lot_id }}</dd>
+    <dt>AVAILABLE</dt><dd>{{ item.quantity_remaining }}</dd>
+    <dt>PRICE / CHAIR</dt><dd>${{ '%.2f'|format(item.price_per_chair|float) }}</dd>
+    <dt>DEPOSIT</dt><dd>{{ (pct * 100)|round(1) }}% · minimum ${{ (min_cents / 100)|round(2) }}</dd>
+  </dl>
+  <p class="policy">{{ policy }} <a href="/terms#deposits">Full terms →</a></p>
+
+  <form id="reserve-form" data-lot-id="{{ item.lot_id }}">
+    <label>QUANTITY <input name="quantity" type="number" min="1"
+           max="{{ item.quantity_remaining }}" value="{{ item.quantity_remaining }}" required></label>
+    <label><input type="radio" name="kind" value="deposit" checked> DEPOSIT (card or bank)</label>
+    <label><input type="radio" name="kind" value="full"> PAY IN FULL (bank only)</label>
+    <label>NAME <input name="name" required></label>
+    <label>EMAIL <input name="email" type="email"></label>
+    <label>PHONE <input name="phone"></label>
+    <button type="submit">CONTINUE TO SECURE PAYMENT →</button>
+  </form>
+</section>
+{% endblock %}

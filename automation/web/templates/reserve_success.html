@@ -1,0 +1,31 @@
+{% extends "_public_base.html" %}
+{# placeholder: replaced in Wave 4 (B3 storefront UI). Context contract this
+   page is guaranteed: deposit (the ledger row), is_paid, policy. Keep those
+   names when the real markup lands. #}
+{% block title %}Reservation received | Black Whole Liquidation{% endblock %}
+{% block meta_description %}Your deposit has been received.{% endblock %}
+{% block head_extra %}<meta name="robots" content="noindex">{% endblock %}
+
+{% block content %}
+<section class="reserve-success">
+  {% if is_paid %}
+    <h1>◉ RESERVED</h1>
+    <p>Payment received. This lot is held for you — we'll be in touch to schedule
+       pickup or freight.</p>
+  {% else %}
+    <h1>◉ PAYMENT INITIATED</h1>
+    <p>Bank payments take 1–4 business days to settle. We'll confirm by email as
+       soon as it clears — nothing else is needed from you.</p>
+  {% endif %}
+  <dl>
+    <dt>REFERENCE</dt><dd>#{{ deposit.id }}</dd>
+    <dt>LOT</dt><dd><a href="/listings/{{ deposit.lot_id }}">{{ deposit.lot_id }}</a></dd>
+    <dt>QUANTITY</dt><dd>{{ deposit.quantity }}</dd>
+    <dt>PAID NOW</dt><dd>${{ '%.2f'|format((deposit.amount_cents or 0) / 100) }}</dd>
+    <dt>BALANCE AT DELIVERY</dt>
+    <dd>${{ '%.2f'|format(((deposit.subtotal_cents or 0) - (deposit.amount_cents or 0)) / 100) }}</dd>
+    <dt>STATUS</dt><dd>{{ deposit.status }}</dd>
+  </dl>
+  <p class="policy">{{ policy }} <a href="/terms#deposits">Full terms →</a></p>
+</section>
+{% endblock %}
