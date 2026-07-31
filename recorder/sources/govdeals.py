@@ -154,6 +154,37 @@ independently checked; this mirrors the same 2-key limitation already
 present in `deals/adapters/govdeals.py::fetch_detail`'s own signature and
 is not something this module can fix without editing `deals/`.
 
+FIX ROUND 2 (review finding, 2026-07-31) — the "gone_unverified" batch
+guard: fix round 1's `_corroborate_absence` originally folded the
+`JSONDecodeError` case straight into the same `"gone"` verdict as a real
+CLEAN parsed-but-empty response, AND printed nothing for it — both wrong.
+`JSONDecodeError` carries no `.response` (confirmed by reading `requests`'
+own `Response.json()` source: it raises `RequestsJSONDecodeError(e.msg,
+e.doc, e.pos)` with no `response=` kwarg), and `GovDealsAdapter.
+fetch_detail()` doesn't expose the underlying `Response` object either — so
+THIS module genuinely cannot tell a real HTTP 204 apart from a WAF/anti-bot
+interstitial page or a transient malformed-but-200 body from the exception
+alone. If a systemic event (an anti-bot challenge, an outage) hit the
+corroboration endpoint for several lots in the same `poll()` batch, the
+pre-fix code would have silently, permanently marked every one of them
+'gone' — the exact append-only-unrecoverable failure class the fix-round-1
+PS 401 guard exists to prevent, left unguarded on the GovDeals side.
+
+Now: `JSONDecodeError` returns a distinct `"gone_unverified"` verdict (never
+folded into plain `"gone"`) and ALWAYS prints a `RECORDER NOTE` line — never
+silent, even for the single, common, legitimate case. `poll()` collects
+every corroboration verdict for the batch BEFORE trusting any of them, then
+runs a batch-level check mirroring `public_surplus.py`'s 401 guard exactly:
+`CORROBORATION_BLOCK_MIN_COUNT` (3) AND `CORROBORATION_BLOCK_MIN_FRACTION`
+(80%) of the batch's corroboration ATTEMPTS (not the whole `poll()` batch —
+lots that resolved via `refetch()` or the cap-fallback path don't count
+toward this denominator) hitting `"gone_unverified"` trips a loud
+`RECORDER ERROR` and suppresses ALL 'gone' observations derived from THOSE
+unverified signals that round; explicit `"active"`/`"closed"`/clean-`"gone"`
+verdicts (a real parsed-but-empty 200) from the same batch still stand. A
+single ambiguous body among an otherwise-healthy batch still becomes
+`'gone'` exactly as fix round 1 shipped it.
+
 Fixtures captured live 2026-07-31 under `tests/recorder/fixtures/govdeals/`:
 `lot_raw_examples.json` (4 real `Lot.raw` maestro asset dicts from the
 "372,...,266" category + "chairs" search — untouched dicts, the exact shape
@@ -202,6 +233,17 @@ TERM_MAX_PAGES = 10
 # absent-past-end-date lot beyond the cap falls back to the pre-fix
 # "absence alone" 'gone' behavior for that round only.
 CORROBORATION_CAP_PER_BATCH = 25
+
+# Batch-level suspected-systemic-event thresholds for JSONDecodeError-derived
+# ("gone_unverified") corroboration verdicts (fix round 2, review finding) —
+# mirrors recorder/sources/public_surplus.py's BLOCK_SUSPECT_MIN_COUNT/
+# _MIN_FRACTION for its own 401 guard. A single ambiguous empty/unparseable
+# body is still trusted as 'gone' (that IS the verified-live 204 "doesn't
+# exist" signal in the common case); several in the SAME poll() batch looks
+# more like a WAF/anti-bot interstitial or an outage hitting the
+# corroboration endpoint broadly than several simultaneous real absences.
+CORROBORATION_BLOCK_MIN_COUNT = 3
+CORROBORATION_BLOCK_MIN_FRACTION = 0.8
 
 # GovDeals' `fetch_detail()` end-date field (`assetAuctionEndDate`) is naive
 # US/Eastern local time — see module docstring's "LIVE RECON for the
@@ -277,10 +319,25 @@ def _corroborate_absence(adapter: GovDealsAdapter, asset_id: int, account_id: in
       non-closed record. `detail` is the raw `fetch_detail()` payload.
     - `("closed", detail)` — resolves, but `assetStatusCd` reads sold/closed
       (see `_status_of`'s "never observed but don't hardcode" caveat).
-    - `("gone", None_or_empty_detail)` — confirmed empty: either GovDeals'
-      real "doesn't exist" signal for this endpoint (HTTP 204 empty body,
-      surfaces as `requests.exceptions.JSONDecodeError` — see module
-      docstring) or (defensively) a 200 with a falsy/empty JSON body.
+    - `("gone", empty_detail)` — a CLEAN 200 response that parsed fine but is
+      falsy/empty (defensive — not observed live, but a real parsed signal,
+      not an ambiguous one).
+    - `("gone_unverified", None)` — fix round 2 (review finding): the body
+      failed to parse as JSON at all (`requests.exceptions.JSONDecodeError`).
+      Live recon found this IS GovDeals' real "asset/account pair doesn't
+      exist" signal (HTTP 204 empty body — `raise_for_status()` doesn't
+      reject 204, so the empty body surfaces from `r.json()` instead) — but
+      `GovDealsAdapter.fetch_detail()` doesn't expose the underlying
+      `Response`, and `JSONDecodeError` itself carries no `.response` (
+      verified by reading `requests`' own `Response.json()` source: it
+      raises `RequestsJSONDecodeError(e.msg, e.doc, e.pos)` with no
+      `response=` kwarg). So THIS module cannot distinguish a real 204 from
+      a WAF/anti-bot interstitial or a transient malformed-but-200 body from
+      the exception alone. Treated as a TENTATIVE 'gone' — `poll()` runs a
+      batch-level guard (`CORROBORATION_BLOCK_MIN_COUNT`/`_MIN_FRACTION`,
+      mirrors `public_surplus.py`'s 401 guard) before trusting it, since a
+      systemic event hitting several lots in one batch would otherwise mass-
+      mark them 'gone' permanently (append-only-unrecoverable).
     - `("unknown", None)` — the call raised something that says NOTHING
       about whether the lot exists (a real HTTPError — 403/429/5xx — or a
       network-level RequestException, or an unexpected exception). Per the
@@ -298,11 +355,14 @@ def _corroborate_absence(adapter: GovDealsAdapter, asset_id: int, account_id: in
         )
         return "unknown", None
     except requests.exceptions.JSONDecodeError:
-        # HTTP 204 empty body — verified live: GovDeals' real "asset/account
-        # pair doesn't exist" signal for this endpoint (raise_for_status()
-        # doesn't raise on 204, so this surfaces from r.json() instead).
-        # Corroborates absence — this is NOT a network failure.
-        return "gone", None
+        # Fix round 2 (review finding): never silent, and never unilaterally
+        # trusted — see the "gone_unverified" case in this function's
+        # docstring above. poll()'s batch-level guard makes the final call.
+        print(
+            f"[govdeals] RECORDER NOTE: corroboration empty/unparseable body for "
+            f"{asset_id}/{account_id} — treating as gone (204 signal, unverified)"
+        )
+        return "gone_unverified", None
     except requests.exceptions.RequestException as e:
         print(
             f"[govdeals] RECORDER ERROR: poll() corroboration fetch_detail failed for "
@@ -460,6 +520,12 @@ class GovDealsSource:
         observations: list[Observation] = []
         corroboration_calls = 0
         corroboration_cap_warned = False
+        # Corroboration verdicts collected in this pass BEFORE any of them
+        # are trusted (fix round 2, review finding): the "gone_unverified"
+        # batch guard needs to see the WHOLE batch's corroboration outcome
+        # first, exactly like public_surplus.py's 401 guard.
+        pending: list[tuple[str, str, dict | None, int, int]] = []  # (k, verdict, payload, asset_id, account_id)
+
         for lot in lots:
             lot_id = str(lot["source_lot_id"])
             parsed = key_by_lot_id.get(lot_id)
@@ -502,6 +568,37 @@ class GovDealsSource:
 
             corroboration_calls += 1
             verdict, payload = _corroborate_absence(adapter, asset_id, account_id)
+            pending.append((k, verdict, payload, asset_id, account_id))
+
+        # Fix round 2 (review finding): batch-level suspected-systemic-event
+        # guard over this round's "gone_unverified" (JSONDecodeError) verdicts
+        # — mirrors public_surplus.py's 401 block guard. A single ambiguous
+        # empty/unparseable body is still trusted (the common, legitimate
+        # live-204 case); several in the same batch looks more like a WAF/
+        # anti-bot interstitial or outage than several simultaneous real
+        # absences, and 'gone' is append-only-unrecoverable if wrong.
+        unverified_count = sum(1 for _, verdict, *_r in pending if verdict == "gone_unverified")
+        total_corroborations = len(pending)
+        suspected_event = (
+            total_corroborations > 0
+            and unverified_count >= CORROBORATION_BLOCK_MIN_COUNT
+            and (unverified_count / total_corroborations) >= CORROBORATION_BLOCK_MIN_FRACTION
+        )
+        if suspected_event:
+            print(
+                f"[govdeals] RECORDER ERROR: poll() suspects a systemic corroboration "
+                f"failure — {unverified_count}/{total_corroborations} corroboration "
+                f"attempt(s) in this batch returned an empty/unparseable body (threshold: "
+                f">= {CORROBORATION_BLOCK_MIN_COUNT} AND >= "
+                f"{CORROBORATION_BLOCK_MIN_FRACTION:.0%}). A real per-lot 204 doesn't-exist "
+                "signal is rare and independent — this many at once looks like a WAF/anti-"
+                "bot interstitial or an outage hitting the corroboration endpoint broadly, "
+                "not simultaneous real absences. Suppressing ALL 'gone' observations "
+                "derived from these unverified signals this round; explicit closed/active/"
+                "clean-gone verdicts from the same batch still stand."
+            )
+
+        for k, verdict, payload, asset_id, account_id in pending:
             if verdict == "active":
                 observations.append(Observation(
                     source=SOURCE,
@@ -529,7 +626,20 @@ class GovDealsSource:
                     status="gone",
                     raw={"recorder_probe": {
                         "result": "not_found",
-                        "http_status": 204 if payload is None else 200,
+                        "http_status": 200,
+                        "url": f"govdeals-maestro-detail/{asset_id}/{account_id}",
+                    }},
+                ))
+            elif verdict == "gone_unverified":
+                if suspected_event:
+                    continue  # suppressed — see the batch-level warning above
+                observations.append(Observation(
+                    source=SOURCE,
+                    source_lot_id=k,
+                    status="gone",
+                    raw={"recorder_probe": {
+                        "result": "not_found",
+                        "http_status": 204,
                         "url": f"govdeals-maestro-detail/{asset_id}/{account_id}",
                     }},
                 ))
