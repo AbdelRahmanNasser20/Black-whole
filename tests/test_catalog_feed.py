@@ -43,7 +43,8 @@ def test_eligible_row_maps_all_columns():
         "availability": "in stock",
         "condition": "used",
         "price": "28.00 USD",
-        "link": "https://black-whole.com/listings/snap_06_asu_event_phoenix",
+        "link": "https://black-whole.com/listings/snap_06_asu_event_phoenix"
+                f"?{catalog_feed.UTM_QUERY}",
         "image_link": "https://nihgzltpjriekyqqucbd.supabase.co/storage/v1/object/public/listing-images/snap_06_asu_event_phoenix.jpg",
         "brand": "BLACKWHOLE Liquidation",
     }
@@ -56,7 +57,13 @@ def test_price_formatted_two_decimals_and_usd():
 
 def test_link_is_absolute_listings_url():
     fr = catalog_feed.feed_row(_lot(lot_id="abc123"), BASE)
-    assert fr["link"] == "https://black-whole.com/listings/abc123"
+    assert fr["link"] == f"https://black-whole.com/listings/abc123?{catalog_feed.UTM_QUERY}"
+
+
+def test_link_carries_facebook_utm_attribution():
+    fr = catalog_feed.feed_row(_lot(lot_id="abc123"), BASE)
+    assert "utm_source=facebook" in fr["link"]
+    assert "utm_medium=catalog" in fr["link"]
 
 
 # ───────────────────────────── eligibility / drops ──────────────────────────
@@ -101,7 +108,7 @@ def test_site_base_url_env_override(monkeypatch):
     monkeypatch.setenv("SITE_BASE_URL", "https://staging.example.com/")
     assert catalog_feed.site_base_url() == "https://staging.example.com"
     fr = catalog_feed.feed_row(_lot(lot_id="x"))  # no explicit base_url
-    assert fr["link"] == "https://staging.example.com/listings/x"
+    assert fr["link"] == f"https://staging.example.com/listings/x?{catalog_feed.UTM_QUERY}"
 
 
 def test_site_base_url_default(monkeypatch):
