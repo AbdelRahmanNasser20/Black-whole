@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Interim local scheduler for the closing-price recorder (BLACKWHOLE-28
+  Phase 0). Runs `recorder_local.sh` (which itself runs
+  `recorder.cli run` — poll-once always, discover for any stale source)
+  every 300s so we don't miss auction closes while the Render cron
+  (render.yaml's `recorder-run` service) is still pending deploy.
+
+  NOT INSTALLED by this commit — the controller copies this to
+  ~/Library/LaunchAgents/ and runs `launchctl load` once the recorder has
+  been smoke-tested end to end. Once render.yaml's `recorder-run` cron is
+  live, retire this (see repo CLAUDE.md's TCC note: launchd cannot run
+  anything under ~/Desktop/, this path is fine because listing_automation
+  lives under ~/Projects/).
+
+  To install by hand:
+    cp scripts/launchd/com.blackwhole.recorder.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.blackwhole.recorder.plist
+  To uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.blackwhole.recorder.plist
+    rm ~/Library/LaunchAgents/com.blackwhole.recorder.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blackwhole.recorder</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/abdelnasser/Projects/blackwhole/listing_automation/.claude/worktrees/BLACKWHOLE-28-phase0/scripts/recorder_local.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/abdelnasser/.blackwhole/logs/recorder.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/abdelnasser/.blackwhole/logs/recorder.log</string>
+</dict>
+</plist>

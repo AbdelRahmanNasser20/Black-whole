@@ -23,6 +23,7 @@ COPY pyproject.toml README.md ./
 COPY automation/ ./automation/
 COPY auction_extractors/ ./auction_extractors/
 COPY deals/ ./deals/
+COPY recorder/ ./recorder/
 COPY scripts/ ./scripts/
 COPY run.py ./
 

@@ -47,6 +47,8 @@ envVarGroups:
         sync: false
       - key: COMPS_KEY
         sync: false
+      - key: GSA_API_KEY            # recorder's gsa.py source (BLACKWHOLE-28 Phase 0);
+        sync: false                 # falls back to the shared/rate-limited DEMO_KEY if unset
 
 services:
   # ── 1. Always-on website ────────────────────────────────────────────────
@@ -132,5 +134,26 @@ services:
     schedule: "0 13 * * *"       # 13:00 UTC ≈ 9am ET
     autoDeploy: true
     dockerCommand: sh scripts/deals_cron.sh digest
+    envVars:
+      - fromGroup: blackwhole-secrets
+
+  # ── 4. Closing-price recorder (BLACKWHOLE-28 Phase 0) ───────────────────
+  # Every day without a recorder is a day of comps lost forever — closing
+  # prices can't be backfilled. `run` does poll-once (adaptive cadence, down
+  # to 5-min inside the final hour of a closing lot) + conditional discover
+  # for any of the 6 sources gone stale. 5-min cadence exists to catch
+  # closes; drop to */10 if Render cron cost becomes a concern.
+  - type: cron
+    name: recorder-run
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "*/5 * * * *"      # every 5 min
+    autoDeploy: true
+    # --discover-stale-hours 12 (up from the CLI default of 6): discover()
+    # has no change-gating yet, so every stale-refresh re-INSERTs a fresh
+    # row for every active lot it finds — a gentler cadence buys storage
+    # headroom until that's measured and fixed (see recorder/README.md's
+    # "Storage" section for the actual pg_total_relation_size numbers).
+    dockerCommand: ./scripts/recorder_cron.sh run --discover-stale-hours 12
     envVars:
       - fromGroup: blackwhole-secrets
