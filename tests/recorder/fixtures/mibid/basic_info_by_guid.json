@@ -1,0 +1,91 @@
+{
+  "8e2bbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 1,
+    "currentBid": 25.0,
+    "minimumBid": 26.0,
+    "highestBidder": "d8Q/2CBMDretSoQqwZv1paWOIxYXgrxkLwUD6fAk6oY=",
+    "allBidders": [
+      "d8Q/2CBMDretSoQqwZv1paWOIxYXgrxkLwUD6fAk6oY="
+    ],
+    "endDateTime": "2025-08-04T10:00:00"
+  },
+  "8f2bbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 1,
+    "currentBid": 25.0,
+    "minimumBid": 26.0,
+    "highestBidder": "d8Q/2CBMDretSoQqwZv1paWOIxYXgrxkLwUD6fAk6oY=",
+    "allBidders": [
+      "d8Q/2CBMDretSoQqwZv1paWOIxYXgrxkLwUD6fAk6oY="
+    ],
+    "endDateTime": "2025-08-11T10:00:00"
+  },
+  "902bbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 33,
+    "currentBid": 82.0,
+    "minimumBid": 83.0,
+    "highestBidder": "d8Q/2CBMDretSoQqwZv1paWOIxYXgrxkLwUD6fAk6oY=",
+    "allBidders": [
+      "d8Q/2CBMDretSoQqwZv1paWOIxYXgrxkLwUD6fAk6oY=",
+      "89po5AQagqpjHnF56cTrpNTg+PxitmSJYinN+ObOra4="
+    ],
+    "endDateTime": "2025-08-18T10:10:00"
+  },
+  "912dbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 1,
+    "currentBid": 25.0,
+    "minimumBid": 26.0,
+    "highestBidder": "Lha82JZSZrPfyaJPiLGkYSDFIZbE/ST6mKydIoja1zI=",
+    "allBidders": [
+      "Lha82JZSZrPfyaJPiLGkYSDFIZbE/ST6mKydIoja1zI="
+    ],
+    "endDateTime": "2025-10-31T10:15:00"
+  },
+  "a82dbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 1,
+    "currentBid": 25.0,
+    "minimumBid": 26.0,
+    "highestBidder": "smjRucWG42hC5CqVxOIRvdfiBDT5WffnrofiAkAiFZA=",
+    "allBidders": [
+      "smjRucWG42hC5CqVxOIRvdfiBDT5WffnrofiAkAiFZA="
+    ],
+    "endDateTime": "2025-11-04T10:00:00"
+  },
+  "b72dbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 8,
+    "currentBid": 76.0,
+    "minimumBid": 77.0,
+    "highestBidder": "H9VPAgvDVM/Ql2lEm/qEOXX38LPBvRb7UoQGg09C+7c=",
+    "allBidders": [
+      "H9VPAgvDVM/Ql2lEm/qEOXX38LPBvRb7UoQGg09C+7c=",
+      "IYLxOiX19HWn1Ot3gNCoypP2HYsc0nmRZM0tXsnqDLU=",
+      "T8aMZ1eKEPMU0qHGdDKvmYZHk/fsrcdd4NIhB33U5R0=",
+      "86s5un5F8P+R0dnNd+2X/wWkoePoLA+hHzL3k4UVaEA="
+    ],
+    "endDateTime": "2025-11-03T10:20:00"
+  },
+  "b82dbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 16,
+    "currentBid": 92.0,
+    "minimumBid": 93.0,
+    "highestBidder": "StV8kf9ipdb8JuAXehVEaD4xkj1jruk4VsHzOQaF4p8=",
+    "allBidders": [
+      "StV8kf9ipdb8JuAXehVEaD4xkj1jruk4VsHzOQaF4p8=",
+      "yephWQ6t3nMLxwNWTkn35ZkmUyIESO5YrTGRiH1cRHM=",
+      "qFDMOjXXVjQmrDFjEBtT8YzxVguCh93kuVi/pzcNHAk=",
+      "H9VPAgvDVM/Ql2lEm/qEOXX38LPBvRb7UoQGg09C+7c=",
+      "smjRucWG42hC5CqVxOIRvdfiBDT5WffnrofiAkAiFZA=",
+      "2ElYSSAt+2k0uTPPKKeLYawSz04dKoVh+vTAKgNvtZ8="
+    ],
+    "endDateTime": "2025-11-03T10:25:00"
+  },
+  "ba2dbd12-8a45-f111-9243-005056936aaa": {
+    "numberOfBids": 1,
+    "currentBid": 25.0,
+    "minimumBid": 26.0,
+    "highestBidder": "H9VPAgvDVM/Ql2lEm/qEOXX38LPBvRb7UoQGg09C+7c=",
+    "allBidders": [
+      "H9VPAgvDVM/Ql2lEm/qEOXX38LPBvRb7UoQGg09C+7c="
+    ],
+    "endDateTime": "2025-11-03T10:35:00"
+  }
+}
