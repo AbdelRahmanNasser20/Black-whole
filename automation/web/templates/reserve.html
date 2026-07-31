@@ -1,33 +1,137 @@
 {% extends "_public_base.html" %}
-{# placeholder: replaced in Wave 4 (B3 storefront UI). Context contract this
-   page is guaranteed: item, hero, pct, min_cents, policy, canceled,
-   reserve_enabled. Keep those names when the real markup lands. #}
+{# Context contract (app.py::reserve_page): item, hero, pct, min_cents, policy,
+   canceled, reserve_enabled. The numbers rendered here are DISPLAY ONLY — the
+   server re-derives the charge from the lot's own price in
+   deposits.quote_for_lot, so nothing on this page can name its own price. #}
 {% block title %}Reserve {{ item.title or item.lot_id }} | Black Whole Liquidation{% endblock %}
 {% block meta_description %}Lock this lot with a refundable deposit.{% endblock %}
 {% block head_extra %}<meta name="robots" content="noindex">{% endblock %}
+{% block body_class %}page-reserve{% endblock %}
 
 {% block content %}
-<section class="reserve">
-  <h1>RESERVE — {{ item.title or item.lot_id }}</h1>
-  {% if canceled %}<p class="notice">Checkout canceled — nothing was charged.</p>{% endif %}
-  {% if hero %}<img src="{{ hero }}" alt="{{ item.title or item.lot_id }}" style="max-width:100%">{% endif %}
-  <dl>
-    <dt>LOT</dt><dd>{{ item.lot_id }}</dd>
-    <dt>AVAILABLE</dt><dd>{{ item.quantity_remaining }}</dd>
-    <dt>PRICE / CHAIR</dt><dd>${{ '%.2f'|format(item.price_per_chair|float) }}</dd>
-    <dt>DEPOSIT</dt><dd>{{ (pct * 100)|round(1) }}% · minimum ${{ (min_cents / 100)|round(2) }}</dd>
-  </dl>
-  <p class="policy">{{ policy }} <a href="/terms#deposits">Full terms →</a></p>
+<nav class="crumbs mono tiny">
+  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> /
+  <a href="/listings/{{ item.lot_id }}">{{ item.title or item.lot_id }}</a> / <span>RESERVE</span>
+</nav>
 
-  <form id="reserve-form" data-lot-id="{{ item.lot_id }}">
-    <label>QUANTITY <input name="quantity" type="number" min="1"
-           max="{{ item.quantity_remaining }}" value="{{ item.quantity_remaining }}" required></label>
-    <label><input type="radio" name="kind" value="deposit" checked> DEPOSIT (card or bank)</label>
-    <label><input type="radio" name="kind" value="full"> PAY IN FULL (bank only)</label>
-    <label>NAME <input name="name" required></label>
-    <label>EMAIL <input name="email" type="email"></label>
-    <label>PHONE <input name="phone"></label>
-    <button type="submit">CONTINUE TO SECURE PAYMENT →</button>
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">RESERVATION · LOT {{ item.lot_id }}</div>
+    <h1 class="page-title">LOCK THIS LOT</h1>
+    <p class="page-lede">
+      A deposit takes the chairs off the floor while you sort budget, board
+      approval, or a truck. It comes off the balance at delivery — it is not a
+      fee, and it is refundable until we book freight.
+    </p>
+  </div>
+  <div class="page-head-right mono tiny">
+    DEPOSIT {{ (pct * 100)|round(1) }}%
+    <span class="tag">MIN ${{ "{:,.2f}".format(min_cents / 100) }}</span>
+  </div>
+</section>
+
+<section class="reserve-grid">
+  <aside class="reserve-lot">
+    <div class="reserve-lot-media">
+      {% if hero %}
+        <img src="{{ hero }}" alt="{{ item.title or item.lot_id }}">
+      {% else %}
+        <div class="lot-img-fallback">◉</div>
+      {% endif %}
+    </div>
+    <div class="reserve-lot-body">
+      <div class="mono tiny reserve-lot-tag">LOT {{ item.lot_id }}</div>
+      <h2 class="reserve-lot-title">{{ item.title or 'Untitled lot' }}</h2>
+      <dl class="reserve-lot-specs">
+        <div>
+          <dt class="mono tiny">PRICE / CHAIR</dt>
+          <dd>${{ "{:,.2f}".format(item.price_per_chair|float) }}</dd>
+        </div>
+        <div>
+          <dt class="mono tiny">AVAILABLE</dt>
+          <dd>{{ item.quantity_remaining }}</dd>
+        </div>
+        <div>
+          <dt class="mono tiny">{% if item.location_labels | length > 1 %}LOCATIONS{% else %}LOCATION{% endif %}</dt>
+          <dd>
+            {%- if item.location_labels %}{{ item.location_labels | join(' · ') }}
+            {%- else %}—{% endif -%}
+          </dd>
+        </div>
+      </dl>
+      <a class="reserve-back mono tiny" href="/listings/{{ item.lot_id }}">← BACK TO THE LOT</a>
+    </div>
+  </aside>
+
+  <form class="manifest-form" id="reserve-form"
+        data-endpoint="/reserve/{{ item.lot_id }}/checkout"
+        data-price="{{ item.price_per_chair }}"
+        data-pct="{{ pct }}"
+        data-min-cents="{{ min_cents }}"
+        data-max-qty="{{ item.quantity_remaining }}"
+        data-canceled="{{ '1' if canceled else '0' }}">
+    <label class="mf-row"><span>HOW MANY CHAIRS</span>
+      <input name="quantity" type="number" min="1" max="{{ item.quantity_remaining }}"
+             value="{{ item.quantity_remaining }}" required>
+    </label>
+
+    <div class="mf-row">
+      <span>PAYMENT</span>
+      <div class="kind-picker">
+        <label class="kind-opt">
+          <input type="radio" name="kind" value="deposit" checked>
+          <span class="kind-body">
+            <span class="kind-title mono">DEPOSIT ({{ (pct * 100)|round|int }}% · pay by card or bank)</span>
+            <span class="kind-note">Balance payable at delivery by Zelle or cash.</span>
+          </span>
+        </label>
+        <label class="kind-opt">
+          <input type="radio" name="kind" value="full">
+          <span class="kind-body">
+            <span class="kind-title mono">PAY IN FULL (bank transfer only)</span>
+            <span class="kind-note">Nothing owed on the truck. Bank transfers take 1–4 business days.</span>
+          </span>
+        </label>
+      </div>
+    </div>
+
+    <div class="quote-box">
+      <div class="qb-cell">
+        <span class="mono tiny">SUBTOTAL</span>
+        <strong id="quote-subtotal">$0.00</strong>
+      </div>
+      <div class="qb-cell qb-cell--due">
+        <span class="mono tiny">DUE NOW</span>
+        <strong id="quote-due-now">$0.00</strong>
+      </div>
+      <div class="qb-cell">
+        <span class="mono tiny">BALANCE AT DELIVERY</span>
+        <strong id="quote-balance">$0.00</strong>
+      </div>
+    </div>
+
+    <div class="mf-row mf-row--two">
+      <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+      <label><span>EMAIL</span><input name="email" type="email" autocomplete="email"></label>
+    </div>
+    <div class="mf-row mf-row--two">
+      <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+    </div>
+    <div class="mf-hint mono tiny">EMAIL OR PHONE REQUIRED — WE NEED ONE WAY TO REACH YOU.</div>
+
+    <div class="policy-block">
+      <div class="mono tiny policy-label">DEPOSIT &amp; REFUND POLICY</div>
+      <p>{{ policy }}</p>
+      <a class="mono tiny" href="/terms#deposits">READ THE FULL TERMS →</a>
+    </div>
+
+    <button type="submit" class="btn btn-primary">CONTINUE TO SECURE PAYMENT →</button>
+    <div class="mf-result" hidden></div>
+    <div class="mf-hint mono tiny">PAYMENT IS HANDLED BY STRIPE — WE NEVER SEE YOUR CARD OR BANK DETAILS.</div>
   </form>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/public.js?v={{ now }}"></script>
 {% endblock %}

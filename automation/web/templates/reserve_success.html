@@ -1,31 +1,74 @@
 {% extends "_public_base.html" %}
-{# placeholder: replaced in Wave 4 (B3 storefront UI). Context contract this
-   page is guaranteed: deposit (the ledger row), is_paid, policy. Keep those
-   names when the real markup lands. #}
+{# Context contract (app.py::reserve_success): deposit (the ledger row),
+   is_paid, policy. `is_paid` is read off OUR row, never off the redirect —
+   on ACH the buyer lands here days before the money settles, so the
+   processing copy must never claim a payment landed. #}
 {% block title %}Reservation received | Black Whole Liquidation{% endblock %}
 {% block meta_description %}Your deposit has been received.{% endblock %}
 {% block head_extra %}<meta name="robots" content="noindex">{% endblock %}
+{% block body_class %}page-reserve{% endblock %}
 
 {% block content %}
-<section class="reserve-success">
-  {% if is_paid %}
-    <h1>◉ RESERVED</h1>
-    <p>Payment received. This lot is held for you — we'll be in touch to schedule
-       pickup or freight.</p>
-  {% else %}
-    <h1>◉ PAYMENT INITIATED</h1>
-    <p>Bank payments take 1–4 business days to settle. We'll confirm by email as
-       soon as it clears — nothing else is needed from you.</p>
-  {% endif %}
-  <dl>
-    <dt>REFERENCE</dt><dd>#{{ deposit.id }}</dd>
-    <dt>LOT</dt><dd><a href="/listings/{{ deposit.lot_id }}">{{ deposit.lot_id }}</a></dd>
-    <dt>QUANTITY</dt><dd>{{ deposit.quantity }}</dd>
-    <dt>PAID NOW</dt><dd>${{ '%.2f'|format((deposit.amount_cents or 0) / 100) }}</dd>
-    <dt>BALANCE AT DELIVERY</dt>
-    <dd>${{ '%.2f'|format(((deposit.subtotal_cents or 0) - (deposit.amount_cents or 0)) / 100) }}</dd>
-    <dt>STATUS</dt><dd>{{ deposit.status }}</dd>
+<section class="page-head">
+  <div class="page-head-left">
+    {% if is_paid %}
+      <div class="mono tiny">◉ RESERVED · LOT {{ deposit.lot_id }}</div>
+      <h1 class="page-title">DEPOSIT RECEIVED — LOT LOCKED</h1>
+      <p class="page-lede">
+        We'll reach out within 1 business day to schedule pickup or freight.
+        Balance due at delivery — Zelle or cash.
+      </p>
+    {% else %}
+      <div class="mono tiny">◉ PAYMENT INITIATED · LOT {{ deposit.lot_id }}</div>
+      <h1 class="page-title">BANK TRANSFER INITIATED</h1>
+      <p class="page-lede">
+        Takes 1–4 business days to clear. The lot is flagged for you; we'll
+        confirm by email.
+      </p>
+    {% endif %}
+  </div>
+  <div class="page-head-right mono tiny">
+    REFERENCE <span class="tag">#{{ deposit.id }}</span>
+  </div>
+</section>
+
+<section class="receipt">
+  <dl class="spec-sheet">
+    <div>
+      <dt>LOT</dt>
+      <dd><a href="/listings/{{ deposit.lot_id }}">{{ deposit.lot_id }}</a></dd>
+    </div>
+    <div>
+      <dt>QUANTITY</dt>
+      <dd class="big-num">{{ deposit.quantity }}</dd>
+    </div>
+    <div>
+      <dt>{% if deposit.kind == 'full' %}PAID IN FULL{% else %}DEPOSIT PAID{% endif %}</dt>
+      <dd class="big-num">${{ "{:,.2f}".format((deposit.amount_cents or 0) / 100) }}</dd>
+    </div>
+    <div>
+      <dt>BALANCE AT DELIVERY</dt>
+      <dd class="big-num">${{ "{:,.2f}".format(((deposit.subtotal_cents or 0) - (deposit.amount_cents or 0)) / 100) }}</dd>
+    </div>
+    <div>
+      <dt>ORDER SUBTOTAL</dt>
+      <dd>${{ "{:,.2f}".format((deposit.subtotal_cents or 0) / 100) }}</dd>
+    </div>
+    <div>
+      <dt>STATUS</dt>
+      <dd class="mono">{{ deposit.status | upper }}</dd>
+    </div>
   </dl>
-  <p class="policy">{{ policy }} <a href="/terms#deposits">Full terms →</a></p>
+
+  <div class="policy-block policy-block--wide">
+    <div class="mono tiny policy-label">DEPOSIT &amp; REFUND POLICY</div>
+    <p>{{ policy }}</p>
+    <a class="mono tiny" href="/terms#deposits">READ THE FULL TERMS →</a>
+  </div>
+
+  <div class="detail-ctas">
+    <a class="btn btn-ghost" href="/listings">BROWSE MORE LOTS</a>
+    <a class="btn btn-ghost" href="/#contact">ASK A QUESTION</a>
+  </div>
 </section>
 {% endblock %}

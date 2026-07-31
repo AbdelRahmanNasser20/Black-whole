@@ -1,42 +1,123 @@
 {% extends "_public_base.html" %}
-{# placeholder: replaced in Wave 4 (B3 storefront UI). Context contract this
-   page is guaranteed: policy (the short form shown at Stripe Checkout) and
-   reserve_enabled (from _public_ctx). The #deposits section below is the FULL
-   locked policy — it is the thing a buyer is agreeing to, so change the wording
-   only with the operator, and keep it in sync with
-   automation/stripe_gateway.REFUND_POLICY_SHORT. #}
-{% block title %}Terms · Deposits & Refunds | Black Whole Liquidation{% endblock %}
+{# Context contract (app.py::public_terms): policy (the short form shown at
+   Stripe Checkout) and reserve_enabled (from _public_ctx). The #deposits
+   section below is the FULL locked policy — it is the thing a buyer is
+   agreeing to, so change the wording only with the operator, and keep it in
+   sync with automation/stripe_gateway.REFUND_POLICY_SHORT. This page renders
+   even when the feature is dark: the policy gets linked from DMs and emails
+   whether or not Checkout is live. #}
+{% block title %}Terms · Deposits &amp; Refunds | Black Whole Liquidation{% endblock %}
 {% block meta_description %}Deposit, refund, and delivery terms for bulk chair lots from Black Whole Liquidation.{% endblock %}
+{% block body_class %}page-terms{% endblock %}
 
 {% block content %}
-<section class="terms">
-  <h1>TERMS</h1>
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">THE FINE PRINT · PLAIN ENGLISH</div>
+    <h1 class="page-title">TERMS</h1>
+    <p class="page-lede">
+      Two things a buyer sending money to a liquidator deserves in writing:
+      what happens to a deposit, and what a freight estimate is worth. Both
+      are below, in the same words we use on the phone.
+    </p>
+  </div>
+  <div class="page-head-right mono tiny">
+    <a href="#deposits">DEPOSITS &amp; REFUNDS →</a><br>
+    <a href="#freight">FREIGHT ESTIMATES →</a>
+  </div>
+</section>
 
-  <h2 id="deposits">DEPOSITS &amp; REFUNDS</h2>
-  <ul>
-    <li><strong>Fully refundable until freight is booked.</strong> Change your
-        mind before we schedule a truck and you get every cent back.</li>
-    <li><strong>After freight is booked</strong>, the deposit covers the freight
-        cost if you cancel. That booking is a real commitment we make to a
-        carrier on your behalf.</li>
-    <li><strong>The deposit applies to your balance.</strong> It is not a fee —
-        it comes off what you owe.</li>
-    <li><strong>The balance is payable at delivery</strong> by Zelle or cash.</li>
-    <li>Deposits are taken by card or bank transfer. Pay-in-full is bank
-        transfer only.</li>
-    <li>Refunds are issued to the original payment method.</li>
-  </ul>
-  <p class="policy">{{ policy }}</p>
+<section class="terms-body">
+  <article class="terms-section" id="deposits">
+    <div class="section-rule"></div>
+    <h2 class="section-title">DEPOSITS &amp; REFUNDS</h2>
+    <p class="terms-lede">{{ policy }}</p>
 
-  <h2 id="pickup">PICKUP &amp; FREIGHT</h2>
-  <p>Local pickup is always free. Freight quotes are estimates until the truck is
-     booked; the chair price is separate and firm.</p>
+    <ol class="terms-list">
+      <li>
+        <span class="mono tiny">01 · BEFORE THE TRUCK IS BOOKED</span>
+        <p><strong>Fully refundable.</strong> Change your mind before we schedule
+          a carrier and you get every cent back, to the original payment method.
+          No restocking fee, no questions.</p>
+      </li>
+      <li>
+        <span class="mono tiny">02 · AFTER THE TRUCK IS BOOKED</span>
+        <p>If you cancel once freight is booked, <strong>the deposit covers the
+          freight cost</strong>. That booking is a real commitment we make to a
+          carrier on your behalf, and it is not refundable to us either. Anything
+          left over after the carrier is paid comes back to you.</p>
+      </li>
+      <li>
+        <span class="mono tiny">03 · THE DEPOSIT IS NOT A FEE</span>
+        <p><strong>It applies to your balance.</strong> A $450 deposit on a
+          $3,000 order means $2,550 due at delivery — the deposit is money off
+          what you owe, never money on top of it.</p>
+      </li>
+      <li>
+        <span class="mono tiny">04 · THE BALANCE</span>
+        <p>Payable <strong>at delivery or pickup, by Zelle or cash</strong>. You
+          see the chairs before the rest of the money moves.</p>
+      </li>
+      <li>
+        <span class="mono tiny">05 · RAILS</span>
+        <p>Deposits can be paid by card or bank transfer. Pay-in-full is bank
+          transfer only — card fees on a full order are real money, and we would
+          rather put that into the price. Bank transfers take 1–4 business days
+          to clear; the lot is held for you from the moment payment is initiated.</p>
+      </li>
+      <li>
+        <span class="mono tiny">06 · REFUNDS</span>
+        <p>Issued to the original payment method. Card refunds land in a few
+          business days; bank refunds can take up to a week, depending on your
+          bank, not us.</p>
+      </li>
+      <li>
+        <span class="mono tiny">07 · IF WE CAN'T DELIVER</span>
+        <p>If a lot turns out to be short, damaged, or gone before we hand it
+          over, you get a full refund regardless of anything above. We don't
+          keep money for chairs you never got.</p>
+      </li>
+    </ol>
+  </article>
 
-  {% if reserve_enabled %}
-  <p><a href="/listings">Browse current lots and reserve one →</a></p>
-  {% else %}
-  <p><a href="/listings">Browse current lots →</a> or
-     <a href="/#contact">ask us about a lot</a>.</p>
-  {% endif %}
+  <article class="terms-section" id="freight">
+    <div class="section-rule"></div>
+    <h2 class="section-title">FREIGHT ESTIMATES</h2>
+    <ul class="terms-list terms-list--plain">
+      <li>
+        <p>The number a lot page gives you is an <strong>estimate</strong>, not a
+          booked rate. It is <strong>finalized at ship time</strong>, when we
+          tender the real pallet count and dimensions to a carrier.</p>
+      </li>
+      <li>
+        <p>Estimates assume <strong>residential delivery with a liftgate</strong>
+          — the expensive version. A dock or a forklift on your end usually makes
+          it cheaper, not dearer.</p>
+      </li>
+      <li>
+        <p>The <strong>chair price is separate and firm</strong>. Freight moves
+          with fuel and lane; the price per chair does not.</p>
+      </li>
+      <li>
+        <p><strong>Local pickup is always free.</strong> Bring a truck to the
+          lot's city and freight is a line item that never happens.</p>
+      </li>
+      <li>
+        <p>Lanes we can't price honestly — international, offshore, or an address
+          we can't resolve — get a hand quote instead of a guess. We would rather
+          make you wait a day than give you a number that changes.</p>
+      </li>
+    </ul>
+  </article>
+
+  <div class="terms-cta">
+    {% if reserve_enabled %}
+    <a class="btn btn-primary" href="/listings">BROWSE CURRENT LOTS →</a>
+    <a class="btn btn-ghost" href="/#contact">ASK A QUESTION</a>
+    {% else %}
+    <a class="btn btn-primary" href="/listings">BROWSE CURRENT LOTS →</a>
+    <a class="btn btn-ghost" href="/#contact">ASK US ABOUT A LOT</a>
+    {% endif %}
+  </div>
 </section>
 {% endblock %}
