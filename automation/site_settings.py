@@ -11,7 +11,7 @@ Two hard rules encoded here:
   2. `set_many()` is allowlist-only and range-checked. Anything not in `SPEC`,
      or outside its bounds, is a ValueError before a statement is issued.
 
-DDL of record: `scripts/sql/004_deposits.sql`. Schema is never created at runtime.
+DDL of record: `scripts/sql/005_deposits.sql`. Schema is never created at runtime.
 """
 from __future__ import annotations
 

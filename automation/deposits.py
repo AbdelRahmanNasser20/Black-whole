@@ -21,7 +21,7 @@ the whole feature stay dark when `STRIPE_SECRET_KEY` is unset.
 
 Storage goes through `automation.db` (psycopg over Supabase), same as the
 inquiries/subscribers stores. Schema is never created at runtime — DDL of
-record is `scripts/sql/004_deposits.sql`.
+record is `scripts/sql/005_deposits.sql`.
 """
 from __future__ import annotations
 
