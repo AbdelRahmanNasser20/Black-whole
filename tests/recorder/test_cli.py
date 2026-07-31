@@ -54,6 +54,49 @@ def _obs(status="active", source="govdeals"):
     return Observation(source=source, source_lot_id="1", status=status, raw={})
 
 
+class _FakeLockConn:
+    """Stand-in for automation.db.connect()'s dedicated advisory-lock
+    connection. `.execute(sql, params).fetchone()` always answers `locked`
+    (True/False fixed at construction) regardless of which SQL string is
+    passed — cmd_run only ever inspects the return of the FIRST call
+    (pg_try_advisory_lock); the second call (pg_advisory_unlock) return
+    value is ignored by production code."""
+
+    def __init__(self, locked=True):
+        self.locked = locked
+        self.executed = []
+        self.commits = 0
+        self.closed = False
+
+    def execute(self, sql, params=None):
+        self.executed.append((sql, params))
+        return self
+
+    def fetchone(self):
+        return {"locked": self.locked}
+
+    def commit(self):
+        self.commits += 1
+
+    def close(self):
+        self.closed = True
+
+
+def _patch_lock(monkeypatch, locked=True):
+    """Patch cli.db.connect to hand out a fresh _FakeLockConn per call, and
+    return the list of every conn created so tests can inspect lock/unlock
+    calls + close()."""
+    conns = []
+
+    def fake_connect():
+        conn = _FakeLockConn(locked=locked)
+        conns.append(conn)
+        return conn
+
+    monkeypatch.setattr(cli.db, "connect", fake_connect)
+    return conns
+
+
 # --- registry completeness --------------------------------------------------
 
 def test_registry_has_all_six_sources():
@@ -148,6 +191,40 @@ def test_poll_once_groups_due_rows_by_source_and_isolates_failures(monkeypatch):
     assert rc == 1
 
 
+def test_poll_once_sorts_due_by_end_date_ascending_nulls_last(monkeypatch):
+    # IMPORTANT 3: soonest-to-close (and already-past / confirming) lots must
+    # be polled before far-out or unknown-end_date lots, so an overrunning
+    # run always burns its time on the most urgent lots first.
+    far_future = NOW + timedelta(days=5)
+    near_future = NOW + timedelta(minutes=2)
+    already_past = NOW - timedelta(minutes=1)
+    tracked_rows = [
+        {"source": "a", "source_lot_id": "unknown-end", "observed_at": NOW - timedelta(hours=10),
+         "end_date": None, "current_bid": None, "bid_count": None},
+        {"source": "a", "source_lot_id": "far", "observed_at": NOW - timedelta(hours=10),
+         "end_date": far_future, "current_bid": None, "bid_count": None},
+        {"source": "a", "source_lot_id": "past", "observed_at": NOW - timedelta(hours=10),
+         "end_date": already_past, "current_bid": None, "bid_count": None},
+        {"source": "a", "source_lot_id": "near", "observed_at": NOW - timedelta(hours=10),
+         "end_date": near_future, "current_bid": None, "bid_count": None},
+    ]
+    monkeypatch.setattr(cli.store, "tracked_active", lambda: tracked_rows)
+    monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
+
+    seen_order = []
+
+    class OrderTrackingSource:
+        SOURCE = "a"
+
+        def poll(self, lots):
+            seen_order.extend(row["source_lot_id"] for row in lots)
+            return []
+
+    cli.cmd_poll_once({"a": OrderTrackingSource()}, now=NOW)
+
+    assert seen_order == ["past", "near", "far", "unknown-end"]
+
+
 def test_poll_once_returns_zero_when_nothing_due(monkeypatch):
     monkeypatch.setattr(cli.store, "tracked_active", lambda: [])
     monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
@@ -180,6 +257,7 @@ def test_coverage_prints_table(monkeypatch, capsys):
         {"source": "_all", "closed_lots": 10, "covered": 9, "missed": 1, "pct": 90.0},
     ]
     monkeypatch.setattr(cli.store, "coverage", lambda days: rows)
+    monkeypatch.setattr(cli.store, "table_size_pretty", lambda: "128 MB")
     rc = cli.cmd_coverage(7)
     out = capsys.readouterr().out
     assert rc == 0
@@ -189,15 +267,27 @@ def test_coverage_prints_table(monkeypatch, capsys):
 
 def test_coverage_handles_empty_rows(monkeypatch, capsys):
     monkeypatch.setattr(cli.store, "coverage", lambda days: [])
+    monkeypatch.setattr(cli.store, "table_size_pretty", lambda: "0 bytes")
     rc = cli.cmd_coverage(7)
     out = capsys.readouterr().out
     assert rc == 0
     assert "no coverage data" in out.lower()
 
 
+def test_coverage_prints_table_size_line(monkeypatch, capsys):
+    # IMPORTANT 6: storage-size visibility on every coverage report.
+    monkeypatch.setattr(cli.store, "coverage", lambda days: [])
+    monkeypatch.setattr(cli.store, "table_size_pretty", lambda: "42 MB")
+    rc = cli.cmd_coverage(7)
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "listing_snapshots table size: 42 MB" in out
+
+
 # --- cmd_run: conditional discover ------------------------------------------
 
 def test_run_discovers_only_stale_or_never_discovered_sources(monkeypatch):
+    _patch_lock(monkeypatch, locked=True)
     monkeypatch.setattr(cli.store, "tracked_active", lambda: [])
     monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
 
@@ -222,6 +312,7 @@ def test_run_discovers_only_stale_or_never_discovered_sources(monkeypatch):
 
 
 def test_run_exit_code_reflects_poll_and_discover_failures(monkeypatch):
+    _patch_lock(monkeypatch, locked=True)
     monkeypatch.setattr(cli.store, "tracked_active", lambda: [])
     monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
     monkeypatch.setattr(cli.store, "newest_observed_at", lambda source: None)
@@ -232,6 +323,7 @@ def test_run_exit_code_reflects_poll_and_discover_failures(monkeypatch):
 
 
 def test_run_skips_discover_entirely_when_nothing_is_stale(monkeypatch):
+    _patch_lock(monkeypatch, locked=True)
     monkeypatch.setattr(cli.store, "tracked_active", lambda: [])
     monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
     monkeypatch.setattr(cli.store, "newest_observed_at", lambda source: NOW)
@@ -241,6 +333,70 @@ def test_run_skips_discover_entirely_when_nothing_is_stale(monkeypatch):
 
     assert fresh.discover_calls == 0
     assert rc == 0
+
+
+# --- cmd_run: advisory lock overlap guard (IMPORTANT 3) ---------------------
+
+def test_run_skips_when_lock_not_acquired(monkeypatch):
+    conns = _patch_lock(monkeypatch, locked=False)
+    monkeypatch.setattr(cli.store, "tracked_active", lambda: [])
+    monkeypatch.setattr(cli.store, "newest_observed_at", lambda source: NOW)
+
+    never_called = FakeSource("a")
+    rc = cli.cmd_run({"a": never_called}, discover_stale_hours=6, now=NOW)
+
+    assert rc == 0
+    assert never_called.discover_calls == 0
+    assert never_called.poll_calls == 0
+    # the dedicated lock connection must still be released/closed even
+    # though the run itself never proceeded.
+    assert len(conns) == 1
+    assert conns[0].closed is True
+
+
+def test_run_skips_when_lock_not_acquired_prints_message(monkeypatch, capsys):
+    _patch_lock(monkeypatch, locked=False)
+    rc = cli.cmd_run({}, discover_stale_hours=6, now=NOW)
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "recorder run skipped" in out
+    assert "previous run still active" in out
+
+
+def test_run_acquires_and_releases_lock_on_success(monkeypatch):
+    conns = _patch_lock(monkeypatch, locked=True)
+    monkeypatch.setattr(cli.store, "tracked_active", lambda: [])
+    monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
+    monkeypatch.setattr(cli.store, "newest_observed_at", lambda source: NOW)
+
+    rc = cli.cmd_run({"fresh": FakeSource("fresh")}, discover_stale_hours=6, now=NOW)
+
+    assert rc == 0
+    assert len(conns) == 1
+    conn = conns[0]
+    assert conn.closed is True
+    # first call = try-lock, second = unlock; both went through the same
+    # dedicated connection, not the short-lived db.fetch_* helpers.
+    assert len(conn.executed) == 2
+    assert "pg_try_advisory_lock" in conn.executed[0][0]
+    assert conn.executed[0][1] == (cli._RUN_LOCK_KEY,)
+    assert "pg_advisory_unlock" in conn.executed[1][0]
+    assert conn.executed[1][1] == (cli._RUN_LOCK_KEY,)
+
+
+def test_run_releases_lock_even_when_poll_or_discover_raises(monkeypatch):
+    conns = _patch_lock(monkeypatch, locked=True)
+
+    def boom():
+        raise RuntimeError("tracked_active boom")
+
+    monkeypatch.setattr(cli.store, "tracked_active", boom)
+
+    with pytest.raises(RuntimeError):
+        cli.cmd_run({}, discover_stale_hours=6, now=NOW)
+
+    assert conns[0].closed is True
+    assert "pg_advisory_unlock" in conns[0].executed[-1][0]
 
 
 # --- main(): argparse wiring + schema guard placement -----------------------
@@ -262,9 +418,25 @@ def test_main_exits_3_when_schema_missing(monkeypatch):
     assert exc_info.value.code == 3
 
 
+def test_main_exits_4_with_clean_message_when_db_unreachable(monkeypatch, capsys):
+    # IMPORTANT 5: a DB outage must print one clean line and exit a distinct
+    # code (4), never a raw psycopg traceback.
+    def raise_operational_error(*a, **k):
+        raise cli.psycopg.OperationalError("connection to server failed")
+
+    monkeypatch.setattr(cli.db, "fetch_one", raise_operational_error)
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["coverage"])
+    assert exc_info.value.code == 4
+    err = capsys.readouterr().err
+    assert "RECORDER ERROR: database unreachable" in err
+    assert "connection to server failed" in err
+
+
 def test_main_dispatches_coverage_when_schema_present(monkeypatch, capsys):
     monkeypatch.setattr(cli.db, "fetch_one", lambda *a, **k: {"reg": "listing_snapshots"})
     monkeypatch.setattr(cli.store, "coverage", lambda days: [])
+    monkeypatch.setattr(cli.store, "table_size_pretty", lambda: "0 bytes")
     rc = cli.main(["coverage", "--days", "3"])
     assert rc == 0
     assert "no coverage data" in capsys.readouterr().out.lower()

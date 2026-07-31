@@ -27,6 +27,24 @@ VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, COALESCE(%s, now()))
 # subquery: filtering inside DISTINCT ON would return a stale 'active' row
 # for a lot whose latest snapshot has since flipped to closed/gone — exactly
 # the bug the recorder exists to avoid.
+#
+# CRITICAL 2 fix (BLACKWHOLE-28 whole-branch review): Postgres now() is fixed
+# for the whole transaction, and a discover+sold_sweep batch is one
+# executemany() call — every row inserted in that batch gets the IDENTICAL
+# observed_at. `ORDER BY ... observed_at DESC` alone is then nondeterministic
+# among same-batch rows for the same lot: which row "wins" as latest is
+# arbitrary, so a closed lot could resurrect into the poll set (or an active
+# one could silently drop out) depending on row order Postgres happens to
+# pick. `id DESC` breaks the tie deterministically — BIGSERIAL id always
+# reflects true insert order, even within one transaction.
+#
+# MINOR (whole-branch review): `{source_filter}` below is filled in by
+# `.format()` in `tracked_active()`, but that's safe — the spliced-in text is
+# always one of two hardcoded constants this module chooses ("" or "WHERE
+# source = %s"), never caller/user input. The actual `source` VALUE still
+# flows through the driver via that `%s` placeholder, parameterized exactly
+# like every other query in this file — `.format()` only ever assembles SQL
+# *shape*, never SQL *values*.
 _TRACKED_ACTIVE_SQL = """
 SELECT source, source_lot_id, observed_at, end_date, current_bid, bid_count
 FROM (
@@ -34,7 +52,7 @@ FROM (
            source, source_lot_id, observed_at, end_date, current_bid, bid_count, status
     FROM listing_snapshots
     {source_filter}
-    ORDER BY source, source_lot_id, observed_at DESC
+    ORDER BY source, source_lot_id, observed_at DESC, id DESC
 ) latest
 WHERE status = 'active'
 ORDER BY source, source_lot_id
@@ -45,7 +63,7 @@ WITH latest AS (
     SELECT DISTINCT ON (source, source_lot_id)
            source, source_lot_id, end_date
     FROM listing_snapshots
-    ORDER BY source, source_lot_id, observed_at DESC
+    ORDER BY source, source_lot_id, observed_at DESC, id DESC
 ), closed_window AS (
     SELECT source, source_lot_id, end_date
     FROM latest
@@ -111,6 +129,17 @@ def tracked_active(source: str | None = None) -> list[dict]:
         sql = _TRACKED_ACTIVE_SQL.format(source_filter="")
         rows = db.fetch_all(sql)
     return list(rows)
+
+
+def table_size_pretty() -> str:
+    """Pretty-printed on-disk size of `listing_snapshots` (IMPORTANT 6 —
+    storage-size visibility, since discover() re-inserting the same active
+    lots on every stale-refresh has no change-gating yet; the coverage
+    report is where the operator will notice a growth problem first)."""
+    row = db.fetch_one(
+        "SELECT pg_size_pretty(pg_total_relation_size('listing_snapshots')) AS size"
+    )
+    return row["size"] if row else "unknown"
 
 
 def newest_observed_at(source: str) -> datetime | None:

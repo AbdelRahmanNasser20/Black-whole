@@ -209,6 +209,43 @@ def test_poll_empty_lots_makes_no_request(monkeypatch):
     assert gsa.GSASource().poll([]) == []
 
 
+# --- api_key leak (IMPORTANT 4) --------------------------------------------
+
+def test_error_paths_never_print_the_api_key(monkeypatch, capsys):
+    monkeypatch.setenv(gsa.GSA_API_KEY_ENV, "super-secret-key-999")
+    leaky_url = f"{gsa.AUCTIONS_URL}?api_key=super-secret-key-999&format=JSON"
+    monkeypatch.setattr(gsa, "polite_get", lambda *a, **k: _FakeResponse(None, status_code=403, url=leaky_url))
+    assert gsa.GSASource().discover() == []
+    out = capsys.readouterr().out
+    assert "super-secret-key-999" not in out
+    assert "RECORDER ERROR" in out
+
+
+def test_error_paths_never_print_the_api_key_on_unexpected_status(monkeypatch, capsys):
+    monkeypatch.setenv(gsa.GSA_API_KEY_ENV, "super-secret-key-999")
+    leaky_url = f"{gsa.AUCTIONS_URL}?api_key=super-secret-key-999&format=JSON"
+    monkeypatch.setattr(gsa, "polite_get", lambda *a, **k: _FakeResponse(None, status_code=500, url=leaky_url))
+    assert gsa.GSASource().discover() == []
+    out = capsys.readouterr().out
+    assert "super-secret-key-999" not in out
+
+
+def test_connection_exception_message_has_key_redacted(monkeypatch, capsys):
+    monkeypatch.setenv(gsa.GSA_API_KEY_ENV, "super-secret-key-999")
+
+    def raise_with_leaky_message(*a, **k):
+        raise gsa.requests.exceptions.ConnectionError(
+            "Max retries exceeded with url: /assets/gsaauctions/v2/auctions"
+            "?api_key=super-secret-key-999&format=JSON"
+        )
+
+    monkeypatch.setattr(gsa, "polite_get", raise_with_leaky_message)
+    assert gsa.GSASource().discover() == []
+    out = capsys.readouterr().out
+    assert "super-secret-key-999" not in out
+    assert "<redacted>" in out
+
+
 # --- HTTP failure handling --------------------------------------------------------
 
 def test_discover_returns_empty_on_403_without_raising(monkeypatch):

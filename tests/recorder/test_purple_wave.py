@@ -108,7 +108,10 @@ def test_sold_sweep_prices_are_decimal_and_priced(monkeypatch, sold_items):
         assert o.current_bid >= 0
 
 
-def test_sold_sweep_request_adds_date_type_past(monkeypatch, sold_items):
+def test_sold_sweep_request_adds_date_type_past_sold_filter_and_date_ranges(monkeypatch, sold_items):
+    # CRITICAL 1 fix: dateType=past alone sweeps the oldest slice of an
+    # 18-year archive (0 usable comps) — sold:Yes + a current/previous-year
+    # dateRanges window are both required. See purple_wave.py docstring.
     captured = {}
 
     def fake_get(url, *, headers=None, params=None, timeout=30):
@@ -116,9 +119,13 @@ def test_sold_sweep_request_adds_date_type_past(monkeypatch, sold_items):
         return _FakeResponse(sold_items)
 
     monkeypatch.setattr(pw, "polite_get", fake_get)
+    now = datetime.now(timezone.utc)
     pw.PurpleWaveSource().sold_sweep()
     assert captured["params"]["dateType"] == "past"
-    assert captured["params"]["filters"] == f"family_category_id:{pw.FURNITURE_FAMILY_CATEGORY_ID}"
+    assert captured["params"]["filters"] == (
+        f"family_category_id:{pw.FURNITURE_FAMILY_CATEGORY_ID};sold:Yes"
+    )
+    assert captured["params"]["dateRanges"] == f"{now.year},{now.year - 1}"
 
 
 def test_sold_sweep_raw_roundtrips_unmodified(monkeypatch, sold_items):
@@ -132,6 +139,34 @@ def test_sold_sweep_raw_roundtrips_unmodified(monkeypatch, sold_items):
 def test_sold_sweep_returns_empty_on_fetch_failure(monkeypatch):
     monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(None, status_code=403))
     assert pw.PurpleWaveSource().sold_sweep() == []
+
+
+def test_sold_sweep_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+    # deferred item this CRITICAL-1 edit absorbs: sold_sweep()'s own
+    # connection-exception path, direct (not via a shared discover() test).
+    def raise_connection_error(*a, **k):
+        raise pw.requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(pw, "polite_get", raise_connection_error)
+    assert pw.PurpleWaveSource().sold_sweep() == []
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+    assert "purple_wave" in out
+
+
+def test_sold_sweep_warns_loudly_when_zero_rows_have_bid_count(monkeypatch, capsys):
+    # harvest sanity check (CRITICAL 1): a sold sweep with no priced/bid
+    # rows means the sold:Yes / dateRanges params drifted — must be loud,
+    # not silent, since a silent 0-comp sweep is exactly the bug this fix
+    # exists to catch.
+    unpriced = [{"id": 1, "closed": 1, "sold": "No", "current_bid": 0, "bid_count": 0,
+                 "auction_timestamp": "2008-01-11T00:00:00.000Z"}]
+    monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(unpriced))
+    obs = pw.PurpleWaveSource().sold_sweep()
+    assert len(obs) == 1
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "bid_count>0" in out
 
 
 # --- poll() --------------------------------------------------------

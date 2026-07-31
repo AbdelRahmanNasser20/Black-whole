@@ -105,6 +105,22 @@ def test_tracked_active_sql_filters_status_outside_distinct_on(monkeypatch):
     assert distinct_on < subquery_close < status_filter
 
 
+def test_tracked_active_sql_tie_breaks_same_batch_observed_at_with_id_desc(monkeypatch):
+    # CRITICAL 2: a discover+sold_sweep batch inserts via one executemany()
+    # transaction, so Postgres now() (observed_at) is identical for every
+    # row in that batch. Without an `id DESC` tie-break, "latest snapshot"
+    # is nondeterministic among same-batch rows for the same lot.
+    captured = {}
+
+    def fake_fetch_all(sql, params=None):
+        captured["sql"] = sql
+        return []
+
+    monkeypatch.setattr(store.db, "fetch_all", fake_fetch_all)
+    store.tracked_active()
+    assert "ORDER BY source, source_lot_id, observed_at DESC, id DESC" in captured["sql"]
+
+
 def test_tracked_active_no_source_passes_no_params(monkeypatch):
     captured = {}
 
@@ -141,6 +157,26 @@ def test_tracked_active_filters_by_source_and_returns_rows(monkeypatch):
     }]
 
 
+# --- table_size_pretty (IMPORTANT 6: storage-size visibility) --------------
+
+def test_table_size_pretty_returns_value_from_row(monkeypatch):
+    captured = {}
+
+    def fake_fetch_one(sql, params=None):
+        captured["sql"] = sql
+        return {"size": "128 MB"}
+
+    monkeypatch.setattr(store.db, "fetch_one", fake_fetch_one)
+    assert store.table_size_pretty() == "128 MB"
+    assert "pg_total_relation_size('listing_snapshots')" in captured["sql"]
+    assert "pg_size_pretty" in captured["sql"]
+
+
+def test_table_size_pretty_returns_unknown_when_no_row(monkeypatch):
+    monkeypatch.setattr(store.db, "fetch_one", lambda sql, params=None: None)
+    assert store.table_size_pretty() == "unknown"
+
+
 # --- newest_observed_at --------------------------------------------------
 
 def test_newest_observed_at_returns_value_from_row(monkeypatch):
@@ -173,6 +209,21 @@ def test_coverage_computes_pct_and_all_rollup(monkeypatch):
     assert by_source["_all"]["covered"] == 13
     assert by_source["_all"]["missed"] == 1
     assert by_source["_all"]["pct"] == round(100.0 * 13 / 14, 1)
+
+
+def test_coverage_sql_tie_breaks_latest_cte_with_id_desc(monkeypatch):
+    # CRITICAL 2: the coverage view's `latest` CTE needs the same id DESC
+    # tie-break as tracked_active(), for the same same-batch-observed_at
+    # reason.
+    captured = {}
+
+    def fake_fetch_all(sql, params=None):
+        captured["sql"] = sql
+        return []
+
+    monkeypatch.setattr(store.db, "fetch_all", fake_fetch_all)
+    store.coverage(days=7)
+    assert "ORDER BY source, source_lot_id, observed_at DESC, id DESC" in captured["sql"]
 
 
 def test_coverage_handles_zero_closed_lots_without_dividing_by_zero(monkeypatch):

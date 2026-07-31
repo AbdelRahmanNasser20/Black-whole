@@ -14,17 +14,24 @@ CREATE TABLE IF NOT EXISTS listing_snapshots (
 CREATE INDEX IF NOT EXISTS idx_listing_snapshots_lot
   ON listing_snapshots (source, source_lot_id, observed_at DESC);
 -- sold_comps: DERIVED view; wrong logic later => recompute, never re-scrape
+-- CRITICAL 2 fix (BLACKWHOLE-28 whole-branch review): `id DESC` tie-breaks
+-- both DISTINCT ON CTEs below. A discover+sold_sweep batch inserts through
+-- one executemany() transaction, so Postgres now() (and therefore
+-- observed_at) is IDENTICAL for every row in that batch — `ORDER BY
+-- observed_at DESC` alone is nondeterministic among same-batch rows for the
+-- same lot. BIGSERIAL `id` always reflects true insert order, even within
+-- one transaction, so it's the deterministic tie-break.
 CREATE OR REPLACE VIEW sold_comps AS
 WITH latest AS (
   SELECT DISTINCT ON (source, source_lot_id) *
   FROM listing_snapshots
-  ORDER BY source, source_lot_id, observed_at DESC
+  ORDER BY source, source_lot_id, observed_at DESC, id DESC
 ), last_priced AS (
   SELECT DISTINCT ON (source, source_lot_id)
          source, source_lot_id, current_bid, bid_count
   FROM listing_snapshots
   WHERE current_bid IS NOT NULL
-  ORDER BY source, source_lot_id, observed_at DESC
+  ORDER BY source, source_lot_id, observed_at DESC, id DESC
 )
 SELECT l.source, l.source_lot_id,
        COALESCE(l.current_bid, p.current_bid) AS final_price,

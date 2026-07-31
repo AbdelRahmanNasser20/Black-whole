@@ -190,35 +190,55 @@ def _to_observation(item: dict) -> Observation | None:
     )
 
 
+def _redact_key(text: str, key: str) -> str:
+    """Strip a live GSA_API_KEY value out of arbitrary error text (e.g. a
+    requests exception's str(), which can embed the full request URL — query
+    string and all — via the underlying urllib3 message). IMPORTANT 4 fix:
+    cron logs must never leak the key."""
+    if key:
+        return text.replace(key, "<redacted>")
+    return text
+
+
 def _fetch_auctions() -> list[dict] | None:
     """Fetch the full active-auctions list. Returns None on ANY fetch failure
     (network exception, blocked, non-200, bad JSON, unexpected shape) — never
     an empty list, so callers can tell "fetch failed" apart from "fetch
     succeeded and there's genuinely nothing there." See module docstring's
     "poll() gone semantics" for why this distinction is load-bearing.
+
+    IMPORTANT 4 fix (BLACKWHOLE-28 whole-branch review): every error path
+    below logs the constant `AUCTIONS_URL` (no query string), never
+    `resp.url` — `resp.url` is the actual request URL requests.py built,
+    which includes `?api_key=<key>&format=JSON`, and printing it would leak
+    the key into cron logs on every blocked/malformed-response error. The
+    network-exception path additionally redacts the key out of the
+    exception's own string, since `requests`/`urllib3` exception messages can
+    embed the full failed request URL (key included).
     """
+    key = _api_key()
     try:
-        resp = polite_get(AUCTIONS_URL, params={"api_key": _api_key(), "format": "JSON"})
+        resp = polite_get(AUCTIONS_URL, params={"api_key": key, "format": "JSON"})
     except requests.exceptions.RequestException as e:
-        print(f"[gsa] RECORDER ERROR: request failed: {e}")
+        print(f"[gsa] RECORDER ERROR: request failed: {_redact_key(str(e), key)}")
         return None
     if resp.status_code in (403, 429):
-        print(f"[gsa] RECORDER ERROR: blocked HTTP {resp.status_code} on {resp.url} — backing off, no data this round")
+        print(f"[gsa] RECORDER ERROR: blocked HTTP {resp.status_code} on {AUCTIONS_URL} — backing off, no data this round")
         return None
     if resp.status_code != 200:
-        print(f"[gsa] RECORDER ERROR: unexpected HTTP {resp.status_code} on {resp.url}")
+        print(f"[gsa] RECORDER ERROR: unexpected HTTP {resp.status_code} on {AUCTIONS_URL}")
         return None
     try:
         data = resp.json()
     except ValueError:
-        print(f"[gsa] RECORDER ERROR: non-JSON response from {resp.url}")
+        print(f"[gsa] RECORDER ERROR: non-JSON response from {AUCTIONS_URL}")
         return None
     if not isinstance(data, dict) or "Results" not in data:
-        print(f"[gsa] RECORDER ERROR: unexpected response shape (no 'Results' key) from {resp.url}")
+        print(f"[gsa] RECORDER ERROR: unexpected response shape (no 'Results' key) from {AUCTIONS_URL}")
         return None
     results = data.get("Results")
     if not isinstance(results, list):
-        print(f"[gsa] RECORDER ERROR: 'Results' is not a list in response from {resp.url}")
+        print(f"[gsa] RECORDER ERROR: 'Results' is not a list in response from {AUCTIONS_URL}")
         return None
     return results
 

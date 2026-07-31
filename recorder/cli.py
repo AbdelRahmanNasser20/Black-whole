@@ -24,11 +24,19 @@ import argparse
 import sys
 from datetime import datetime, timedelta, timezone
 
+import psycopg
+
 # Importing automation.config triggers its .env-load side effect (same
 # pattern deals/classify.py and deals/llm_steps.py use) — recorder/store.py
 # only imports `automation.db`, which never loads .env itself, so something
-# in this process's import chain has to. Must happen before any DB access,
-# but AFTER argparse has had a chance to short-circuit on --help.
+# in this process's import chain has to. MINOR fix (whole-branch review):
+# this runs at MODULE IMPORT time, i.e. before argparse ever gets a chance
+# to short-circuit on --help — all top-level imports happen before main()
+# is called. It's harmless there (and safe to run for --help too) only
+# because loading a .env file is a side-effect-free read with no failure
+# mode of its own; the thing that must stay AFTER argparse's --help
+# short-circuit is `_check_schema()`'s actual DB query, called from inside
+# main() below, not this import.
 from automation import config  # noqa: F401
 from automation import db
 
@@ -97,6 +105,11 @@ def cmd_poll_once(registry: dict, now: datetime | None = None) -> int:
     tracked = store.tracked_active()
     due = [row for row in tracked if schedule.is_due(now, row["observed_at"], row["end_date"])]
 
+    # IMPORTANT 3: sort by end_date ascending, NULLs last, BEFORE grouping by
+    # source — final-hour/confirming lots (soonest end_date, or already past)
+    # always poll first if a run overruns and can't finish everything due.
+    due.sort(key=lambda row: (row["end_date"] is None, row["end_date"]))
+
     by_source: dict[str, list[dict]] = {}
     for row in due:
         by_source.setdefault(row["source"], []).append(row)
@@ -156,32 +169,61 @@ def _format_coverage_table(rows: list[dict]) -> str:
 def cmd_coverage(days: int) -> int:
     rows = store.coverage(days=days)
     print(_format_coverage_table(rows))
+    print(f"listing_snapshots table size: {store.table_size_pretty()}")
     return 0
 
 
 # --- run (the cron entrypoint) ---------------------------------------------
 
+# Advisory lock key for `run` (IMPORTANT 3). Render cron fires every 5 min;
+# a slow run (network hiccups, a stuck source) must never overlap the next
+# invocation and double-poll/double-discover concurrently.
+_RUN_LOCK_KEY = "recorder_run"
+
+
 def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
 
-    poll_rc = cmd_poll_once(registry, now=now)
+    # Session-level advisory lock on a dedicated connection held for the
+    # whole run — NOT the short-lived per-query connections `db.fetch_*`
+    # opens. `pg_try_advisory_lock` never blocks: it returns False instantly
+    # if another `run` already holds the lock, so an overrunning previous
+    # invocation just makes this one a clean no-op exit(0), never a pile-up.
+    conn = db.connect()
+    try:
+        locked = conn.execute(
+            "SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (_RUN_LOCK_KEY,)
+        ).fetchone()["locked"]
+        conn.commit()
+        if not locked:
+            print("recorder run skipped — previous run still active")
+            return 0
 
-    stale: list[str] = []
-    for name in registry:
-        newest = store.newest_observed_at(name)
-        if newest is None or (now - newest) >= timedelta(hours=discover_stale_hours):
-            stale.append(name)
+        poll_rc = cmd_poll_once(registry, now=now)
 
-    discover_rc = 0
-    if stale:
-        print(f"run: discover due for stale source(s): {','.join(stale)}")
-        for name in stale:
-            rc = cmd_discover(registry, source=name)
-            discover_rc = discover_rc or rc
-    else:
-        print("run: no source is stale, skipping discover")
+        stale: list[str] = []
+        for name in registry:
+            newest = store.newest_observed_at(name)
+            if newest is None or (now - newest) >= timedelta(hours=discover_stale_hours):
+                stale.append(name)
 
-    return 1 if (poll_rc or discover_rc) else 0
+        discover_rc = 0
+        if stale:
+            print(f"run: discover due for stale source(s): {','.join(stale)}")
+            for name in stale:
+                rc = cmd_discover(registry, source=name)
+                discover_rc = discover_rc or rc
+        else:
+            print("run: no source is stale, skipping discover")
+
+        return 1 if (poll_rc or discover_rc) else 0
+    finally:
+        try:
+            conn.execute("SELECT pg_advisory_unlock(hashtext(%s))", (_RUN_LOCK_KEY,))
+            conn.commit()
+        except Exception:  # noqa: BLE001 - best-effort release; connection close below is the backstop
+            pass
+        conn.close()
 
 
 # --- startup guard + argparse wiring ----------------------------------------
@@ -189,8 +231,20 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
 def _check_schema() -> None:
     """Exit 3 with a clear message if `listing_snapshots` hasn't been created
     yet, instead of letting the first real query blow up with a raw
-    psycopg traceback in the cron log."""
-    row = db.fetch_one("SELECT to_regclass('listing_snapshots') AS reg")
+    psycopg traceback in the cron log.
+
+    IMPORTANT 5 fix (BLACKWHOLE-28 whole-branch review): a DB *outage*
+    (unreachable host, pooler down, network blip) is a different failure
+    from "schema not applied" — catch it separately so cron logs read one
+    clean line instead of a raw psycopg.OperationalError traceback, and exit
+    a distinct code (4, not 3) so the two causes are distinguishable from
+    the exit status alone.
+    """
+    try:
+        row = db.fetch_one("SELECT to_regclass('listing_snapshots') AS reg")
+    except psycopg.OperationalError as exc:
+        print(f"RECORDER ERROR: database unreachable: {exc}", file=sys.stderr)
+        sys.exit(4)
     if not row or row.get("reg") is None:
         print(
             "RECORDER ERROR: listing_snapshots table not found. Apply "

@@ -27,13 +27,28 @@ LIVE RECON (verified 2026-07-31, this task):
   keyword search would miss (observed items included "(3) bleachers" and
   "DeBough MFG. CO lockers"). `FURNITURE_TERMS` is imported per the shared
   contract but unused here; the category id is the precise filter.
-- Sold/closed lots: grepping `combined.js`'s `empty_sold` route handler shows
-  the site's own "Sold" navigation builds `dateType=past` (optionally
-  `dateRanges=<year>,<year-1>`, confirmed NOT required — live-tested without
-  it and still got results). Verified live 2026-07-31:
-  `?perPage=500&filters=family_category_id:646&dateType=past` returned real
-  closed lots with `closed=1`, `sold="Yes"`, and a priced `current_bid` — this
-  is the `api_final` capture method (a real winning bid, not a snapshot).
+- Sold/closed lots (CORRECTED — see BLACKWHOLE-28 whole-branch review
+  CRITICAL 1, re-verified live 2026-07-31): `dateType=past` ALONE is not
+  enough. The site is an 18-year archive and its default sort is
+  oldest-first — `?perPage=500&filters=family_category_id:646&dateType=past`
+  returns lots from **2008** with `sold="No"`, `current_bid=0`,
+  `bid_count=0`: zero usable comps. Two more params are required:
+  1. `sold:Yes` appended to `filters` with a **semicolon** join (confirmed
+     live — `,` was not tested first because `;` worked on the first try
+     and was verified to actually narrow results, not silently no-op like
+     `q=` and `filters=id:<n>` do elsewhere on this API):
+     `filters=family_category_id:646;sold:Yes`.
+  2. `dateRanges=<year>,<year-1>` (computed at call time from
+     `datetime.now(timezone.utc).year`, e.g. `dateRanges=2026,2025` on
+     2026-07-31) — narrows to the last ~2 years instead of the full archive.
+  Combined and verified live 2026-07-31:
+  `?perPage=500&filters=family_category_id:646;sold:Yes&dateType=past&dateRanges=2026,2025`
+  returned **500/500** items with `closed=1`, `sold="Yes"`, a priced
+  `current_bid`, and `bid_count>0` (dates spanning 2025-01-07 to
+  2026-04-28) — this is the `api_final` capture method (a real winning bid,
+  not a snapshot). `sold_sweep()` builds both params on every call; a
+  fetch that comes back with 0 rows having `bid_count>0` prints a loud
+  WARNING (harvest sanity check — see `sold_sweep()`).
 - No confirmed single-item detail endpoint exists (`filters=id:<n>` is
   silently ignored by the API — same no-op as `q`). `poll()` therefore re-runs
   the same `family_category_id:646` sweep (current volume is tiny, ~38 active
@@ -156,16 +171,23 @@ def _to_observation(item: dict, *, status: str | None = None) -> Observation | N
     )
 
 
-def _fetch_search(*, extra_params: dict | None = None) -> list[dict] | None:
+def _fetch_search(*, extra_params: dict | None = None, extra_filters: str | None = None) -> list[dict] | None:
     """Run the family_category_id:646 search. Returns None on ANY fetch
     failure (network exception, blocked, non-200, bad JSON, unexpected shape)
     — never an empty list, so callers can tell "fetch failed" apart from
     "fetch succeeded and there's genuinely nothing there." See module
     docstring's "poll() gone semantics" for why this distinction matters.
+
+    `extra_filters` is appended to the `filters` param with a semicolon join
+    (the API's multi-filter separator — confirmed live, see module docstring's
+    "Sold/closed lots" section), e.g. "sold:Yes".
     """
+    filters = f"family_category_id:{FURNITURE_FAMILY_CATEGORY_ID}"
+    if extra_filters:
+        filters = f"{filters};{extra_filters}"
     params = {
         "perPage": SEARCH_PER_PAGE,
-        "filters": f"family_category_id:{FURNITURE_FAMILY_CATEGORY_ID}",
+        "filters": filters,
     }
     if extra_params:
         params.update(extra_params)
@@ -243,9 +265,27 @@ class PurpleWaveSource:
         return observations
 
     def sold_sweep(self) -> list[Observation]:
-        items = _fetch_search(extra_params={"dateType": "past"})
+        # CRITICAL 1 fix (BLACKWHOLE-28 whole-branch review): dateType=past
+        # alone sweeps the full 18-year archive oldest-first — 0 usable comps.
+        # sold:Yes (filters, semicolon-joined) + dateRanges=<year>,<year-1>
+        # (computed here, not hardcoded) narrow it to actually-sold, recent
+        # lots. See module docstring's "Sold/closed lots" section.
+        now = datetime.now(timezone.utc)
+        date_ranges = f"{now.year},{now.year - 1}"
+        items = _fetch_search(
+            extra_filters="sold:Yes",
+            extra_params={"dateType": "past", "dateRanges": date_ranges},
+        )
         if items is None:
             print("[purple_wave] RECORDER ERROR: sold_sweep() aborted — fetch failed, 0 observations")
             return []
         out = [_to_observation(it, status="closed") for it in items]
-        return [o for o in out if o is not None]
+        result = [o for o in out if o is not None]
+        priced = sum(1 for o in result if (o.bid_count or 0) > 0)
+        if priced == 0:
+            print(
+                f"[purple_wave] WARNING: sold_sweep() returned {len(result)} closed "
+                f"observation(s) but 0 have bid_count>0 — check the sold:Yes / "
+                f"dateRanges={date_ranges} params for drift (harvest sanity check)"
+            )
+        return result

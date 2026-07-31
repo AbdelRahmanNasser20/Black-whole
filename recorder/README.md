@@ -102,10 +102,10 @@ snapshot actually confirms `closed` or `gone`. A lot leaves the poll set
 
 | Source          | Access method                                                                 | Sold-price capture |
 |-----------------|--------------------------------------------------------------------------------|---------------------|
-| `purple_wave`   | Official JSON search API (`www.purplewave.com/v1/search/search`), category-id filtered. `sold_sweep()` re-queries with `dateType=past`. | `api_final` — sold sweep returns real winning bids |
+| `purple_wave`   | Official JSON search API (`www.purplewave.com/v1/search/search`), category-id filtered. `sold_sweep()` re-queries with `dateType=past`, `filters=...;sold:Yes`, and a computed `dateRanges=<year>,<year-1>` window (see CRITICAL 1 note in `purple_wave.py`'s docstring — `dateType=past` alone sweeps the oldest slice of an 18-year archive, 0 usable comps). **Pending operator sign-off:** `www.purplewave.com/robots.txt` disallows `/v1/` for crawlers — it's the site's own public frontend API (no auth, no anti-bot challenge encountered), but that disallow line hasn't been explicitly cleared with the operator; flag before scaling volume on this source. | `api_final` — sold sweep returns real winning bids |
 | `municibid`     | Server-rendered search-results HTML with an embedded full-result JSON marker, plus per-card HTML for bid counts (paginated, `bs4`-parsed). `sold_sweep()` hits `StatusFilter=completed_only`. | `api_final` — sold sweep returns real "Final Bid" prices |
 | `mibid`         | Michigan's own Knockout.js homepage embeds the entire 2,000+ auction catalog as a literal JS array; per-lot bid data confirmed via `GET /AuctionBid/GetBasicInfo?guid=`. | `api_final` — `sold_sweep()` filters the embed to `status=4` (closed) and enriches each match with `GetBasicInfo` for a trustworthy final bid + bid count |
-| `gsa`           | Official `api.data.gov` GSA Auctions JSON API (`GSA_API_KEY`, falls back to the shared `DEMO_KEY`). No closed/sold feed exists — a lot simply drops off the active list. | `last_snapshot` — the last observation before a lot vanishes from the active feed is the de-facto close |
+| `gsa`           | Official `api.data.gov` GSA Auctions JSON API (`GSA_API_KEY`, falls back to the shared `DEMO_KEY`). No closed/sold feed exists — a lot simply drops off the active list. **`bid_count` is really `biddersCount`** (GSA doesn't publish a bid-count field) — it's the number of distinct bidders, not the number of bids; don't read it as a bid-count in comps analysis. | `last_snapshot` — the last observation before a lot vanishes from the active feed is the de-facto close |
 | `govdeals`      | Thin import-only wrapper over `deals.adapters.govdeals.GovDealsAdapter` (the maestro JSON search API already built for the `deals/` closing-price tracker). No closed/sold feed used here. | `last_snapshot` |
 | `public_surplus`| Independent plain-HTTP scrape of the server-rendered `publicsurplus.com` search + detail pages (legacy JSP, no JSON API). | `last_snapshot` — **closed/removed lots return HTTP 401** (a login wall), not 404 and not a distinguishable "closed" page, so `poll()` reads a 401 as `status='gone'`. Documented in detail in `recorder/sources/public_surplus.py`'s module docstring. |
 
@@ -119,19 +119,46 @@ a percentage and an `_all` roll-up row. This is the number that matters:
 Below that, the recorder is silently losing comps exactly like not having
 one at all — the whole point was never missing a close.
 
+`coverage` also prints a `listing_snapshots table size: <pretty>` line
+(`pg_total_relation_size` via `pg_size_pretty`) after the table — see
+"Storage" below.
+
+**`sold_comps`'s `bid_count > 0` gate** (the view's last `WHERE` clause)
+deliberately excludes closed/gone lots whose `bid_count` came back honestly
+`NULL` rather than `0` — a lot the recorder never got a priced observation
+for isn't a "no-bid close," it's a gap in *our* coverage. Two known sources
+of that gap today: residual `municibid` lots whose `sold_sweep()` enrichment
+call didn't land before the lot dropped off the completed list, and
+`public_surplus` lots that closed before the recorder's first poll caught
+them (no `sold_sweep()` on that source — see the per-source table above).
+Those lots are missing from `sold_comps` on purpose, not a bug — don't
+"fix" the gate to include them without a real price.
+
 ## Deploy notes
 
 **Render (target).** `render.yaml` adds a `recorder-run` cron service
-(`*/5 * * * *`, `./scripts/recorder_cron.sh run`, same `blackwhole-secrets`
-env group and plan tier as the four `deals-*` cron blocks). The 5-minute
-cadence exists specifically to catch closes inside the schedule's 5-minute
-"hot" window — drop it to `*/10 * * * *` if Render cron cost becomes a
-concern; coverage will degrade gracefully, not catastrophically, since the
-confirming poll still fires on the next tick regardless of cadence.
-`scripts/recorder_cron.sh` mirrors `scripts/deals_cron.sh` line for line
-(committed script, `cd` to repo root, `exec python -m recorder.cli "$@"`) —
-that pattern exists because an inline `sh -c "... && ..."` form silently
-quote-mangled and exited 127 the first time this project tried it.
+(`*/5 * * * *`, `./scripts/recorder_cron.sh run --discover-stale-hours 12`,
+same `blackwhole-secrets` env group and plan tier as the four `deals-*` cron
+blocks). The 5-minute cadence exists specifically to catch closes inside
+the schedule's 5-minute "hot" window — drop it to `*/10 * * * *` if Render
+cron cost becomes a concern; coverage will degrade gracefully, not
+catastrophically, since the confirming poll still fires on the next tick
+regardless of cadence. `scripts/recorder_cron.sh` mirrors
+`scripts/deals_cron.sh` line for line (committed script, `cd` to repo root,
+`exec python -m recorder.cli "$@"`) — that pattern exists because an inline
+`sh -c "... && ..."` form silently quote-mangled and exited 127 the first
+time this project tried it.
+
+**Storage.** `discover()` has no change-gating yet — every stale-refresh
+re-INSERTs a fresh row for every active lot it finds, even when nothing
+about that lot changed since the last discover. `--discover-stale-hours 12`
+(the Render cron's value, up from the CLI's own default of 6) is a stopgap
+that halves discover-driven row growth until this is measured against real
+`coverage`-printed table-size numbers. The real fix — gate re-inserts on the
+observation actually differing from the prior snapshot (status/current_bid/
+bid_count/end_date) — is deferred until the size line shows it's needed;
+`poll()`'s own inserts are unaffected (they only fire for lots due per
+`schedule.is_due`, which is already sparse).
 
 **Interim launchd (laptop, today).** Until the Render cron is deployed,
 `scripts/recorder_local.sh` + `scripts/launchd/com.blackwhole.recorder.plist`
