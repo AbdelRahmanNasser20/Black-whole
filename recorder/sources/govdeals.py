@@ -91,6 +91,69 @@ LIVE RECON (verified 2026-07-31, this task):
   =str)` (used by `recorder/store.py::observation_row`) stringifies the
   two embedded `datetime` objects automatically.
 
+FIX ROUND 1 (review finding #2, 2026-07-31) — per-lot corroboration before
+'gone': absence-from-the-60-page-refetch-sweep alone is a weaker signal than
+it looks — the sweep can overflow its own page cap, or an anti-snipe
+extension can move a lot's `end_date` later without this module's tracked
+copy knowing yet. Before trusting a healthy-refetch absence past a tracked
+lot's own `end_date`, `poll()` now corroborates with ONE extra call to
+`GovDealsAdapter.fetch_detail(asset_id, account_id)` (the same per-lot
+maestro detail endpoint `deals/`'s own gallery-fetch path already uses) —
+capped at `CORROBORATION_CAP_PER_BATCH` calls per `poll()` invocation (loud
+`WARNING` if the cap truncates coverage; any lot past the cap falls back to
+the pre-fix "absence alone" 'gone' behavior for that round only).
+
+LIVE RECON for the corroboration path (verified 2026-07-31, this fix round):
+- `fetch_detail(asset_id, account_id)` — unlike the search/refetch payload —
+  carries NO pricing fields at all (`currentBid`/`bidCount`/`assetBidPrice`
+  are all absent from its ~90-key response). An 'active'/'closed' Observation
+  built from corroboration therefore always carries `current_bid=None,
+  bid_count=None` — the next `poll()` due-cycle will pick up real pricing
+  once the lot is either found in `refetch()` again or the situation
+  resolves.
+- Its end-date field is `assetAuctionEndDate` — NOT `assetAuctionEndDateUtc`
+  (that UTC-suffixed field, present on search results, is simply absent
+  here) — and is **naive US/Eastern local time**, not UTC. Verified live by
+  cross-checking asset 41961/432's `fetch_detail()` value
+  (`"2026-07-31T09:01:00"`, no offset) against the SAME lot's known-UTC
+  `assetAuctionEndDateUtc` from `discover()` (`2026-07-31T13:01:00+00:00`,
+  a 4-hour EDT gap) — exact match after `zoneinfo`-converting Eastern→UTC.
+  `_parse_detail_end_date()` does that conversion (mirrors
+  `recorder/sources/municibid.py`'s identical ET-conversion pattern for its
+  own detail-page timestamps — GovDeals, like Municibid, is a US East Coast
+  operation).
+- A `(asset_id, account_id)` pair that doesn't correspond to a real asset
+  (verified live with a bogus id and a real `asset_id` paired with a wrong
+  `account_id`) returns **HTTP 204 with an empty body** — NOT 404. Because
+  `GovDealsAdapter.fetch_detail()` calls `r.raise_for_status()` (which does
+  NOT raise on 204, a 2xx code) before `r.json()`, the empty body surfaces
+  as `requests.exceptions.JSONDecodeError` (`"Expecting value: line 1 column
+  1"`) — which, per `requests`' own class hierarchy, IS a
+  `requests.exceptions.RequestException` subclass, so it must be caught
+  BEFORE the generic `RequestException` handler or it would be
+  mis-classified as a plain network failure. This 204-via-JSONDecodeError
+  IS this endpoint's real "doesn't exist" signal and is treated as
+  corroborating 'gone' — NOT as "fetch_detail RAISES (network) → emit
+  nothing" (a real HTTPError — 403/429/5xx — or a real connection failure
+  still hits the "emit nothing" branch, since those say nothing about
+  whether the lot exists).
+
+Residual caveat (documented per review, not solved further here): if
+`fetch_detail` itself keeps failing for a genuinely-absent lot on every poll
+cycle (persistent network trouble reaching just that one corroboration
+call), that lot never gets marked 'gone' and lingers in `store.
+tracked_active()` indefinitely — this is the deliberately SAFE failure
+direction (never guess 'gone' without evidence, matching the append-only-
+unrecoverable-mistake principle), but it means corroboration failure is not
+self-healing on its own; an operator/coverage-report (`recorder/store.py::
+coverage()`) would need to surface a lot that's stopped updating for an
+unusually long time. Also: `fetch_detail` is keyed by `(asset_id,
+account_id)` only, not the full 3-part `lot_key` this module tracks by — an
+`auction_id` mismatch (the same asset/account re-auctioned) is not
+independently checked; this mirrors the same 2-key limitation already
+present in `deals/adapters/govdeals.py::fetch_detail`'s own signature and
+is not something this module can fix without editing `deals/`.
+
 Fixtures captured live 2026-07-31 under `tests/recorder/fixtures/govdeals/`:
 `lot_raw_examples.json` (4 real `Lot.raw` maestro asset dicts from the
 "372,...,266" category + "chairs" search — untouched dicts, the exact shape
@@ -109,6 +172,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -132,6 +196,17 @@ FURNITURE_CATEGORY_IDS = "372,47B,47C,47A,46,47D,28E,266"
 # single-term sweeps.
 CATEGORY_MAX_PAGES = 20
 TERM_MAX_PAGES = 10
+
+# Cap on per-lot `fetch_detail` corroboration calls per `poll()` invocation
+# (fix round 1, review finding #2) — loud WARNING if truncated; any
+# absent-past-end-date lot beyond the cap falls back to the pre-fix
+# "absence alone" 'gone' behavior for that round only.
+CORROBORATION_CAP_PER_BATCH = 25
+
+# GovDeals' `fetch_detail()` end-date field (`assetAuctionEndDate`) is naive
+# US/Eastern local time — see module docstring's "LIVE RECON for the
+# corroboration path".
+_GOVDEALS_TZ = ZoneInfo("America/New_York")
 
 
 def _status_of(status_text: str | None) -> str:
@@ -179,6 +254,74 @@ def _parse_money(value: Any) -> Decimal | None:
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return None
+
+
+def _parse_detail_end_date(raw: Any) -> datetime | None:
+    """Parse `fetch_detail()`'s `assetAuctionEndDate` — naive US/Eastern
+    local time, NOT the UTC-suffixed field search results carry. See module
+    docstring's "LIVE RECON for the corroboration path"."""
+    if not raw:
+        return None
+    try:
+        dt = datetime.strptime(str(raw), "%Y-%m-%dT%H:%M:%S")
+    except ValueError:
+        return None
+    return dt.replace(tzinfo=_GOVDEALS_TZ).astimezone(timezone.utc)
+
+
+def _corroborate_absence(adapter: GovDealsAdapter, asset_id: int, account_id: int) -> tuple[str, dict | None]:
+    """Fix round 1 (review finding #2): before trusting a healthy-refetch
+    absence as 'gone', corroborate with the per-lot maestro detail endpoint.
+    Returns `(verdict, payload)`:
+    - `("active", detail)` — the asset/account pair still resolves to a real,
+      non-closed record. `detail` is the raw `fetch_detail()` payload.
+    - `("closed", detail)` — resolves, but `assetStatusCd` reads sold/closed
+      (see `_status_of`'s "never observed but don't hardcode" caveat).
+    - `("gone", None_or_empty_detail)` — confirmed empty: either GovDeals'
+      real "doesn't exist" signal for this endpoint (HTTP 204 empty body,
+      surfaces as `requests.exceptions.JSONDecodeError` — see module
+      docstring) or (defensively) a 200 with a falsy/empty JSON body.
+    - `("unknown", None)` — the call raised something that says NOTHING
+      about whether the lot exists (a real HTTPError — 403/429/5xx — or a
+      network-level RequestException, or an unexpected exception). Per the
+      fetch-failure rule, the caller must emit NOTHING for this lot this
+      round, not even 'gone'.
+    """
+    try:
+        detail = adapter.fetch_detail(asset_id, account_id)
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else None
+        print(
+            f"[govdeals] RECORDER ERROR: poll() corroboration fetch_detail HTTP {status} "
+            f"for {asset_id}/{account_id} — treating as fetch failure, emitting nothing "
+            "for this lot this round"
+        )
+        return "unknown", None
+    except requests.exceptions.JSONDecodeError:
+        # HTTP 204 empty body — verified live: GovDeals' real "asset/account
+        # pair doesn't exist" signal for this endpoint (raise_for_status()
+        # doesn't raise on 204, so this surfaces from r.json() instead).
+        # Corroborates absence — this is NOT a network failure.
+        return "gone", None
+    except requests.exceptions.RequestException as e:
+        print(
+            f"[govdeals] RECORDER ERROR: poll() corroboration fetch_detail failed for "
+            f"{asset_id}/{account_id}: {e} — emitting nothing for this lot this round"
+        )
+        return "unknown", None
+    except Exception as e:  # noqa: BLE001
+        print(
+            f"[govdeals] RECORDER ERROR: poll() corroboration fetch_detail failed "
+            f"unexpectedly for {asset_id}/{account_id}: {e} — emitting nothing for this "
+            "lot this round"
+        )
+        return "unknown", None
+
+    if not detail:
+        return "gone", detail
+    if _status_of(detail.get("assetStatusCd")) == "closed":
+        return "closed", detail
+    return "active", detail
 
 
 def _lot_to_observation(lot: Lot) -> Observation:
@@ -315,6 +458,8 @@ class GovDealsSource:
 
         now = datetime.now(timezone.utc)
         observations: list[Observation] = []
+        corroboration_calls = 0
+        corroboration_cap_warned = False
         for lot in lots:
             lot_id = str(lot["source_lot_id"])
             parsed = key_by_lot_id.get(lot_id)
@@ -326,7 +471,23 @@ class GovDealsSource:
                 observations.append(_snapshot_to_observation(k, snapshot))
                 continue
             end_date = lot.get("end_date")
-            if end_date is not None and end_date <= now:
+            if end_date is None or end_date > now:
+                # absent from a healthy refetch but not yet past end_date
+                # (or end_date unknown) — emit nothing this round, retried later.
+                continue
+
+            # Fix round 1 (review finding #2): corroborate via the per-lot
+            # detail endpoint before trusting 'gone' — see module docstring.
+            asset_id, account_id, _auction_id = parsed
+            if corroboration_calls >= CORROBORATION_CAP_PER_BATCH:
+                if not corroboration_cap_warned:
+                    print(
+                        f"[govdeals] WARNING: poll() corroboration cap "
+                        f"({CORROBORATION_CAP_PER_BATCH}) hit this batch — remaining "
+                        "absent-past-end-date lot(s) fall back to absence-alone 'gone' "
+                        "detection (no per-lot detail corroboration) for this round"
+                    )
+                    corroboration_cap_warned = True
                 observations.append(Observation(
                     source=SOURCE,
                     source_lot_id=k,
@@ -337,8 +498,45 @@ class GovDealsSource:
                         "url": "govdeals-maestro-search-refetch",
                     }},
                 ))
-            # else: absent from a healthy refetch but not yet past end_date
-            # (or end_date unknown) — emit nothing this round, retried later.
+                continue
+
+            corroboration_calls += 1
+            verdict, payload = _corroborate_absence(adapter, asset_id, account_id)
+            if verdict == "active":
+                observations.append(Observation(
+                    source=SOURCE,
+                    source_lot_id=k,
+                    status="active",
+                    raw=payload,
+                    current_bid=None,  # fetch_detail carries no pricing fields — see docstring
+                    bid_count=None,
+                    end_date=_parse_detail_end_date(payload.get("assetAuctionEndDate")),
+                ))
+            elif verdict == "closed":
+                observations.append(Observation(
+                    source=SOURCE,
+                    source_lot_id=k,
+                    status="closed",
+                    raw=payload,
+                    current_bid=None,
+                    bid_count=None,
+                    end_date=_parse_detail_end_date(payload.get("assetAuctionEndDate")),
+                ))
+            elif verdict == "gone":
+                observations.append(Observation(
+                    source=SOURCE,
+                    source_lot_id=k,
+                    status="gone",
+                    raw={"recorder_probe": {
+                        "result": "not_found",
+                        "http_status": 204 if payload is None else 200,
+                        "url": f"govdeals-maestro-detail/{asset_id}/{account_id}",
+                    }},
+                ))
+            # verdict == "unknown": corroboration itself failed for real
+            # reasons (network/HTTP error) — emit NOTHING for this lot this
+            # round, per the fetch-failure rule (loud error already printed
+            # by _corroborate_absence).
         return observations
 
     def sold_sweep(self) -> list[Observation]:

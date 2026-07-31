@@ -170,6 +170,95 @@ def test_parse_money_handles_float_str_none():
     assert govdeals._parse_money(None) is None
 
 
+# --- _parse_detail_end_date --------------------------------------------------------
+
+def test_parse_detail_end_date_converts_naive_eastern_to_utc():
+    # verified live: fetch_detail()'s assetAuctionEndDate for asset 41961
+    # ("2026-07-31T09:01:00", naive ET) matched the SAME lot's known-UTC
+    # assetAuctionEndDateUtc from discover() ("2026-07-31T13:01:00+00:00").
+    dt = govdeals._parse_detail_end_date("2026-07-31T09:01:00")
+    assert dt == datetime(2026, 7, 31, 13, 1, 0, tzinfo=timezone.utc)
+
+
+def test_parse_detail_end_date_handles_missing():
+    assert govdeals._parse_detail_end_date(None) is None
+    assert govdeals._parse_detail_end_date("") is None
+    assert govdeals._parse_detail_end_date("not-a-date") is None
+
+
+# --- _corroborate_absence --------------------------------------------------------
+
+def test_corroborate_absence_active_verdict(monkeypatch):
+    adapter = govdeals.GovDealsAdapter()
+    monkeypatch.setattr(
+        govdeals.GovDealsAdapter, "fetch_detail",
+        lambda self, a, c: {"assetStatusCd": "STA", "assetAuctionEndDate": "2026-08-05T09:01:00"},
+    )
+    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+    assert verdict == "active"
+    assert payload["assetStatusCd"] == "STA"
+
+
+def test_corroborate_absence_closed_verdict(monkeypatch):
+    adapter = govdeals.GovDealsAdapter()
+    monkeypatch.setattr(
+        govdeals.GovDealsAdapter, "fetch_detail",
+        lambda self, a, c: {"assetStatusCd": "closed"},
+    )
+    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+    assert verdict == "closed"
+
+
+def test_corroborate_absence_gone_on_json_decode_error(monkeypatch):
+    adapter = govdeals.GovDealsAdapter()
+
+    def raise_jde(self, a, c):
+        raise govdeals.requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", raise_jde)
+    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+    assert verdict == "gone"
+    assert payload is None
+
+
+def test_corroborate_absence_gone_on_falsy_detail(monkeypatch):
+    adapter = govdeals.GovDealsAdapter()
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", lambda self, a, c: {})
+    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+    assert verdict == "gone"
+    assert payload == {}
+
+
+def test_corroborate_absence_unknown_on_connection_error(monkeypatch, capsys):
+    adapter = govdeals.GovDealsAdapter()
+
+    def raise_conn(self, a, c):
+        raise govdeals.requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", raise_conn)
+    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+    assert verdict == "unknown"
+    assert payload is None
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+
+
+def test_corroborate_absence_unknown_on_http_error(monkeypatch, capsys):
+    adapter = govdeals.GovDealsAdapter()
+
+    def raise_http(self, a, c):
+        resp = govdeals.requests.Response()
+        resp.status_code = 403
+        raise govdeals.requests.exceptions.HTTPError("blocked", response=resp)
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", raise_http)
+    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+    assert verdict == "unknown"
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+    assert "403" in out
+
+
 # --- discover() --------------------------------------------------------
 
 def test_discover_calls_category_cluster_and_remaining_furniture_terms(monkeypatch, lots):
@@ -269,21 +358,135 @@ def test_poll_found_snapshot_returns_observation(monkeypatch, snapshots):
     assert obs[0].status == "active"
 
 
-def test_poll_returns_gone_for_vanished_lot_after_its_end_date(monkeypatch):
-    def fake_refetch(self, keys):
-        return {}
+def _fail_fetch_detail(self, asset_id, account_id):
+    raise AssertionError(f"fetch_detail must not be called for {asset_id}/{account_id} here")
 
-    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", fake_refetch)
+
+# --- poll() corroboration (fix round 1, review finding #2) -----------------
+#
+# Absence from a healthy refetch, past the tracked lot's own end_date, is no
+# longer enough on its own to emit 'gone' — poll() now corroborates with ONE
+# extra GovDealsAdapter.fetch_detail(asset_id, account_id) call first. These
+# tests cover its four verdict branches plus the cap/skip behavior.
+
+def test_poll_corroboration_confirms_gone_via_204_empty_json_decode_error(monkeypatch):
+    # verified live (see module docstring): a nonexistent asset/account pair
+    # returns HTTP 204 empty body, which raise_for_status() does NOT reject —
+    # the empty body surfaces as JSONDecodeError from r.json() instead. This
+    # IS the endpoint's real "doesn't exist" signal, corroborating 'gone'.
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+
+    def fake_fetch_detail(self, asset_id, account_id):
+        raise govdeals.requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
     past_end = datetime.now(timezone.utc) - timedelta(hours=1)
     obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": past_end}])
     assert len(obs) == 1
     assert obs[0].status == "gone"
     assert obs[0].raw["recorder_probe"]["result"] == "not_found"
-    assert obs[0].raw["recorder_probe"]["http_status"] == 200
+    assert obs[0].raw["recorder_probe"]["http_status"] == 204
+    assert "999/888" in obs[0].raw["recorder_probe"]["url"]
+
+
+def test_poll_corroboration_confirms_still_active_with_later_end_date(monkeypatch):
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+    detail_payload = {
+        "assetId": 999, "accountId": 888, "auctionId": 1,
+        "assetStatusCd": "STA",
+        "assetAuctionEndDate": "2026-08-05T09:01:00",  # naive ET — see docstring
+    }
+
+    def fake_fetch_detail(self, asset_id, account_id):
+        assert (asset_id, account_id) == (999, 888)
+        return dict(detail_payload)
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": past_end}])
+    assert len(obs) == 1
+    o = obs[0]
+    assert o.status == "active"
+    assert o.source_lot_id == "999/888/1"
+    assert o.raw == detail_payload
+    assert o.current_bid is None  # fetch_detail carries no pricing fields
+    assert o.bid_count is None
+    # naive ET 09:01 -> UTC 13:01 (EDT, -4h) — the anti-snipe-extension case
+    assert o.end_date == datetime(2026, 8, 5, 13, 1, 0, tzinfo=timezone.utc)
+
+
+def test_poll_corroboration_confirms_closed(monkeypatch):
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+    detail_payload = {
+        "assetId": 999, "accountId": 888, "auctionId": 1,
+        "assetStatusCd": "SOLD",  # defensive — never observed live, see _status_of
+        "assetAuctionEndDate": "2026-07-30T09:01:00",
+    }
+    monkeypatch.setattr(
+        govdeals.GovDealsAdapter, "fetch_detail",
+        lambda self, asset_id, account_id: dict(detail_payload),
+    )
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": past_end}])
+    assert len(obs) == 1
+    assert obs[0].status == "closed"
+    assert obs[0].raw == detail_payload
+
+
+def test_poll_corroboration_unknown_network_failure_emits_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+
+    def fake_fetch_detail(self, asset_id, account_id):
+        raise govdeals.requests.exceptions.ConnectionError("boom")
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": past_end}])
+    assert obs == []  # NOT 'gone' — corroboration itself failed, fetch-failure rule applies
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+
+
+def test_poll_corroboration_real_http_error_emits_nothing(monkeypatch, capsys):
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+
+    def fake_fetch_detail(self, asset_id, account_id):
+        resp = govdeals.requests.Response()
+        resp.status_code = 500
+        raise govdeals.requests.exceptions.HTTPError("server error", response=resp)
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": past_end}])
+    assert obs == []
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+
+
+def test_poll_corroboration_cap_falls_back_to_absence_alone_gone(monkeypatch, capsys):
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+    calls = []
+
+    def fake_fetch_detail(self, asset_id, account_id):
+        calls.append((asset_id, account_id))
+        raise govdeals.requests.exceptions.JSONDecodeError("Expecting value", "", 0)
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    n = govdeals.CORROBORATION_CAP_PER_BATCH + 3
+    lots = [{"source_lot_id": f"{i}/888/1", "end_date": past_end} for i in range(n)]
+    obs = govdeals.GovDealsSource().poll(lots)
+    assert len(obs) == n  # every lot still ends up 'gone' one way or another
+    assert all(o.status == "gone" for o in obs)
+    assert len(calls) == govdeals.CORROBORATION_CAP_PER_BATCH  # cap respected
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "corroboration cap" in out
 
 
 def test_poll_absent_lot_before_end_date_emits_nothing(monkeypatch):
     monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", _fail_fetch_detail)
     future_end = datetime.now(timezone.utc) + timedelta(hours=1)
     obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": future_end}])
     assert obs == []
@@ -291,6 +494,7 @@ def test_poll_absent_lot_before_end_date_emits_nothing(monkeypatch):
 
 def test_poll_absent_lot_with_unknown_end_date_emits_nothing(monkeypatch):
     monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", lambda self, keys: {})
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", _fail_fetch_detail)
     obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": None}])
     assert obs == []
 

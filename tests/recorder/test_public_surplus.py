@@ -69,6 +69,58 @@ def test_parse_search_cards_fields(search_html):
     assert c["link"] == "https://www.publicsurplus.com/sms/auction/view?auc=4053470"
 
 
+def test_parse_search_cards_healthy_page_is_silent(search_html, capsys):
+    ps._parse_search_cards(search_html, "https://www.publicsurplus.com/fake")
+    out = capsys.readouterr().out
+    assert out == ""  # real fixture has no drops/misses — must print nothing
+
+
+# --- _parse_search_cards drop/miss aggregation (fix round 1, review finding #3) ---
+
+_HEALTHY_TWO_CARD_HTML = """
+<div class="auction-item" id="111searchGrid">
+<a href="/sms/auction/view?auc=111" title="Test Lot 111">Test Lot 111</a>
+<span id="val_111searchGrid">$5.00</span>
+<script>updateTimeLeftSpan(timeLeftInfoMap, 111, "111searchGrid", 1000, 2000, 0, "", "", "searchList", timeLeftCallback);</script>
+</div>
+<div class="auction-item" id="222searchGrid">
+<a href="/sms/auction/view?auc=222" title="Test Lot 222">Test Lot 222</a>
+<span id="val_222searchGrid">$6.00</span>
+<script>updateTimeLeftSpan(timeLeftInfoMap, 222, "222searchGrid", 1000, 3000, 0, "", "", "searchList", timeLeftCallback);</script>
+</div>
+"""
+
+_DROPPED_AND_MISSING_FIELD_HTML = """
+<div class="auction-item" id="333searchGrid">
+<span id="val_333searchGrid">$7.00</span>
+</div>
+<div class="auction-item" id="444searchGrid">
+<a href="/sms/auction/view?auc=444" title="Test Lot 444">Test Lot 444</a>
+<script>updateTimeLeftSpan(timeLeftInfoMap, 444, "444searchGrid", 1000, 4000, 0, "", "", "searchList", timeLeftCallback);</script>
+</div>
+"""
+
+
+def test_parse_search_cards_synthetic_healthy_page_is_silent(capsys):
+    cards = ps._parse_search_cards(_HEALTHY_TWO_CARD_HTML, "https://www.publicsurplus.com/fake")
+    assert len(cards) == 2
+    out = capsys.readouterr().out
+    assert out == ""
+
+
+def test_parse_search_cards_counts_dropped_card_and_missing_price(capsys):
+    # card 333 has no title/link -> dropped; card 444 has title/link but no
+    # price span -> kept, price_raw=None (a miss).
+    cards = ps._parse_search_cards(_DROPPED_AND_MISSING_FIELD_HTML, "https://www.publicsurplus.com/fake")
+    assert len(cards) == 1
+    assert cards[0]["auc_id"] == "444"
+    assert cards[0]["price_raw"] is None
+    out = capsys.readouterr().out
+    assert "WARNING" in out
+    assert "1 card(s) dropped" in out
+    assert "1 price miss" in out
+
+
 # --- discover() --------------------------------------------------------
 
 def test_discover_parses_n_geq_5_observations(monkeypatch, search_html):
@@ -262,6 +314,77 @@ def test_poll_empty_lots_makes_no_request(monkeypatch):
 
     monkeypatch.setattr(ps, "polite_get", fail_get)
     assert ps.PublicSurplusSource().poll([]) == []
+
+
+# --- poll() batch-level 401 block detection (fix round 1, review finding #1) ---
+
+def test_poll_all_tracked_lots_401_suspected_block_zero_gone_loud_error(monkeypatch, login_wall_html, capsys):
+    # a session-wide block would look identical, per lot, to N real closes —
+    # this must NOT mass-mark every tracked lot 'gone' (append-only-unrecoverable).
+    monkeypatch.setattr(ps, "polite_get", lambda url, **k: _FakeResponse(login_wall_html, status_code=401, url=url))
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    lots = [{"source_lot_id": str(i), "end_date": past_end} for i in range(5)]
+    obs = ps.PublicSurplusSource().poll(lots)
+    assert obs == []
+    out = capsys.readouterr().out
+    assert "RECORDER ERROR" in out
+    assert "block" in out.lower()
+    assert "5/5" in out
+
+
+def test_poll_single_401_among_healthy_batch_still_gone(monkeypatch, detail_no_bids_html, detail_with_bids_html, login_wall_html):
+    # a lone 401 in an otherwise-healthy batch is PS's normal, legitimate
+    # close signal — must still become 'gone' exactly as before this fix.
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        if "auc=4054005" in url:
+            return _FakeResponse(detail_no_bids_html, url=url)
+        if "auc=4053470" in url:
+            return _FakeResponse(detail_with_bids_html, url=url)
+        return _FakeResponse(login_wall_html, status_code=401, url=url)
+
+    monkeypatch.setattr(ps, "polite_get", fake_get)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    lots = [
+        {"source_lot_id": "4054005"},
+        {"source_lot_id": "4054005"},
+        {"source_lot_id": "4053470"},
+        {"source_lot_id": "4053470"},
+        {"source_lot_id": "9999999", "end_date": past_end},  # the lone 401
+    ]
+    obs = ps.PublicSurplusSource().poll(lots)
+    statuses = [o.status for o in obs]
+    assert statuses.count("gone") == 1
+    assert statuses.count("active") == 4
+
+
+def test_poll_below_min_count_401s_not_suspected(monkeypatch, login_wall_html):
+    # 2 lots, both 401 (100% of the batch) — below BLOCK_SUSPECT_MIN_COUNT
+    # (3), so NOT treated as a suspected block; both still become 'gone'.
+    monkeypatch.setattr(ps, "polite_get", lambda url, **k: _FakeResponse(login_wall_html, status_code=401, url=url))
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    lots = [{"source_lot_id": "1", "end_date": past_end}, {"source_lot_id": "2", "end_date": past_end}]
+    obs = ps.PublicSurplusSource().poll(lots)
+    assert len(obs) == 2
+    assert all(o.status == "gone" for o in obs)
+
+
+def test_poll_below_min_fraction_401s_not_suspected(monkeypatch, detail_no_bids_html, login_wall_html):
+    # 3 401s out of 10 lots (30%) — meets the min COUNT but not the min
+    # FRACTION (80%) — NOT suspected; the 3 still become 'gone' individually.
+    def fake_get(url, *, headers=None, params=None, timeout=30):
+        if "auc=4054005" in url:
+            return _FakeResponse(detail_no_bids_html, url=url)
+        return _FakeResponse(login_wall_html, status_code=401, url=url)
+
+    monkeypatch.setattr(ps, "polite_get", fake_get)
+    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
+    lots = [{"source_lot_id": "4054005"} for _ in range(7)] + [
+        {"source_lot_id": f"gone-{i}", "end_date": past_end} for i in range(3)
+    ]
+    obs = ps.PublicSurplusSource().poll(lots)
+    statuses = [o.status for o in obs]
+    assert statuses.count("gone") == 3
+    assert statuses.count("active") == 7
 
 
 def test_sold_sweep_returns_empty_list():

@@ -101,6 +101,32 @@ one zero-bid one with bids — both trimmed to the Time-Left/price/bid-count
 blocks), `detail_login_wall_401.html` (the real, generic 401 login-wall
 body — see "Closed/removed lots" above; content is identical regardless of
 which non-active auction id triggers it).
+
+FIX ROUND 1 (review, 2026-07-31):
+
+- **Finding #1 (CRITICAL) — batch-level 401 block detection.** A per-lot 401
+  ("Closed/removed lots" above) is PS's own legitimate close signal, but a
+  session-wide block (PS rate-limiting/banning this IP or session) would
+  produce the EXACT SAME per-lot signal — a generic 401 login-wall body —
+  for every tracked lot in the same `poll()` batch, indistinguishable lot-
+  by-lot from N simultaneous real closes. Since 'gone' is append-only and
+  unrecoverable, mass-misreading a block as N closes would permanently
+  corrupt N lots' history. `poll()` now does a batch-level sanity check
+  BEFORE turning any 401 into 'gone': if `>= BLOCK_SUSPECT_MIN_COUNT` lots
+  in the SAME batch AND `>= BLOCK_SUSPECT_MIN_FRACTION` of the batch both
+  returned a 401-not-found this round, the whole batch is treated as a
+  suspected block — a loud `RECORDER ERROR` is printed and NO 'gone'
+  observations are emitted from ANY 401 that round (still-active/found-lot
+  observations from lots that DID resolve normally in the same batch still
+  stand — only the 401-derived 'gone' path is suppressed). A single 401
+  among an otherwise-healthy batch still becomes 'gone' exactly as before —
+  that's the common, legitimate case this adapter exists to catch.
+- **Finding #3 (minor) — silent card/field drops.** `_parse_search_cards`
+  now counts cards it skips outright (no title/link match) and per-field
+  regex misses (price/end-date not found on an otherwise-parsed card) and
+  prints one aggregated `WARNING` per page when any occurred, instead of
+  only the old per-card `print()` for a fully-dropped card. A healthy page
+  with zero misses stays silent.
 """
 from __future__ import annotations
 
@@ -131,6 +157,13 @@ PS_PAGE_SIZE = 25
 # request burst against a single host (>=1s/request via polite_get already
 # throttles the wall-clock cost).
 MAX_SEARCH_PAGES = 20
+
+# Batch-level suspected-block thresholds (fix round 1, review finding #1) —
+# see module docstring. A poll() batch is only treated as a suspected
+# session-wide block when AT LEAST this many lots AND AT LEAST this fraction
+# of the whole batch both came back 401-not-found in the same round.
+BLOCK_SUSPECT_MIN_COUNT = 3
+BLOCK_SUSPECT_MIN_FRACTION = 0.8
 
 _GRID_CARD_RE = re.compile(r'<div class="auction-item" id="(\d+)searchGrid">')
 _LOCATION_RE = re.compile(r'auction-item-state[^>]*>\s*([^<]*)')
@@ -201,9 +234,19 @@ def _parse_search_cards(html: str, page_url: str) -> list[dict]:
     is the parsed card dict itself (title/link/location/price_raw/
     end_epoch_ms_raw/page_url) — the literal matched substrings, per the
     shared contract's "raw must carry ... the raw matched substrings"
-    instruction for HTML sources."""
+    instruction for HTML sources.
+
+    Fix round 1 (review finding #3): dropped cards (no title/link match) and
+    per-field regex misses (price/end-date not found on an otherwise-kept
+    card) are counted and reported as ONE aggregated `WARNING` line when any
+    occurred — never silent, but also never one `print()` per miss flooding
+    the log on a bad page.
+    """
     matches = list(_GRID_CARD_RE.finditer(html))
     cards: list[dict] = []
+    dropped = 0
+    price_misses = 0
+    end_misses = 0
     for i, m in enumerate(matches):
         auc_id = m.group(1)
         seg_end = matches[i + 1].start() if i + 1 < len(matches) else len(html)
@@ -211,16 +254,20 @@ def _parse_search_cards(html: str, page_url: str) -> list[dict]:
 
         tm = _title_link_re(auc_id).search(seg)
         if not tm:
-            print(f"[public_surplus] skipping card {auc_id} with no title/link match")
+            dropped += 1
             continue
         link = BASE_URL + tm.group(1)
         title = html_lib.unescape(tm.group(2)).strip()
 
         pm = _search_price_re(auc_id).search(seg)
         price_raw = pm.group(1).strip() if pm else None
+        if price_raw is None:
+            price_misses += 1
 
         em = _end_epoch_re(auc_id).search(seg)
         end_epoch_ms_raw = em.group(1) if em else None
+        if end_epoch_ms_raw is None:
+            end_misses += 1
 
         lm = _LOCATION_RE.search(seg)
         location = lm.group(1).strip() if lm else ""
@@ -234,6 +281,14 @@ def _parse_search_cards(html: str, page_url: str) -> list[dict]:
             "end_epoch_ms_raw": end_epoch_ms_raw,
             "page_url": page_url,
         })
+
+    if dropped or price_misses or end_misses:
+        print(
+            f"[public_surplus] WARNING: _parse_search_cards() on {page_url}: "
+            f"{dropped} card(s) dropped (no title/link match), {price_misses} "
+            f"price miss(es), {end_misses} end-date miss(es), out of "
+            f"{len(matches)} card(s) found on this page"
+        )
     return cards
 
 
@@ -394,13 +449,42 @@ class PublicSurplusSource:
         if not lots:
             return []
         now = datetime.now(timezone.utc)
+
+        # Fetch every lot's detail FIRST — the batch-level suspected-block
+        # check (fix round 1, review finding #1; see module docstring) needs
+        # to see the whole batch's outcome before any 'gone' is decided.
+        fetched: list[tuple[dict, dict | None]] = [
+            (lot, _fetch_detail(str(lot["source_lot_id"]))) for lot in lots
+        ]
+
+        not_found_401_count = sum(
+            1 for _, detail in fetched
+            if detail is not None and detail["not_found"] and detail["http_status"] == 401
+        )
+        suspected_block = (
+            not_found_401_count >= BLOCK_SUSPECT_MIN_COUNT
+            and (not_found_401_count / len(lots)) >= BLOCK_SUSPECT_MIN_FRACTION
+        )
+        if suspected_block:
+            print(
+                f"[public_surplus] RECORDER ERROR: poll() suspects a session-wide block — "
+                f"{not_found_401_count}/{len(lots)} tracked lots returned HTTP 401 in this "
+                f"single batch (threshold: >= {BLOCK_SUSPECT_MIN_COUNT} lots AND "
+                f">= {BLOCK_SUSPECT_MIN_FRACTION:.0%} of the batch). A real PS closed-"
+                "auction 401 only ever affects one lot at a time (see module docstring) — "
+                "this many at once looks like PS blocking this IP/session, not simultaneous "
+                "real closes. Suppressing ALL 'gone' observations derived from a 401 this "
+                "round; any found-lot (still-active) observations from the same batch still stand."
+            )
+
         observations: list[Observation] = []
-        for lot in lots:
+        for lot, detail in fetched:
             lot_id = str(lot["source_lot_id"])
-            detail = _fetch_detail(lot_id)
             if detail is None:
                 continue  # fetch failure for this lot — loud error already printed, skip
             if detail["not_found"]:
+                if detail["http_status"] == 401 and suspected_block:
+                    continue  # suppressed — see the batch-level warning above
                 end_date = lot.get("end_date")
                 if end_date is not None and end_date <= now:
                     observations.append(Observation(
