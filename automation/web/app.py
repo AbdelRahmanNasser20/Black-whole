@@ -56,8 +56,11 @@ from .. import favorites
 from .. import telegram_alerts
 from .. import deposits
 from .. import stripe_gateway
+from .. import freight_estimate
+from .. import freight_log
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import rate_limit
 from . import auth as auth_svc
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -566,6 +569,14 @@ async def public_listing_detail(request: Request, lot_id: str):
             "item": row,
             "hero": hero,
             "images": images,
+            # The freight widget only renders where it can actually answer: a
+            # lot with a locatable origin that's still for sale. A zip-less or
+            # sold lot keeps the plain pickup row instead of offering a form
+            # that can only ever say "we'll quote it by hand".
+            "freight": {
+                "enabled": bool(_freight_origin_zip(row)) and not row["is_sold"],
+                "default_qty": _freight_default_qty(row),
+            },
             **_detail_seo(row, hero, images),
         }),
     )
@@ -1110,6 +1121,243 @@ async def public_subscribe(payload: dict):
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
+
+
+# ── Freight estimate (public, self-serve) ────────────────────────────────────
+# A buyer types their ZIP on a lot page and gets an honest RANGE. Public paths,
+# deliberately outside `/api/` (auth.py's PROTECTED_PREFIXES), same as /contact
+# and /reserve.
+#
+# THE HARD RULE: never invent a number. An unquotable lane (international,
+# offshore/Alaska, unresolvable ZIP, or a lot whose origin we can't locate)
+# returns HTTP 200 with `ok: false` and hands the buyer to the contact form. It
+# does NOT guess, and it does not 500 — a lane we can't price is a normal
+# outcome of a public form, not an error.
+
+FREIGHT_UNQUOTABLE = {
+    "ok": False,
+    "reason": "unquotable",
+    "message": (
+        "We'll quote this lane by hand — send the request below and we'll come "
+        "back with a real number."
+    ),
+}
+
+# What the estimate is and isn't. Shipped with every quote so the widget can't
+# drift from the terms, and so a screenshot of the number carries its caveats.
+FREIGHT_FRAMING = {
+    "estimate_only": True,
+    "residential_liftgate_included": True,
+    "chair_price_separate": True,
+    "pickup_free": True,
+}
+
+# Sanity ceiling on a requested quantity. Bigger than any real lot (the largest
+# to date is ~4,900) and small enough that a fat-fingered 9-digit number can't
+# turn into a nonsense weight.
+FREIGHT_MAX_QTY = 10_000
+
+
+def _freight_origin_zip(row: dict) -> str | None:
+    """Where this lot ships FROM. Server-side only — never client-supplied.
+
+    Origin is the one input a buyer must not control: letting them pass it
+    would turn the endpoint into a free general-purpose freight calculator and
+    make every logged lane a lie. Falls back to the state capital's ZIP when a
+    lot has no ZIP on file (±a state's width, which the range already absorbs);
+    no ZIP and no known state means no quote.
+
+    Normalization goes through the estimator's own `_resolve_zip` rather than a
+    second hand-rolled `zfill(5)` here — one module decides what a ZIP is.
+    """
+    zip_code = freight_estimate._resolve_zip(row.get("zip_code"))
+    if zip_code:
+        return zip_code
+    state = (row.get("state") or "").strip().upper()
+    return freight_estimate.STATE_CENTER_ZIP.get(state)
+
+
+def _freight_default_qty(row: dict) -> int:
+    """What to quote when the buyer doesn't say — the whole lot, basically."""
+    for key in ("quantity_remaining", "quantity_original"):
+        try:
+            qty = int(row.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty > 0:
+            return min(qty, FREIGHT_MAX_QTY)
+    return 1
+
+
+def _freight_rate_ok(request: Request) -> None:
+    """429 unless this caller (and the site as a whole) is under the hour's cap."""
+    ip = rate_limit.client_ip(request)
+    if not rate_limit.allow(f"freight:{ip}", limit=rate_limit.FREIGHT_PER_IP_LIMIT):
+        raise HTTPException(429, "rate_limited")
+    if not rate_limit.allow("freight:global", limit=rate_limit.FREIGHT_GLOBAL_LIMIT):
+        raise HTTPException(429, "rate_limited")
+
+
+def _freight_range(quote: dict, low_key: str, high_key: str) -> dict | None:
+    low, high = quote.get(low_key), quote.get(high_key)
+    if low is None or high is None:
+        return None
+    return {"low": low, "high": high}
+
+
+def _freight_public_estimate(quote: dict) -> dict:
+    """The subset of the estimator's dict a browser may see.
+
+    `raw` (calibration constants, NMFC class, the carrier's own response) stays
+    server-side: it's the audit trail for a quote, not a spec sheet for a
+    competitor, and every one of those knobs is tunable-by-us guesswork.
+    """
+    return {
+        "mode": quote.get("mode"),
+        "recommended_mode": quote.get("recommended_mode"),
+        "ltl": _freight_range(quote, "ltl_low", "ltl_high"),
+        "partial": _freight_range(quote, "partial_low", "partial_high"),
+        "miles": quote.get("miles"),
+        "transit_days": quote.get("transit_days"),
+        "valid_until": quote.get("valid_until"),
+    }
+
+
+def _freight_range_str(quote: dict) -> str:
+    mode = quote.get("recommended_mode") or quote.get("mode") or "ltl"
+    rng = _freight_range(quote, f"{mode}_low", f"{mode}_high") or _freight_range(
+        quote, "ltl_low", "ltl_high"
+    )
+    if not rng:
+        return "—"
+    return f"${rng['low']:,.0f}–${rng['high']:,.0f} ({mode})"
+
+
+async def _notify_freight_estimate(
+    row: dict, quote: dict, *, dest_zip: str, quantity: int, quote_id: int | None
+) -> None:
+    """Someone priced a real lane — that's a warm lead even without an email.
+
+    Best-effort, exactly like `_notify_new_inquiry`: a dead Telegram must never
+    surface as a failed estimate.
+    """
+    try:
+        lot_id = row.get("lot_id") or "—"
+        bits = [f"🚚 FREIGHT ESTIMATE · lot {lot_id}"]
+        bits.append(
+            f"{quantity} chairs → {dest_zip} · {_freight_range_str(quote)}"
+        )
+        bits.append(
+            f"~{quote.get('miles')} mi · ~{quote.get('transit_days')} days · "
+            f"via {quote.get('provider') or 'estimator'}"
+            + (f" · quote #{quote_id}" if quote_id else "")
+        )
+        bits.append(f"→ {PUBLIC_BASE_URL}/listings/{lot_id}")
+        await telegram_alerts.send_message("\n".join(bits), topic="leads")
+    except Exception:
+        pass
+
+
+async def _notify_freight_email(quote_id: int, email: str) -> None:
+    """The buyer traded their email for the estimate — that's the hot signal."""
+    try:
+        await telegram_alerts.send_message(
+            f"📧 FREIGHT LEAD · quote #{quote_id} → {email}", topic="leads"
+        )
+    except Exception:
+        pass
+
+
+@app.post("/freight-estimate")
+async def public_freight_estimate(payload: dict, request: Request):
+    """`{lot_id, dest_zip, quantity?}` → a freight cost range for that lane."""
+    _freight_rate_ok(request)
+    payload = payload or {}
+
+    lot_id = str(payload.get("lot_id") or "").strip()
+    row = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    if not row or row.get("status") == "hidden" or inventory.is_sold(row):
+        # A sold lot has nothing to ship; quoting freight on it would be a
+        # promise we can't keep.
+        raise HTTPException(404, "listing not found")
+
+    if payload.get("quantity") in (None, ""):
+        quantity = _freight_default_qty(row)
+    else:
+        try:
+            quantity = int(payload["quantity"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "quantity must be a number")
+        quantity = max(1, min(quantity, FREIGHT_MAX_QTY))
+
+    dest_zip = str(payload.get("dest_zip") or "").strip()
+    origin_zip = _freight_origin_zip(row)
+    if not origin_zip:
+        # We don't know where the lot is. Better a hand quote than a lane
+        # measured from nowhere.
+        return dict(FREIGHT_UNQUOTABLE)
+
+    try:
+        # Pure arithmetic over a committed lookup table — microseconds, no I/O,
+        # so it runs inline rather than paying for a thread hop. (A configured
+        # WarpProvider would add a network call; it falls back to the estimator
+        # on failure and is not wired on the storefront today.)
+        quote = freight_estimate.get_freight_estimate(origin_zip, dest_zip, quantity)
+    except freight_estimate.FreightUnavailable:
+        return dict(FREIGHT_UNQUOTABLE)
+
+    quote_id = await asyncio.to_thread(
+        freight_log.insert_storefront_quote,
+        lot_id=row.get("lot_id") or lot_id,
+        origin_zip=origin_zip,
+        dest_zip=dest_zip,
+        quantity=quantity,
+        quote=quote,
+        client_ip=rate_limit.client_ip(request),
+    )
+    asyncio.create_task(
+        _notify_freight_estimate(
+            row, quote, dest_zip=dest_zip, quantity=quantity, quote_id=quote_id
+        )
+    )
+    return {
+        "ok": True,
+        "quote_id": quote_id,
+        "estimate": _freight_public_estimate(quote),
+        "framing": dict(FREIGHT_FRAMING),
+    }
+
+
+def _looks_like_email(value: str) -> bool:
+    """Cheap plausibility check — the real validation is whether it bounces."""
+    if not value or len(value) > 254 or any(c.isspace() for c in value):
+        return False
+    local, _, domain = value.partition("@")
+    return bool(local) and "." in domain and not domain.startswith(".") \
+        and not domain.endswith(".")
+
+
+@app.post("/freight-estimate/email")
+async def public_freight_estimate_email(payload: dict, request: Request):
+    """Step two: attach an email to a quote the buyer already has on screen.
+
+    Split from the estimate itself on purpose — asking for an email before
+    showing a number costs more quotes than the addresses are worth.
+    """
+    _freight_rate_ok(request)
+    payload = payload or {}
+    try:
+        quote_id = int(payload.get("quote_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quote_id required")
+
+    email = str(payload.get("email") or "").strip()
+    if not _looks_like_email(email):
+        raise HTTPException(400, "valid email required")
+
+    await asyncio.to_thread(freight_log.set_quote_email, quote_id, email)
+    asyncio.create_task(_notify_freight_email(quote_id, email))
+    return {"ok": True}
 
 
 # ── Reserve with deposit (Stripe Checkout) ───────────────────────────────────
