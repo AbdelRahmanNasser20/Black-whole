@@ -51,6 +51,7 @@ from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import db
 from .. import catalog_feed
 from .. import inventory
+from .. import lot_images
 from .. import favorites
 from .. import telegram_alerts
 from ..alerts import blast as alerts_blast
@@ -451,27 +452,16 @@ def _hero_src(row: dict) -> str | None:
     """Cover-image URL for a row: durable cloud URL first, local /image/ fallback.
 
     The deployed site has no local Desktop folder, so a populated
-    `hero_image_url` (Supabase Storage, BLACKWHOLE-6) is what actually renders
-    there. Locally, an un-uploaded lot still shows via the /image/ route.
+    `hero_image_url` is what actually renders there. Locally, an un-uploaded lot
+    still shows via the /image/ route. Precedence lives in `lot_images` so the
+    site and the CRM can't drift (BLACKWHOLE-31).
     """
-    url = (row.get("hero_image_url") or "").strip()
-    if url.startswith("http"):
-        return url
-    folder, hero = row.get("folder_name"), row.get("hero_image")
-    if folder and hero:
-        return f"/image/{folder}/{hero}"
-    return None
+    return lot_images.hero_src(row)
 
 
 def _gallery_srcs(row: dict) -> list[str]:
     """Ordered gallery URLs: durable cloud list first, else local folder files."""
-    urls = row.get("image_urls")
-    if isinstance(urls, list) and urls:
-        return [u for u in urls if u]
-    folder = row.get("folder_name")
-    if folder:
-        return [f"/image/{folder}/{n}" for n in _folder_images(DOWNLOAD_ROOT / folder)]
-    return []
+    return lot_images.gallery_srcs(row)
 
 
 @app.get("/", response_class=HTMLResponse)

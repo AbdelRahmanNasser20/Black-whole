@@ -28,6 +28,7 @@ blueprint (scrape → llm → download → dewatermark → fb → ebay).
   - `dewatermark.py` — dewatermark.ai REST API only. Per-folder sidecar + global response cache + budget caps.
   - `quality.py` — bottom-right histogram check; runs after every API call to guard against the API returning still-watermarked output.
   - `listing_images.py` — durable listing images via Supabase Storage (BLACKWHOLE-6). Uploads cleaned photos to the shared **public `listing-images` bucket** (same bucket + key contract as the CRM's BWCRM-18) and returns durable public URLs stored in `inventory.hero_image_url` (flat key `<lot>.<ext>`) + `inventory.image_urls` (gallery, prefixed `<lot>/NN.<ext>`). Uses `SUPABASE_STORAGE_URL` / `SUPABASE_STORAGE_KEY` / `LISTING_IMAGES_BUCKET` (deliberately separate from the stale `SUPABASE_URL`/`ANON`). Best-effort: unconfigured/failed upload → URLs stay NULL and the site falls back to local `/image/` serving. Public reads need no key. Backfill via `scripts/backfill_listing_images.py`.
+  - `lot_images.py` — **the one resolver for "where are this lot's photos?"** (BLACKWHOLE-31). Precedence is always `durable DB URLs → local disk → nothing`, never host-specific. Stdlib-only and takes its DB reader by injection (`resolve_lot(lot_id, fetch_row=...)`), so the CRM repo imports it too — via workspace `core/images.py`, which re-exports this module rather than copying it. `resolve(row)` returns a `LotImages` with `.urls` (deduped photo set — safe to send from any host), `.hero` (the cover, honoring the `hero_image_url` column), `.local_paths`, `.source`. `hero_src()` / `gallery_srcs()` are the web-template helpers `web/app.py` now delegates to. See "Lot photos" below.
   - `facebook.py`, `ebay.py` — fill drafts, stop before publish.
   - `templates.py` — FB description + eBay HTML description with placeholders.
   - `favorites.py` — auction-favorites store + Telegram countdown alert schedule (6d/3d/2d/1d/1h/5m). Persists `favorites` + `alert_log` tables in the same `inventory.db`. The scheduler loop runs inside the FastAPI process (`web/app.py`); alert sends go through `telegram_alerts.py`. Marking `auction_extractors` cards via the dashboard's `04 Auctions` tab writes here.
@@ -94,6 +95,50 @@ from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute
 1. First time only: `python run.py --login-only` (browser opens with FB + eBay tabs; log into both, close window).
 2. `python -m automation.web` — public site at http://127.0.0.1:8765/, admin dashboard at http://127.0.0.1:8765/admin.
 3. Paste GovDeals URL on the Launcher tab → Run. Confirm price when prompted. Drafts appear under the Drafts tab. Inventory ledger picks up the row automatically (see next section).
+
+## Lot photos — READ BEFORE WRITING ANY IMAGE-PATH CODE
+
+**Cloudflare R2 is the canonical backend. Supabase Storage is dead.** The shared
+Supabase project blew its egress quota and Storage is 402-restricted — every
+`…supabase.co/storage/v1/object/public/listing-images/…` URL returns HTTP 402,
+not the image. R2 (`R2_*` in `.env`, public base
+`https://pub-4ac6bae8ec024e3aaccf3317c8873840.r2.dev`) serves the same key
+contract with zero egress fees. `listing_images.upload_lot_images()` already
+dispatches to `r2_images` whenever R2 is configured, so the *upload* path needs
+no thought — but **never write a new Supabase Storage URL into `inventory`**,
+and treat any row still carrying one as broken. `lot_images.storage_backend(url)`
+answers which backend a URL belongs to; `deals/archive.py` still uploads to
+Supabase and is the one module that hasn't been moved over.
+
+**Resolving is centralized in `automation/lot_images.py`.** Don't hand-roll
+`DOWNLOAD_ROOT / folder_name` again. The bug that motivated this: the CRM poller
+resolved photos off `folder_path`, which only exists on the operator's laptop,
+so on the server it found nothing and sent text-only replies — five buyers lost
+on lot 31225 (~945 chairs). Rules the module encodes:
+- `image_urls` (the gallery) is the photo **set**. `hero_image_url` is the
+  **cover**. File 0 is uploaded under both keys, so unioning them double-attaches
+  the first photo — `.urls` deliberately doesn't.
+- Local disk is a fallback, never an answer to "can the bot show a buyer this
+  lot" — `has_usable_images()` ignores disk on purpose.
+- `_originals/` and `_screenshots/` are internal; only top-level files in a lot
+  folder are listing photos.
+
+**Getting photos onto a lot** — two scripts, by whether we physically have it:
+```bash
+# lots we own (reads the operator's Desktop folder)
+./.venv/bin/python scripts/backfill_listing_images.py --lot 31225
+./.venv/bin/python scripts/backfill_listing_images.py --missing
+
+# lots we're offering but never picked up (active_bid) — mirrors the seller's
+# own GovDeals photos into R2; finds asset/account from the row automatically
+./.venv/bin/python scripts/import_deal_images.py --lot wa-steilacoom-50
+```
+
+**The guard.** A `crm_offerable` lot with no usable photos is the exact failure
+that cost those buyers, and it's silent. `scripts/check_offerable_images.py`
+exits non-zero on any such lot; `--http` also proves the URLs return 200 (which
+is what catches a backend going dark, as Supabase did). Run it after flipping
+any lot to `crm_offerable`.
 
 ## Inventory ledger — READ BEFORE TOUCHING run.py OR APP.PY
 
