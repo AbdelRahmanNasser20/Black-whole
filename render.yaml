@@ -134,3 +134,19 @@ services:
     dockerCommand: sh scripts/deals_cron.sh digest
     envVars:
       - fromGroup: blackwhole-secrets
+
+  # ── 4. Closing-price recorder (BLACKWHOLE-28 Phase 0) ───────────────────
+  # Every day without a recorder is a day of comps lost forever — closing
+  # prices can't be backfilled. `run` does poll-once (adaptive cadence, down
+  # to 5-min inside the final hour of a closing lot) + conditional discover
+  # for any of the 6 sources gone stale. 5-min cadence exists to catch
+  # closes; drop to */10 if Render cron cost becomes a concern.
+  - type: cron
+    name: recorder-run
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "*/5 * * * *"      # every 5 min
+    autoDeploy: true
+    dockerCommand: ./scripts/recorder_cron.sh run
+    envVars:
+      - fromGroup: blackwhole-secrets
