@@ -55,6 +55,7 @@ from .. import inventory
 from .. import favorites
 from .. import telegram_alerts
 from .. import deposits
+from .. import site_settings
 from .. import stripe_gateway
 from .. import freight_estimate
 from .. import freight_log
@@ -3006,6 +3007,76 @@ async def inq_delete(inquiry_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+# ───────────────────────────── deposits API ─────────────────────────────
+# The money ledger behind the storefront's Reserve button (B4). Admin-only by
+# construction: everything here is under /api/, which the auth middleware gates.
+#
+# Two deliberate non-features:
+#   1. **No refunds from here.** A refund is executed in the Stripe dashboard
+#      and arrives back as a `charge.refunded` webhook, which flips the row.
+#      A "refund" button here would be a second source of truth for money.
+#   2. **No inventory side-effects.** A paid deposit does NOT decrement
+#      `quantity_remaining` (v1 decision) — the operator adjusts by hand once
+#      the pickup/freight is actually arranged.
+#
+# `set_admin_fields` is the manual override for when reality and Stripe
+# disagree, so it is NOT state-machine gated. The UI only offers `→ canceled`
+# on pending/processing rows; the API stays permissive on purpose.
+
+@app.get("/api/deposits")
+async def dep_list(status: str | None = None):
+    if status and status not in deposits.DEPOSIT_STATUSES:
+        raise HTTPException(400, f"invalid status: {status}")
+    items = await asyncio.to_thread(deposits.list_deposits, status=status or None)
+    return {"items": items}
+
+
+@app.patch("/api/deposits/{deposit_id}")
+async def dep_update(deposit_id: int, payload: dict):
+    payload = payload or {}
+    status = payload.get("status")
+    if status is not None and status not in deposits.DEPOSIT_STATUSES:
+        raise HTTPException(400, f"invalid status: {status}")
+    try:
+        row = await asyncio.to_thread(
+            deposits.set_admin_fields,
+            deposit_id,
+            status=status,
+            admin_note=payload.get("admin_note"),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
+@app.delete("/api/deposits/{deposit_id}")
+async def dep_delete(deposit_id: int):
+    ok = await asyncio.to_thread(deposits.delete_deposit, deposit_id)
+    if not ok:
+        raise HTTPException(404, "not found")
+    return {"ok": True}
+
+
+# ───────────────────────────── site settings API ─────────────────────────────
+# The live deposit rule (pct + floor), editable from the Deposits tab without a
+# redeploy. Distinct from `/api/site-config` — that one reports deployment
+# config and is load-bearing for the auth tests; do not merge them.
+
+@app.get("/api/settings")
+async def settings_get():
+    return await asyncio.to_thread(site_settings.get_all)
+
+
+@app.patch("/api/settings")
+async def settings_update(payload: dict):
+    try:
+        return await asyncio.to_thread(site_settings.set_many, payload or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ───────────────────────────── subscribers API ─────────────────────────────
