@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>Public Surplus: Login</title>
+        <META NAME="ROBOTS" CONTENT="NOARCHIVE"/>
+        <script type="text/javascript">
+            function jsSmsUrl(service,owp) {
+  var url = "/sms";
+  if (owp == null) {
+  }
+  else if (owp != "") {
+     url = url + "/" + owp;
+  }
+  url = url + service;
+  return url;
+}
+            function loginLoad()
+            {
+                var loginurl = jsSmsUrl("/login/login?dst=%2Fauction%2Fview%3Fauc%3D4049641","");
+                  if (top.name && top.window && top.name.indexOf('psw_') == 0 && top.window.opener) {
+                         top.window.opener.focus();
+                         top.window.opener.top.location = loginurl;
+                         top.window.close();
+                  }
+                  else {
+                     top.location = loginurl;
+                  }
+            }
+        </script>
+    </head>
+    <body onLoad="loginLoad();">
+    </body>
+</html>

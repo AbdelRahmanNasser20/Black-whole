@@ -1,0 +1,32 @@
+[
+  {
+    "asset_id": 41961,
+    "account_id": 432,
+    "auction_id": 2,
+    "observed_at": "2026-07-31T03:17:23.123539-07:00",
+    "bid_count": 0,
+    "current_bid": 10.0,
+    "end_utc": "2026-07-31T13:01:00+00:00",
+    "status": "STA"
+  },
+  {
+    "asset_id": 41959,
+    "account_id": 432,
+    "auction_id": 2,
+    "observed_at": "2026-07-31T03:17:23.123572-07:00",
+    "bid_count": 0,
+    "current_bid": 10.0,
+    "end_utc": "2026-07-31T13:02:00+00:00",
+    "status": "STA"
+  },
+  {
+    "asset_id": 41958,
+    "account_id": 432,
+    "auction_id": 2,
+    "observed_at": "2026-07-31T03:17:23.123598-07:00",
+    "bid_count": 0,
+    "current_bid": 5.0,
+    "end_utc": "2026-07-31T13:03:00+00:00",
+    "status": "STA"
+  }
+]
