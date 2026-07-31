@@ -31,6 +31,7 @@
   <a class="rail-tab" data-tab="subscribers" href="?tab=subscribers" data-rail-close><span class="rail-tab-num">08</span><span class="rail-tab-label">Subscribers</span></a>
   <a class="rail-tab" data-tab="deals" href="?tab=deals" data-rail-close><span class="rail-tab-num">09</span><span class="rail-tab-label">Deals</span></a>
   <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close><span class="rail-tab-num">10</span><span class="rail-tab-label">Tracking</span></a>
+  <a class="rail-tab" data-tab="deposits" href="?tab=deposits" data-rail-close><span class="rail-tab-num">11</span><span class="rail-tab-label">Deposits</span></a>
 </nav>
 {% endblock %}
 
@@ -760,6 +761,62 @@
   {#- skeleton twin ships in the HTML (same markup UI.load paints during a probe); static/admin/test_scrape.js swaps it
       for the idle prompt on boot, then cards / empty / error after the operator runs a probe -#}
   <div class="auction-grid ts-grid" id="ts-grid" data-state="loading">{{ skeleton_cards(4) }}</div>
+</section>
+
+<!-- ───────────── Deposits ───────────── -->
+<section class="panel" data-pane="deposits" hidden>
+  {#- Deposits (11): this pane's CSS lives in static/admin/deposits.css; the shared .controls/.seg/.card/.badge
+      come from static/ui/components.css. skeleton_cards(n) (_ui/macros.html) is skeleton('card', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_cards %}
+  <link rel="stylesheet" href="/static/admin/deposits.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">MONEY / DEPOSITS</div>
+    <h1 class="hero-title">Stripe Checkout reservations.</h1>
+    <p class="hero-sub">
+      Paid ≠ shipped: adjust inventory by hand. A
+      <span class="lex done">paid</span> row means the money cleared, not that
+      a chair moved — drop <span class="lex running">quantity remaining</span>
+      on the Inventory tab yourself once the pickup or freight is arranged.
+      Refunds are executed in the Stripe dashboard; the status syncs back here
+      over the webhook.
+    </p>
+  </div>
+
+  {#- The live deposit rule. Edited here, not in the environment — the seed env keys
+      (DEPOSIT_PCT_DEFAULT / DEPOSIT_MIN_USD_DEFAULT) only matter before the first save. -#}
+  <div class="controls dep-settings" id="dep-settings">
+    <div class="dep-group">
+      <span class="dep-label" title="Percentage of (qty × price/chair) charged at checkout">DEPOSIT %</span>
+      <input type="number" id="dep-pct" min="1" max="100" step="0.5" value="15" aria-label="Deposit percentage">
+    </div>
+    <div class="dep-group">
+      <span class="dep-label" title="Floor in whole dollars — capped at the order subtotal at quote time">MIN $</span>
+      <input type="number" id="dep-min" min="0" max="100000" step="10" value="200" aria-label="Deposit minimum in dollars">
+    </div>
+    <div class="dep-actions">
+      <span class="dep-settings-status" id="dep-settings-msg" aria-live="polite"></span>
+      <button type="button" class="btn btn-small btn-primary" id="dep-settings-save">save rule</button>
+    </div>
+  </div>
+
+  {#- status filter mirrors ?dstatus= (static/admin/deposits.js owns the key — `status` is already taken by
+      Inquiries and Subscribers); shared .seg / .seg-btn.is-active -#}
+  <div class="controls deposit-controls">
+    <span class="deposit-controls-label">STATUS</span>
+    <div class="seg" id="dep-status-filter" role="group" aria-label="Filter by status">
+      <button type="button" class="seg-btn is-active" data-value="" aria-pressed="true">all</button>
+      <button type="button" class="seg-btn" data-value="pending">pending</button>
+      <button type="button" class="seg-btn" data-value="processing">processing</button>
+      <button type="button" class="seg-btn" data-value="paid">paid</button>
+      <button type="button" class="seg-btn" data-value="failed">failed</button>
+      <button type="button" class="seg-btn" data-value="refunded">refunded</button>
+      <button type="button" class="seg-btn" data-value="canceled">canceled</button>
+    </div>
+    <button type="button" class="btn btn-small" id="dep-refresh">↻ refresh</button>
+  </div>
+
+  {#- skeleton twin ships in the HTML; static/admin/deposits.js (UI.load) swaps it for cards / empty / error -#}
+  <div class="deposit-list" id="dep-list" data-state="loading">{{ skeleton_cards(5) }}</div>
 </section>
 {% endblock %}
 

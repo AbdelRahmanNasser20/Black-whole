@@ -1,0 +1,89 @@
+/* static/admin/deposits.css — Deposits tab (11). Ported out of app.css during the PR #64 rebase onto the
+   E1/F admin rebuild: `.inq-card` → shared `.card` (components.css) + the `card--deposit` modifier, kind and
+   status pills → `.badge` + own pill, actions → `.card-chips`. Tokens only (tokens.css), radius 0.
+   Loading/empty/error come from skeleton.css (.sk-card / .ui-empty / .ui-error). */
+
+/* ── the live deposit rule ───────────────────────────────────── */
+.dep-settings {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 12px 0; border-bottom: 1px solid var(--border); margin: 0 0 var(--gap);
+}
+.dep-group { display: flex; align-items: center; gap: 8px; }
+.dep-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.dep-settings input[type=number] {
+  width: 84px; padding: 4px 6px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font-family: var(--mono); font-size: var(--fs-sm);
+}
+.dep-settings input[type=number]:focus { outline: none; border-color: var(--accent); }
+.dep-settings .dep-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.dep-settings-status { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+.dep-msg-ok  { color: var(--success); }
+.dep-msg-err { color: var(--danger); }
+
+/* ── control row ─────────────────────────────────────────────── */
+.deposit-controls { padding: 12px 0; border-bottom: 1px solid var(--border); margin: 0 0 var(--gap); }
+.deposit-controls-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.deposit-controls .btn { margin-left: auto; }
+
+/* ── list ────────────────────────────────────────────────────── */
+.deposit-list { display: flex; flex-direction: column; gap: 14px; padding: 0 0 40px; }
+.deposit-list > * { min-width: 0; }
+.deposit-list .sk-card { min-height: 150px; }
+
+/* ── card ────────────────────────────────────────────────────── */
+.card--deposit { border-left: 3px solid var(--border-strong); }
+.card--deposit .card-band { margin-left: -3px; padding-left: calc(var(--pad) + 2px); }
+.card--deposit.is-pending    { border-left-color: var(--dim); }
+.card--deposit.is-processing { border-left-color: var(--warn); }
+.card--deposit.is-paid       { border-left-color: var(--success); }
+.card--deposit.is-failed     { border-left-color: var(--danger); }
+.card--deposit.is-refunded   { border-left-color: var(--info); }
+.card--deposit.is-canceled   { border-left-color: var(--border-strong); opacity: .7; }
+
+.dep-kind {
+  flex: 0 0 auto; padding: 3px 8px; letter-spacing: .2em; font-size: 10px;
+  border: 1px solid var(--border-strong); color: var(--text);
+}
+.dep-kind--deposit { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.dep-kind--full    { background: var(--success); color: var(--bg); border-color: var(--success); }
+
+.dep-amount { font-family: var(--mono); font-size: var(--fs-lg); color: var(--text); }
+.dep-qty, .dep-order, .dep-ids, .dep-hint {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
+}
+.dep-sid { margin-right: 10px; color: var(--dim); }
+.dep-fail { font-family: var(--mono); font-size: var(--fs-xs); color: var(--danger); }
+
+.dep-lot a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.dep-unlinked { color: var(--dim); }
+.dep-when { color: var(--muted); }
+
+.dep-status { flex: 0 0 auto; }
+.is-pending    .dep-status { color: var(--muted); }
+.is-processing .dep-status { color: var(--warn); border-color: var(--warn); }
+.is-paid       .dep-status { color: var(--success); border-color: var(--success); }
+.is-failed     .dep-status { color: var(--danger); border-color: var(--danger); }
+.is-refunded   .dep-status { color: var(--info); border-color: var(--info); }
+.is-canceled   .dep-status { color: var(--dim); }
+
+.dep-who { font-size: 15px; }
+.dep-contact { display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: var(--fs-xs); }
+.dep-contact a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+
+.dep-note {
+  margin: 4px 0 0; padding: 10px 14px;
+  background: var(--bg); border-left: 2px solid var(--accent);
+  font-family: var(--display); font-style: italic; font-size: 15px;
+  color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+.dep-actions { gap: 8px; padding-top: 8px; align-items: center; }
+.dep-danger { color: var(--danger); border-color: var(--danger); }
+.dep-danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+@media (max-width: 639px) {
+  .card--deposit .card-band { height: auto; min-height: 28px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; row-gap: 6px; }
+  .dep-lot { flex-basis: 100%; }
+  .dep-settings .dep-actions { margin-left: 0; }
+}
