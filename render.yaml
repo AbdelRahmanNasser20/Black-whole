@@ -95,9 +95,33 @@ services:
       - key: PUBLICSURPLUS_ALLOW_BROWSER
         value: "0"           # no Chromium here — degrade, never launch+crash
       - key: LLM_PROVIDER
-        value: groq          # quantity refine via Groq API (llama-3.3-70b)
+        value: groq          # quantity refine via Groq (openai/gpt-oss-120b)
       - key: LISTINGS_DB_PATH
         value: /tmp/listings.db   # ephemeral staging buffer; Supabase is durable
+
+  # Second pass over the rows the 08:00 sweep could not count. The sweep NULLs a
+  # whole chunk's quantity whenever its LLM chunk fails, and `trusted_quantity`
+  # then hides those rows from both the Auctions tab and the alert — which is how
+  # https://www.govdeals.com/en/asset/420/9312 ("LOT: (199) BANQUET CHAIRS") sat
+  # invisible from 2026-08-05 to 2026-08-16 while its auction ran and closed.
+  # Idempotent: a recovered row flips to quantity_source='llm' and stops matching,
+  # so once the backlog drains this prints "nothing pending" and exits 0.
+  #
+  # --limit 120 = 10 requests/hour = 240/day. Groq's free ceiling dropped from
+  # 14,400/day to 1,000 when the Llama models were retired and gpt-oss became the
+  # only usable family, so this is deliberately small: the 08:00 sweep's own ~60
+  # requests must never be crowded out by the backfill that exists to help it.
+  - type: cron
+    name: quantity-backfill
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "40 * * * *"   # hourly, off-peak from the :15/:30/:45 deals crons
+    autoDeploy: true
+    dockerCommand: python scripts/backfill_quantities_llm.py --limit 120
+    envVars:
+      - fromGroup: blackwhole-secrets
+      - key: LLM_PROVIDER_BACKFILL
+        value: groq
 
   # ── 3. Deals tracker — continuous loop (2026-07-17 spec) ────────────────
   - type: cron
@@ -140,16 +164,24 @@ services:
     name: deals-backfill-classify
     runtime: docker
     dockerfilePath: ./Dockerfile
-    # Drains the ~41k lots left unclassified by the str.format bug (every call
-    # raised KeyError before reaching the network; a bare except stored
-    # `other`/0.0). 450/hour ≈ 10,800/day sits under Groq's free 14,400 req/day
-    # with room for the discovery sweep's own ~3,100. Self-terminating: once
-    # nothing is pending the run prints "nothing pending" and exits 0, so this
-    # can stay scheduled forever rather than needing to be remembered and
-    # removed.
+    # Drains the lots left unclassified by the str.format bug (every call raised
+    # KeyError before reaching the network; a bare except stored `other`/0.0).
+    # Self-terminating: once nothing is pending the run prints "nothing pending"
+    # and exits 0, so this can stay scheduled forever.
+    #
+    # Was --limit 450 (10,800/day) against Groq's free 14,400/day. That ceiling
+    # is gone: the Llama models were retired 2026-08-17 and gpt-oss — the only
+    # usable free family left — allows 1,000 req/day. At 450/hour this cron
+    # alone would drain the whole day's quota before 10:00 UTC and starve the
+    # 08:00 chair sweep, which is the failure this PR exists to fix. Held to
+    # 20/hour (480/day) so the chair path keeps its ~300.
+    #
+    # At this rate the ~150k backlog will not drain in any useful time. Clearing
+    # it needs a paid tier or a narrower sweep — an operator budget call, not
+    # something to paper over by raising the limit here.
     schedule: "30 * * * *"
     autoDeploy: true
-    dockerCommand: sh scripts/deals_cron.sh backfill-classify --limit 450 --rpm 18
+    dockerCommand: sh scripts/deals_cron.sh backfill-classify --limit 20 --rpm 10
     envVars:
       - fromGroup: blackwhole-secrets
       - key: DEALS_LLM_PROVIDER

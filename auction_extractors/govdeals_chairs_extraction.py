@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from dotenv import load_dotenv
 
-from quantity_infer import infer_chair_quantity_from_title
+from quantity_infer import explicit_title_quantity, infer_chair_quantity_from_title
 from quantity_llm import refine_quantities_with_llm
 from quantity_refine import refine_quantities_with_regex_fulltext
 from paths import REPORTS_DIR
@@ -939,11 +939,78 @@ def _fallback_rank(listings):
         listing["rank"] = i
     return safe
 
+def partition_for_alert(
+    listings: list,
+    *,
+    include_medical: bool = False,
+    min_quantity: int = MIN_CHAIR_QUANTITY,
+) -> tuple[list, list]:
+    """Split scraped rows into ``(alertable, held_back)``.
+
+    ``alertable`` is the historical filter, unchanged: banquet/event chairs
+    with an LLM-verified count over ``min_quantity``. The trust gate stays shut
+    — a regex count still never becomes a trusted count (BLACKWHOLE-4).
+
+    ``held_back`` is the part that was missing. A lot whose count the LLM could
+    not verify used to be dropped with no trace, which is fine when it happens
+    to one row and catastrophic when the quantity LLM's provider quota runs out
+    mid-sweep and it happens to a third of them. Since 2026-07-20 that has been
+    20-56% of every GovDeals run. Lot 420/9312 — "LOT: (199) BANQUET CHAIRS",
+    199 chairs in Las Vegas — was scraped daily from 2026-08-05, dropped every
+    single time, and its auction closed without the operator ever seeing it.
+
+    So: when a row has no trusted count but its *title states* a bulk count
+    outright (``quantity_infer.explicit_title_quantity``), it goes to
+    ``held_back`` carrying ``claimed_quantity`` + ``claimed_by`` instead of
+    disappearing. Those two keys are the row's only marking — ``quantity`` and
+    ``quantity_source`` are left exactly as the LLM left them, so nothing
+    downstream can mistake the claim for a verified count.
+    """
+    from top_chairs import _classify, _is_non_chair_lot, trusted_quantity
+
+    kept: list = []
+    held: list = []
+    for item in listings:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or ""
+        cat, _ = _classify(title, item.get("description"))
+        if cat == "medical":
+            # Medical lots bypass the quantity gate entirely when enabled —
+            # preserved from the original filter, where a `return
+            # include_medical` short-circuited before the count was read.
+            if include_medical:
+                kept.append(item)
+            continue
+        if _is_non_chair_lot(title):
+            continue
+        q = trusted_quantity(item)
+        if q is not None:
+            if q > min_quantity:
+                kept.append(item)
+            continue
+        claim = explicit_title_quantity(title)
+        if claim and claim[0] > min_quantity:
+            flagged = dict(item)
+            flagged["claimed_quantity"] = claim[0]
+            flagged["claimed_by"] = claim[1]
+            held.append(flagged)
+
+    held.sort(key=lambda x: -int(x.get("claimed_quantity") or 0))
+    return kept, held
+
+
 def _alert_on_quantity_degradation(listings: list, *, provider: str) -> None:
-    """Telegram-alert when the LLM quantity pass failed for some rows so the
-    pipeline is back on the (unreliable) regex value. Silent regex fallback is
-    exactly how a "Lot of 2,100" lot becomes qty 2 and vanishes from results —
-    the operator must know the run's quantities are degraded."""
+    """Telegram-alert when the LLM quantity pass failed for some rows.
+
+    The failure is not a mis-count — it is a disappearance. ``_mark_chunk_failed``
+    nulls the regex seed (BLACKWHOLE-4 AC4), and the trust gate then drops every
+    such row from ranking and from the alert. This message used to say the
+    pipeline was "falling back to regex, so counts may be wrong", which reads as
+    a precision problem you can eyeball later; it is really a recall problem you
+    cannot see at all. ``partition_for_alert`` now rescues the rows whose titles
+    state a count, but a row with no count in its title is still lost, so the
+    operator needs the real number here."""
     degraded = [
         it for it in listings
         if it.get("quantity_source") in ("llm_failed", "llm_missing")
@@ -953,8 +1020,9 @@ def _alert_on_quantity_degradation(listings: list, *, provider: str) -> None:
     reason = next((it.get("quantity_error") for it in degraded if it.get("quantity_error")), "unknown")
     _send_telegram_plain(
         f"⚠️ GovDeals scrape: quantity LLM ({provider}) FAILED on {len(degraded)}/{len(listings)} "
-        f"lots — falling back to regex, so counts may be wrong (big lots can disappear). "
-        f"First error: {str(reason)[:160]}"
+        f"lots — those lots have NO verified count and are dropped from the ranked alert "
+        f"(not mis-counted — omitted). Ones whose title states a count are listed under "
+        f"“held back”. First error: {str(reason)[:160]}"
     )
 
 
@@ -1004,7 +1072,10 @@ def _format_output(listings):
         if isinstance(x, dict) and x.get("quantity_source") in ("llm_failed", "llm_missing")
     )
     if failed:
-        lines.append(f"⚠ {failed}/{len(listings)} listings had LLM quantity failures (regex value used)\n")
+        lines.append(
+            f"⚠ {failed}/{len(listings)} listings had LLM quantity failures "
+            f"(no verified count — omitted from the ranking, not mis-counted)\n"
+        )
     for fallback_idx, item in enumerate(listings, 1):
         if not isinstance(item, dict):
             # Should never happen, but a stray non-dict in the list is no
@@ -1038,21 +1109,83 @@ def _format_output(listings):
         lines.append(block)
     return "\n".join(lines)
 
-def send_telegram(listings):
-    """Send final ranked output to Telegram. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID."""
+def _format_held_back(held):
+    """Render the lots with no verified count whose own title states one.
+
+    These are exactly the lots the pipeline used to drop in silence. The
+    quantity LLM failed on them, so ``trusted_quantity`` rightly refuses to
+    speak — but the title says "LOT: (199) BANQUET CHAIRS" in plain English,
+    and throwing that away cost us lot 420/9312 for eleven days.
+
+    So we show the claim, label it unverified, and name the pattern that read
+    it. The operator opens the link and decides in five seconds. Nothing here
+    is ever fed back as a trusted quantity.
+    """
+    if not held:
+        return ""
+    lines = [
+        f"❓ {len(held)} lot(s) with NO verified count whose title claims "
+        f"> {MIN_CHAIR_QUANTITY} chairs — unverified, open the link:\n"
+    ]
+    for item in held:
+        if not isinstance(item, dict):
+            continue
+        title = item.get("title") or "(no title)"
+        claim = item.get("claimed_quantity", "?")
+        why = item.get("claimed_by") or "title"
+        price = item.get("price") or "N/A"
+        end_date = item.get("end_date") or "N/A"
+        time_left = item.get("time_left") or "N/A"
+        link = item.get("link") or ""
+        block = (
+            f"• {title}\n"
+            f"Title claims ~{claim} [{why}] · unverified · {price}\n"
+            f"Ends: {end_date} · Time left: {time_left}\n"
+        )
+        if link:
+            block += f"↗ {link}\n"
+        lines.append(block)
+    return "\n".join(lines)
+
+
+def _compose_alert(listings, held_back=None, max_len=4000):
+    """Join the ranked section and the held-back section under Telegram's cap.
+
+    Held-back lots are protected from truncation. They are the ones we were
+    already losing, and a message that silently cuts them off reproduces the
+    original bug at a different layer — so the ranked section absorbs the
+    trimming instead.
+    """
+    ranked_body = _format_output(listings) if listings else ""
+    held_body = _format_held_back(held_back or [])
+    if not held_body:
+        if len(ranked_body) > max_len:
+            ranked_body = ranked_body[: max_len - 20] + "\n…(truncated)"
+        return ranked_body
+    if len(held_body) > max_len:
+        return held_body[: max_len - 20] + "\n…(truncated)"
+    room = max_len - len(held_body) - 2
+    if len(ranked_body) > room:
+        ranked_body = ranked_body[: max(0, room - 20)] + "\n…(truncated)" if room > 20 else ""
+    return "\n".join(p for p in (ranked_body, held_body) if p.strip())
+
+
+def send_telegram(listings, held_back=None):
+    """Send final ranked output to Telegram. Requires TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID.
+
+    ``held_back`` carries lots with no verified quantity whose title states a
+    bulk count — rendered in their own clearly-unverified section.
+    """
     if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
         print(" → Telegram not configured (set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID); skipping.")
         return
     print("[3a] Sending to Telegram…")
-    body = _format_output(listings)
+    # Telegram max message length 4096
+    body = _compose_alert(listings, held_back, max_len=4000)
     # Guard against empty text (Telegram 400: message text is empty)
     if not body or not body.strip():
         body = "GovDeals automation: no listings, test message."
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    # Telegram max message length 4096
-    max_len = 4000
-    if len(body) > max_len:
-        body = body[: max_len - 20] + "\n…(truncated)"
     try:
         r = requests.post(
             url,
@@ -1165,30 +1298,32 @@ def main():
     # Drop non-chair lots that merely share a chair-ish word (scales, stools,
     # recliners, …). Medical exam/dental lots are gated behind INCLUDE_MEDICAL
     # (default off) for the future medical vertical. Cache keeps every row.
-    from top_chairs import _classify, _is_non_chair_lot, trusted_quantity
     include_medical = os.getenv("INCLUDE_MEDICAL") == "1"
-    def _keep(item: dict) -> bool:
-        title = item.get("title") or ""
-        cat, _ = _classify(title, item.get("description"))
-        if cat == "medical":
-            return include_medical
-        if _is_non_chair_lot(title):
-            return False
-        # Only alert on an LLM-verified count. An untrusted regex quantity
-        # (or an LLM failure) returns None here and is dropped, not coerced
-        # to 0 (BLACKWHOLE-4).
-        q = trusted_quantity(item)
-        return q is not None and q > MIN_CHAIR_QUANTITY
-    listings = [item for item in listings if _keep(item)]
+    listings, held_back = partition_for_alert(
+        listings, include_medical=include_medical, min_quantity=MIN_CHAIR_QUANTITY
+    )
+    if held_back:
+        print(
+            f" → {len(held_back)} lot(s) held back: no verified count, but the "
+            f"title claims > {MIN_CHAIR_QUANTITY} chairs. Reported separately."
+        )
     if not listings:
-        print(f"No banquet chairs with quantity > {MIN_CHAIR_QUANTITY}. Exiting.")
+        print(f"No banquet chairs with quantity > {MIN_CHAIR_QUANTITY}.")
+        if held_back:
+            # Do NOT return here. An LLM outage can leave every lot unverified,
+            # and returning early is exactly how lot 420/9312 ("LOT: (199)
+            # BANQUET CHAIRS") went unreported for eleven days while its
+            # auction ran and closed.
+            send_telegram([], held_back=held_back)
+        else:
+            print("Exiting.")
         return
     print(f" → {len(listings)} banquet-chair listings kept (qty > {MIN_CHAIR_QUANTITY})")
     ranked = rank_with_llm(listings)
     if not ranked:
         print("Ranking failed or returned empty. Exiting.")
         return
-    send_telegram(ranked)
+    send_telegram(ranked, held_back=held_back)
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
         print("(Telegram not configured; set TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to receive output.)")
     print("=== Script complete ===")
