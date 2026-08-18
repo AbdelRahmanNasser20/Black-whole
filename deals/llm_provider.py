@@ -33,14 +33,26 @@ from collections import deque
 # `scripts/check_llm_provider.py --headroom`:
 #
 #   llama-3.3-70b-versatile   1,000 req/day   ← can't cover either workload
-#   llama-3.1-8b-instant     14,400 req/day   ← covers both with ~3x headroom
+#   llama-3.1-8b-instant     14,400 req/day   ← covered both with ~3x headroom
+#
+# 2026-08-17: BOTH of those are gone. Groq retired the Llama 3.x family on this
+# account and every call now returns 404 model_not_found, which `classify.py`
+# surfaces as ClassificationUnavailable and stores as NULL — 150,683 of 158,421
+# deal_lots are unclassified and nothing has been classified in 24h. gpt-oss is
+# the only usable free family left and it allows just 1,000 req/day, so the
+# ~4,300/day this pipeline wants no longer fits on the free tier at all. The
+# default below is now a model that exists; making the workload fit is a budget
+# decision (paid tier, or a narrower sweep) and is deliberately not made here.
+# Verify any candidate with `scripts/check_llm_provider.py --headroom <model>`
+# BEFORE relying on it — a hardcoded model id is a dependency on someone else's
+# deprecation schedule, which is exactly how this broke.
 #
 # Cerebras is kept wired but is NOT free on a new org: a fresh account sits at
 # $0.00 and returns HTTP 402 payment_required. Set CEREBRAS_API_KEY only
 # alongside real credits.
 _OPENAI_COMPATIBLE = {
     "cerebras": ("CEREBRAS_API_KEY", "https://api.cerebras.ai/v1", "gpt-oss-120b"),
-    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
+    "groq": ("GROQ_API_KEY", "https://api.groq.com/openai/v1", "openai/gpt-oss-120b"),
 }
 # Flash-Lite, not Flash: Flash is a thinking model and bills hidden reasoning
 # tokens, which is a large part of how a prepay balance vanished on workloads
