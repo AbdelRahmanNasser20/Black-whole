@@ -150,13 +150,17 @@ def update_live_state(key, s: Snapshot, next_poll_at, lane: str) -> None:
 
 def due_for_poll(now: datetime) -> list[Lot]:
     from deals.mapping import asset_to_lot
+    # `raw IS NOT NULL` guards against a cold-archived row leaking in: raw is
+    # nulled once a lot closes and its blob is exported to R2, and
+    # asset_to_lot(None) would raise AttributeError, killing the whole pass.
     rows = db.fetch_all("""SELECT raw FROM deal_lots
-        WHERE outcome_complete IS NOT TRUE AND (next_poll_at IS NULL OR next_poll_at<=%s)""", (now,))
+        WHERE outcome_complete IS NOT TRUE AND raw IS NOT NULL
+          AND (next_poll_at IS NULL OR next_poll_at<=%s)""", (now,))
     lots = []
     for r in rows:
         try:
             lots.append(asset_to_lot(r["raw"]))
-        except ValueError as e:
+        except (ValueError, AttributeError, TypeError, KeyError) as e:
             print(f"deals.store.due_for_poll: skipping malformed stored row: {e}", file=sys.stderr)
     return lots
 

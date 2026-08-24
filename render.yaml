@@ -28,6 +28,21 @@ envVarGroups:
         sync: false
       - key: LISTING_IMAGES_BUCKET  # listing-images
         sync: false
+      # Cloudflare R2 — the CANONICAL image backend. Supabase Storage above is
+      # 402-restricted (over free-tier quota) and serves nothing, so without
+      # these five the cloud archiver has no working destination: env_config()
+      # returns None and deals/archive.py falls back to a bucket that 402s.
+      # R2 has zero egress fees. Values live in the dashboard, never here.
+      - key: R2_ACCOUNT_ID          # Cloudflare account id
+        sync: false
+      - key: R2_ACCESS_KEY_ID       # R2 S3-API access key
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY   # R2 S3-API secret
+        sync: false
+      - key: R2_BUCKET              # listing-images
+        sync: false
+      - key: R2_PUBLIC_BASE         # https://pub-<hash>.r2.dev (or custom domain)
+        sync: false
       - key: TELEGRAM_BOT_TOKEN     # deals digests + margin/relist alerts
         sync: false
       - key: TELEGRAM_CHAT_ID       # -100… "BlackWhole Alerts" supergroup id (BLACKWHOLE-24)

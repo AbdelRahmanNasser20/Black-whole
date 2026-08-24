@@ -43,7 +43,8 @@ def lots_for_analysis(now: datetime, *, max_bid: float, window_h: int,
     <= max_bid, not analyzed in the last 12h."""
     return db.fetch_all("""
         SELECT l.* FROM deal_lots l
-        WHERE l.outcome IS NULL AND l.end_utc > %s AND l.end_utc <= %s
+        WHERE l.outcome IS NULL AND l.raw IS NOT NULL
+          AND l.end_utc > %s AND l.end_utc <= %s
           AND (l.bid_count = 0 OR l.current_bid <= %s)
           AND l.is_free = false AND l.currency_code = 'USD'
           AND NOT EXISTS (SELECT 1 FROM deal_verdicts v

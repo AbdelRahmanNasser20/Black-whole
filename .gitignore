@@ -11,3 +11,7 @@ dist/
 auction_extractors/state/
 auction_extractors/reports/
 .playwright-mcp/
+
+# env backups — same secrets as .env, never commit
+.env.bak*
+.env.*.bak
