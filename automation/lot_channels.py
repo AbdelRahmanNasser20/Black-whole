@@ -331,17 +331,28 @@ def quantity_from_detail(detail: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def mirror_photos(lot_id: str, urls: list[str], log: Log = _print) -> dict | None:
-    """Seller photos -> R2 under our key contract; stamps hero/gallery on the row."""
+def mirror_photos(lot_id: str, urls: list[str], log: Log = _print, *,
+                  dewatermark: bool = True) -> dict | None:
+    """Seller photos -> dewatermark.ai -> R2 under our key contract; stamps hero/gallery.
+
+    Same three-layer cache + budget as run.py's phase 3 (`automation.dewatermark`):
+    a hash already cleaned anywhere on this machine never hits the API again.
+    Seller photos carry the tiled www.govdeals.com watermark, so shipping them
+    raw is never right — `dewatermark=False` exists for tests only.
+    """
+    import asyncio
     import httpx
     if not urls:
         return None
-    with tempfile.TemporaryDirectory(prefix="lot_channels_") as tmp, \
-            httpx.Client(timeout=60.0, follow_redirects=True, headers=DOWNLOAD_HEADERS) as client:
-        files: list[Path] = []
+    # The lot folder lives under SCRATCH_DIR (not a throwaway tmp) so the
+    # dewatermark sidecar + _originals/ persist and re-runs are free.
+    folder = Path(config.SCRATCH_DIR) / "lot_channels" / listing_images.key_base(lot_id)
+    folder.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    with httpx.Client(timeout=60.0, follow_redirects=True, headers=DOWNLOAD_HEADERS) as client:
         for i, url in enumerate(urls):
             ext = listing_images.guess_ext(url.split("?")[0])
-            target = Path(tmp) / f"{i:02d}.{ext}"
+            target = folder / f"{i:02d}.{ext}"
             try:
                 resp = client.get(url)
                 resp.raise_for_status()
@@ -351,12 +362,59 @@ def mirror_photos(lot_id: str, urls: list[str], log: Log = _print) -> dict | Non
             if resp.content:
                 target.write_bytes(resp.content)
                 files.append(target)
-        if not files:
-            return None
-        result = listing_images.upload_lot_images(lot_id, files)
+    if not files:
+        return None
+    if dewatermark:
+        from . import dewatermark as dw
+        _phase("dewatermark", "running", lot_id=lot_id)
+        cleaned = asyncio.run(dw.dewatermark(None, files, folder, lot_label=lot_id))
+        dirty = [c for c in cleaned if c.parent.name == "_originals"]
+        if dirty:
+            log(f"  ! {len(dirty)}/{len(files)} photos still watermarked (API failed) — kept originals")
+        _phase("dewatermark", "done", cleaned=len(cleaned) - len(dirty), files=len(files))
+        log(f"  ✓ dewatermarked {len(cleaned) - len(dirty)}/{len(files)} via dewatermark.ai")
+        files = cleaned or files
+    result = listing_images.upload_lot_images(lot_id, files)
     if result:
         inventory.set_images(lot_id, result["hero_image_url"], result["image_urls"])
     return result
+
+
+def redo_photos(lot_id: str, log: Log = _print) -> dict | None:
+    """Re-mirror a lot's photos from GovDeals through dewatermark.ai and overwrite
+    the R2 keys in place (site + catalog + plan pick the new bytes up; the URLs
+    keep their shape, `?v=` cache-busters change)."""
+    row = inventory.get(lot_id)
+    if not row:
+        raise ValueError(f"no inventory row {lot_id!r}")
+    m = re.search(r"/asset/(\d+)/(\d+)", row.get("govdeals_url") or "")
+    if not m:
+        raise ValueError(f"{lot_id}: no govdeals_url on the row — can't refetch the seller photos")
+    asset, account = int(m.group(1)), int(m.group(2))
+    detail = fetch_detail(asset, account)
+    urls = gallery_urls(detail)
+    # honour a split part's photo subset by matching the count we already hold
+    entry = plan_entry_for(lot_id) or {}
+    part_idx = entry.get("photo_indexes")
+    if part_idx:
+        urls = [urls[i] for i in part_idx if i < len(urls)]
+    log(f"{lot_id}: {len(urls)} seller photos → dewatermark → R2")
+    up = mirror_photos(lot_id, urls, log=log)
+    if up:
+        row = inventory.get(lot_id) or row
+        fresh = lot_images.resolve(row).urls
+        cur = plan_entry_for(lot_id)
+        if cur:
+            # Keep a hand-picked photo order (cover first) when the set is the
+            # same — only the bytes and the ?v= cache-busters changed.
+            key = lambda u: u.split("?")[0]  # noqa: E731
+            by_key = {key(u): u for u in fresh}
+            ordered = [by_key[key(u)] for u in cur.get("photo_urls") or [] if key(u) in by_key]
+            ordered += [u for u in fresh if u not in ordered]
+            cur["photo_urls"] = ordered
+            cur["cover_url"] = ordered[0] if ordered else ""
+            upsert_plan_entry(cur)
+    return up
 
 
 # ───────────────────────────── add ─────────────────────────────
@@ -488,6 +546,8 @@ def add_lot(url: str, *, price: float | None = None, split: str | None = None,
                   f"Ledger status active_bid — not owned yet.",
             fb_city=fb_city, fb_state=fb_state,
         )
+        if part.photos:
+            entry["photo_indexes"] = list(part.photos)
         prior = plan_entry_for(lot_id) or {}
         if prior.get("fb_listing_url"):
             # Live on Marketplace already: the plan's copy is what buyers see;
