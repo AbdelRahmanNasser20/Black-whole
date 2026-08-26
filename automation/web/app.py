@@ -49,7 +49,7 @@ from ..config import (
 )
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import db
-from .. import catalog_feed
+from .. import catalog_feed, lot_channels
 from .. import inventory
 from .. import lot_images
 from .. import favorites
@@ -200,11 +200,27 @@ async def _apply_event(ev: dict) -> None:
         state.confirmed_price = ev.get("confirmed")
 
 
-async def _run_subprocess(url: str, extra_args: list[str]) -> None:
-    """Spawn `python run.py <url>` and pump its output into the event stream."""
+# What the Launcher's ▶ does. "channels" = scripts/lot_channels.py add — ledger
+# row + photos on R2 + Marketplace post on the family account, with the site and
+# the FB Business catalog following the row (2026-08-26). "pipeline" = the
+# original run.py scrape→LLM→dewatermark→FB/eBay draft flow, now opt-in.
+DEFAULT_LAUNCH_MODE = os.getenv("LISTING_LAUNCH_MODE", "channels")
+LAUNCH_MODES = ("channels", "pipeline", "remove")
+
+
+def _launch_cmd(mode: str, target: str, extra_args: list[str]) -> list[str]:
     project_root = Path(__file__).resolve().parents[2]
-    run_py = project_root / "run.py"
-    cmd = [sys.executable, "-u", str(run_py), url] + extra_args
+    if mode == "pipeline":
+        return [sys.executable, "-u", str(project_root / "run.py"), target] + extra_args
+    script = project_root / "scripts" / "lot_channels.py"
+    verb = "remove" if mode == "remove" else "add"
+    return [sys.executable, "-u", str(script), verb, target] + extra_args
+
+
+async def _run_subprocess(url: str, extra_args: list[str], mode: str = "pipeline") -> None:
+    """Spawn the launch command for `mode` and pump its output into the event stream."""
+    project_root = Path(__file__).resolve().parents[2]
+    cmd = _launch_cmd(mode, url, extra_args)
     env = os.environ.copy()
     env.setdefault("PYTHONUNBUFFERED", "1")
     # Give the dashboard up to 2 minutes to POST a confirmed price before run.py
@@ -267,7 +283,8 @@ async def _start_next() -> None:
     item = state.pending.pop(0)
     state.reset()
     state.url = item["url"]
-    asyncio.create_task(_run_subprocess(item["url"], item.get("extra_args") or []))
+    asyncio.create_task(_run_subprocess(item["url"], item.get("extra_args") or [],
+                                        item.get("mode") or DEFAULT_LAUNCH_MODE))
     await _broadcast_queue()
 
 
@@ -491,6 +508,8 @@ def _decorate(row: dict) -> dict:
     row["hero_src"] = _hero_src(row)
     row["location_labels"] = inventory.location_labels(row)
     row["is_sold"] = inventory.is_sold(row)
+    # "CHAIR" on every card was fine until the Augusta round tables (2026-08-26).
+    row["unit"] = lot_channels.unit_word(row).upper()
     return row
 
 
@@ -1055,7 +1074,32 @@ async def get_run_state():
     return JSONResponse(state.snapshot())
 
 
+def _channels_args_from_payload(payload: dict) -> list[str]:
+    """Flags for `lot_channels.py add` (the default ▶ mode)."""
+    extra: list[str] = []
+    if payload.get("price"):
+        extra += ["--price", str(payload["price"])]
+    for key, flag in (("split", "--split"), ("title", "--title"), ("blurb", "--blurb"),
+                      ("chair_type", "--chair-type"), ("fb_city", "--fb-city"),
+                      ("fb_state", "--fb-state")):
+        val = (payload.get(key) or "").strip() if isinstance(payload.get(key), str) else payload.get(key)
+        if val:
+            extra += [flag, str(val)]
+    if payload.get("quantity"):
+        extra += ["--quantity", str(int(payload["quantity"]))]
+    channels = payload.get("channels")
+    if isinstance(channels, (list, tuple)) and channels:
+        extra += ["--channels", ",".join(str(c) for c in channels)]
+    elif isinstance(channels, str) and channels.strip():
+        extra += ["--channels", channels.strip()]
+    if payload.get("skip_fb") or payload.get("no_publish"):
+        extra.append("--no-publish")
+    return extra
+
+
 def _extra_args_from_payload(payload: dict) -> list[str]:
+    if (payload.get("mode") or DEFAULT_LAUNCH_MODE) == "channels":
+        return _channels_args_from_payload(payload)
     extra: list[str] = []
     for flag in ("skip_dewatermark", "skip_fb", "skip_ebay", "force_republish"):
         if payload.get(flag):
@@ -1091,25 +1135,51 @@ async def start_run(payload: dict):
     if not urls:
         raise HTTPException(400, "Provide at least one govdeals.com URL")
 
-    extra = _extra_args_from_payload(payload)
+    mode = payload.get("mode") or DEFAULT_LAUNCH_MODE
+    if mode not in ("channels", "pipeline"):
+        raise HTTPException(400, f"mode must be channels or pipeline, got {mode!r}")
+    extra = _extra_args_from_payload({**payload, "mode": mode})
+    return await _enqueue(urls, extra, mode)
 
+
+async def _enqueue(targets: list[str], extra: list[str], mode: str) -> dict:
     async with state.lock:
         if state.run_status == "running":
-            for u in urls:
-                state.pending.append({"url": u, "extra_args": extra})
+            for u in targets:
+                state.pending.append({"url": u, "extra_args": extra, "mode": mode})
             await _broadcast_queue()
-            return {"ok": True, "queued": len(urls), "running": state.url,
-                    "queue_length": len(state.pending)}
+            return {"ok": True, "queued": len(targets), "running": state.url,
+                    "queue_length": len(state.pending), "mode": mode}
 
-        head, *rest = urls
+        head, *rest = targets
         for u in rest:
-            state.pending.append({"url": u, "extra_args": extra})
+            state.pending.append({"url": u, "extra_args": extra, "mode": mode})
         state.reset()
         state.url = head
-        asyncio.create_task(_run_subprocess(head, extra))
+        asyncio.create_task(_run_subprocess(head, extra, mode))
         await _broadcast_queue()
         return {"ok": True, "running": head, "queued": len(rest),
-                "queue_length": len(state.pending)}
+                "queue_length": len(state.pending), "mode": mode}
+
+
+@app.post("/api/lots/{lot_id}/remove")
+async def remove_lot_everywhere(lot_id: str, payload: dict | None = None):
+    """Take a lot off site + FB Business catalog + Marketplace as "moved"
+    (fake sold-out + Mark as sold). Streams through the Launcher console."""
+    payload = payload or {}
+    if not inventory.get(lot_id):
+        raise HTTPException(404, f"no lot {lot_id}")
+    extra: list[str] = []
+    channels = payload.get("channels")
+    if channels:
+        extra += ["--channels", ",".join(channels) if isinstance(channels, list) else str(channels)]
+    return await _enqueue([lot_id], extra, "remove")
+
+
+@app.get("/api/lots/status")
+async def lots_channel_status(lot_id: str | None = None):
+    """Per-lot channel matrix: site / business feed / Marketplace."""
+    return {"items": lot_channels.channel_matrix([lot_id] if lot_id else None)}
 
 
 @app.post("/api/runs/queue/clear")

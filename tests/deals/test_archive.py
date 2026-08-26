@@ -73,3 +73,82 @@ def test_photo_paths_to_urls():
                                "https://already.absolute/x.jpg"])
     assert got == ["https://webassets.lqdt1.com/assets/photos/1980/1980_307_a.jpg?cb=2606",
                    "https://already.absolute/x.jpg"]
+
+
+# ── R2-first upload: the Supabase fallback must never fire when R2 is live ──
+# Regression guard for the bug where a transient R2 put failure fell through to
+# Supabase. The 402 there is on *serving*, so the write could succeed and stamp
+# images_archived=true over a permanently dead URL that is never retried.
+
+R2_ENV = {"R2_ACCOUNT_ID": "acct", "R2_ACCESS_KEY_ID": "ak",
+          "R2_SECRET_ACCESS_KEY": "sk", "R2_BUCKET": "listing-images",
+          "R2_PUBLIC_BASE": "https://pub-test.r2.dev"}
+
+
+@pytest.fixture
+def r2_on(monkeypatch):
+    """R2 fully configured, boto3 client stubbed, module cache cleared."""
+    from deals import archive
+    monkeypatch.setattr(archive, "_R2", {})
+    for k, v in R2_ENV.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(archive.r2_images, "client", lambda cfg=None: "s3-stub")
+    return archive
+
+
+@pytest.fixture
+def r2_off(monkeypatch):
+    from deals import archive
+    monkeypatch.setattr(archive, "_R2", {})
+    for k in R2_ENV:
+        monkeypatch.delenv(k, raising=False)
+    return archive
+
+
+def test_upload_raises_and_never_touches_supabase_when_r2_put_fails(r2_on):
+    with patch.object(r2_on.r2_images, "put_object", return_value=False), \
+         patch.object(r2_on, "httpx") as fake_httpx:
+        with pytest.raises(RuntimeError, match="refusing Supabase fallback"):
+            r2_on._upload("govdeals/1_2_3/abc.jpg", b"bytes")
+    fake_httpx.post.assert_not_called()          # the whole point of the fix
+
+
+def test_upload_returns_versioned_r2_url_on_success(r2_on):
+    with patch.object(r2_on.r2_images, "put_object", return_value=True):
+        url = r2_on._upload("govdeals/1_2_3/abc.jpg", b"bytes")
+    assert url.startswith("https://pub-test.r2.dev/govdeals/1_2_3/abc.jpg?v=")
+    assert "supabase" not in url
+
+
+def test_upload_uses_supabase_only_when_r2_unconfigured(r2_off, monkeypatch):
+    monkeypatch.setenv("SUPABASE_STORAGE_URL", "https://proj.supabase.co")
+    monkeypatch.setenv("SUPABASE_STORAGE_KEY", "key")
+    with patch.object(r2_off, "httpx") as fake_httpx:
+        url = r2_off._upload("govdeals/1_2_3/abc.jpg", b"bytes")
+    fake_httpx.post.assert_called_once()
+    assert url == ("https://proj.supabase.co/storage/v1/object/public/"
+                   "listing-images/govdeals/1_2_3/abc.jpg")
+
+
+def test_failed_upload_is_isolated_per_lot_and_never_marks_archived(fullres):
+    """A raising _upload must be counted and the lot left UNarchived, so
+    unarchived_active() retries it next pass. If set_archived_images ran here,
+    the lot would be stamped archived over a URL that was never written."""
+    from deals.archive import archive_active
+
+    rows = [{"asset_id": 1, "account_id": 2, "auction_id": 3, "hero_image_url": "https://x/a.jpg"},
+            {"asset_id": 4, "account_id": 5, "auction_id": 6, "hero_image_url": "https://x/b.jpg"}]
+
+    class FakeAdapter:
+        def fetch_gallery(self, asset_id, account_id):
+            return []
+
+    with patch("deals.store.unarchived_active", return_value=rows), \
+         patch("deals.store.set_archived_images") as marked, \
+         patch("deals.archive._download", return_value=b"bytes"), \
+         patch("deals.archive._upload", side_effect=RuntimeError("R2 down")):
+        meter = archive_active(FakeAdapter(), limit=10, sleep_s=0)
+
+    assert meter["errors"] == 2        # both lots failed, loop did not abort
+    assert meter["lots"] == 0
+    marked.assert_not_called()         # nothing stamped as archived

@@ -105,7 +105,7 @@ def run_analysis(now: datetime | None = None, env: dict | None = None) -> Analyz
                     mark_alerted((lot.asset_id, lot.account_id, lot.auction_id),
                                  verdict["analyzed_at"])
                     rep.alerted += 1
-        except (LlmStepError, ValueError, KeyError) as e:
+        except (LlmStepError, ValueError, KeyError, AttributeError, TypeError) as e:
             rep.errors += 1
             print(f"[analyze] error on {row.get('asset_id')}: {e}", file=sys.stderr)
     try:

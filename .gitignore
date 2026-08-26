@@ -11,3 +11,14 @@ dist/
 auction_extractors/state/
 auction_extractors/reports/
 .playwright-mcp/
+
+# env backups — same secrets as .env, never commit
+.env.bak*
+.env.*.bak
+
+# lot_channels / FB relist runtime state + screenshots (never commit runtime JSONs — workspace CLAUDE.md §15)
+scripts/fb_relist_plan_*.json
+catalog/*.csv
+_fb_*.png
+facebook_catalog_phoenix.csv
+scripts/backups/

@@ -1,6 +1,7 @@
 import os, re, sys, time, hashlib, httpx
 from deals.models import Lot
 from automation.downloader import DOWNLOAD_HEADERS
+from automation import r2_images
 
 BUCKET = "listing-images"
 
@@ -56,10 +57,49 @@ def _download(url: str) -> bytes | None:
         return None
 
 
+_R2: dict = {}
+
+
+def _r2():
+    """(s3, cfg) when R2 is usable, else None. Built once — a sweep uploads
+    hundreds of images and each boto3 client costs a fresh session."""
+    if "checked" not in _R2:
+        _R2["checked"] = True
+        cfg = r2_images.env_config()
+        if cfg:
+            try:
+                _R2["s3"], _R2["cfg"] = r2_images.client(cfg), cfg
+            except Exception as e:  # noqa: BLE001 - fall back, never crash a sweep
+                print(f"[deals.archive] R2 unavailable: {e}", file=sys.stderr)
+    return (_R2["s3"], _R2["cfg"]) if "s3" in _R2 else None
+
+
 def _upload(path: str, data: bytes) -> str:
-    """Upload to Supabase storage; return public URL. Uses SUPABASE_STORAGE_* env."""
-    # SUPABASE_STORAGE_URL is the project base (no /storage/v1) — same contract
-    # as automation/listing_images.py.
+    """Upload one image; return its durable public URL.
+
+    R2 first. Supabase Storage is 402-restricted on the shared free project —
+    every URL it ever minted returns Payment Required, not an image — so it
+    survives only as a fallback for installs with no R2 credentials. See
+    CLAUDE.md "Lot photos": never write a new Supabase Storage URL.
+    """
+    r2 = _r2()
+    if r2:
+        s3, cfg = r2
+        if not r2_images.put_object(s3, bucket=cfg["bucket"], path=path,
+                                    data=data, content_type=_content_type(path)):
+            # Deliberately do NOT fall back here. The 402 is on *serving*, so a
+            # Supabase write can still succeed — and then set_archived_images()
+            # stamps images_archived=true over a URL that will never load, and
+            # unarchived_active() (WHERE images_archived IS NOT TRUE) never
+            # retries the lot. Raising instead lets the per-lot guards in
+            # archive_lot_images()/run_discovery() count an error and retry next
+            # run. Keys are content-addressed, so a partial gallery re-uploads
+            # idempotently.
+            raise RuntimeError(
+                f"R2 upload failed for {path!r}; refusing Supabase fallback")
+        return r2_images.public_url(
+            path, public_base=cfg["public_base"],
+            version=r2_images.content_version(data))
     base = os.environ["SUPABASE_STORAGE_URL"].rstrip("/")
     key = os.environ["SUPABASE_STORAGE_KEY"]
     httpx.post(f"{base}/storage/v1/object/{BUCKET}/{path}", content=data,

@@ -262,12 +262,23 @@ function shortUrl(u) {
 $('#launch-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const payload = {
+  const pipeline = fd.get('mode_pipeline') === 'on';
+  const channels = ['site', 'fb', 'business'].filter(c => fd.get('ch_' + c) === 'on');
+  const payload = pipeline ? {
+    mode: 'pipeline',
     url: fd.get('url'),
     skip_dewatermark: fd.get('skip_dewatermark') === 'on',
     skip_fb: fd.get('skip_fb') === 'on',
     skip_ebay: fd.get('skip_ebay') === 'on',
     price: fd.get('price') ? parseInt(fd.get('price'), 10) : null,
+  } : {
+    mode: 'channels',
+    url: fd.get('url'),
+    price: fd.get('price') ? parseInt(fd.get('price'), 10) : null,
+    title: (fd.get('title') || '').trim(),
+    blurb: (fd.get('blurb') || '').trim(),
+    split: (fd.get('split') || '').trim(),
+    channels,
   };
   consoleEl.innerHTML = '';
   $$('.phase').forEach(p => setPhase(p.dataset.phase, 'pending', {}));
@@ -285,6 +296,20 @@ $('#launch-form').addEventListener('submit', async (e) => {
   $('#run-btn').disabled = true;
   $('#cancel-btn').disabled = false;
 });
+
+// ▶ is "list everywhere" by default; the legacy scrape/eBay pipeline is a checkbox.
+const _modeBox = document.querySelector('#launch-form [name="mode_pipeline"]');
+if (_modeBox) {
+  const sync = () => {
+    const on = _modeBox.checked;
+    document.querySelectorAll('#launch-form .pipeline-only').forEach(el => el.hidden = !on);
+    document.querySelectorAll('#launch-form .opts-copy').forEach(el => el.hidden = on);
+    const lbl = $('#run-btn-label');
+    if (lbl) lbl.textContent = on ? 'Run pipeline' : 'List everywhere';
+  };
+  _modeBox.addEventListener('change', sync);
+  sync();
+}
 
 $('#cancel-btn').addEventListener('click', (e) => {
   withButtonLoading(e.currentTarget, '…cancelling', async () => {
@@ -1323,6 +1348,8 @@ function renderInvTable(items) {
       <td class="inv-actions">
         <button class="btn btn-small btn-ghost" data-act="view">view</button>
         <button class="btn btn-small btn-ghost" data-act="republish">republish</button>
+        <button class="btn btn-small btn-ghost" data-act="remove-everywhere"
+                title="Mark as moved: fake sold-out on the site + business feed, Mark as sold on Marketplace">moved</button>
         <button class="btn btn-small btn-ghost inv-danger" data-act="delete">✕</button>
       </td>
     `;
@@ -1388,6 +1415,20 @@ async function onInvAction(e) {
   const act = btn.dataset.act;
   if (act === 'view') {
     window.open(`/listings/${encodeURIComponent(lotId)}`, '_blank');
+    return;
+  }
+  if (act === 'remove-everywhere') {
+    if (!confirm(`Mark ${lotId} as MOVED everywhere?\n\nSite + business feed: fake sold-out (shows under ALREADY MOVED).\nMarketplace: Mark as sold on the family account.\n\nWatch the Launcher console.`)) return;
+    await withButtonLoading(btn, '…queuing', async () => {
+      try {
+        await apiFetch(`/api/lots/${encodeURIComponent(lotId)}/remove`, {method: 'POST',
+          headers: {'content-type': 'application/json'}, body: '{}'});
+        toast(`${lotId} queued as moved — see Launcher tab.`, 'ok');
+        setTimeout(loadInventory, 4000);
+      } catch (err) {
+        toast('Remove failed: ' + (err.message || err), 'err');
+      }
+    });
     return;
   }
   if (act === 'delete') {
