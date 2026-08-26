@@ -112,10 +112,13 @@ def city_matches(ledger_city: str | None, plan_city: str | None) -> bool:
 
 
 def numbers_in(text: str) -> list[int]:
-    """Bare integers in listing copy, ignoring $-prefixed prices."""
+    """Bare integers in listing copy, ignoring $-prefixed prices and measurements
+    (60" / 29 in / 32"H — the Augusta round tables are 60 inches, not 60 units)."""
     return [
         int(m.group(1).replace(",", ""))
-        for m in re.finditer(r"(?<!\$)\b(\d{1,3}(?:,\d{3})+|\d+)\b", text or "")
+        for m in re.finditer(
+            r"(?<!\$)\b(\d{1,3}(?:,\d{3})+|\d+)\b(?!\s*(?:\"|″|”|-?inch|\s?in\b|'|ft\b|\s?x\s?\d))",
+            text or "")
     ]
 
 
@@ -142,6 +145,10 @@ def verify_listing(listing: dict, *, dry_run: bool, http: bool) -> list[str]:
     problems: list[str] = []
     sku = listing.get("sku") or "<missing sku>"
     kind = listing.get("kind") or "specific"
+    if listing.get("fb_status") == "sold":
+        # Retired on purpose via lot_channels remove (fake sold-out + Mark as
+        # sold). Its ledger row is meant to fail every sellable check.
+        return []
     copy = " ".join(
         str(listing.get(k) or "")
         for k in ("title", "quantity_wording", "description")
