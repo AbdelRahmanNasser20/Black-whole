@@ -159,6 +159,10 @@ def _classify(title: str | None, description: str | None) -> tuple[str, str]:
 _NON_CHAIR_TERMS = (
     "scale", "stool", "ottoman", "pouf", "footrest", "lumbar support",
     "recliner", "filing cabinet", "file cabinet", "pillow", "drafting chair",
+    # Accessories that carry a chair count in the title and are not chairs.
+    # "Lot of 500 White Spandex Chair Covers" reads as a 500-chair lot to any
+    # count-from-title path — it is 500 pieces of fabric.
+    "chair cover", "seat cover", "chair cushion", "seat cushion", "chair mat",
 )
 
 

@@ -22,7 +22,15 @@ from typing import Any
 import requests
 
 # Chunk size keeps prompts small for free-tier limits and fast failures.
-_CHUNK = int(os.getenv("LLM_QUANTITY_CHUNK", "12"))
+#
+# 8, not the old 12: Groq's gpt-oss tier allows 8,000 tokens per MINUTE and
+# counts `max_tokens` as requested up front, so an oversized single request is
+# rejected 413 "Request too large" — a limit that genuinely does not clear by
+# waiting, because the request alone exceeds the whole window. At 12 rows the
+# worst case (12 x 3,000 chars of title+description ≈ 9,000 tokens, plus 4,000
+# reserved) asked for ~13,000 against a ceiling of 8,000 and four of ten chunks
+# died. See `_TPM_CEILING` below for the arithmetic that keeps this honest.
+_CHUNK = int(os.getenv("LLM_QUANTITY_CHUNK", "8"))
 
 # Per-chunk reliability knobs. No single free LLM is reliable enough to carry a
 # full daily scrape on its own: Gemini suffers transient 503 outages and Groq's
@@ -58,7 +66,21 @@ _RATE_LIMIT_MAX_WAIT = float(os.getenv("QUANTITY_LLM_RATE_LIMIT_MAX_WAIT", "120"
 
 # Must match tests/test_quantity_accuracy.py / any tooling that shows "what the LLM sees"
 LLM_QUANTITY_TITLE_MAX = 500
-LLM_QUANTITY_DESC_MAX = 2500
+LLM_QUANTITY_DESC_MAX = int(os.getenv("LLM_QUANTITY_DESC_MAX", "1200"))
+
+# Groq's free gpt-oss tier: 8,000 tokens/minute, and `max_tokens` is counted as
+# requested the moment the call is made. A request whose prompt + reservation
+# clears this is rejected 413 outright, so the three knobs above are not
+# independent — `test_quantity_request_fits_the_tpm_ceiling` asserts their
+# product stays inside it. Raise one and that test tells you which other to cut.
+_TPM_CEILING = 8000
+_CHARS_PER_TOKEN = 4  # standard rough ratio; deliberately pessimistic here
+
+# Sized to the answer, not to the ceiling. The reply is one small JSON object
+# per row (~25 tokens), and gpt-oss's reasoning for a counting task is short —
+# but the reservation is charged in full against TPM whether it is used or not,
+# so 4,000 was buying nothing and costing half the window.
+_QUANTITY_MAX_TOKENS = int(os.getenv("LLM_QUANTITY_MAX_TOKENS", "2000"))
 
 
 def _ollama_chat(base_url: str, model: str, prompt: str, timeout: int) -> str:
@@ -89,15 +111,34 @@ def _openai_chat(api_key: str, prompt: str, model: str = "gpt-4o-mini") -> str:
     return resp.choices[0].message.content or ""
 
 
-def _groq_chat(api_key: str, prompt: str, model: str = "llama-3.3-70b-versatile") -> str:
+# Groq retired the whole Llama 3.x family on this account. Both models this
+# repo had hardcoded — `llama-3.3-70b-versatile` here and `llama-3.1-8b-instant`
+# in deals/llm_provider.py — now answer 404 model_not_found, which the quantity
+# pass records as `llm_failed` for every row in the chunk. That is the immediate
+# reason lot 420/9312 ("LOT: (199) BANQUET CHAIRS") never reached an alert.
+#
+# `openai/gpt-oss-120b` is the same family the upstream quantity_eval benchmark
+# picked (auction_extractors/.env pins OLLAMA_MODEL=gpt-oss:120b-cloud), so the
+# swap keeps the accuracy the benchmark measured. Watch the budget: gpt-oss on
+# Groq's free tier allows 1,000 req/day, not the 14,400 Llama had. The chair
+# sweep needs ~60 (BATCH=12 over ~740 rows) and fits; the deals classify crons
+# do not, and are tracked separately.
+#
+# Env-overridable so the next retirement is a config change, not a deploy.
+_GROQ_QUANTITY_MODEL = os.getenv("GROQ_QUANTITY_MODEL", "openai/gpt-oss-120b")
+
+
+def _groq_chat(api_key: str, prompt: str, model: str = "") -> str:
     from openai import OpenAI
+
+    model = model or _GROQ_QUANTITY_MODEL
 
     client = OpenAI(api_key=api_key, base_url="https://api.groq.com/openai/v1")
     resp = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0,
-        max_tokens=4000,
+        max_tokens=_QUANTITY_MAX_TOKENS,
     )
     return resp.choices[0].message.content or ""
 
