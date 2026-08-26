@@ -48,6 +48,9 @@
     <button class="tab" data-tab="deals">
       <span class="tab-num">10</span><span class="tab-label">Deals</span>
     </button>
+    <button class="tab" data-tab="deposits">
+      <span class="tab-num">11</span><span class="tab-label">Deposits</span>
+    </button>
   </nav>
   <div class="meta">
     <span class="status-dot" id="conn-dot"></span>
@@ -681,6 +684,61 @@
   <div class="auction-status" id="ts-status"></div>
   <div class="auction-grid" id="ts-grid">
     <div class="drafts-empty">Enter a keyword and hit <strong>▶ run test scrape</strong>.</div>
+  </div>
+</section>
+
+<!-- ───────────── Deposits (11) ───────────── -->
+<section class="panel" data-pane="deposits" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">MONEY / DEPOSITS</div>
+    <h1 class="hero-title">Stripe Checkout reservations.</h1>
+    <p class="hero-sub">
+      Paid ≠ shipped: adjust inventory by hand. A
+      <span class="lex done">paid</span> row means the money cleared, not that
+      a chair moved — drop <span class="lex running">quantity remaining</span>
+      on the Inventory tab yourself once the pickup or freight is arranged.
+      Refunds are executed in the Stripe dashboard; the status syncs back here
+      over the webhook.
+    </p>
+  </div>
+
+  <!-- The live deposit rule. Edited here, not in the environment — the seed
+       env keys only matter before the first save. -->
+  <div class="dep-settings" id="dep-settings">
+    <div class="ac-group">
+      <span class="ac-label" title="Percentage of (qty × price/chair) charged at checkout">DEPOSIT %</span>
+      <input type="number" id="dep-pct" min="1" max="100" step="0.5" value="15">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Floor in whole dollars — capped at the order subtotal at quote time">MIN $</span>
+      <input type="number" id="dep-min" min="0" max="100000" step="10" value="200">
+    </div>
+    <div class="ac-actions">
+      <span class="dep-settings-status mono tiny" id="dep-settings-msg"></span>
+      <button type="button" class="btn btn-small btn-primary" id="dep-settings-save">save rule</button>
+    </div>
+  </div>
+
+  <div class="inv-controls">
+    <div class="ac-group">
+      <span class="ac-label">STATUS</span>
+      <div class="seg" id="dep-status-filter">
+        <button type="button" class="seg-btn active" data-value="">all</button>
+        <button type="button" class="seg-btn" data-value="pending">pending</button>
+        <button type="button" class="seg-btn" data-value="processing">processing</button>
+        <button type="button" class="seg-btn" data-value="paid">paid</button>
+        <button type="button" class="seg-btn" data-value="failed">failed</button>
+        <button type="button" class="seg-btn" data-value="refunded">refunded</button>
+        <button type="button" class="seg-btn" data-value="canceled">canceled</button>
+      </div>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-small" id="dep-refresh">↻ refresh</button>
+    </div>
+  </div>
+
+  <div class="inq-list" id="dep-list">
+    <div class="drafts-empty">Loading deposits…</div>
   </div>
 </section>
 

@@ -121,6 +121,222 @@ function bindCaptureForm(form) {
   });
 })();
 
+// ─── freight estimate widget (detail page) ──────────────────────────────
+// Two steps on purpose: ZIP first (zero friction, always answers), and only
+// once a number is on screen do we ask for an email. An unquotable lane is a
+// normal answer — it hands the buyer to the contact form, never a guess.
+(function initFreightWidget() {
+  const widget = document.getElementById('freight-widget');
+  if (!widget) return;
+  const form = widget.querySelector('.fw-form');
+  const result = widget.querySelector('.fw-result');
+  if (!form || !result) return;
+  const zipEl = widget.querySelector('.fw-zip');
+  const qtyEl = widget.querySelector('.fw-qty');
+  const emailRow = widget.querySelector('.fw-email');
+  const emailEl = widget.querySelector('.fw-email-input');
+  let quoteId = null;
+
+  const money = (n) => '$' + Math.round(Number(n)).toLocaleString('en-US');
+  const num = (n) => Number(n).toLocaleString('en-US');
+
+  function show(html, tone) {
+    result.innerHTML = html;
+    result.classList.remove('mf-result--ok', 'mf-result--err');
+    if (tone) result.classList.add(tone);
+    result.hidden = false;
+  }
+
+  function rangeFor(est, mode) {
+    return est[mode] || null;
+  }
+
+  function renderEstimate(data) {
+    const est = data.estimate || {};
+    const mode = est.recommended_mode || est.mode || 'ltl';
+    const primary = rangeFor(est, mode) || rangeFor(est, 'ltl') || rangeFor(est, 'partial');
+    if (!primary) {
+      show('WE’LL QUOTE THIS LANE BY HAND — <a href="#contact-form">SEND THE REQUEST BELOW</a>', 'mf-result--err');
+      return false;
+    }
+    const bits = ['◉ EST. ' + money(primary.low) + '–' + money(primary.high)];
+    if (est.miles) bits.push('~' + num(est.miles) + ' MI');
+    if (est.transit_days) bits.push('~' + num(est.transit_days) + ' DAYS');
+    let html = bits.join(' · ');
+    if (est.mode === 'both') {
+      const altKey = (mode === 'ltl') ? 'partial' : 'ltl';
+      const alt = rangeFor(est, altKey);
+      if (alt) {
+        html += '<span class="fw-alt">' + altKey.toUpperCase() + ' ALT. ' +
+          money(alt.low) + '–' + money(alt.high) + '</span>';
+      }
+    }
+    show(html, 'mf-result--ok');
+    return true;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const dest = (zipEl.value || '').trim();
+    if (!/^\d{5}$/.test(dest)) {
+      show('✗ ENTER A 5-DIGIT US ZIP CODE.', 'mf-result--err');
+      return;
+    }
+    const payload = {lot_id: widget.dataset.lotId, dest_zip: dest};
+    const qty = parseInt(qtyEl && qtyEl.value, 10);
+    if (qty > 0) payload.quantity = qty;
+
+    const btn = form.querySelector('button[type="submit"]');
+    const btnText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'PRICING…';
+    if (emailRow) emailRow.hidden = true;
+    quoteId = null;
+
+    try {
+      const r = await fetch('/freight-estimate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (r.status === 429) {
+        show('TOO MANY ESTIMATES — GIVE IT A MINUTE.', 'mf-result--err');
+        return;
+      }
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(data.detail || 'Estimate failed');
+      if (data.ok === false) {
+        show('WE’LL QUOTE THIS LANE BY HAND — <a href="#contact-form">SEND THE REQUEST BELOW</a>', 'mf-result--err');
+        return;
+      }
+      if (renderEstimate(data) && emailRow && data.quote_id) {
+        quoteId = data.quote_id;
+        emailRow.hidden = false;
+      }
+    } catch (err) {
+      show('✗ COULDN’T REACH THE PRICER — TRY THAT AGAIN IN A MOMENT.', 'mf-result--err');
+    } finally {
+      btn.disabled = false; btn.textContent = btnText;
+    }
+  });
+
+  emailRow?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const email = (emailEl.value || '').trim();
+    if (!quoteId || !email) return;
+    const btn = emailRow.querySelector('button[type="submit"]');
+    const btnText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'SENDING…';
+    try {
+      const r = await fetch('/freight-estimate/email', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({quote_id: quoteId, email: email}),
+      });
+      if (!r.ok) throw new Error('send failed');
+      emailRow.hidden = true;
+      show('SENT — WE’LL FOLLOW UP.', 'mf-result--ok');
+    } catch (err) {
+      show('✗ COULDN’T SAVE THAT EMAIL — TRY AGAIN OR USE THE FORM BELOW.', 'mf-result--err');
+    } finally {
+      btn.disabled = false; btn.textContent = btnText;
+    }
+  });
+})();
+
+// ─── reserve form (deposit checkout) ────────────────────────────────────
+// The math here is DISPLAY ONLY. The server re-derives every cent from the
+// lot's own price before it talks to Stripe, so a tampered field changes what
+// the buyer reads and nothing else.
+(function initReserveForm() {
+  const form = document.getElementById('reserve-form');
+  if (!form) return;
+  const result = form.querySelector('.mf-result');
+  const qtyEl = form.querySelector('[name="quantity"]');
+  const out = {
+    subtotal: document.getElementById('quote-subtotal'),
+    dueNow: document.getElementById('quote-due-now'),
+    balance: document.getElementById('quote-balance'),
+  };
+  const price = parseFloat(form.dataset.price || '0') || 0;
+  const pct = parseFloat(form.dataset.pct || '0') || 0;
+  const minCents = parseInt(form.dataset.minCents || '0', 10) || 0;
+  const maxQty = parseInt(form.dataset.maxQty || '0', 10) || 0;
+
+  const dollars = (cents) => '$' + (cents / 100).toLocaleString('en-US', {
+    minimumFractionDigits: 2, maximumFractionDigits: 2,
+  });
+  const kindNow = () => {
+    const picked = form.querySelector('[name="kind"]:checked');
+    return picked ? picked.value : 'deposit';
+  };
+
+  function show(text, tone) {
+    if (!result) return;
+    result.textContent = text;
+    result.classList.remove('mf-result--ok', 'mf-result--err');
+    if (tone) result.classList.add(tone);
+    result.hidden = false;
+  }
+
+  function recompute() {
+    let qty = parseInt(qtyEl && qtyEl.value, 10);
+    if (!(qty > 0)) qty = 0;
+    if (maxQty && qty > maxQty) qty = maxQty;
+    const subtotal = Math.round(qty * price * 100);
+    const dueNow = (kindNow() === 'full')
+      ? subtotal
+      : Math.min(subtotal, Math.max(Math.ceil(subtotal * pct), minCents));
+    const balance = subtotal - dueNow;
+    if (out.subtotal) out.subtotal.textContent = dollars(subtotal);
+    if (out.dueNow) out.dueNow.textContent = dollars(dueNow);
+    if (out.balance) out.balance.textContent = dollars(balance);
+  }
+
+  qtyEl?.addEventListener('input', recompute);
+  form.querySelectorAll('[name="kind"]').forEach(el => {
+    el.addEventListener('change', recompute);
+  });
+  recompute();
+
+  if (location.search.indexOf('canceled=1') !== -1 || form.dataset.canceled === '1') {
+    show('CHECKOUT CANCELED — YOUR LOT IS STILL HERE.', null);
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(form);
+    const payload = {
+      quantity: parseInt(fd.get('quantity'), 10),
+      kind: kindNow(),
+      name: (fd.get('name') || '').trim(),
+      email: (fd.get('email') || '').trim(),
+      phone: (fd.get('phone') || '').trim(),
+    };
+    if (!payload.email && !payload.phone) {
+      show('✗ We need an email or a phone number to reach you.', 'mf-result--err');
+      return;
+    }
+
+    const btn = form.querySelector('button[type="submit"]');
+    const btnText = btn.textContent;
+    btn.disabled = true; btn.textContent = 'OPENING CHECKOUT…';
+    try {
+      const r = await fetch(form.dataset.endpoint, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || !data.ok) throw new Error(data.detail || 'Could not start checkout');
+      window.location = data.url;
+    } catch (err) {
+      show('✗ ' + (err.message || 'Something broke. Please try again or contact us.'),
+           'mf-result--err');
+      btn.disabled = false; btn.textContent = btnText;
+    }
+  });
+})();
+
 // ─── detail page gallery ────────────────────────────────────────────────
 (function initGallery() {
   const main = document.getElementById('gal-main-img');

@@ -72,6 +72,7 @@ const panels = {
   'test-scrape': $('[data-pane="test-scrape"]'),
   subscribers: $('[data-pane="subscribers"]'),
   deals: $('[data-pane="deals"]'),
+  deposits: $('[data-pane="deposits"]'),
 };
 
 const TAB_STORAGE_KEY = 'admin.lastTab';
@@ -91,6 +92,7 @@ function activateTab(name, {persist = true} = {}) {
   if (name === 'inquiries') loadInquiries();
   if (name === 'subscribers') loadSubscribers();
   if (name === 'deals') loadDeals();
+  if (name === 'deposits') { loadDeposits(); loadDepositSettings(); }
   if (name === 'listings-db') loadListingsDb();
   if (name === 'test-scrape') $('#ts-q')?.focus();
   if (persist) {
@@ -1839,6 +1841,193 @@ $$('#sub-status-filter .seg-btn').forEach(b => b.addEventListener('click', () =>
   b.classList.add('active');
   _subStatusFilter = b.dataset.value;
   loadSubscribers();
+}));
+
+
+// ─────────────────────────── Deposits tab (11) ───────────────────────────
+// The money ledger: one card per Stripe Checkout attempt, plus the live
+// deposit rule. Two things this UI deliberately does NOT do:
+//   · no refund button — refunds happen in the Stripe dashboard and come back
+//     as a webhook, so this stays a mirror of Stripe rather than a rival
+//     source of truth;
+//   · no inventory writes — a paid deposit doesn't decrement anything (v1).
+// `→ CANCELED` is offered only on pending/processing rows because those are
+// the only ones where "this reservation is dead" is an operator judgement
+// call rather than something Stripe already told us.
+
+var _depStatusFilter = '';
+
+const DEP_MONEY = new Intl.NumberFormat('en-US', {style: 'currency', currency: 'USD'});
+
+function depMoney(cents) {
+  if (cents == null || isNaN(cents)) return '—';
+  return DEP_MONEY.format(cents / 100);
+}
+
+function depWhen(ts) {
+  return ts ? String(ts).replace('T', ' ').slice(0, 16) : '';
+}
+
+async function loadDeposits() {
+  const el = $('#dep-list');
+  if (!el) return;
+  el.innerHTML = '<div class="drafts-empty">Loading…</div>';
+  try {
+    const r = await fetch('/api/deposits' + (_depStatusFilter ? `?status=${encodeURIComponent(_depStatusFilter)}` : ''));
+    const data = await r.json();
+    renderDeposits(data.items || []);
+  } catch (e) {
+    el.innerHTML = `<div class="drafts-empty">Load failed: ${e}</div>`;
+  }
+}
+
+function renderDeposits(items) {
+  const el = $('#dep-list');
+  if (!el) return;
+  if (!items.length) {
+    el.innerHTML = '<div class="drafts-empty">No deposits yet. Reservations land here the moment a buyer opens Stripe Checkout.</div>';
+    return;
+  }
+  el.innerHTML = '';
+  for (const d of items) {
+    const card = document.createElement('article');
+    card.className = `inq-card dep-card dep-${d.status}`;
+    card.dataset.id = d.id;
+    const lotLink = d.lot_id
+      ? `<a href="/listings/${encodeURIComponent(d.lot_id)}" target="_blank">LOT #${escapeHtml(d.lot_id)}</a>`
+      : '<span class="inq-unlinked mono tiny">NO LOT</span>';
+    const stamps = [
+      d.created_at ? `created ${depWhen(d.created_at)}` : '',
+      d.paid_at ? `paid ${depWhen(d.paid_at)}` : '',
+      d.refunded_at ? `refunded ${depWhen(d.refunded_at)}` : '',
+    ].filter(Boolean).join(' · ');
+    const ids = [d.stripe_session_id, d.stripe_payment_intent].filter(Boolean)
+      .map(x => `<span class="dep-sid">${escapeHtml(x)}</span>`).join('');
+    const canCancel = d.status === 'pending' || d.status === 'processing';
+    card.innerHTML = `
+      <header class="inq-head">
+        <span class="inq-kind dep-kind--${escapeAttr(d.kind)}">${d.kind === 'full' ? 'FULL' : 'DEPOSIT'}</span>
+        <span class="dep-amount">${depMoney(d.amount_cents)}</span>
+        <span class="dep-qty mono tiny">× ${d.quantity != null ? d.quantity : '?'}</span>
+        <span class="inq-lot">${lotLink}</span>
+        <span class="inq-when mono tiny">${escapeHtml(stamps)}</span>
+        <span class="inq-status-pill dep-status-${escapeAttr(d.status)}">${escapeHtml(d.status)}</span>
+      </header>
+      <div class="inq-body">
+        <div class="inq-name">${escapeHtml(d.buyer_name || '—')}</div>
+        <div class="inq-contact mono tiny">
+          ${d.buyer_email ? `<a href="mailto:${escapeAttr(d.buyer_email)}">${escapeHtml(d.buyer_email)}</a>` : ''}
+          ${d.buyer_phone ? `<a href="tel:${escapeAttr(d.buyer_phone)}">${escapeHtml(d.buyer_phone)}</a>` : ''}
+          ${d.payment_method ? `· ${escapeHtml(d.payment_method)}` : ''}
+        </div>
+        <div class="dep-order mono tiny">
+          order ${depMoney(d.subtotal_cents)}
+          · balance at delivery ${depMoney((d.subtotal_cents || 0) - (d.amount_cents || 0))}
+        </div>
+        ${ids ? `<div class="dep-ids mono tiny">${ids}</div>` : ''}
+        ${d.failure_reason ? `<div class="dep-fail mono tiny">${escapeHtml(d.failure_reason)}</div>` : ''}
+        ${d.admin_note ? `<blockquote class="inq-msg">${escapeHtml(d.admin_note)}</blockquote>` : ''}
+      </div>
+      <footer class="inq-foot">
+        ${canCancel ? '<button class="btn btn-small" data-cancel>→ CANCELED</button>' : ''}
+        ${d.status === 'paid' ? '<span class="dep-hint mono tiny">Refund in the Stripe dashboard — status syncs here automatically.</span>' : ''}
+        <button class="btn btn-small btn-ghost inv-danger" data-delete>✕ delete</button>
+      </footer>
+    `;
+    card.querySelector('[data-cancel]')?.addEventListener('click', async (e) => {
+      if (!confirm(`Mark deposit #${d.id} canceled? This does not refund anything in Stripe.`)) return;
+      await withButtonLoading(e.currentTarget, '…', async () => {
+        try {
+          await apiFetch(`/api/deposits/${d.id}`, {
+            method: 'PATCH',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({status: 'canceled'}),
+          });
+          toast(`Deposit #${d.id} → canceled`, 'ok');
+          loadDeposits();
+        } catch (err) {
+          toast('Status change failed: ' + (err.message || err), 'err');
+        }
+      });
+    });
+    card.querySelector('[data-delete]').addEventListener('click', async (e) => {
+      if (!confirm(`Delete deposit #${d.id}? The Stripe record stays; only our row goes.`)) return;
+      await withButtonLoading(e.currentTarget, '…', async () => {
+        try {
+          await apiFetch(`/api/deposits/${d.id}`, {method: 'DELETE'});
+          toast(`Deposit #${d.id} deleted.`, 'ok');
+          loadDeposits();
+        } catch (err) {
+          toast('Delete failed: ' + (err.message || err), 'err');
+        }
+      });
+    });
+    el.appendChild(card);
+  }
+}
+
+// ── the rule ──
+// Stored as a fraction (0.15); shown as a percent (15) because that's how the
+// operator thinks and how the storefront copy reads.
+
+function depSettingsMsg(text, kind) {
+  const el = $('#dep-settings-msg');
+  if (!el) return;
+  el.textContent = text || '';
+  el.className = 'dep-settings-status mono tiny' + (kind ? ` dep-msg-${kind}` : '');
+}
+
+async function loadDepositSettings() {
+  try {
+    const s = await apiFetch('/api/settings');
+    const pct = $('#dep-pct'), min = $('#dep-min');
+    if (pct && s.deposit_pct != null) pct.value = Math.round(Number(s.deposit_pct) * 1000) / 10;
+    if (min && s.deposit_min_usd != null) min.value = s.deposit_min_usd;
+    depSettingsMsg('');
+  } catch (err) {
+    depSettingsMsg('could not load rule: ' + (err.message || err), 'err');
+  }
+}
+
+async function saveDepositSettings() {
+  const pct = Number($('#dep-pct')?.value);
+  const min = Number($('#dep-min')?.value);
+  if (!isFinite(pct) || pct <= 0 || pct > 100) {
+    depSettingsMsg('deposit % must be between 0 and 100', 'err');
+    return;
+  }
+  if (!isFinite(min) || min < 0) {
+    depSettingsMsg('minimum must be a positive dollar amount', 'err');
+    return;
+  }
+  try {
+    const s = await apiFetch('/api/settings', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        deposit_pct: Math.round((pct / 100) * 10000) / 10000,
+        deposit_min_usd: Math.round(min),
+      }),
+    });
+    depSettingsMsg(`saved · ${Math.round(Number(s.deposit_pct) * 1000) / 10}% · floor $${s.deposit_min_usd}`, 'ok');
+    toast('Deposit rule saved.', 'ok');
+  } catch (err) {
+    depSettingsMsg('save failed: ' + (err.message || err), 'err');
+    toast('Deposit rule save failed: ' + (err.message || err), 'err');
+  }
+}
+
+$('#dep-settings-save')?.addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, 'saving…', saveDepositSettings);
+});
+$('#dep-refresh')?.addEventListener('click', (e) => {
+  withButtonLoading(e.currentTarget, '↻ loading…', loadDeposits);
+});
+$$('#dep-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => {
+  $$('#dep-status-filter .seg-btn').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  _depStatusFilter = b.dataset.value;
+  loadDeposits();
 }));
 
 

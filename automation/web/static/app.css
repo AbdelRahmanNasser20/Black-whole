@@ -1082,6 +1082,47 @@ main {
 .inq-foot { display: flex; gap: 8px; flex-wrap: wrap; }
 
 
+/* ═══════════════ Deposits tab (11) ═══════════════
+   Cards reuse .inq-card; only the money-specific bits live here. */
+.dep-settings {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 14px var(--pad);
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--line);
+}
+.dep-settings input[type=number] {
+  width: 84px; padding: 4px 6px;
+  background: var(--bg); border: 1px solid var(--line); color: var(--ink);
+  font-family: var(--mono); font-size: 13px;
+}
+.dep-settings input[type=number]:focus { outline: none; border-color: var(--accent); }
+.dep-settings-status { color: var(--ink-mute); }
+.dep-msg-ok  { color: var(--ok); }
+.dep-msg-err { color: var(--err); }
+
+.dep-amount { font-family: var(--mono); font-size: 16px; color: var(--ink); }
+.dep-qty, .dep-order, .dep-ids, .dep-hint { color: var(--ink-mute); }
+.dep-sid { margin-right: 10px; color: var(--ink-dim); }
+.dep-fail { color: var(--err); }
+.dep-kind--deposit { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.dep-kind--full { background: var(--ok); color: var(--bg); border-color: var(--ok); }
+
+/* Status colours, shared by the card's left rule and its pill. */
+.dep-card.dep-pending    { border-left-color: var(--ink-dim); }
+.dep-card.dep-processing { border-left-color: var(--warn); }
+.dep-card.dep-paid       { border-left-color: var(--ok); }
+.dep-card.dep-failed     { border-left-color: var(--err); }
+.dep-card.dep-refunded   { border-left-color: var(--info); }
+.dep-card.dep-canceled   { border-left-color: var(--line-bold); opacity: 0.7; }
+
+.dep-status-pending    { color: var(--ink-mute); }
+.dep-status-processing { color: var(--warn); border-color: var(--warn); }
+.dep-status-paid       { color: var(--ok);   border-color: var(--ok); }
+.dep-status-failed     { color: var(--err);  border-color: var(--err); }
+.dep-status-refunded   { color: var(--info); border-color: var(--info); }
+.dep-status-canceled   { color: var(--ink-dim); }
+
+
 /* ───────────── Listings DB (tab 07) ───────────── */
 
 .ldb-table-wrap {

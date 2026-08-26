@@ -518,11 +518,31 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         "title", "subtitle", "description", "chair_type", "dimensions", "city", "state",
         "zip_code", "contact_name", "contact_email", "contact_phone",
         "govdeals_username", "govdeals_password",
-        "locations", "fake_sold_out", "sold_at",
+        "locations", "fake_sold_out", "sold_at", "deposit_pct_override",
     }
     clean = {k: v for k, v in fields.items() if k in allowed}
     if not clean:
         return get(lot_id)
+    # Per-lot deposit % (B4). Blank clears it back to the site-wide rule; the
+    # DB CHECK is 0 < x <= 1, so reject out-of-range here rather than letting
+    # psycopg surface a constraint violation as a 500. Percent-vs-fraction is
+    # the easy mistake (15 instead of 0.15) — a 400 says so out loud instead of
+    # the value being silently ignored at quote time.
+    if "deposit_pct_override" in clean:
+        raw = clean["deposit_pct_override"]
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            clean["deposit_pct_override"] = None
+        else:
+            try:
+                pct = float(raw)
+            except (TypeError, ValueError):
+                raise ValueError("deposit_pct_override must be a number") from None
+            if not 0 < pct <= 1:
+                raise ValueError(
+                    "deposit_pct_override must be a fraction in (0, 1] — "
+                    "use 0.15 for 15%"
+                )
+            clean["deposit_pct_override"] = pct
     # Auto-sold-out rule
     if (
         "quantity_remaining" in clean

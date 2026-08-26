@@ -48,14 +48,21 @@ from ..config import (
     PUBLIC_BASE_URL,
 )
 from ..progress import EVENT_PREFIX, parse as parse_event
+from .. import config as app_config
 from .. import db
 from .. import catalog_feed
 from .. import inventory
 from .. import lot_images
 from .. import favorites
 from .. import telegram_alerts
+from .. import deposits
+from .. import site_settings
+from .. import stripe_gateway
+from .. import freight_estimate
+from .. import freight_log
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import rate_limit
 from . import auth as auth_svc
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -345,6 +352,33 @@ async def auth_logout(response: Response):
 
 # ───────────────────────────── public pages ─────────────────────────────
 
+def _reserve_enabled() -> bool:
+    """The Reserve feature's single on/off switch — no Stripe key, no feature.
+
+    Read at request time (not import time) so flipping the key doesn't need a
+    redeploy and tests can monkeypatch it.
+    """
+    return stripe_gateway.enabled()
+
+
+def _reservable(row: dict | None) -> bool:
+    """Can a buyer put money down on this lot right now?
+
+    Deliberately stricter than "is it visible": a lot with no price has no
+    quote, and a lot at zero remaining has nothing to hold. Hidden/sold lots
+    still render their detail page (BLACKWHOLE-29 sold archive) — they just
+    don't get a Reserve button.
+    """
+    if not row or row.get("status") == "hidden" or inventory.is_sold(row):
+        return False
+    try:
+        price = float(row.get("price_per_chair") or 0)
+        remaining = int(row.get("quantity_remaining") or 0)
+    except (TypeError, ValueError):
+        return False
+    return price > 0 and remaining > 0
+
+
 def _public_ctx(extra: dict) -> dict:
     """Common context for every public-page template (footer link etc)."""
     return {
@@ -352,6 +386,7 @@ def _public_ctx(extra: dict) -> dict:
         "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
         "base_url": PUBLIC_BASE_URL,
         "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
+        "reserve_enabled": _reserve_enabled(),
         **extra,
     }
 
@@ -525,6 +560,14 @@ async def public_listing_detail(request: Request, lot_id: str):
             "item": row,
             "hero": hero,
             "images": images,
+            # The freight widget only renders where it can actually answer: a
+            # lot with a locatable origin that's still for sale. A zip-less or
+            # sold lot keeps the plain pickup row instead of offering a form
+            # that can only ever say "we'll quote it by hand".
+            "freight": {
+                "enabled": bool(_freight_origin_zip(row)) and not row["is_sold"],
+                "default_qty": _freight_default_qty(row),
+            },
             **_detail_seo(row, hero, images),
         }),
     )
@@ -929,6 +972,70 @@ async def _notify_new_inquiry(row: dict) -> None:
         pass
 
 
+_DEPOSIT_ALERT_HEADS = {
+    "checkout.session.completed": "💰 DEPOSIT PAID",
+    "checkout.session.async_payment_succeeded": "💰 DEPOSIT PAID",
+    "checkout.session.async_payment_failed": "✗ ACH FAILED",
+    "checkout.session.expired": "✗ CHECKOUT EXPIRED",
+    "charge.refunded": "↩ REFUNDED",
+}
+
+
+def _dollars(cents: Any) -> str:
+    return f"${(int(cents or 0) / 100):,.2f}"
+
+
+async def _notify_deposit(row: dict, event_type: str) -> None:
+    """Money moved — tell the operator. Best-effort, exactly like the lead ping.
+
+    Only called when `deposits.transition()` reported `changed=True`, so a
+    Stripe retry of an already-applied event stays silent.
+    """
+    try:
+        status = (row or {}).get("status") or ""
+        head = _DEPOSIT_ALERT_HEADS.get(event_type, "◉ DEPOSIT UPDATE")
+        # A completed session that only reached 'processing' is an ACH debit in
+        # flight, not money in the bank — say so rather than crying "PAID".
+        if status == "processing":
+            head = "🏦 ACH INITIATED"
+        elif status == "failed":
+            head = "✗ ACH FAILED"
+        elif status == "refunded":
+            head = "↩ REFUNDED"
+        elif status == "canceled":
+            head = "✗ CHECKOUT EXPIRED"
+
+        kind = (row.get("kind") or "deposit").strip()
+        bits = [f"{head} · #{row.get('id')}"]
+        bits.append(
+            f"{_dollars(row.get('amount_cents'))} "
+            f"({'deposit' if kind == 'deposit' else 'paid in full'})"
+            + (f" · via {row['payment_method']}" if row.get("payment_method") else "")
+        )
+        lot_id = row.get("lot_id")
+        qty = row.get("quantity")
+        lot_line = f"{PUBLIC_BASE_URL}/listings/{lot_id}" if lot_id else "—"
+        bits.append(f"lot {lot_id or '—'} × {qty or '—'} — {lot_line}")
+
+        contact = " / ".join(
+            x for x in (row.get("buyer_email"), row.get("buyer_phone")) if x
+        )
+        who = row.get("buyer_name") or "—"
+        bits.append(f"{who}{(' — ' + contact) if contact else ''}")
+
+        if row.get("failure_reason"):
+            bits.append(f"reason: {row['failure_reason']}")
+
+        if status == "paid":
+            bits.append(
+                "⚠ inventory NOT auto-decremented — adjust qty on the Inventory tab"
+            )
+        bits.append(f"→ {PUBLIC_BASE_URL}/admin (Deposits)")
+        await telegram_alerts.send_message("\n".join(bits), topic="leads")
+    except Exception:
+        pass
+
+
 @app.post("/contact")
 async def public_contact(payload: dict):
     payload = payload or {}
@@ -1005,6 +1112,426 @@ async def public_subscribe(payload: dict):
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
+
+
+# ── Freight estimate (public, self-serve) ────────────────────────────────────
+# A buyer types their ZIP on a lot page and gets an honest RANGE. Public paths,
+# deliberately outside `/api/` (auth.py's PROTECTED_PREFIXES), same as /contact
+# and /reserve.
+#
+# THE HARD RULE: never invent a number. An unquotable lane (international,
+# offshore/Alaska, unresolvable ZIP, or a lot whose origin we can't locate)
+# returns HTTP 200 with `ok: false` and hands the buyer to the contact form. It
+# does NOT guess, and it does not 500 — a lane we can't price is a normal
+# outcome of a public form, not an error.
+
+FREIGHT_UNQUOTABLE = {
+    "ok": False,
+    "reason": "unquotable",
+    "message": (
+        "We'll quote this lane by hand — send the request below and we'll come "
+        "back with a real number."
+    ),
+}
+
+# What the estimate is and isn't. Shipped with every quote so the widget can't
+# drift from the terms, and so a screenshot of the number carries its caveats.
+FREIGHT_FRAMING = {
+    "estimate_only": True,
+    "residential_liftgate_included": True,
+    "chair_price_separate": True,
+    "pickup_free": True,
+}
+
+# Sanity ceiling on a requested quantity. Bigger than any real lot (the largest
+# to date is ~4,900) and small enough that a fat-fingered 9-digit number can't
+# turn into a nonsense weight.
+FREIGHT_MAX_QTY = 10_000
+
+
+def _freight_origin_zip(row: dict) -> str | None:
+    """Where this lot ships FROM. Server-side only — never client-supplied.
+
+    Origin is the one input a buyer must not control: letting them pass it
+    would turn the endpoint into a free general-purpose freight calculator and
+    make every logged lane a lie. Falls back to the state capital's ZIP when a
+    lot has no ZIP on file (±a state's width, which the range already absorbs);
+    no ZIP and no known state means no quote.
+
+    Normalization goes through the estimator's own `_resolve_zip` rather than a
+    second hand-rolled `zfill(5)` here — one module decides what a ZIP is.
+    """
+    zip_code = freight_estimate._resolve_zip(row.get("zip_code"))
+    if zip_code:
+        return zip_code
+    state = (row.get("state") or "").strip().upper()
+    return freight_estimate.STATE_CENTER_ZIP.get(state)
+
+
+def _freight_default_qty(row: dict) -> int:
+    """What to quote when the buyer doesn't say — the whole lot, basically."""
+    for key in ("quantity_remaining", "quantity_original"):
+        try:
+            qty = int(row.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+        if qty > 0:
+            return min(qty, FREIGHT_MAX_QTY)
+    return 1
+
+
+def _freight_rate_ok(request: Request) -> None:
+    """429 unless this caller (and the site as a whole) is under the hour's cap."""
+    ip = rate_limit.client_ip(request)
+    if not rate_limit.allow(f"freight:{ip}", limit=rate_limit.FREIGHT_PER_IP_LIMIT):
+        raise HTTPException(429, "rate_limited")
+    if not rate_limit.allow("freight:global", limit=rate_limit.FREIGHT_GLOBAL_LIMIT):
+        raise HTTPException(429, "rate_limited")
+
+
+def _freight_range(quote: dict, low_key: str, high_key: str) -> dict | None:
+    low, high = quote.get(low_key), quote.get(high_key)
+    if low is None or high is None:
+        return None
+    return {"low": low, "high": high}
+
+
+def _freight_public_estimate(quote: dict) -> dict:
+    """The subset of the estimator's dict a browser may see.
+
+    `raw` (calibration constants, NMFC class, the carrier's own response) stays
+    server-side: it's the audit trail for a quote, not a spec sheet for a
+    competitor, and every one of those knobs is tunable-by-us guesswork.
+    """
+    return {
+        "mode": quote.get("mode"),
+        "recommended_mode": quote.get("recommended_mode"),
+        "ltl": _freight_range(quote, "ltl_low", "ltl_high"),
+        "partial": _freight_range(quote, "partial_low", "partial_high"),
+        "miles": quote.get("miles"),
+        "transit_days": quote.get("transit_days"),
+        "valid_until": quote.get("valid_until"),
+    }
+
+
+def _freight_range_str(quote: dict) -> str:
+    mode = quote.get("recommended_mode") or quote.get("mode") or "ltl"
+    rng = _freight_range(quote, f"{mode}_low", f"{mode}_high") or _freight_range(
+        quote, "ltl_low", "ltl_high"
+    )
+    if not rng:
+        return "—"
+    return f"${rng['low']:,.0f}–${rng['high']:,.0f} ({mode})"
+
+
+async def _notify_freight_estimate(
+    row: dict, quote: dict, *, dest_zip: str, quantity: int, quote_id: int | None
+) -> None:
+    """Someone priced a real lane — that's a warm lead even without an email.
+
+    Best-effort, exactly like `_notify_new_inquiry`: a dead Telegram must never
+    surface as a failed estimate.
+    """
+    try:
+        lot_id = row.get("lot_id") or "—"
+        bits = [f"🚚 FREIGHT ESTIMATE · lot {lot_id}"]
+        bits.append(
+            f"{quantity} chairs → {dest_zip} · {_freight_range_str(quote)}"
+        )
+        bits.append(
+            f"~{quote.get('miles')} mi · ~{quote.get('transit_days')} days · "
+            f"via {quote.get('provider') or 'estimator'}"
+            + (f" · quote #{quote_id}" if quote_id else "")
+        )
+        bits.append(f"→ {PUBLIC_BASE_URL}/listings/{lot_id}")
+        await telegram_alerts.send_message("\n".join(bits), topic="leads")
+    except Exception:
+        pass
+
+
+async def _notify_freight_email(quote_id: int, email: str) -> None:
+    """The buyer traded their email for the estimate — that's the hot signal."""
+    try:
+        await telegram_alerts.send_message(
+            f"📧 FREIGHT LEAD · quote #{quote_id} → {email}", topic="leads"
+        )
+    except Exception:
+        pass
+
+
+@app.post("/freight-estimate")
+async def public_freight_estimate(payload: dict, request: Request):
+    """`{lot_id, dest_zip, quantity?}` → a freight cost range for that lane."""
+    _freight_rate_ok(request)
+    payload = payload or {}
+
+    lot_id = str(payload.get("lot_id") or "").strip()
+    row = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    if not row or row.get("status") == "hidden" or inventory.is_sold(row):
+        # A sold lot has nothing to ship; quoting freight on it would be a
+        # promise we can't keep.
+        raise HTTPException(404, "listing not found")
+
+    if payload.get("quantity") in (None, ""):
+        quantity = _freight_default_qty(row)
+    else:
+        try:
+            quantity = int(payload["quantity"])
+        except (TypeError, ValueError):
+            raise HTTPException(400, "quantity must be a number")
+        quantity = max(1, min(quantity, FREIGHT_MAX_QTY))
+
+    dest_zip = str(payload.get("dest_zip") or "").strip()
+    origin_zip = _freight_origin_zip(row)
+    if not origin_zip:
+        # We don't know where the lot is. Better a hand quote than a lane
+        # measured from nowhere.
+        return dict(FREIGHT_UNQUOTABLE)
+
+    try:
+        # Pure arithmetic over a committed lookup table — microseconds, no I/O,
+        # so it runs inline rather than paying for a thread hop. (A configured
+        # WarpProvider would add a network call; it falls back to the estimator
+        # on failure and is not wired on the storefront today.)
+        quote = freight_estimate.get_freight_estimate(origin_zip, dest_zip, quantity)
+    except freight_estimate.FreightUnavailable:
+        return dict(FREIGHT_UNQUOTABLE)
+
+    quote_id = await asyncio.to_thread(
+        freight_log.insert_storefront_quote,
+        lot_id=row.get("lot_id") or lot_id,
+        origin_zip=origin_zip,
+        dest_zip=dest_zip,
+        quantity=quantity,
+        quote=quote,
+        client_ip=rate_limit.client_ip(request),
+    )
+    asyncio.create_task(
+        _notify_freight_estimate(
+            row, quote, dest_zip=dest_zip, quantity=quantity, quote_id=quote_id
+        )
+    )
+    return {
+        "ok": True,
+        "quote_id": quote_id,
+        "estimate": _freight_public_estimate(quote),
+        "framing": dict(FREIGHT_FRAMING),
+    }
+
+
+def _looks_like_email(value: str) -> bool:
+    """Cheap plausibility check — the real validation is whether it bounces."""
+    if not value or len(value) > 254 or any(c.isspace() for c in value):
+        return False
+    local, _, domain = value.partition("@")
+    return bool(local) and "." in domain and not domain.startswith(".") \
+        and not domain.endswith(".")
+
+
+@app.post("/freight-estimate/email")
+async def public_freight_estimate_email(payload: dict, request: Request):
+    """Step two: attach an email to a quote the buyer already has on screen.
+
+    Split from the estimate itself on purpose — asking for an email before
+    showing a number costs more quotes than the addresses are worth.
+    """
+    _freight_rate_ok(request)
+    payload = payload or {}
+    try:
+        quote_id = int(payload.get("quote_id"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quote_id required")
+
+    email = str(payload.get("email") or "").strip()
+    if not _looks_like_email(email):
+        raise HTTPException(400, "valid email required")
+
+    await asyncio.to_thread(freight_log.set_quote_email, quote_id, email)
+    asyncio.create_task(_notify_freight_email(quote_id, email))
+    return {"ok": True}
+
+
+# ── Reserve with deposit (Stripe Checkout) ───────────────────────────────────
+# All of these are PUBLIC paths, deliberately outside `/api/`: `auth.py`'s
+# PROTECTED_PREFIXES gate `/admin`, `/api/`, `/screenshot/`, so a buyer can
+# still reach Checkout with operator auth switched on. Don't move them.
+#
+# ROUTE ORDER IS LOAD-BEARING: `/reserve/success` must be registered BEFORE
+# `/reserve/{lot_id}` or the path param swallows "success" and every buyer
+# coming back from Stripe lands on a 404.
+
+
+def _reserve_lot_or_404(lot_id: str) -> dict:
+    """Dark feature, unknown lot and hidden lot all look the same from outside."""
+    if not _reserve_enabled():
+        raise HTTPException(404, "not found")
+    row = inventory.get(lot_id)
+    if not row or row.get("status") == "hidden":
+        raise HTTPException(404, "listing not found")
+    return row
+
+
+@app.get("/reserve/success", response_class=HTMLResponse)
+async def reserve_success(request: Request, session_id: str = Query("")):
+    """Where Stripe drops the buyer after Checkout.
+
+    The redirect races the webhook, and on ACH it beats it by days — so this
+    page reads our row and says what's actually true: `paid` => confirmed,
+    anything else => "we've got your payment initiated". It never asserts a
+    payment landed on the strength of the redirect alone.
+    """
+    if not _reserve_enabled():
+        raise HTTPException(404, "not found")
+    row = await asyncio.to_thread(deposits.get_by_session, session_id)
+    if not row:
+        raise HTTPException(404, "reservation not found")
+    return templates.TemplateResponse(
+        request, "reserve_success.html",
+        _public_ctx({
+            "deposit": row,
+            "is_paid": row.get("status") == "paid",
+            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+        }),
+    )
+
+
+@app.get("/reserve/{lot_id}", response_class=HTMLResponse)
+async def reserve_page(request: Request, lot_id: str):
+    row = _reserve_lot_or_404(lot_id)
+    if not _reservable(row):
+        # Sold out, unpriced, or nothing left — there's no quote to show, so
+        # send them back to the lot page instead of a form that can't submit.
+        return RedirectResponse(f"/listings/{lot_id}", status_code=303)
+    _decorate(row)
+    # deposit_rules() reads site_settings (DB) — off the event loop.
+    pct, min_cents = await asyncio.to_thread(deposits.deposit_rules, row)
+    return templates.TemplateResponse(
+        request, "reserve.html",
+        _public_ctx({
+            "item": row,
+            "hero": row.get("hero_src"),
+            "pct": pct,
+            "min_cents": min_cents,
+            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+            "canceled": request.query_params.get("canceled") == "1",
+        }),
+    )
+
+
+@app.post("/reserve/{lot_id}/checkout")
+async def reserve_checkout(lot_id: str, payload: dict):
+    """Turn a quantity into a Stripe Checkout URL.
+
+    Everything the client sends is a *request*, not a fact. The quantity is
+    re-bounded against `quantity_remaining`, and the amount is re-derived from
+    the lot's own price by `deposits.quote_for_lot` — an `amount` field in the
+    payload is read by nobody. The row is written BEFORE the session so a
+    session we never hear about still has something to reconcile against.
+    """
+    row = _reserve_lot_or_404(lot_id)
+    if not _reservable(row):
+        raise HTTPException(400, "lot is not reservable")
+    payload = payload or {}
+
+    remaining = int(row.get("quantity_remaining") or 0)
+    try:
+        quantity = int(payload.get("quantity"))
+    except (TypeError, ValueError):
+        raise HTTPException(400, "quantity required")
+    if quantity < 1 or quantity > remaining:
+        raise HTTPException(400, f"quantity must be between 1 and {remaining}")
+
+    kind = (payload.get("kind") or "deposit").strip()
+    if kind not in deposits.DEPOSIT_KINDS:
+        raise HTTPException(400, "kind must be 'deposit' or 'full'")
+
+    # Same contact rule as the contact form: a name plus at least one way to
+    # reach them. A deposit we can't chase to a pickup is worse than no deposit.
+    name = (payload.get("name") or "").strip()
+    email = (payload.get("email") or "").strip() or None
+    phone = (payload.get("phone") or "").strip() or None
+    if not name:
+        raise HTTPException(400, "name required")
+    if not email and not phone:
+        raise HTTPException(400, "email or phone required")
+
+    try:
+        quote = await asyncio.to_thread(
+            deposits.quote_for_lot, row, quantity=quantity, kind=kind
+        )
+        deposit = await asyncio.to_thread(
+            deposits.create_pending,
+            lot_id=row.get("lot_id") or lot_id,
+            quantity=quantity,
+            price_per_chair=row.get("price_per_chair"),
+            quote=quote,
+            buyer_name=name,
+            buyer_email=email,
+            buyer_phone=phone,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+    try:
+        session = await asyncio.to_thread(
+            stripe_gateway.create_checkout_session, deposit=deposit, lot=row
+        )
+    except Exception:
+        # Close the row out rather than leaving a pending record no webhook can
+        # ever resolve (there is no session to expire).
+        await asyncio.to_thread(
+            deposits.transition, deposit["id"], "canceled",
+            failure_reason="session_create_failed",
+        )
+        raise HTTPException(502, "checkout_unavailable")
+
+    await asyncio.to_thread(deposits.attach_session, deposit["id"], session.id)
+    return {"ok": True, "url": session.url, "deposit_id": deposit["id"]}
+
+
+@app.get("/terms", response_class=HTMLResponse)
+async def public_terms(request: Request):
+    """The deposit policy, on a stable URL.
+
+    Renders even when the feature is dark — the policy is the trust artifact and
+    gets linked from DMs and emails whether or not Checkout is live. Only the
+    call-to-action copy is gated on `reserve_enabled`.
+    """
+    return templates.TemplateResponse(
+        request, "terms.html",
+        _public_ctx({"policy": stripe_gateway.REFUND_POLICY_SHORT}),
+    )
+
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """Stripe's side of the ledger.
+
+    The signature is the ONLY authentication this endpoint has, so an
+    unverifiable body is a 400 and nothing else happens. Once verified, the
+    answer is always 2xx — an unknown event type, a replay, and a row we can't
+    match are all *fine*; returning non-2xx just makes Stripe redeliver for
+    three days.
+
+    Note for go-live: Cloudflare Bot Fight Mode blocks Stripe's POSTs. A WAF
+    skip rule for this path is part of the runbook.
+    """
+    if not _reserve_enabled() or not app_config.STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(404, "not found")
+
+    raw = await request.body()
+    signature = request.headers.get("stripe-signature", "")
+    try:
+        event = await asyncio.to_thread(stripe_gateway.verify_webhook, raw, signature)
+    except Exception:
+        raise HTTPException(400, "invalid signature")
+
+    row, changed = await asyncio.to_thread(deposits.apply_stripe_event, event)
+    # `changed` is what keeps a Stripe retry from re-pinging the operator: the
+    # state machine no-ops the second delivery and reports False.
+    if changed and row:
+        asyncio.create_task(_notify_deposit(row, event.get("type") or ""))
+    return {"ok": True}
 
 
 # ── unsubscribe (public capability URL, BLACKWHOLE-10 / PRD §6) ──────────────
@@ -2470,6 +2997,76 @@ async def inq_delete(inquiry_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+# ───────────────────────────── deposits API ─────────────────────────────
+# The money ledger behind the storefront's Reserve button (B4). Admin-only by
+# construction: everything here is under /api/, which the auth middleware gates.
+#
+# Two deliberate non-features:
+#   1. **No refunds from here.** A refund is executed in the Stripe dashboard
+#      and arrives back as a `charge.refunded` webhook, which flips the row.
+#      A "refund" button here would be a second source of truth for money.
+#   2. **No inventory side-effects.** A paid deposit does NOT decrement
+#      `quantity_remaining` (v1 decision) — the operator adjusts by hand once
+#      the pickup/freight is actually arranged.
+#
+# `set_admin_fields` is the manual override for when reality and Stripe
+# disagree, so it is NOT state-machine gated. The UI only offers `→ canceled`
+# on pending/processing rows; the API stays permissive on purpose.
+
+@app.get("/api/deposits")
+async def dep_list(status: str | None = None):
+    if status and status not in deposits.DEPOSIT_STATUSES:
+        raise HTTPException(400, f"invalid status: {status}")
+    items = await asyncio.to_thread(deposits.list_deposits, status=status or None)
+    return {"items": items}
+
+
+@app.patch("/api/deposits/{deposit_id}")
+async def dep_update(deposit_id: int, payload: dict):
+    payload = payload or {}
+    status = payload.get("status")
+    if status is not None and status not in deposits.DEPOSIT_STATUSES:
+        raise HTTPException(400, f"invalid status: {status}")
+    try:
+        row = await asyncio.to_thread(
+            deposits.set_admin_fields,
+            deposit_id,
+            status=status,
+            admin_note=payload.get("admin_note"),
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
+@app.delete("/api/deposits/{deposit_id}")
+async def dep_delete(deposit_id: int):
+    ok = await asyncio.to_thread(deposits.delete_deposit, deposit_id)
+    if not ok:
+        raise HTTPException(404, "not found")
+    return {"ok": True}
+
+
+# ───────────────────────────── site settings API ─────────────────────────────
+# The live deposit rule (pct + floor), editable from the Deposits tab without a
+# redeploy. Distinct from `/api/site-config` — that one reports deployment
+# config and is load-bearing for the auth tests; do not merge them.
+
+@app.get("/api/settings")
+async def settings_get():
+    return await asyncio.to_thread(site_settings.get_all)
+
+
+@app.patch("/api/settings")
+async def settings_update(payload: dict):
+    try:
+        return await asyncio.to_thread(site_settings.set_many, payload or {})
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 # ───────────────────────────── subscribers API ─────────────────────────────

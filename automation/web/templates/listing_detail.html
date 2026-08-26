@@ -81,8 +81,44 @@
         </dd>
       </div>
       {% if item.dimensions %}<div><dt>DIMENSIONS</dt><dd>{{ item.dimensions }}</dd></div>{% endif %}
-      {% if not item.is_sold %}
-      <div><dt>PICKUP</dt><dd>Local preferred · Freight quotes on request</dd></div>
+      {% if freight.enabled %}
+      {#- Only rendered where the server can actually answer (a locatable,
+          unsold lot — see `freight.enabled` in app.py). Everything the widget
+          needs travels on data-* so public.js stays template-free. #}
+      <div class="spec-wide" id="freight-widget"
+           data-lot-id="{{ item.lot_id }}" data-default-qty="{{ freight.default_qty }}">
+        <dt>FREIGHT TO YOUR ZIP</dt>
+        <dd>
+          <form class="fw-form">
+            <label class="fw-field">
+              <span class="mono tiny">DEST ZIP</span>
+              <input class="fw-zip" name="dest_zip" inputmode="numeric" maxlength="5"
+                     placeholder="00000" autocomplete="postal-code" required>
+            </label>
+            <label class="fw-field">
+              <span class="mono tiny">CHAIRS</span>
+              <input class="fw-qty" name="quantity" type="number" min="1" max="10000"
+                     value="{{ freight.default_qty }}">
+            </label>
+            <button type="submit" class="btn btn-primary btn-small">ESTIMATE →</button>
+          </form>
+          <div class="fw-result mf-result" hidden></div>
+          <form class="fw-email" hidden>
+            <label class="fw-field fw-field--grow">
+              <span class="mono tiny">EMAIL ME THIS ESTIMATE</span>
+              <input class="fw-email-input" type="email" placeholder="you@company.com"
+                     autocomplete="email">
+            </label>
+            <button type="submit" class="btn btn-ghost btn-small">SEND</button>
+          </form>
+          <div class="fw-framing mono tiny">
+            ESTIMATE — FINALIZED AT SHIP TIME · INCLUDES RESIDENTIAL DELIVERY + LIFTGATE
+            · CHAIR PRICE SEPARATE &amp; FIRM · LOCAL PICKUP ALWAYS FREE
+          </div>
+        </dd>
+      </div>
+      {% elif not item.is_sold %}
+      <div><dt>PICKUP</dt><dd>Local pickup free · freight quoted on request</dd></div>
       {% endif %}
       <div><dt>CONDITION</dt><dd>Used — inspected · see photos</dd></div>
     </dl>
@@ -96,9 +132,17 @@
     {% endif %}
 
     <div class="detail-ctas">
+      {#- Reserve replaces the lead-form CTA only when a buyer could actually
+          pay: feature lit, lot unsold, priced, and something left to hold.
+          Every other case keeps the original primary button verbatim. #}
+      {% if reserve_enabled and not item.is_sold and item.price_per_chair and (item.quantity_remaining or 0) > 0 %}
+      <a href="/reserve/{{ item.lot_id }}" class="btn btn-primary">RESERVE WITH DEPOSIT →</a>
+      <a href="#contact-form" class="btn btn-ghost">ASK A QUESTION</a>
+      {% else %}
       <a href="#contact-form" class="btn btn-primary">
         {%- if item.is_sold %}FIND ME ONE LIKE THIS →{% else %}I WANT THIS LOT →{% endif -%}
       </a>
+      {% endif %}
       {% if item.facebook_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.facebook_url }}">VIEW ON FACEBOOK</a>{% endif %}
       {% if item.ebay_url %}<a class="btn btn-ghost" target="_blank" rel="noopener" href="{{ item.ebay_url }}">VIEW ON EBAY</a>{% endif %}
     </div>
