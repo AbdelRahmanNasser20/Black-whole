@@ -138,6 +138,19 @@ def cmd_copy(a) -> int:
     return 0
 
 
+def cmd_redo_photos(a) -> int:
+    rc = 0
+    for lot_id in a.lot_ids:
+        try:
+            up = lc.redo_photos(lot_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"ERROR {lot_id}: {type(exc).__name__}: {exc}", file=sys.stderr)
+            rc = 1
+            continue
+        print(f"  ✓ {lot_id}: {len(up['image_urls']) if up else 0} clean photos on R2")
+    return rc
+
+
 def cmd_catalog(a) -> int:
     path, n = lc.write_catalog_csv(Path(a.out) if a.out else lc.CATALOG_CSV)
     print(f"{n} rows → {path}")
@@ -201,6 +214,10 @@ def main() -> int:
     p.add_argument("--fb-city", dest="fb_city")
     p.add_argument("--fb-state", dest="fb_state")
     p.set_defaults(fn=cmd_copy)
+
+    p = sub.add_parser("redo-photos", help="re-mirror seller photos through dewatermark.ai and overwrite R2")
+    p.add_argument("lot_ids", nargs="+")
+    p.set_defaults(fn=cmd_redo_photos)
 
     p = sub.add_parser("catalog", help="write the FB Business catalog CSV for manual upload")
     p.add_argument("--out")
