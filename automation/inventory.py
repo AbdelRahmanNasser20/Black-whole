@@ -34,7 +34,12 @@ from .config import ATTACHMENTS_ROOT
 # connection with dict rows instead of a sqlite3.Connection.
 connect = db.connect
 
-PUBLIC_STATUSES = ("listed", "draft", "owned", "won_pickup")
+# 'active_bid' = a lot we are bidding on / offering ahead of pickup. It is on
+# Marketplace and in the CRM's ROUTABLE set already, so hiding it from the
+# storefront and the FB catalog only made the three channels disagree
+# (lot 27562 was live on FB and invisible on the site). lot_channels.py
+# "remove" is the one way off: fake_sold_out + a sold status.
+PUBLIC_STATUSES = ("listed", "draft", "owned", "won_pickup", "active_bid")
 # 'lost_sold_out' = a lot we never actually owned (outbid, or the seller went
 # elsewhere) that we still show as SOLD. It has been in the DB CHECK constraint
 # and in real rows since the July ops pass; leaving it out of this tuple meant
@@ -308,7 +313,7 @@ def stats() -> dict:
 # (BLACKWHOLE-7). Deliberately narrower than PUBLIC_STATUSES: 'draft' lots are
 # unconfirmed GovDeals scrapes, not real sellable stock, so they stay off the
 # FB shop even though they show on our own /listings page.
-CATALOG_FEED_STATUSES = ("listed", "owned", "won_pickup")
+CATALOG_FEED_STATUSES = ("listed", "owned", "won_pickup", "active_bid")
 
 
 def list_catalog_feed() -> list[dict]:
@@ -658,6 +663,7 @@ def insert_manual(
     hero_image: str | None = None,
     locations: Any = None,
     status: str = "draft",
+    govdeals_url: str | None = None,
 ) -> dict:
     """Admin-created row for a lot that was never run through the pipeline."""
     if get(lot_id):
@@ -677,14 +683,15 @@ def insert_manual(
             INSERT INTO inventory (
                 lot_id, title, subtitle, description, city, state, zip_code, chair_type,
                 dimensions, quantity_original, quantity_remaining, price_per_chair,
-                folder_name, hero_image, locations, status, sold_at, parsed_at, updated_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                folder_name, hero_image, locations, status, sold_at, govdeals_url,
+                parsed_at, updated_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 str(lot_id), title, subtitle, description, city, state, zip_code, chair_type,
                 dimensions, quantity, remaining, price_per_chair, folder_name,
                 hero_image, Jsonb(parsed_locations) if parsed_locations else None,
-                status, sold_at, now, now,
+                status, sold_at, govdeals_url, now, now,
             ),
         )
         conn.commit()

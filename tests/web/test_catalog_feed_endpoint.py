@@ -65,7 +65,7 @@ def test_feed_header_present_when_empty(monkeypatch):
     r = _client().get("/catalog/facebook.csv")
     assert r.status_code == 200
     assert r.text.splitlines()[0] == (
-        "id,title,description,availability,condition,price,link,image_link,brand"
+        ",".join(catalog_feed.FEED_COLUMNS)
     )
 
 

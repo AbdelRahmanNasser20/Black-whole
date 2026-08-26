@@ -1422,3 +1422,12 @@ main {
 .deal-drawer-comp a { color: var(--ink-mute); }
 .deal-drawer-comp a:hover { color: var(--ink); }
 .deal-drawer-price { font-family: var(--mono); color: var(--ok); white-space: nowrap; }
+
+/* Launcher — optional copy fields for the all-channels ▶ (lot_channels add) */
+.opts-copy { display: grid; gap: 6px; }
+.opts-copy input[type=text] {
+  width: 100%; font: inherit; font-size: 12px;
+  background: transparent; color: inherit;
+  border: 1px solid rgba(255,255,255,.14); border-radius: 4px; padding: 6px 8px;
+}
+.opts-copy input[type=text]:focus { outline: none; border-color: rgba(255,255,255,.4); }

@@ -68,12 +68,12 @@
       <div class="lot-row">
         <div class="lot-qty">
           <div class="lot-qty-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</div>
-          <div class="lot-qty-label">CHAIRS</div>
+          <div class="lot-qty-label">{{ item.unit }}S</div>
         </div>
         <div class="lot-price">
           {% if item.price_per_chair %}
             <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
-            <div class="lot-price-label">/ CHAIR</div>
+            <div class="lot-price-label">/ {{ item.unit }}</div>
           {% else %}
             <div class="lot-price-num">—</div>
             <div class="lot-price-label">INQUIRE</div>
@@ -138,12 +138,12 @@
         <div class="lot-row">
           <div class="lot-qty">
             <div class="lot-qty-num">{{ item.quantity_original or '—' }}</div>
-            <div class="lot-qty-label">CHAIRS</div>
+            <div class="lot-qty-label">{{ item.unit }}S</div>
           </div>
           <div class="lot-price">
             {% if item.price_per_chair %}
               <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
-              <div class="lot-price-label">SOLD AT / CHAIR</div>
+              <div class="lot-price-label">SOLD AT / {{ item.unit }}</div>
             {% else %}
               <div class="lot-price-num">—</div>
               <div class="lot-price-label">SOLD</div>

@@ -83,18 +83,33 @@
              autocomplete="off" spellcheck="false">
     </label>
     <div class="opts">
-      <label class="opt"><input type="checkbox" name="skip_dewatermark"> skip dewatermark</label>
-      <label class="opt"><input type="checkbox" name="skip_fb"> skip facebook</label>
-      <label class="opt"><input type="checkbox" name="skip_ebay"> skip ebay</label>
       <label class="opt opt-num">
         <input type="number" name="price" placeholder="price"
                min="1" max="999" inputmode="numeric">
-        <span>$/chair override</span>
+        <span>$/unit</span>
       </label>
+      <label class="opt"><input type="checkbox" name="ch_site" checked> site</label>
+      <label class="opt"><input type="checkbox" name="ch_fb" checked> facebook (family acct)</label>
+      <label class="opt"><input type="checkbox" name="ch_business" checked> business page</label>
+      <label class="opt" title="Old flow: scrape → LLM → dewatermark → FB draft on your own profile + eBay">
+        <input type="checkbox" name="mode_pipeline"> legacy pipeline</label>
+    </div>
+    <div class="opts opts-copy">
+      <input type="text" name="title" placeholder="title (optional — e.g. 199 Banquet Chairs — Tan Crown-Back)"
+             autocomplete="off" spellcheck="false">
+      <input type="text" name="blurb" placeholder="blurb (optional — one plain paragraph for site + FB)"
+             autocomplete="off">
+      <input type="text" name="split" placeholder="split (optional — chairs:60:20:2-3,tables:14:65:0-1)"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <div class="opts pipeline-only" hidden>
+      <label class="opt"><input type="checkbox" name="skip_dewatermark"> skip dewatermark</label>
+      <label class="opt"><input type="checkbox" name="skip_fb"> skip facebook</label>
+      <label class="opt"><input type="checkbox" name="skip_ebay"> skip ebay</label>
     </div>
     <div class="launch-actions">
       <button type="submit" class="btn btn-primary" id="run-btn">
-        <span class="btn-glyph">▶</span> Run pipeline
+        <span class="btn-glyph">▶</span> <span id="run-btn-label">List everywhere</span>
       </button>
       <button type="button" class="btn btn-ghost" id="cancel-btn" disabled>
         Cancel
@@ -302,6 +317,8 @@
         ↓ backfill from folders
       </button>
       <a class="btn btn-small btn-ghost" href="/listings" target="_blank" rel="noopener">open public /listings ↗</a>
+      <a class="btn btn-small btn-ghost" href="/catalog/facebook.csv" download="fb_catalog_products.csv"
+         title="Same rows Meta pulls on schedule — upload this file in Commerce Manager → catalog Chairs → Data sources">⬇ FB catalog CSV</a>
     </div>
   </div>
 
