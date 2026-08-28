@@ -25,6 +25,17 @@ silently shrinking the archived set.
 Nothing here reads `raw` back out of the database — re-exporting ~420 MB
 through the pooler would burn egress on a project restricted partly for it.
 
+The purge itself is restricted to a TEMP TABLE of the proven keys rather than
+to the bare predicate. That is what closes the race: lots close continuously
+(125 did during one 20-minute window), and a blanket
+`WHERE outcome_complete IS TRUE AND raw IS NOT NULL` re-evaluates at execution
+time, so a lot that closed one second after the gate would be nulled with its
+blob nowhere. Joining against a fixed key set makes the purge provably a subset
+of what was exported, no matter how long it runs.
+
+A small delta is healed rather than fatal: missing keys are exported and
+readback-verified first, then folded into the key set.
+
 Idempotent and resumable: pending is defined by state (`raw IS NOT NULL`), not
 a cursor, so an interrupted run just resumes and a drained backlog is a no-op.
 
@@ -42,7 +53,13 @@ import os
 import sys
 import time
 
-from automation import config, db  # noqa: F401  (config populates BLACKWHOLE_DB_URL)
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from automation import config, db, r2_images  # noqa: E402,F401 (config -> DB URL)
+from deals.raw_archive import (  # noqa: E402
+    ARCHIVE_PREFIX, parse_batch, serialize_batch)
 
 BACKUP_GLOB = os.path.expanduser("~/.blackwhole/backups/deal_lots_raw_*.jsonl.gz")
 
@@ -51,14 +68,25 @@ PURGEABLE_SQL = """
     WHERE outcome_complete IS TRUE AND outcome IS NOT NULL AND raw IS NOT NULL
 """
 
-# The bulk form: one statement, one index scan, no per-row round trip. Safe
-# only behind the coverage gate above.
+# Row-wise IN against a subquery over the TEMP key table. The predicate columns
+# are repeated on the inner select so a lot that is somehow no longer purgeable
+# is skipped even though its key is in the set.
 PURGE_SQL = """
     UPDATE deal_lots SET raw = NULL
     WHERE (asset_id, account_id, auction_id) IN (
-        SELECT asset_id, account_id, auction_id FROM deal_lots
-        WHERE outcome_complete IS TRUE AND outcome IS NOT NULL AND raw IS NOT NULL
+        SELECT l.asset_id, l.account_id, l.auction_id
+        FROM deal_lots l JOIN purge_keys k
+          ON l.asset_id = k.asset_id AND l.account_id = k.account_id
+         AND l.auction_id = k.auction_id
+        WHERE l.outcome_complete IS TRUE AND l.outcome IS NOT NULL
+          AND l.raw IS NOT NULL
         LIMIT %s)
+"""
+
+TEMP_DDL = """
+    CREATE TEMP TABLE purge_keys (
+        asset_id BIGINT, account_id BIGINT, auction_id BIGINT
+    ) ON COMMIT PRESERVE ROWS
 """
 
 RESTORE_SQL = """
@@ -108,22 +136,72 @@ def coverage():
     return purge, missing
 
 
-def do_purge(batch: int) -> int:
+def heal_missing(missing: list[tuple[int, int, int]]) -> str:
+    """Export the keys that closed since the last archive, verify, keep a copy.
+
+    Returns the local backup path. Raises rather than returning on any failure —
+    an unverified export must never widen the set the purge is allowed to touch.
+    """
+    cfg = r2_images.env_config()
+    if not cfg:
+        sys.exit("R2 is not configured — cannot archive the delta")
+    s3 = r2_images.client(cfg)
+
+    want, rows = set(missing), []
+    ids = sorted({k[0] for k in missing})
+    for i in range(0, len(ids), 200):
+        for r in db.fetch_all(
+                """SELECT asset_id, account_id, auction_id, raw FROM deal_lots
+                   WHERE asset_id = ANY(%s) AND raw IS NOT NULL""", (ids[i:i + 200],)):
+            if (r["asset_id"], r["account_id"], r["auction_id"]) in want:
+                rows.append(r)
+
+    blob = serialize_batch(rows)
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    path = f"{ARCHIVE_PREFIX}/heal_{stamp}_{len(rows)}.jsonl.gz"
+    if not r2_images.put_object(s3, bucket=cfg["bucket"], path=path, data=blob,
+                                content_type="application/gzip"):
+        sys.exit(f"R2 upload failed for {path!r} — nothing purged")
+
+    got = s3.get_object(Bucket=cfg["bucket"], Key=path)["Body"].read()
+    if parse_batch(got) != [(r["asset_id"], r["account_id"], r["auction_id"]) for r in rows]:
+        sys.exit(f"readback mismatch for {path!r} — nothing purged")
+
+    local = os.path.expanduser(f"~/.blackwhole/backups/deal_lots_raw_heal_{stamp}.jsonl.gz")
+    with open(local, "wb") as fh:
+        fh.write(blob)
+    print(f"  healed {len(rows):,} -> {path} ({len(blob)/1e6:.2f} MB) + {local}")
+    return local
+
+
+def do_purge(keys, batch: int) -> int:
+    """Null only `keys`, batched, over one session holding the TEMP table."""
     total, t0 = 0, time.time()
-    while True:
-        try:
-            n = db.execute(PURGE_SQL, (batch,))
-        except Exception as e:                      # noqa: BLE001
-            # Read-only flip mid-run is the expected failure on a restricted
-            # free-tier project. Everything nulled so far is committed, and
-            # re-running resumes from wherever it stopped.
-            print(f"\n  STOPPED: {type(e).__name__}: {e}")
-            print(f"  nulled {total:,} before stopping; re-run to resume.")
-            return total
-        if not n:
-            break
-        total += n
-        print(f"  nulled {total:,} ({time.time() - t0:.0f}s)", flush=True)
+    with db.connect(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute("SET statement_timeout = 0")
+        cur.execute(TEMP_DDL)
+        with cur.copy("COPY purge_keys (asset_id, account_id, auction_id) "
+                      "FROM STDIN") as cp:
+            for k in keys:
+                cp.write_row(k)
+        cur.execute("CREATE INDEX ON purge_keys (asset_id, account_id, auction_id)")
+        cur.execute("ANALYZE purge_keys")
+        print(f"  key set loaded: {len(keys):,}", flush=True)
+
+        while True:
+            try:
+                cur.execute(PURGE_SQL, (batch,))
+            except Exception as e:                  # noqa: BLE001
+                # A read-only flip mid-run is the expected failure on a
+                # restricted free-tier project. Everything nulled so far is
+                # committed; re-running resumes from wherever it stopped.
+                print(f"\n  STOPPED: {type(e).__name__}: {e}")
+                print(f"  nulled {total:,} before stopping; re-run to resume.")
+                return total
+            if not cur.rowcount:
+                break
+            total += cur.rowcount
+            print(f"  nulled {total:,} ({time.time() - t0:.0f}s)", flush=True)
     return total
 
 
@@ -157,9 +235,11 @@ def main() -> int:
     print("Coverage proof (read-only):")
     purge, missing = coverage()
     if missing:
-        print(f"\nABORT: {len(missing):,} purgeable rows are not in any archive file.")
-        print("Run the raw archiver first:  python -m deals.cli archive-raw")
-        return 1
+        if not a.execute:
+            print(f"\n  {len(missing):,} rows would be archived first (--execute).")
+        else:
+            print(f"\nHealing {len(missing):,} lots that closed since the last archive:")
+            heal_missing(missing)
     if not purge:
         print("\nnothing pending — already drained.")
         return 0
@@ -167,8 +247,14 @@ def main() -> int:
         print(f"\nDRY RUN — would null {len(purge):,} rows. Re-run with --execute.")
         return 0
 
-    print(f"\nEXECUTE — nulling {len(purge):,} archived blobs")
-    n = do_purge(a.batch)
+    # Re-read the archive from disk so the healed delta is included, then purge
+    # ONLY the intersection. Lots closing from here on are simply not in the
+    # set — they wait for the next run instead of racing this one.
+    arch = archived_keys()
+    covered = [k for k in purge if k in arch]
+    print(f"\nEXECUTE — nulling {len(covered):,} archived blobs "
+          f"({len(purge) - len(covered):,} left for the next run)")
+    n = do_purge(covered, a.batch)
     print(f"\nnulled {n:,}. db size now {db_size()}")
     print("Space is NOT returned until: VACUUM FULL deal_lots; ANALYZE deal_lots;")
     return 0
