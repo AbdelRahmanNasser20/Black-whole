@@ -32,7 +32,7 @@ def _dsn() -> str:
     return dsn
 
 
-def connect() -> psycopg.Connection:
+def connect(*, autocommit: bool = False) -> psycopg.Connection:
     """Open a fresh connection to the Supabase Postgres DB.
 
     Usable as a context manager: ``with connect() as conn:`` commits on a clean
@@ -41,8 +41,16 @@ def connect() -> psycopg.Connection:
     Use this directly when a single logical operation spans several statements
     in one transaction (e.g. inventory.upsert_from_run); use the helpers below
     for one-shot queries.
+
+    ``autocommit=True`` commits each statement as it runs. Needed whenever one
+    session must span many statements and NOT hold a single transaction open:
+    a long batched backfill that should keep completed batches even if a later
+    one fails, `LISTEN/NOTIFY` listeners, and `VACUUM`, which Postgres refuses
+    to run inside a transaction block. Documented on the shared `core.db`
+    surface (workspace CLAUDE.md §14) but missing here until 2026-08-28, so
+    `connect(autocommit=True)` raised TypeError in this repo only.
     """
-    return psycopg.connect(_dsn(), row_factory=dict_row, autocommit=False)
+    return psycopg.connect(_dsn(), row_factory=dict_row, autocommit=autocommit)
 
 
 def fetch_one(sql: str, params: Sequence[Any] | None = None) -> dict | None:
