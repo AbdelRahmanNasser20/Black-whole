@@ -225,6 +225,28 @@ services:
     envVars:
       - fromGroup: blackwhole-secrets
 
+  # Cold-storage the closed lots' `raw` blob. This is the cron that STOPS the
+  # regrowth that pushed the database past the free tier's 500 MB read-only
+  # ceiling: `raw` is ~2.7 KB on a row that is 473 bytes without it, kept
+  # forever on every lot, and nothing reads it once a lot has closed.
+  #
+  # It exports to R2, READS THE OBJECT BACK, and only nulls when the returned
+  # keys match — so a silent upload failure can never turn into data loss.
+  # Needs the R2_* values in blackwhole-secrets; without them it exits non-zero
+  # rather than nulling blobs with nowhere to put them.
+  #
+  # Daily, not hourly: ~2.5k lots close per day, one 6,000-row pass clears it
+  # with headroom. Off-peak from the :15/:30/:45 deals crons.
+  - type: cron
+    name: deals-archive-raw
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "10 6 * * *"
+    autoDeploy: true
+    dockerCommand: sh scripts/deals_cron.sh archive-raw --limit 6000
+    envVars:
+      - fromGroup: blackwhole-secrets
+
   # ── 4. Closing-price recorder (BLACKWHOLE-28 Phase 0) ───────────────────
   # Every day without a recorder is a day of comps lost forever — closing
   # prices can't be backfilled. `run` does poll-once (adaptive cadence, down

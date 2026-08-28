@@ -62,6 +62,16 @@ def main():
     bc.add_argument("--rpm", type=int, default=18)
     bc.add_argument("--reset-fakes", action="store_true",
                     help="blank the provably-fake other/0.0 rows, then exit")
+    rawa = sub.add_parser("archive-raw",
+                    help="cold-store closed lots' raw blob to R2, then null it in Postgres")
+    # 6000 x ~2.7 KB ~= 16 MB per object: one HTTP PUT, and small enough that a
+    # failed run wastes little. Pending is state-defined, so this is cron-safe
+    # forever -- a drained backlog prints "nothing pending" and exits 0.
+    rawa.add_argument("--limit", type=int, default=6000)
+    rawa.add_argument("--lag-hours", type=int, default=48,
+                    help="skip lots touched recently; absorbs anti-snipe re-sweeps")
+    rawa.add_argument("--no-null", action="store_true",
+                    help="export and verify only; leave raw in place")
     sub.add_parser("watch-once")
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
@@ -96,6 +106,10 @@ def main():
     elif a.cmd == "backfill-classify":
         from deals.backfill_classify import run as run_backfill_classify
         print(run_backfill_classify(limit=a.limit, rpm=a.rpm, reset=a.reset_fakes))
+    elif a.cmd == "archive-raw":
+        from deals.raw_archive import run_archive_raw
+        print(run_archive_raw(limit=a.limit, lag_hours=a.lag_hours,
+                              null_after=not a.no_null))
     elif a.cmd == "watch-once":
         print(poll_once(adapter, datetime.now().astimezone()))
     elif a.cmd == "backfill-outcomes":
