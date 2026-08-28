@@ -149,16 +149,27 @@ regardless of cadence. `scripts/recorder_cron.sh` mirrors
 `sh -c "... && ..."` form silently quote-mangled and exited 127 the first
 time this project tried it.
 
-**Storage.** `discover()` has no change-gating yet — every stale-refresh
-re-INSERTs a fresh row for every active lot it finds, even when nothing
-about that lot changed since the last discover. `--discover-stale-hours 12`
-(the Render cron's value, up from the CLI's own default of 6) is a stopgap
-that halves discover-driven row growth until this is measured against real
-`coverage`-printed table-size numbers. The real fix — gate re-inserts on the
-observation actually differing from the prior snapshot (status/current_bid/
-bid_count/end_date) — is deferred until the size line shows it's needed;
-`poll()`'s own inserts are unaffected (they only fire for lots due per
-`schedule.is_due`, which is already sparse).
+**Storage.** The size line showed it was needed, so change-gating landed
+2026-08-28. `discover()` has no memory of what it has already seen, so every
+stale-refresh used to re-INSERT a fresh row for every active lot even when
+nothing about it had moved — **31,383 of 47,115 rows were strictly interior to
+a run of identical `(status, current_bid, bid_count, end_date)`**, two thirds
+of a 112 MB table. `store.filter_changed()` now drops those before the insert;
+`store.is_changed()` holds the rules and is pure, so it is tested without a
+database (`tests/recorder/test_change_gating.py`).
+
+One rule is worth knowing before you touch it: an observation later than the
+lot's `end_date` is kept **even when every field is identical**, because
+`coverage()` decides a close was *caught* by finding a snapshot past
+`end_date`. Gate that away and a caught close is misreported as missed — the
+one thing this recorder exists to get right. Anti-snipe extensions also keep
+landing, because `end_date` is itself a gated field.
+
+The historical duplicates were removed by `scripts/compact_listing_snapshots.py`
+(backed up to R2 first, `sold_comps` checksummed before and after).
+`--discover-stale-hours 12` remains the Render cron's value but is no longer
+load-bearing as a stopgap. `poll()`'s inserts were never the problem — they
+only fire for lots due per `schedule.is_due`, which is already sparse.
 
 **Interim launchd (laptop, today).** Until the Render cron is deployed,
 `scripts/recorder_local.sh` + `scripts/launchd/com.blackwhole.recorder.plist`

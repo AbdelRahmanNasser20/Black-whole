@@ -112,12 +112,88 @@ def observation_row(o: Observation) -> tuple:
 
 
 def insert_observations(obs: Iterable[Observation]) -> int:
-    """Append every observation as a new row. Returns the count inserted."""
+    """Append every observation as a new row. Returns the count inserted.
+
+    Deliberately dumb: it inserts exactly what it is handed. Deciding what is
+    worth keeping is `filter_changed`'s job, so this stays a straight
+    append-only writer and the gating logic stays pure and testable.
+    """
     rows = [observation_row(o) for o in obs]
     if not rows:
         return 0
     db.executemany(INSERT_SQL, rows)
     return len(rows)
+
+
+# Latest known state per lot, for change-gating. Same DISTINCT ON + `id DESC`
+# tie-break as _TRACKED_ACTIVE_SQL, and for the same reason: a whole batch
+# shares one now(), so observed_at alone does not order rows within it.
+_LATEST_STATE_SQL = """
+SELECT DISTINCT ON (source, source_lot_id)
+       source, source_lot_id, status, current_bid, bid_count, end_date
+FROM listing_snapshots
+WHERE source = %s AND source_lot_id = ANY(%s)
+ORDER BY source, source_lot_id, observed_at DESC, id DESC
+"""
+
+_GATED_FIELDS = ("status", "current_bid", "bid_count", "end_date")
+
+
+def is_changed(obs: Observation, prev: dict | None) -> bool:
+    """Is this observation worth storing? Pure — no DB, no clock beyond `obs`.
+
+    `discover()` has no idea whether it has seen a lot before, so every
+    stale-refresh re-INSERTed a full row for every active lot even when nothing
+    moved. Measured 2026-08-28: 31,383 of 47,115 rows were interior duplicates.
+
+    Three reasons to keep a row, and the third is the subtle one:
+
+    1. No previous row — the first sighting is always evidence.
+    2. Any gated field differs. `current_bid` is Decimal and `end_date` is
+       tz-aware; both compare correctly against the DB's own values, and a
+       None/non-None flip counts as a change.
+    3. **The observation is after the lot's end_date.** Post-close evidence must
+       always land even when every field looks identical, because `coverage()`
+       decides whether a close was *caught* by looking for a snapshot past
+       end_date. Gate that away and a caught close is misreported as missed —
+       which would make the recorder lie about the one thing it exists to do.
+    """
+    if prev is None:
+        return True
+    for f in _GATED_FIELDS:
+        if getattr(obs, f) != prev.get(f):
+            return True
+    end = prev.get("end_date") or obs.end_date
+    if end is not None and obs.observed_at is not None and obs.observed_at > end:
+        return True
+    return False
+
+
+def filter_changed(obs: Iterable[Observation]) -> list[Observation]:
+    """Drop observations that repeat the lot's latest stored state verbatim.
+
+    One query per source rather than per lot. An observation with no
+    `observed_at` (the common case — the DB stamps now()) cannot be compared
+    against end_date, so rule 3 in `is_changed` simply does not fire for it;
+    that is safe, because a genuine close also flips `status`, which rule 2
+    catches.
+    """
+    obs = list(obs)
+    if not obs:
+        return []
+
+    by_source: dict[str, list[Observation]] = {}
+    for o in obs:
+        by_source.setdefault(o.source, []).append(o)
+
+    latest: dict[tuple[str, str], dict] = {}
+    for source, group in by_source.items():
+        ids = sorted({o.source_lot_id for o in group})
+        for row in db.fetch_all(_LATEST_STATE_SQL, (source, ids)):
+            latest[(row["source"], row["source_lot_id"])] = row
+
+    return [o for o in obs
+            if is_changed(o, latest.get((o.source, o.source_lot_id)))]
 
 
 def tracked_active(source: str | None = None) -> list[dict]:
