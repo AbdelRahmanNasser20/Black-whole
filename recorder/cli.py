@@ -73,7 +73,9 @@ def _discover_one(adapter) -> int:
     """discover() + sold_sweep() for one source, inserted as one batch.
     Raises on failure — the caller isolates per-source."""
     observations = list(adapter.discover()) + list(adapter.sold_sweep())
-    return store.insert_observations(observations)
+    # discover() re-reports every active lot on every sweep; without this the
+    # table grew ~2/3 pure duplicates (recorder/README.md "Storage").
+    return store.insert_observations(store.filter_changed(observations))
 
 
 def cmd_discover(registry: dict, source: str | None = None) -> int:
@@ -124,7 +126,7 @@ def cmd_poll_once(registry: dict, now: datetime | None = None) -> int:
             continue
         try:
             observations = adapter.poll(rows)
-            n = store.insert_observations(observations)
+            n = store.insert_observations(store.filter_changed(observations))
         except Exception as exc:  # noqa: BLE001 - one bad source must never kill the poll
             print(f"RECORDER ERROR source={name} poll failed: {exc!r}", file=sys.stderr)
             failed.append(name)
