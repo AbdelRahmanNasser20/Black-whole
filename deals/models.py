@@ -29,6 +29,23 @@ class Lot:
     llm_category: str | None = None
     llm_category_confidence: float | None = None
     category_agreement: bool | None = None
+    site: str = "govdeals"
+    native_id: str = ""
+
+    def __post_init__(self):
+        if not self.native_id:
+            self.native_id = f"{self.asset_id}/{self.account_id}/{self.auction_id}"
+
+def full_key(lot: "Lot") -> str:
+    return f"{lot.site}:{lot.native_id}"
+
+def synth_ids(site: str, native_id: str, *, ordinal: int) -> tuple[int, int, int]:
+    """Foreign sites have string ids; the legacy trio is synthesized.
+    account_id = -ordinal keeps foreign rows out of any real GovDeals account space;
+    site is in the PK, so cross-site collision is impossible; within-site crc32
+    collision (~0.2% at 100k lots) is caught by ux_deal_lots_site_native."""
+    import zlib
+    return (zlib.crc32(native_id.encode()) & 0x7FFFFFFF, -ordinal, 0)
 
 @dataclass
 class Snapshot:
