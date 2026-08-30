@@ -1,3 +1,4 @@
+from deals import sites
 from deals.fees import FeeModel, landed_cost
 from automation import db
 from automation.telegram_alerts import send_message_sync
@@ -18,7 +19,7 @@ def format_digest(rows: list[dict], fees: FeeModel) -> str:
     lines = [f"🪑 {len(rows)} lots closing <24h with 0 bids:\n"]
     for r in rows[:40]:
         lc = landed_cost(float(r["current_bid"] or 0), qty=1, fees=fees)
-        url = f"https://www.govdeals.com/en/asset/{r['asset_id']}/{r['account_id']}"
+        url = sites.lot_url(r)
         lines.append(f"• {r['title'][:50]} — ${r['current_bid']:.0f} ({r['bid_count']} bids), "
                      f"landed ~${lc.total:.0f}, {r['city']}, {r['state']} — {url}")
     return "\n".join(lines)

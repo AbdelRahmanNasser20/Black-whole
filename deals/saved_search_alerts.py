@@ -3,6 +3,7 @@
 (first_seen_at after the search's last_run_at) match their stored params."""
 import sys
 from datetime import datetime
+from deals import sites
 from automation import db
 from automation.telegram_alerts import send_message_sync
 from automation.web.deals_query import build_where
@@ -10,7 +11,7 @@ from automation.web.deals_query import build_where
 def format_search_alert(name: str, rows: list[dict]) -> str:
     lines = [f"🔎 saved search “{name}”: {len(rows)} new match(es)"]
     for r in rows[:10]:
-        url = f"https://www.govdeals.com/en/asset/{r['asset_id']}/{r['account_id']}"
+        url = sites.lot_url(r)
         lines.append(f"• {r['title'][:55]} — ${float(r['current_bid'] or 0):.0f} "
                      f"({r['bid_count']} bids), {r['city']}, {r['state']} — {url}")
     if len(rows) > 10:
@@ -18,14 +19,39 @@ def format_search_alert(name: str, rows: list[dict]) -> str:
     return "\n".join(lines)
 
 _ALLOWED = {"q", "category", "native", "state", "max_bids", "ending_within",
-            "status", "min_margin", "list_id", "tag"}
+            "status", "min_margin", "list_id", "tag", "min_price", "max_price",
+            "bbox"}
+
+def _sanitize_params(params: dict | None) -> dict:
+    """Whitelist + coerce saved-search params for build_where(). Defensive:
+    a malformed value drops its key rather than crash the alert sweep.
+    - bbox: "s,w,n,e" string (what the UI saves) or a 4-item JSONB array ->
+      4-float tuple (south, west, north, east); anything else is dropped.
+    - min_price/max_price: coerced to float, dropped if not numeric."""
+    out = {k: v for k, v in (params or {}).items() if k in _ALLOWED}
+    if "bbox" in out:
+        raw = out.pop("bbox")
+        if isinstance(raw, str):
+            raw = raw.split(",")
+        try:
+            if isinstance(raw, (list, tuple)) and len(raw) == 4:
+                out["bbox"] = tuple(float(x) for x in raw)
+        except (TypeError, ValueError):
+            pass
+    for key in ("min_price", "max_price"):
+        if key in out:
+            try:
+                out[key] = float(out[key])
+            except (TypeError, ValueError):
+                out.pop(key)
+    return out
 
 def run_saved_search_alerts(now: datetime | None = None) -> int:
     now = now or datetime.now().astimezone()
     sent = 0
     for s in db.fetch_all("SELECT * FROM saved_searches WHERE alert = true"):
         try:
-            params = {k: v for k, v in (s["params"] or {}).items() if k in _ALLOWED}
+            params = _sanitize_params(s["params"])
             where, args = build_where(**params)
             if s["last_run_at"]:
                 where += " AND deal_lots.first_seen_at > %s"
