@@ -40,6 +40,9 @@ def main():
     d.add_argument("--categories", default=None)
     d.add_argument("--max-pages", type=int, default=60)
     d.add_argument("--site", default="govdeals", choices=list(sites.SITES) + ["all"])
+    d.add_argument("--dry-run", action="store_true",
+                   help="print Lots (full_key, title, bid, close) — never writes the store")
+    d.add_argument("--limit", type=int, default=None, help="dry-run only: stop after N lots")
     ar = sub.add_parser("archive-active",
                         help="backfill image archives for active lots before their listings expire")
     ar.add_argument("--limit", type=int, default=100)
@@ -91,6 +94,19 @@ def main():
         import os
         cats = sweep_categories(a.categories, os.environ)
         for key in (sites.enabled_sites() if a.site == "all" else [a.site]):
+            if a.dry_run:
+                # onboarding verification path: bypass run_discovery entirely,
+                # so nothing (store, classify, relist) can touch prod
+                from deals.models import full_key
+                n = 0
+                for lot in sites.get_adapter(key).discover(max_pages=a.max_pages):
+                    print(f"{full_key(lot)}\t{lot.title[:60]}\t"
+                          f"${lot.current_bid:.2f} ({lot.bid_count} bids)\t{lot.end_utc.isoformat()}")
+                    n += 1
+                    if a.limit and n >= a.limit:
+                        break
+                print(f"[dry-run] {key}: {n} lot(s), nothing written")
+                continue
             rep = run_discovery(sites.get_adapter(key), categories=cats, max_pages=a.max_pages)
             print(f"[{key}] {rep}" if a.site == "all" else rep)
     elif a.cmd == "archive-active":
