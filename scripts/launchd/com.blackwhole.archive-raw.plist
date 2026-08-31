@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Local scheduler for the closed-lot blob archiver.
+
+  The database hit the free tier's 500 MB read-only ceiling on 2026-08-28,
+  was purged to 452 MB, and was back at 530 MB three days later because
+  render.yaml's `deals-archive-raw` cron cannot run without the R2_* values
+  set in the Render dashboard. Every 6h rather than daily so a few days of
+  laptop sleep cannot rebuild the backlog that caused the outage.
+
+  Idempotent: a drained backlog prints "nothing pending" and exits 0, so this
+  and the Render cron can both be live.
+
+    cp scripts/launchd/com.blackwhole.archive-raw.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.blackwhole.archive-raw.plist
+  Uninstall:
+    launchctl unload ~/Library/LaunchAgents/com.blackwhole.archive-raw.plist
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.blackwhole.archive-raw</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/abdelnasser/Projects/blackwhole/listing_automation/scripts/archive_raw_local.sh</string>
+    </array>
+
+    <key>StartInterval</key>
+    <integer>21600</integer>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/abdelnasser/.blackwhole/logs/archive-raw.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/abdelnasser/.blackwhole/logs/archive-raw.log</string>
+</dict>
+</plist>
