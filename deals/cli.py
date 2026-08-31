@@ -1,7 +1,7 @@
 # deals/cli.py
 import argparse
 from datetime import datetime
-from deals.adapters.govdeals import GovDealsAdapter
+from deals import sites
 from deals.discover import run_discovery
 from deals.watch import poll_once
 from deals.digest import send_daily_digest
@@ -39,6 +39,10 @@ def main():
     d = sub.add_parser("discover")
     d.add_argument("--categories", default=None)
     d.add_argument("--max-pages", type=int, default=60)
+    d.add_argument("--site", default="govdeals", choices=list(sites.SITES) + ["all"])
+    d.add_argument("--dry-run", action="store_true",
+                   help="print Lots (full_key, title, bid, close) — never writes the store")
+    d.add_argument("--limit", type=int, default=None, help="dry-run only: stop after N lots")
     ar = sub.add_parser("archive-active",
                         help="backfill image archives for active lots before their listings expire")
     ar.add_argument("--limit", type=int, default=100)
@@ -77,16 +81,34 @@ def main():
     sub.add_parser("analyze")
     sub.add_parser("digest")
     sub.add_parser("rank")
+    sub.add_parser("saved-search-alerts",
+                   help="run the saved-search alert sweep once (manual test path)")
     sub.add_parser("init-schema")
     a = ap.parse_args()
-    adapter = GovDealsAdapter()
+    # non-discover commands are GovDeals-only for now; discover picks per --site
+    adapter = sites.get_adapter(getattr(a, "site", None) or "govdeals") \
+        if getattr(a, "site", "govdeals") != "all" else None
     if a.cmd == "init-schema":
         init_schema(); print("schema ready")
     elif a.cmd == "discover":
         import os
         cats = sweep_categories(a.categories, os.environ)
-        rep = run_discovery(adapter, categories=cats, max_pages=a.max_pages)
-        print(rep)
+        for key in (sites.enabled_sites() if a.site == "all" else [a.site]):
+            if a.dry_run:
+                # onboarding verification path: bypass run_discovery entirely,
+                # so nothing (store, classify, relist) can touch prod
+                from deals.models import full_key
+                n = 0
+                for lot in sites.get_adapter(key).discover(max_pages=a.max_pages):
+                    print(f"{full_key(lot)}\t{lot.title[:60]}\t"
+                          f"${lot.current_bid:.2f} ({lot.bid_count} bids)\t{lot.end_utc.isoformat()}")
+                    n += 1
+                    if a.limit and n >= a.limit:
+                        break
+                print(f"[dry-run] {key}: {n} lot(s), nothing written")
+                continue
+            rep = run_discovery(sites.get_adapter(key), categories=cats, max_pages=a.max_pages)
+            print(f"[{key}] {rep}" if a.site == "all" else rep)
     elif a.cmd == "archive-active":
         from deals.archive import archive_active
         print(archive_active(adapter, limit=a.limit, max_mb=a.max_mb,
@@ -124,6 +146,9 @@ def main():
     elif a.cmd == "rank":
         from deals.rank import run_rank
         print(f"ranked {run_rank()} verdicts")
+    elif a.cmd == "saved-search-alerts":
+        from deals.saved_search_alerts import run_saved_search_alerts
+        print(f"sent {run_saved_search_alerts()} alert(s)")
 
 if __name__ == "__main__":
     main()

@@ -5,6 +5,7 @@ import os
 import sys
 from dataclasses import dataclass
 from datetime import datetime
+from deals import sites
 from deals.comps import CompsUnavailable, comps_provider_from_env
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -66,7 +67,7 @@ def should_alert(verdict: dict, env: dict) -> bool:
             and verdict["margin_pct"] >= min_pct)
 
 def format_verdict_alert(lot: Lot, v: dict, distance: float | None) -> str:
-    url = f"https://www.govdeals.com/en/asset/{lot.asset_id}/{lot.account_id}"
+    url = sites.lot_url(lot)
     dist = f" · {distance:.0f} mi away" if distance is not None else ""
     comp_urls = " ".join(c["url"] for c in v.get("comps", [])[:3] if c.get("url"))
     return (f"💰 {lot.title[:70]}\n"

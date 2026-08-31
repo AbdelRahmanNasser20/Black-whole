@@ -5,6 +5,7 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta
+from deals import sites
 from automation import db
 from automation.telegram_alerts import send_message_sync
 
@@ -74,7 +75,7 @@ def scan_for_relists(now: datetime | None = None) -> int:
             # Alert only for categories we'd actually buy (furniture by
             # default); the relist is recorded above regardless.
             if not cats or lot.get("canonical_category") in cats:
-                url = f"https://www.govdeals.com/en/asset/{lot['asset_id']}/{lot['account_id']}"
+                url = sites.lot_url(lot)
                 send_message_sync(f"♻️ RELIST: {lot['title'][:60]}\n"
                                   f"previously closed no-bid — now ${float(lot['current_bid'] or 0):.0f}\n{url}",
                                   topic="deals")

@@ -24,3 +24,17 @@ def test_snapshot_row_matches_columns():
     s = Snapshot(984,6466,2, datetime(2026,7,3,12,tzinfo=timezone.utc), 0, 10.0,
                  datetime(2026,7,3,13,tzinfo=timezone.utc), "STA")
     assert len(snapshot_row(s)) == len(SNAPSHOT_COLUMNS)
+    assert snapshot_row(s)[SNAPSHOT_COLUMNS.index("site")] == "govdeals"
+
+def test_lot_row_ends_with_site_and_native_id():
+    row = lot_row(_lot())
+    assert row[-2:] == ("govdeals", "984/6466/2")
+
+def test_lot_row_foreign_site_round_trips(make_lot):
+    from deals.models import synth_ids
+    ids = synth_ids("marknet", "47644/12", ordinal=4)
+    row = lot_row(make_lot(*[], asset_id=ids[0], account_id=ids[1], auction_id=ids[2],
+                           site="marknet", native_id="47644/12"))
+    assert row[LOT_COLUMNS.index("site")] == "marknet"
+    assert row[LOT_COLUMNS.index("native_id")] == "47644/12"
+    assert row[LOT_COLUMNS.index("account_id")] == -4

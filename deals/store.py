@@ -1,8 +1,8 @@
 """Persistence layer for the deal-tracker over Supabase Postgres.
 
-Tables `deal_lots` + `deal_snapshots`, keyed by (asset_id, account_id,
-auction_id) so a relist of the same asset in a new auction can't clobber a
-prior auction's recorded outcome.
+Tables `deal_lots` + `deal_snapshots`, keyed by (site, asset_id, account_id,
+auction_id) so foreign marketplaces coexist and a relist of the same asset in
+a new auction can't clobber a prior auction's recorded outcome.
 
 `lot_row`/`snapshot_row` + `LOT_COLUMNS`/`SNAPSHOT_COLUMNS` are pure and
 unit-tested (tests/deals/test_store_rows.py) without touching the DB. The
@@ -20,13 +20,15 @@ LOT_COLUMNS = ["asset_id","account_id","auction_id","title","description",
     "llm_category","llm_category_confidence","category_agreement",
     "end_utc","bid_count","opening_bid","current_bid","currency_code","high_bidder",
     "has_reserve","reserve_not_met","reserve_price","is_free",
-    "seller","city","state","zip","lat","lng","hero_image_url","status","is_sold","raw"]
+    "seller","city","state","zip","lat","lng","hero_image_url","status","is_sold","raw",
+    "site","native_id"]
 
 SNAPSHOT_COLUMNS = ["asset_id","account_id","auction_id","observed_at",
-    "bid_count","current_bid","end_utc","status"]
+    "bid_count","current_bid","end_utc","status","site"]
 
 DDL = """
 CREATE TABLE IF NOT EXISTS deal_lots (
+  site TEXT NOT NULL DEFAULT 'govdeals', native_id TEXT NOT NULL,
   asset_id INT, account_id INT, auction_id INT,
   title TEXT, description TEXT,
   native_category_id TEXT, native_category_name TEXT, canonical_category TEXT,
@@ -41,16 +43,18 @@ CREATE TABLE IF NOT EXISTS deal_lots (
   first_seen_at TIMESTAMPTZ DEFAULT now(), updated_at TIMESTAMPTZ DEFAULT now(),
   images_archived BOOLEAN DEFAULT false,
   archived_hero_url TEXT, gallery_urls JSONB,
-  PRIMARY KEY (asset_id, account_id, auction_id)
+  PRIMARY KEY (site, asset_id, account_id, auction_id)
 );
+CREATE UNIQUE INDEX IF NOT EXISTS ux_deal_lots_site_native ON deal_lots(site, native_id);
 CREATE INDEX IF NOT EXISTS ix_deal_lots_cat ON deal_lots(canonical_category);
 CREATE INDEX IF NOT EXISTS ix_deal_lots_poll ON deal_lots(next_poll_at) WHERE outcome_complete IS NOT TRUE;
 CREATE TABLE IF NOT EXISTS deal_snapshots (
   id BIGSERIAL PRIMARY KEY,
   asset_id INT, account_id INT, auction_id INT, observed_at TIMESTAMPTZ,
-  bid_count INT, current_bid REAL, end_utc TIMESTAMPTZ, status TEXT
+  bid_count INT, current_bid REAL, end_utc TIMESTAMPTZ, status TEXT,
+  site TEXT NOT NULL DEFAULT 'govdeals'
 );
-CREATE INDEX IF NOT EXISTS ix_deal_snap_key ON deal_snapshots(asset_id,account_id,auction_id,observed_at DESC);
+CREATE INDEX IF NOT EXISTS ix_deal_snap_key ON deal_snapshots(site,asset_id,account_id,auction_id,observed_at DESC);
 """
 
 BID_OBS_COLUMNS = ["asset_id","account_id","auction_id","observed_at","bid_count",
@@ -83,29 +87,30 @@ def lot_row(lot: Lot) -> tuple:
         lot.end_utc, lot.bid_count, lot.opening_bid, lot.current_bid, lot.currency_code,
         lot.high_bidder, lot.has_reserve, lot.reserve_not_met, lot.reserve_price, lot.is_free,
         lot.seller, lot.city, lot.state, lot.zip, lot.lat, lot.lng,
-        lot.hero_image_url, lot.status, lot.is_sold, json.dumps(lot.raw, default=str))
+        lot.hero_image_url, lot.status, lot.is_sold, json.dumps(lot.raw, default=str),
+        lot.site, lot.native_id)
 
-def snapshot_row(s: Snapshot) -> tuple:
+def snapshot_row(s: Snapshot, site: str = "govdeals") -> tuple:
     return (s.asset_id, s.account_id, s.auction_id, s.observed_at,
-            s.bid_count, s.current_bid, s.end_utc, s.status)
+            s.bid_count, s.current_bid, s.end_utc, s.status, site)
 
 def upsert_lot(lot: Lot) -> None:
     cols = ",".join(LOT_COLUMNS)
     ph = ",".join(["%s"] * len(LOT_COLUMNS))
     # on conflict, refresh as-parsed columns + updated_at, but NEVER touch outcome columns
     updates = ",".join(f"{c}=EXCLUDED.{c}" for c in LOT_COLUMNS
-                       if c not in ("asset_id","account_id","auction_id"))
+                       if c not in ("site","asset_id","account_id","auction_id"))
     db.execute(f"""INSERT INTO deal_lots ({cols}) VALUES ({ph})
-        ON CONFLICT (asset_id,account_id,auction_id) DO UPDATE SET {updates}, updated_at=now()""",
+        ON CONFLICT (site,asset_id,account_id,auction_id) DO UPDATE SET {updates}, updated_at=now()""",
         lot_row(lot))
 
-def append_snapshot(s: Snapshot) -> None:
+def append_snapshot(s: Snapshot, site: str = "govdeals") -> None:
     from deals.watcher_logic import is_snapshot_change
     prev = latest_snapshot((s.asset_id, s.account_id, s.auction_id))
     if not is_snapshot_change(prev, s):
         return
     db.execute(f"INSERT INTO deal_snapshots ({','.join(SNAPSHOT_COLUMNS)}) "
-               f"VALUES ({','.join(['%s']*len(SNAPSHOT_COLUMNS))})", snapshot_row(s))
+               f"VALUES ({','.join(['%s']*len(SNAPSHOT_COLUMNS))})", snapshot_row(s, site))
 
 def latest_snapshot(key: tuple[int,int,int]) -> Snapshot | None:
     r = db.fetch_one("""SELECT asset_id,account_id,auction_id,observed_at,bid_count,current_bid,end_utc,status

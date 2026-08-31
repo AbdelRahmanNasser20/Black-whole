@@ -42,7 +42,8 @@ def _storage_path(lot, idx: int, url: str) -> str:
     if _resize_height():
         ext = ".webp"   # CDN resize responses are webp
     h = hashlib.sha256(canon.encode()).hexdigest()[:10]
-    return f"govdeals/{lot.asset_id}_{lot.account_id}_{lot.auction_id}/{h}{ext}"
+    # object-key namespace = lot.site (govdeals for every existing object/_RowLot)
+    return f"{getattr(lot, 'site', 'govdeals')}/{lot.asset_id}_{lot.account_id}_{lot.auction_id}/{h}{ext}"
 
 
 def _download(url: str) -> bytes | None:
