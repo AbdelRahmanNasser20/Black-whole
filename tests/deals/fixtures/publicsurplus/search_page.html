@@ -1,0 +1,4188 @@
+<!-- SOURCE: https://www.publicsurplus.com/sms/browse/search?posting=y&keyWord=banquet+chairs&page=0  fetched 2026-09-04 (plain requests, logged-out, probe UA) — see SOURCE.md -->
+    <!DOCTYPE html>
+    <html lang='en'>
+        <head>
+            <title>Public Surplus: 
+	Search an auction
+</title>
+            <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+            <meta name="template" content="psV2/en/search.ftlh"/>
+            <meta name="viewport" content="width=device-width, initial-scale=1"/>
+            <link rel="icon" href="/sms/20260805/images/ps_favicon.ico"/>
+
+<link href="/sms/20260805/styles/bootstrap-icons-1.11.1/bootstrap-icons.css" rel="stylesheet" type="text/css" />
+<link href="/sms/20260805/styles/bootstrap-5.2.3/bootstrap.min.css" rel="stylesheet" type="text/css" />
+<link href="/sms/20260805/styles/ps-v2.css" rel="stylesheet" type="text/css" />
+<script type="text/javascript" src="/sms/20260805/js/bootstrap-5.2.3/bootstrap.bundle.min.js"></script>
+
+
+
+	<script type="text/javascript">
+	onerror = function(msg,url,l){
+		var txt="_s=5b5e9db0aec477a3e701f61252e3b064&_r=img";
+		txt+="&Msg="+escape(msg);
+		txt+="&URL="+escape(url);
+		txt+="&Line="+l;
+		txt+="&Platform="+escape(navigator.platform);
+		txt+="&UserAgent="+escape(navigator.userAgent);
+		var i = document.createElement("img");
+		i.setAttribute("src", (("https:" == document.location.protocol) ? "https://errorstack.appspot.com" : "http://www.errorstack.com") + "/submit?" + txt);
+		document.body.appendChild(i);
+	}
+	</script>
+
+
+            <script type="text/javascript" src="/sms/20260805/js/scriptaculous-js-1.8.0/lib/prototype.js"></script>
+            <script type="text/javascript" src="/sms/20260805/js/cookie.js"></script>
+
+            
+
+            
+                    <script type="text/javascript"
+                            src="/sms/20260805/js/scriptaculous-js-1.8.0/src/effects.js"></script>
+                
+
+            
+	<link href="/sms/20260805/styles/ps-v2/header-cards.css" rel="stylesheet" type="text/css"/>
+	<link href="/sms/20260805/styles/ps-v2/auction-docs.css" rel="stylesheet" type="text/css"/>
+	<link href="/sms/20260805/styles/ps-v2/auction/auc-grid.css" rel="stylesheet" type="text/css"/>
+	<script type="text/javascript" src="/sms/20260805/js/ps-v2/element-filter.js"></script>
+	<script type="text/javascript" src="/sms/20260805/js/ps-v2/time-left-countdown.js"></script>
+
+
+            
+                    <script type="text/javascript" src="/sms/20260805/js/lightbox-1.2.js"></script>
+                    <link href="/sms/20260805/styles/lightbox-1.2.css" rel="stylesheet" type="text/css"/>
+                    <link href="/sms/20260805/styles/ps-v2/responsive-lightbox-1.2.css" rel="stylesheet" type="text/css"/>
+                
+
+            
+                    <style type="text/css">
+                
+	.right-col {
+		display: flex;
+		flex-direction: column;
+	}
+	@media (max-width: 991.98px) {
+		.me-col {
+			margin-right: 0;
+		}
+	}
+
+                    </style>
+                
+
+            <script type="text/javascript">
+                    function Auction_PopupWindow(thispage, name, params, popup) {
+	if(!popup){
+		if(this.frameElement){
+			document.location.href=thispage;
+			return;
+		}else{
+			if(iframeModalBootstrap){
+				var modal = document.getElementById(name);
+				if (modal == null) {
+					name = 'iframeModal'
+					modal = document.getElementById(name)
+				}
+				if(modal){
+					modal = bootstrap.Modal.getOrCreateInstance(modal);
+					if(modal){
+						modal.show();
+						iframeModalBootstrap(name, thispage);
+						return;
+					}
+				}
+			}
+		}
+	}
+
+	if (name == null) { name = "pop"; }
+	thiswindow = window.open(thispage,'psw_'+name,params);
+}
+                    /**
+     * Sets the 'src' property for an iframe embedded in a given modal.
+     * Creates an event listener event to reset the src value once the modal is hidden.
+     */
+    function iframeModalBootstrap(modalId, iframeSource) {
+        let iframeModal = document.getElementById("iframe"+modalId);
+        if (iframeModal !== null) {
+            iframeModal.setAttribute("src", iframeSource);
+            let iframeModalBootstrap = document.getElementById(modalId);
+            iframeModalBootstrap.addEventListener('hide.bs.modal', event => {
+                iframeModal.setAttribute("src", "");
+            });
+        }
+    }
+                    function loggingOut() {
+ if (confirm('Are you sure you want to logout?')) {
+   self.location.href="/sms/login/logout";
+ }
+}
+                    function loggingIn() {
+  var currLoc;
+  if (self.location.pathname && self.location.pathname.indexOf("/login/") < 0 && self.location.pathname.indexOf("/about/") < 0) {
+    currLoc = "?&dst=" + escape(self.location.pathname.substring("/sms".length) + self.location.search.replace(/\?_mls=(f|m)/, "").replace(/&_mls=(f|m)/, ""));
+  }
+  else {
+    currLoc = "";
+  }
+  self.location.href="/sms/login/login" + currLoc;
+}
+                    function throttle (cb, delay = 200) {
+          let shouldWait = false
+          let waitingArgs = null
+          let timeout
+
+          const timeoutFn = () => {
+            if (waitingArgs === null) {
+              shouldWait = false
+            } else {
+              cb(...waitingArgs)
+              waitingArgs = null
+              setTimeout(timeoutFn, delay)
+            }
+          }
+
+          return (...args) => {
+            if (shouldWait) {
+              waitingArgs = args
+              return
+            }
+
+            cb(...args)
+            shouldWait = true
+
+            clearTimeout(timeout) // Clear the timeout before setting a new one
+            timeout = setTimeout(timeoutFn, delay)
+          }
+        }
+                    function addCustomZoom(targetId, enableZoom = false) {
+		if(!enableZoom) return;
+
+		const handleResize = throttle(() => {
+			setPageScale(targetId)
+		});
+
+		document.addEventListener("DOMContentLoaded", () => setPageScale(targetId))
+		window.addEventListener("resize", () => { handleResize() } )
+	}
+
+	
+		function setPageScale(targetId) {
+			const target = document.getElementById(targetId)
+			if (!target) return
+
+			const baseWidth = 1610;
+			const scrollBarWidth = window.innerWidth - document.documentElement.clientWidth;
+			const currentWidth = window.innerWidth - scrollBarWidth;
+			const currentHeight = window.innerHeight;
+
+			if(currentWidth <= baseWidth) {
+				target.style.transform = 'none';
+				target.style.margin = '0';
+				return;
+			}
+
+			const scalePercentage = Math.round((currentWidth / baseWidth) * 100);
+			target.style.transform = 'scale(' + scalePercentage + '%)';
+
+			const verticalMargin = Math.ceil(((currentHeight * (scalePercentage / 100)) - currentHeight) / 2);
+			const horizontalMargin = Math.ceil((((currentWidth * (scalePercentage / 100)) - currentWidth) / 2) / (scalePercentage / 100));
+
+			target.style.margin = verticalMargin + 'px ' + horizontalMargin + 'px';
+		}
+                    
+	var daysTimeLeftLoc= 'days';
+	var dayTimeLeftLoc= 'day';
+	var hoursTimeLeftLoc= 'hours';
+	var hourTimeLeftLoc= 'hour';
+	var minsTimeLeftLoc= 'mins';
+	var minTimeLeftLoc= 'min';
+	var secsTimeLeftLoc= 'secs';
+	var secTimeLeftLoc= 'sec';
+	var endpointExtendTimeLeft = '/sms/auction/extendedTime';
+	var Netscape = (navigator.appName == "Netscape" ? true:false);
+
+function captureKey(e) {
+    var keycode;
+    var desiredtarget = 'search';
+
+    if (window.event) {
+        keycode = window.event.keyCode;
+    }
+    else if (e && e.target) {
+        if (desiredtarget == null || desiredtarget == e.target.name){
+            keycode = e.which;
+        }
+    }
+    else {
+        return true;
+    }
+
+    if (keycode == 13){
+        Search(document.search);
+        return false;
+    }
+    else {
+        return true;
+    }
+}
+
+if (document.addEventListener){
+    document.addEventListener('keypress', captureKey, false);
+} else if (document.attachEvent){
+    document.attachEvent('onkeypress', captureKey);
+}
+	function toggleAuctionGridView({ view, tab, saveViewMode }) {
+		if (view === 'g') {
+			document.querySelectorAll('[id^="auctionGridView"]')
+			.forEach(grid => {
+				grid.style.display = '';
+			});
+			document.querySelectorAll('[id^="auctionListView"]')
+			.forEach(grid => {
+				grid.style.display = 'none';
+			});
+			let hideShowImages = document.getElementById('hideShowImages');
+			if (hideShowImages) {
+				hideShowImages.style.display = 'none';
+			}
+		} else {
+			document.querySelectorAll('[id^="auctionListView"]')
+			.forEach(grid => {
+				grid.style.display = '';
+			});
+			let hideShowImages = document.getElementById('hideShowImages');
+			if (hideShowImages) {
+				hideShowImages.style.display = '';
+			}
+			document.querySelectorAll('[id^="auctionGridView"]')
+			.forEach(grid => {
+				grid.style.display = 'none';
+			});
+		}
+
+		if (saveViewMode) {
+			setAuctionViewMode(view, tab);
+		}
+	}
+
+
+
+	function setAuctionViewMode(view, tab) {
+		if(!view || !tab) return;
+
+		new Ajax.Request('/sms/mys/avmc', {
+			method: 'post',
+			parameters: { "view": view, "tab": tab },
+		});
+	}
+	function jsSmsUrl(service,owp) {
+  var url = "/sms";
+  if (owp == null) {
+  }
+  else if (owp != "") {
+     url = url + "/" + owp;
+  }
+  url = url + service;
+  return url;
+}
+
+	function Search(form) {
+	var reg = form.region.options[form.region.selectedIndex].value;
+	if ( reg == "-1" ) {
+	reg = "";
+	}
+	form.page.value = 0;
+	form.action = jsSmsUrl("/browse/search",reg);
+	form.submit();
+	}
+
+	function sort(sorttype, sortDesc) {
+	  document.search.sortBy.value = sorttype;
+	  document.search.sortDesc.value = sortDesc;
+	  document.search.page.value = 0;
+	  document.search.submit();
+	 }
+
+	function srchPage(pageNumber) {
+	document.search.posting.value= "p";
+	document.search.page.value = pageNumber;
+	document.search.submit();
+	}
+	function listimg(stat) {
+	document.search.slth.value = stat;
+	document.search.submit();
+	}
+	function initPage() {
+		Lightbox.initialize({
+	animate:false,
+	resizeSpeed:10,
+	responsive: true,
+	showGroupName:false,
+	strings : {
+		close : 'Close',
+		pictureAlt : 'Picture',
+		rotateLeft : 'Rotate Left',
+		rotateRight : 'Rotate Right',
+		imagesAuction : "Images for Auction #",
+		closeLink : '[Close]',
+		loadingMsg : 'loading',nextLink : '[Next &raquo;]',
+		prevLink : '[&laquo; Prev]',
+		startSlideshow : '[Start Slideshow]',
+		stopSlideshow : '[Stop Slideshow]',
+		numDisplayPrefix : 'Image',
+		numDisplaySeparator : 'of',
+		description : 'Description'
+	},
+	closeImage : '/sms/20260805/images/closeLightbox.png',
+	blankImage : '/sms/20260805/images/spacer.gif',
+	rotateLeftImage : '/sms/20260805/images/rotateLeft.png',
+	rotateRightImage : '/sms/20260805/images/rotateRight.png',
+	fullScreenImage : '/sms/20260805/images/fullScreen.png',
+	closeFromFullScreenImage : '/sms/20260805/images/closeFromFullScreen.png',
+	undoFullScreenImage : '/sms/20260805/images/undoFullScreen.png',
+	fullScreenRotateLeftImage : '/sms/20260805/images/fullScreenRotateLeft.png',
+	fullScreenRotateRightImage : '/sms/20260805/images/fullScreenRotateRight.png',
+	urlAjax : '/sms/aet/ajax',
+	txnId : '',
+	isIE8 : false,
+	isIE10Plus : false,
+	showEditDescription : false
+		,lightboxWidth : 1024,lightboxHeight : 768, fullscreenWidth: 1024, fullscreenHeight: 768, enableFullScreen: false, enableSlideshow:false, enableSlideshowFullScreen:false,enableZoom:true
+	,coldscreen: '',
+	auctionid:''
+});
+
+	}
+
+	var hiddenAuctionsTimeLeft;
+		hiddenAuctionsTimeLeft = 13;
+	function timeLeftCallback() {
+		hiddenAuctionsTimeLeft--;
+		if (hiddenAuctionsTimeLeft == 0) {
+			document.getElementById("toggleButtons").remove();
+			document.getElementById("auctionListView").remove();
+			document.getElementById("hideShowImages").remove();
+			document.getElementById("noAuctionsFound").classList.remove("d-none");
+		}
+	}
+
+   	function acceptCookies() 
+	{
+		var aYearFromNow = new Date();
+		aYearFromNow.setFullYear(aYearFromNow.getFullYear() + 1);
+		
+		$('cookiesAcceptedDiv').hide();
+		setCookie("cookiesAccepted_1", "Y", aYearFromNow, '/');
+	}
+
+                    addCustomZoom('zoom-target-id');
+            </script>
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-ML1H9LELDC"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+
+        gtag('js', new Date());
+        gtag('config', 'G-ML1H9LELDC');
+    </script>
+        </head>
+
+        <body id="main-body-id" onLoad = "initPage();" >
+
+	<div class="modal fade" id="iframeModal" tabindex="-1" role="dialog"
+		data-bs-backdrop="true" data-bs-keyboard="true" data-bs-focus="true"
+	>
+		<div class="modal-dialog d-flex align-items-center" style="--bs-modal-width: 60rem;height: calc(100% - var(--bs-modal-margin) * 2);">
+			<div class="modal-content h-100" style="max-height: 54rem;">
+				<div class="modal-body pt-1 px-1 pb-0 h-100">
+					<div class="embed-responsive z-depth-1-half h-100">
+						<iframe id="iframeiframeModal" class="embed-responsive-item w-100 h-100" src=""></iframe>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="modal fade" id="buyeradm" tabindex="-1" role="dialog"
+		data-bs-backdrop="true" data-bs-keyboard="true" data-bs-focus="true"
+	>
+		<div class="modal-dialog d-flex align-items-center" style="--bs-modal-width: 80rem;height: calc(100% - var(--bs-modal-margin) * 2);">
+			<div class="modal-content h-100" style="max-height: 60rem;">
+					<div class="modal-action-section user-select-none d-flex align-items-center gap-1 justify-content-end">
+							<span class="ms-1 draggable-area" aria-hidden="true"></span>
+							<button id="btnPopupFrame" type="button" aria-label="Open as popup" class="tpg-button" color="link" onclick="_iframeModalBootstrapPopup();">
+								<i title="Open as popup" data-bs-toggle="tooltip" aria-label="Open as popup" data-bs-custom-class="icon-tooltip" class="mx-1 fs-5 bi bi-box-arrow-right"></i>
+							</button>
+					</div>
+				<div class="modal-body pt-1 px-1 pb-0 h-100">
+					<div class="embed-responsive z-depth-1-half h-100">
+						<iframe id="iframebuyeradm" class="embed-responsive-item w-100 h-100" src=""></iframe>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+		<script>
+				function _iframeModalBootstrapPopup() {
+					if (typeof hideModalBootstrap !== 'function') {
+						alert('Hide modal function not implemented!');
+					}
+					const iframeElement = document.querySelector('#buyeradm iframe');
+					if (!iframeElement || !iframeElement.src || iframeElement.src.length === 0) {
+						return;
+					}
+					let sourceIframe = iframeElement.src;
+					Auction_PopupWindow(sourceIframe,'popUpbuyeradm','width=1280,height=960,scrollbars=yes,resizable=yes', true);
+					hideModalBootstrap('buyeradm');
+				}
+				document.addEventListener('DOMContentLoaded', function () {
+					var iframeModalBoostrapDraggable = document.getElementById('buyeradm');
+					if (!iframeModalBoostrapDraggable) return;
+
+					var dialog = iframeModalBoostrapDraggable.querySelector('.modal-dialog');
+					var dialogContent = iframeModalBoostrapDraggable.querySelector('.modal-content');
+
+					if (!dialog || !dialogContent) return;
+
+					var innerIframeDraggable = iframeModalBoostrapDraggable.querySelector('iframe');
+					let isDragging = false;
+					let startMouseX = 0;
+					let startMouseY = 0;
+					let startLeft = 0;
+					let startTop = 0;
+
+					function resetDialogPositioning() {
+						dialog.style.left = '';
+						dialog.style.top = '';
+						dialog.style.position = '';
+						dialog.style.margin = '';
+						dialog.style.transform = '';
+						dialog.style.width = '';
+						dialog.style.maxWidth = '';
+					}
+					function keepDialogReachable() {
+						const minVisible = 150;
+						let currentLeft = parseFloat(dialog.style.left) || 0;
+						let currentTop = parseFloat(dialog.style.top) || 0;
+						let contentRect = dialogContent.getBoundingClientRect();
+
+						// Top: keep visible content from going above viewport
+						if (contentRect.top < 0) {
+							currentTop -= contentRect.top;
+							dialog.style.top = currentTop + 'px';
+							contentRect = dialogContent.getBoundingClientRect();
+						}
+						// Left: keep at least minVisible px of visible content on screen
+						if (contentRect.right < minVisible) {
+							currentLeft += (minVisible - contentRect.right);
+							dialog.style.left = currentLeft + 'px';
+							contentRect = dialogContent.getBoundingClientRect();
+						}
+						// Right: keep at least minVisible px of visible content on screen
+						if (contentRect.left > window.innerWidth - minVisible) {
+							currentLeft -= (contentRect.left - (window.innerWidth - minVisible));
+							dialog.style.left = currentLeft + 'px';
+							contentRect = dialogContent.getBoundingClientRect();
+						}
+						// Bottom: keep at least minVisible px of visible content on screen
+						const visibleHeight = window.innerHeight - contentRect.top;
+						if (visibleHeight < minVisible) {
+							currentTop -= (minVisible - visibleHeight);
+							dialog.style.top = currentTop + 'px';
+						}
+					}
+					function stopDragging() {
+						if (!isDragging) return;
+
+						isDragging = false;
+						document.body.style.userSelect = '';
+
+						keepDialogReachable();
+
+						if (innerIframeDraggable) {
+							innerIframeDraggable.style.pointerEvents = '';
+						}
+					}
+					dialogContent.addEventListener('mousedown', function (e) {
+						e.preventDefault();
+						const dialogRect = dialog.getBoundingClientRect();
+						isDragging = true;
+						startMouseX = e.clientX;
+						startMouseY = e.clientY;
+						startLeft = dialogRect.left;
+						startTop = dialogRect.top;
+
+						dialog.style.margin = '0';
+						dialog.style.position = 'fixed';
+						dialog.style.transform = 'none';
+						dialog.style.top = dialogRect.top + 'px';
+						dialog.style.left = dialogRect.left + 'px';
+						dialog.style.width = dialogRect.width + 'px';
+						if (innerIframeDraggable) {
+							innerIframeDraggable.style.pointerEvents = 'none';
+						}
+						document.body.style.userSelect = 'none';
+					});
+					document.addEventListener('mousemove', function (e) {
+						if (!isDragging) return;
+
+						const dx = e.clientX - startMouseX;
+						const dy = e.clientY - startMouseY;
+
+						dialog.style.left = (startLeft + dx) + 'px';
+						dialog.style.top = (startTop + dy) + 'px';
+
+						keepDialogReachable();
+					});
+					iframeModalBoostrapDraggable.addEventListener('hidden.bs.modal', function () {
+						stopDragging();
+						resetDialogPositioning();
+						if (innerIframeDraggable) {
+							innerIframeDraggable.style.pointerEvents = '';
+						}
+						document.body.style.userSelect = '';
+					});
+					window.addEventListener('blur', stopDragging);
+					document.addEventListener('mouseup', stopDragging);
+					document.addEventListener('mouseleave', stopDragging);
+					window.addEventListener('resize', function () { resetDialogPositioning(); });
+				});
+		</script>
+            
+            
+
+
+
+            <a class="skiplink" href="#startcontent" style="display:none;">
+                Skip over navigation
+            </a>
+
+            <div id="zoom-target-id" class="w-100 h-100 d-flex flex-column">
+                    <header>
+
+
+
+	
+	<div class="header">
+	<script type="text/javascript">
+		//
+		var navfuncs = {
+		 	selectApp : function(sapp) {
+		 	    if (sapp == 'gems') {
+		   			document.location.href = "http://www.publicpurchase.com" + "/gems/browse/home";
+		   		}
+		 	  	if (sapp == 'con') {
+		  			document.location.href = "http://www.publicpurchase.com" + "/contract/home/home";
+		  		} 
+				if (sapp == 'req') {
+		  			document.location.href = "http://" + "/gems/pr/home/dash";
+		  		} 
+		  		if (sapp == 'vendor') {
+		  			document.location.href = "http://www.publicpurchase.com" + "/vendor/agency/home";
+		  		}
+		  		if (sapp == 'cat') {
+		  			document.location.href = "http://" + "/gems/cat/home/dash";
+		  		}
+		  		if (sapp == 'portal') {
+		  			document.location.href = "http://www.publicpurchase.com" + "/portal/view/home";
+		  		}
+		  		if (sapp == 'surplus') {
+		  			document.location.href = "http://www.publicsurplus.com" + "/sms/browse/home";
+		  		}
+		 	}
+		 }
+	 </script>
+		 <div class="logo">
+			<a href="javascript:navfuncs.selectApp('surplus');"><img style="width: 249px" src="/sms/20260805/images/pslogo.svg" alt="Public Surplus Logo" border="0"/></a>
+	     </div>
+			
+    <script type="text/javascript">
+        var pslanguage = "en";
+    </script>
+
+    <div class="pb-1 d-flex justify-content-end me-2 mt-2 ms-lg-0 ms-auto mb-md-2 mb-lg-0 align-self-start language-container">
+        <div
+                id="langdiv"
+                class="ps-lang-position"
+                onmouseover="$('langlistdiv').show();"
+                onmouseout="$('langlistdiv').hide();"
+        >
+            <script type="text/javascript">
+                function base_changeLangugage(locale) {
+                    if (locale == null) { return; }
+                    new Ajax.Request('/sms/about/home.ftlh?locale='+locale, {
+                        onComplete: function() {
+                            document.location.reload();
+                        }
+                    });
+                }
+
+                function base_changeTheme(theme) {
+                    if (!theme) return;
+                    new Ajax.Request('/sms/login/changeTheme?theme=' + theme, {
+                        method: 'post',
+                        onSuccess: function(transport) {
+                            if (isThemeChangeAccepted(transport)) {
+                                location.href = setLayoutSkinParam(location.href, 'm');
+                            }
+                        }
+                    });
+                }
+
+                function isThemeChangeAccepted(transport) {
+                    var response = transport.responseJSON;
+                    if (!response && transport.responseText) {
+                        try {
+                            response = transport.responseText.evalJSON(true);
+                        } catch (e) {
+                            response = null;
+                        }
+                    }
+                    return response && response.response && response.response.statusCode == 'found';
+                }
+
+                function setLayoutSkinParam(url, value) {
+                    url = url
+                        .replace(/([?&])_mls=[^&]*&/, '$1')
+                        .replace(/[?&]_mls=[^&]*$/, '')
+                        .replace(/\?&/, '?');
+                    return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_mls=' + value;
+                }
+            </script>
+
+            <div class="ps-lang-menu">
+                <a class="d-flex align-items-center justify-content-between">
+                    <img style="vertical-align: top; padding-top: 2px;" alt="English" src="/sms/20260805/images/ps/en.png"/>English
+
+<i title="More Languages" data-bs-toggle="tooltip" aria-label="More Languages" data-bs-custom-class="icon-tooltip" class="bi bi-caret-down-fill small me-2" style="color: var(--ps-color-white); "></i>                </a>
+            </div>
+
+            <div id="langlistdiv" class="ps-lang-list" style="display: none;">
+                <ul class="ps-0 mb-0 py-2">
+                            <li>
+                                <a class="d-flex align-items-center justify-content-start" href="javascript:base_changeLangugage('es');"/>
+                                    <img style="vertical-align: top; padding-top: 2px;" alt="Spanish" src="/sms/20260805/images/ps/es.png"/>Spanish
+
+                                </a>
+                            </li>
+                            <li>
+                                <a class="d-flex align-items-center justify-content-start" href="javascript:base_changeLangugage('fr');"/>
+                                    <img style="vertical-align: top; padding-top: 2px;" alt="French" src="/sms/20260805/images/ps/fr.png"/>French
+
+                                </a>
+                            </li>
+                    <li>
+                        <a class="d-flex align-items-center justify-content-start" href="javascript:base_changeTheme('psmobile');">
+<i aria-hidden="true" class="bi bi-universal-access-circle me-2 pe-1" style="color: var(--ps-color-dark-blue-plus); "></i>                            WCAG
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+	
+		 </div>
+		 <div class="small header-change-theme" style="text-align: right; padding-right: 8px">
+		 </div>
+
+		<div class="small header-change-theme pb-1" style="text-align: right; padding-right: 8px">
+		</div>
+
+	
+
+
+	<nav
+		class="ps-main-bar d-flex flex-wrap navbar navbar-expand-md navbar-light py-0 mt-2 d-print-none">
+		<div class="menu-button-container d-flex d-md-none w-100 pe-2 py-2">
+			<button
+					class="navbar-toggler-menu-button navbar-toggler d-flex ms-auto"
+					type="button"
+					data-bs-toggle="collapse"
+					data-bs-target="#navbarTogglerMenu"
+					aria-controls="navbarTogglerMenu"
+					aria-expanded="false"
+					aria-label="Toggle navigation"
+			>
+				<span class="navbar-toggler-icon align-self-center"></span>
+			</button>
+		</div>
+
+		<div id="navbarTogglerMenu" class="top-menu collapse navbar-collapse h-100">
+			<div class="navbar-nav top-menu__left nav-sup-left">
+<a
+class="noborder"
+href="javascript:Auction_PopupWindow('/sms/help/onlineHelp.ftlh','onlineHelp','width=540,height=400,scrollbars=yes,resizable=yes', true);"
+>
+Chat
+<span class="ms-1 nav-bar-chat" title="Live Chat" aria-label="Live Chat" data-bs-custom-class="icon-tooltip">
+<i class="bi bi-chat-left-dots-fill" style="position: absolute; font-size: 0.92rem; color: var(--ps-color-light-blue); color: var(--ps-color-white)"></i>
+<i class="bi bi-chat-right" style="position: relative; top: -4px; left: 6px; font-size: 0.92rem; color: var(--ps-color-light-blue); color: var(--ps-color-white)"></i>
+</span></a>    <span class="d-none d-md-inline">|</span>
+<a
+href="#iframeModal"
+data-bs-toggle="modal"
+data-bs-target="#iframeModal"
+onclick="iframeModalBootstrap('iframeModal', '/sms/help/mainhelp.ftlh?frame1=public/info.ftlh&amp;frame2=public/info_email.ftlh');"
+>
+Help
+</a>    <span class="d-none d-md-inline">|</span>
+					<a href="javascript:loggingIn();">
+						Login
+					</a>
+			</div>
+
+			<div class="navbar-nav top-menu__right nav-sup-right">
+				<a  href="/sms/browse/home?tm=m"
+				   target="_top" >
+					Home
+				</a>    <span class="d-none d-md-inline">|</span>
+
+				<a  href="/sms/browse/allcat?tm=m"
+				   target="_top" >
+					Browse
+				</a>    <span class="d-none d-md-inline">|</span>
+
+
+				<a class="nav-sup-right-on" href="/sms/browse/search?tm=m"
+				   target="_top" >
+					Search
+				</a>
+					    <span class="d-none d-md-inline">|</span>
+<a  href="/sms/about/home.ftlh">
+						About</a>			</div>
+		</div>
+	</nav>
+
+<div class="w-100 ps-border-bottom-gross d-none d-md-block"></div>
+
+
+
+                    </header>
+
+                <main class="ps-container d-flex flex-wrap flex-column" style="flex: 1; min-height: auto">
+                    <div class="d-flex flex-wrap content-container w-100">
+                        <aside class="left-col">
+                            
+                            
+                                    <div class="brand-box  p-3 text-center">
+</div>
+
+                                
+                            
+                        </aside>
+
+                        <section class="d-flex flex-column right-col" color="gray">
+                            
+
+                            <span id="startcontent"></span>
+
+                            
+
+
+<div class="container-fluid ps-side-home__content__cards d-flex flex-wrap flex-md-nowrap justify-content-center py-3">
+	<div class="ps-side-card-container me-md-2">
+		<div class="ps-side-card">
+			<div class="ps-side-card--img">
+				<img src="/sms/20260805/images/ps/img_indexllave.jpg" alt="Graphic of an old key."/>
+			</div>
+
+			<div class="ps-side-card--body">
+				<h5 class="card-title ps-card__body--title mb-2 mb-md-0">
+					Register to become <br>part of Public Surplus
+				</h5>
+				<div class="ps-card__body--children">
+					Click the button below to become a buyer, or <a class="fw-bold" href="/sms/about/contactus.ftlh">Contact Us</a> for more information.
+					<br/>
+					<button
+						class="ps-button"
+						color="light"
+						type="button"
+						id="Submit32"
+						onclick="self.location.href='/sms/register/user';"
+					>
+						Register
+					</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="ps-side-card-container me-md-2">
+		<div class="ps-side-card">
+			<div class="ps-side-card--img">
+				<img src="/sms/20260805/images/ps/img_indexcompu.jpg" class="imageHome" alt='Image of searching'/>
+			</div>
+
+			<div class="ps-side-card--body">
+				<h5 class="card-title ps-card__body--title mb-2 mb-md-0">
+					Looking for a <br/>specific item?
+				</h5>
+
+				<div class="ps-card__body--children">
+					<form action="/sms/browse/search" method="GET" name="searchCard" onsubmit="updateScopeValue()">
+						<input type="hidden" name="posting" value="y"/>
+						<input type="hidden" name="scope" id="searchScope" value=""/>
+						<label for="keyWord">
+							Let us help you find what you are looking for.
+						</label>
+
+						<div class="d-flex justify-content-end mt-2">
+							<input class="form-control" id="keyWord" name="keyWord" type="text" size="20"/>
+							<button class="ps-button ms-2" color="light" type="submit" name="Submit4">
+								Search
+							</button>
+						</div>
+
+						<div class="form-check form-switch pt-2">
+							<input
+								class="form-check-input"
+								type="checkbox"
+								role="switch"
+								id="areaParams"
+								checked
+							/>
+							<label class="form-check-label" for="areaParams">
+								Filtered Search
+							</label>
+						</div>
+					</form>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="ps-side-card-container">
+		<div class="ps-side-card">
+			<div class="ps-side-card--img">
+				<img src="/sms/20260805/images/ps/img_indexmundo.jpg" class="imageHome" alt='Graphic image of flat globe'/>
+			</div>
+
+			<div class="ps-side-card--body">
+				<h5 class="card-title ps-card__body--title mb-2 mb-md-0">
+					Browse auctions <br>within area
+				</h5>
+
+				<div class="ps-card__body--children">
+				</div>
+
+				<div class="mt-2">
+<div class="select dropdown">
+	<label class="input-group" data-bs-toggle="dropdown" data-bs-display="static"
+	       aria-label="Select Region">
+		<input class="form-control place-strong"
+		       type="text"
+		       placeholder='Select Region'
+		       onkeyup="filterShowOnly('.region.dropdown-menu li', value); tabOnDown(this, event);"
+		       aria-describedby="region-select-caret"
+		/>
+		<span class="input-group-text" id="region-select-caret">
+<i aria-hidden="true" class="bi bi-caret-right-fill down" style="color: var(--ps-color-white); color: var(--ps-color-black);"></i><i aria-hidden="true" class="bi bi-caret-down-fill up" style="color: var(--ps-color-white); color: var(--ps-color-black);"></i>        </span>
+	</label>
+
+	<ul class="region shaded dropdown-menu">
+			<li>
+				<a class="dropdown-item" href="/sms/all,al/browse/search">
+                    Alabama
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ak/browse/search">
+                    Alaska
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,as/browse/search">
+                    American Samoa
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,az/browse/search">
+                    Arizona
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ar/browse/search">
+                    Arkansas
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ca/browse/search">
+                    California
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,co/browse/search">
+                    Colorado
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ct/browse/search">
+                    Connecticut
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,de/browse/search">
+                    Delaware
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,fl/browse/search">
+                    Florida
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ga/browse/search">
+                    Georgia
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,gu/browse/search">
+                    Guam
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,hi/browse/search">
+                    Hawaii
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,id/browse/search">
+                    Idaho
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,il/browse/search">
+                    Illinois
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,in/browse/search">
+                    Indiana
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ia/browse/search">
+                    Iowa
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ks/browse/search">
+                    Kansas
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ky/browse/search">
+                    Kentucky
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,la/browse/search">
+                    Louisiana
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,me/browse/search">
+                    Maine
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,md/browse/search">
+                    Maryland
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ma/browse/search">
+                    Massachusetts
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,mi/browse/search">
+                    Michigan
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,mn/browse/search">
+                    Minnesota
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ms/browse/search">
+                    Mississippi
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,mo/browse/search">
+                    Missouri
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,mt/browse/search">
+                    Montana
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ne/browse/search">
+                    Nebraska
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nv/browse/search">
+                    Nevada
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nh/browse/search">
+                    New Hampshire
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nj/browse/search">
+                    New Jersey
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nm/browse/search">
+                    New Mexico
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ny/browse/search">
+                    New York
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nc/browse/search">
+                    North Carolina
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nd/browse/search">
+                    North Dakota
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,oh/browse/search">
+                    Ohio
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ok/browse/search">
+                    Oklahoma
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,or/browse/search">
+                    Oregon
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,pa/browse/search">
+                    Pennsylvania
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,pr/browse/search">
+                    Puerto Rico
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ri/browse/search">
+                    Rhode Island
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,sc/browse/search">
+                    South Carolina
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,sd/browse/search">
+                    South Dakota
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,tn/browse/search">
+                    Tennessee
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,tx/browse/search">
+                    Texas
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,vi/browse/search">
+                    U.S. Virgin Islands
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ut/browse/search">
+                    Utah
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,vt/browse/search">
+                    Vermont
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,va/browse/search">
+                    Virginia
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,wa/browse/search">
+                    Washington
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,dc/browse/search">
+                    Washington D.C.
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,wv/browse/search">
+                    West Virginia
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,wi/browse/search">
+                    Wisconsin
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,wy/browse/search">
+                    Wyoming
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ab/browse/search">
+                    Alberta
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,bc/browse/search">
+                    British Columbia
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,mb/browse/search">
+                    Manitoba
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nb/browse/search">
+                    New Brunswick
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nl/browse/search">
+                    Newfoundland and Labrador
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nt/browse/search">
+                    Northwest Territories
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,ns/browse/search">
+                    Nova Scotia
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,nu/browse/search">
+                    Nunavut
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,on/browse/search">
+                    Ontario
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,pe/browse/search">
+                    Prince Edward Island
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,qc/browse/search">
+                    Quebec
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,sk/browse/search">
+                    Saskatchewan
+				</a>
+			</li>
+			<li>
+				<a class="dropdown-item" href="/sms/all,yt/browse/search">
+                    Yukon
+				</a>
+			</li>
+	</ul>
+</div>
+
+				</div>
+
+				<div class="mt-2">
+
+<div class="select dropdown">
+    <label class="input-group" data-bs-toggle="dropdown" data-bs-display="static"
+           aria-label="Select Agency">
+        <input class="form-control place-strong"
+               type="text"
+               placeholder='Select Agency'
+               onkeyup="filterShowOnly('.agency.dropdown-menu li', value); tabOnDown(this, event);"
+               aria-describedby="agency-select-caret"
+        />
+        <span class="input-group-text" id="agency-select-caret">
+<i aria-hidden="true" class="bi bi-caret-right-fill down" style="color: var(--ps-color-white); color: var(--ps-color-black);"></i><i aria-hidden="true" class="bi bi-caret-down-fill up" style="color: var(--ps-color-white); color: var(--ps-color-black);"></i>        </span>
+    </label>
+    <ul class="agency shaded dropdown-menu">
+            <li>
+                <strong class="dropdown-item disabled text-dark">
+                    Please select region first
+                </strong>
+            </li>
+    </ul>
+</div>
+
+				</div>
+
+			</div>
+		</div>
+	</div>
+</div>
+
+<script type="text/javascript">
+	function updateScopeValue() {
+		let areaParamsSwitch = document.querySelector('#areaParams');
+		let scopeField = document.querySelector('#searchScope');
+
+		if(!areaParamsSwitch || !scopeField) return;
+
+		if (areaParamsSwitch.checked) {
+			scopeField.value = "";
+		} else {
+			scopeField.value = "all";
+		}
+	}
+</script>
+
+
+	<h1 class="nav-sub-head fs-6">
+		Search Auctions
+	</h1>
+
+
+                            
+
+	<div class="py-4 px-3 px-lg-4">
+
+		<form action="/sms/browse/search" method="GET" name="search">
+			<input type="hidden" name="posting" value="y"/>
+			<input type="hidden" name="slth" value=""/>
+			<input type="hidden" name="page"
+				   value="0"/>
+			<input type="hidden" name="sortBy" value=""/>
+ 			<input type="hidden" name="sortDesc" value="N" />
+
+			<div class="row mb-4 align-items-center">
+				<div class="col-12 col-lg-4 text-lg-end mb-2 mb-lg-0">
+					<label for="keyword">
+						Keyword
+					</label>
+				</div>
+				<div class="col-12 col-lg-8 col-xl-7 col-xxl-5">
+					<input id="keyword"
+						   class="form-control"
+						   type="text"
+						   value="banquet chairs"
+						   name="keyWord"
+					/>
+				</div>
+			</div>
+
+			<div class="row mb-4 align-items-center">
+				<div class="col-12 col-lg-4 text-lg-end mb-2 mb-lg-0">
+					<label for="InCategory">
+						In Category
+					</label>
+				</div>
+				<div class="col col-lg-4">
+					<select name="catId" class="form-select" id="InCategory">
+						<option value="-1" >
+							All Categories
+						</option>
+							<option value="22" >
+								Airport
+							</option>
+							<option value="24" >
+								Animals and Livestock
+							</option>
+							<option value="19" >
+								Aviation
+							</option>
+							<option value="10" >
+								Building
+							</option>
+							<option value="16" >
+								Clothing
+							</option>
+							<option value="18" >
+								Collectibles
+							</option>
+							<option value="1" >
+								Computers
+							</option>
+							<option value="2" >
+								Electronics
+							</option>
+							<option value="8" >
+								Food Supply
+							</option>
+							<option value="28" >
+								For Children
+							</option>
+							<option value="14" >
+								Furniture
+							</option>
+							<option value="17" >
+								Heavy Equipment
+							</option>
+							<option value="29" >
+								Heavy Equipment Parts
+							</option>
+							<option value="27" >
+								Housewares
+							</option>
+							<option value="6" >
+								Industrial Equipment
+							</option>
+							<option value="11" >
+								Jewelry
+							</option>
+							<option value="20" >
+								Marine
+							</option>
+							<option value="23" >
+								Medical
+							</option>
+							<option value="4" >
+								Motor Pool
+							</option>
+							<option value="21" >
+								Motor Pool Parts
+							</option>
+							<option value="13" >
+								Music and Arts
+							</option>
+							<option value="3" >
+								Office Equipment
+							</option>
+							<option value="12" >
+								Outdoor Equipment
+							</option>
+							<option value="15" >
+								Real Estate
+							</option>
+							<option value="9" >
+								School Supplies
+							</option>
+							<option value="25" >
+								Scrap
+							</option>
+							<option value="5" >
+								Sporting Goods
+							</option>
+							<option value="26" >
+								Storage
+							</option>
+					</select>
+				</div>
+			</div>
+
+			<div class="row mb-4 align-items-center" id="currentOptions">
+				<div class="col-12 col-lg-4 text-lg-end mb-2 mb-lg-0">
+					<label for="AucEndIn">
+						Auctions Ending In
+					</label>
+				</div>
+				<div class="col-12 col-lg-8 col-xl-7 col-xxl-5 d-flex flex-wrap flex-sm-nowrap">
+					<div class="col-12 col-sm">
+						<select id="AucEndIn"
+								class="form-select "
+								name="endHours"
+						>
+							<option value="-1" >
+								No Limit
+							</option>
+							<option value="1" >
+								1 hour
+							</option>
+							<option value="6" >
+								6 hours
+							</option>
+							<option value="24" >
+								1 day
+							</option>
+							<option value="120" >
+								5 days
+							</option>
+							<option value="240" >
+								10 days
+							</option>
+						</select>
+					</div>
+					<label class="col-12 col-sm-auto text-md-center px-sm-2" for="startsOn">
+						or that Started In
+					</label>
+					<div class="col-12 col-sm">
+						<select
+								class="form-select "
+								name="startHours"
+								id="startsOn"
+						>
+							<option value="-1" >
+								All
+							</option>
+							<option value="1" >
+								the last hour
+							</option>
+							<option value="24" >
+								the last day
+							</option>
+							<option value="48" >
+								the last 2 days
+							</option>
+							<option value="168" >
+								the last week
+							</option>
+						</select>
+					</div>
+				</div>
+			</div>
+
+			<div class="row mb-1 align-items-center">
+				<div class="col-12 col-lg-4 text-lg-end mb-2 mb-lg-0">
+					<label for="PriceRange">
+						Price Range
+					</label>
+				</div>
+				<div class="col-12 col-lg-8 col-xl-7 col-xxl-5">
+					<div class="row align-items-center">
+						<span class="col-12 col-sm-auto text-md-center">
+							From
+						</span>
+
+						<div class="col-12 col-sm input-group">
+							<span class="input-group-text" id="lowerPrice">$</span>
+							<input type="text" id="PriceRange"
+								   class="col form-control"
+								   value="0"
+								   name="lowerPrice"
+								   aria-describedby="lowerPrice"
+								   aria-label="Price Range From"
+								   maxlength="8"
+								   size="6"
+							/>
+						</div>
+
+						<span class="col-12 col-sm-auto text-md-center">
+							To
+						</span>
+
+						<div class="col-12 col-sm input-group">
+							<span class="input-group-text" id="higherPrice">$</span>
+							<input type="text"
+								   class="col form-control"
+								   value="0"
+								   name="higherPrice"
+								   aria-describedby="higherPrice"
+								   aria-label="Price Range To"
+								   maxlength="8"
+								   size="6"
+							/>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="row mb-4 align-items-center">
+				<div class="col offset-lg-4">
+					(
+					leave blank to see all auctions
+					)
+				</div>
+			</div>
+
+			<div class="row mb-4 align-items-center">
+				<div class="col-12 col-lg-4 text-lg-end mb-2 mb-lg-0">
+					<label for="Located">
+						Located
+					</label>
+				</div>
+				<div class="col-12 col-lg-8 col-xl-7 col-xxl-5 d-flex flex-wrap flex-sm-nowrap">
+					<div class="col-12 col-sm">
+						<select id="Located" class="form-select" name="milesLocation">
+							<option value="-1" >
+								All
+							</option>
+							<option value="20" >20</option>
+							<option value="50" >50</option>
+							<option value="100" >100</option>
+							<option value="200" >200</option>
+							<option value="300" >300</option>
+							<option value="400" >400</option>
+							<option value="500" >500</option>
+							<option value="600" >600</option>
+							<option value="700" >700</option>
+							<option value="800" >800</option>
+							<option value="900" >900</option>
+							<option value="1000" >1000</option>
+						</select>
+					</div>
+					<label class="col-12 col-sm-auto text-md-center px-sm-2" for="fromZip">
+						miles from zip code &nbsp;
+					</label>
+					<div class="col-12 col-sm">
+						<input
+							class="form-control"
+							type="text"
+							name="zipCode"
+							size="10"
+							value=""
+							id="fromZip"
+						/>
+					</div>
+				</div>
+			</div>
+
+			<div class="row mb-4 align-items-center">
+				<div class="col-12 col-lg-4 text-lg-end mb-2 mb-lg-0"
+					 
+				>
+					<label for="inRegion">
+						In Region
+					</label>
+				</div>
+				<div class="col col-lg-4">
+					<select id="inRegion" class="form-select" name="region">
+						<option value="" selected>All</option>
+
+    <option value="all,al" >
+        Alabama
+    </option>
+    <option value="all,ak" >
+        Alaska
+    </option>
+    <option value="all,as" >
+        American Samoa
+    </option>
+    <option value="all,az" >
+        Arizona
+    </option>
+    <option value="all,ar" >
+        Arkansas
+    </option>
+    <option value="all,ca" >
+        California
+    </option>
+    <option value="all,co" >
+        Colorado
+    </option>
+    <option value="all,ct" >
+        Connecticut
+    </option>
+    <option value="all,de" >
+        Delaware
+    </option>
+    <option value="all,fl" >
+        Florida
+    </option>
+    <option value="all,ga" >
+        Georgia
+    </option>
+    <option value="all,gu" >
+        Guam
+    </option>
+    <option value="all,hi" >
+        Hawaii
+    </option>
+    <option value="all,id" >
+        Idaho
+    </option>
+    <option value="all,il" >
+        Illinois
+    </option>
+    <option value="all,in" >
+        Indiana
+    </option>
+    <option value="all,ia" >
+        Iowa
+    </option>
+    <option value="all,ks" >
+        Kansas
+    </option>
+    <option value="all,ky" >
+        Kentucky
+    </option>
+    <option value="all,la" >
+        Louisiana
+    </option>
+    <option value="all,me" >
+        Maine
+    </option>
+    <option value="all,md" >
+        Maryland
+    </option>
+    <option value="all,ma" >
+        Massachusetts
+    </option>
+    <option value="all,mi" >
+        Michigan
+    </option>
+    <option value="all,mn" >
+        Minnesota
+    </option>
+    <option value="all,ms" >
+        Mississippi
+    </option>
+    <option value="all,mo" >
+        Missouri
+    </option>
+    <option value="all,mt" >
+        Montana
+    </option>
+    <option value="all,ne" >
+        Nebraska
+    </option>
+    <option value="all,nv" >
+        Nevada
+    </option>
+    <option value="all,nh" >
+        New Hampshire
+    </option>
+    <option value="all,nj" >
+        New Jersey
+    </option>
+    <option value="all,nm" >
+        New Mexico
+    </option>
+    <option value="all,ny" >
+        New York
+    </option>
+    <option value="all,nc" >
+        North Carolina
+    </option>
+    <option value="all,nd" >
+        North Dakota
+    </option>
+    <option value="all,oh" >
+        Ohio
+    </option>
+    <option value="all,ok" >
+        Oklahoma
+    </option>
+    <option value="all,or" >
+        Oregon
+    </option>
+    <option value="all,pa" >
+        Pennsylvania
+    </option>
+    <option value="all,pr" >
+        Puerto Rico
+    </option>
+    <option value="all,ri" >
+        Rhode Island
+    </option>
+    <option value="all,sc" >
+        South Carolina
+    </option>
+    <option value="all,sd" >
+        South Dakota
+    </option>
+    <option value="all,tn" >
+        Tennessee
+    </option>
+    <option value="all,tx" >
+        Texas
+    </option>
+    <option value="all,vi" >
+        U.S. Virgin Islands
+    </option>
+    <option value="all,ut" >
+        Utah
+    </option>
+    <option value="all,vt" >
+        Vermont
+    </option>
+    <option value="all,va" >
+        Virginia
+    </option>
+    <option value="all,wa" >
+        Washington
+    </option>
+    <option value="all,dc" >
+        Washington D.C.
+    </option>
+    <option value="all,wv" >
+        West Virginia
+    </option>
+    <option value="all,wi" >
+        Wisconsin
+    </option>
+    <option value="all,wy" >
+        Wyoming
+    </option>
+    <option value="all,ab" >
+        Alberta
+    </option>
+    <option value="all,bc" >
+        British Columbia
+    </option>
+    <option value="all,mb" >
+        Manitoba
+    </option>
+    <option value="all,nb" >
+        New Brunswick
+    </option>
+    <option value="all,nl" >
+        Newfoundland and Labrador
+    </option>
+    <option value="all,nt" >
+        Northwest Territories
+    </option>
+    <option value="all,ns" >
+        Nova Scotia
+    </option>
+    <option value="all,nu" >
+        Nunavut
+    </option>
+    <option value="all,on" >
+        Ontario
+    </option>
+    <option value="all,pe" >
+        Prince Edward Island
+    </option>
+    <option value="all,qc" >
+        Quebec
+    </option>
+    <option value="all,sk" >
+        Saskatchewan
+    </option>
+    <option value="all,yt" >
+        Yukon
+    </option>
+					</select>
+				</div>
+			</div>
+
+			<div class="d-flex flex-nowrap justify-content-between">
+				<div class="col offset-lg-4">
+					<button
+						type="submit"
+						name="search"
+						color="light"
+						class="ps-button ms-lg-2"
+						onclick="Search(document.search);"
+					>
+						Search
+					</button>
+				</div>
+
+	<script>
+		document.addEventListener('DOMContentLoaded', () => {
+		hideLazyImagesLoadingIcon();
+	});
+
+	function hideLazyImagesLoadingIcon() {
+		const lazyImgContainers = document.querySelectorAll('.lazy-loading-container-loader');
+
+		lazyImgContainers?.forEach((container) => {
+			const lazyImg = container.querySelector('.lazy-img-loading');
+			let lazyIcon = container.querySelector('.lazy-loading-icon');
+
+			if (!lazyIcon || !lazyImg) return;
+
+			//Due to cache, the completion of image loading may occur before the 'load' event listener can be set.
+			if(lazyImg.complete) {
+				lazyIcon.style = 'display: none';
+				return;
+			}
+
+			lazyImg.onerror = function() {
+				lazyIcon.style = 'display: none';
+			}
+
+			lazyImg.addEventListener('load', function() {
+				lazyIcon.style = 'display: none';
+			});
+		});
+		loadInfoIcon();
+	}
+
+	function loadInfoIcon() {
+		document.querySelectorAll('[id^="bi_"]').forEach(infoIcon => {
+			let popoverIcon = new bootstrap.Popover(infoIcon, {
+				html : true,
+				trigger: 'focus hover',
+				delay: { "hide": 100 }, // Used to allow a click on the icon's anchor.
+				sanitize: false,
+				content: function() {
+					return document.querySelector(infoIcon.getAttribute("data-popover-content")).innerHTML;
+				}
+			});
+			infoIcon.addEventListener('shown.bs.popover', () => {
+				popoverIcon.tip.getElementsBySelector('[data-bs-custom-class="icon-tooltip"]').forEach(icon => {
+					activateIconTooltip(icon);
+				});
+			});
+			infoIcon.addEventListener('hide.bs.popover', () => {
+				popoverIcon.tip.getElementsBySelector('[data-bs-custom-class="icon-tooltip"]').forEach(icon => {
+					disposeIconTooltip(icon);
+				});
+			});
+		});
+	}
+	</script>
+
+					<div id="toggleButtons" class="col col-lg-4 text-end">
+	<span class="ps-2">
+		View
+		<button class="ps-button text-center ps-2" color="link" type="button" aria-label="Grid view" onclick="toggleAuctionGridView({ view: 'g', tab:'search', saveViewMode: 'true' });">
+<i title="Grid view" data-bs-toggle="tooltip" aria-label="Grid view" data-bs-custom-class="icon-tooltip" class="bi bi-grid " style="color: var(--ps-color-gray); "></i>		</button>
+		<button class="ps-button text-center px-2" color="link" type="button" aria-label="List view" onclick="toggleAuctionGridView({ view: 'l', tab:'search', saveViewMode: 'true' });">
+<i title="List view" data-bs-toggle="tooltip" aria-label="List view" data-bs-custom-class="icon-tooltip" class="bi bi-list " style="color: var(--ps-color-gray); "></i>		</button>
+	</span>
+					</div>
+			</div>
+		</form>
+	</div>
+		<div class="me-col">
+
+		</div>
+
+                        </section>
+                    </div>
+
+                    
+		<div class="wide-content-container w-100">
+			<div class="w-100 ps-border-bottom-gross d-none d-md-block"></div>
+				<div id="auctionGridView" class="w-100 p-2" >
+		<div class="mb-2 auction-items__container" id="auction_item">
+			<section class="w-100 ps-card-feat"  id="auctionsListContainer">
+
+
+				<div class="auction-item" id="4079872searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079872"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079872/70367919"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079872searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079872"
+								title="#4079872 - 40 Black Banquet Chairs - Lot C"
+							>
+								#4079872 - 40 Black Banquet Chairs - Lot C
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079872searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079872searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079872searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079872, "4079872searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079843searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079843"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079843/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079843searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079843"
+								title="#4079843 - 40 Yellow Banquet Chairs - Lot B"
+							>
+								#4079843 - 40 Yellow Banquet Chairs - Lot B
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079843searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079843searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079843searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079843, "4079843searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079855searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079855"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079855/70367919"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079855searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079855"
+								title="#4079855 - 40 Black Banquet Chairs - Lot B"
+							>
+								#4079855 - 40 Black Banquet Chairs - Lot B
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079855searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079855searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079855searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079855, "4079855searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079856searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079856"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079856/70367919"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079856searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079856"
+								title="#4079856 - 40 Black Banquet Chairs - Lot D"
+							>
+								#4079856 - 40 Black Banquet Chairs - Lot D
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079856searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079856searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079856searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079856, "4079856searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079859searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079859"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079859/70367919"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079859searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079859"
+								title="#4079859 - 20 Black Banquet Chairs - Lot F"
+							>
+								#4079859 - 20 Black Banquet Chairs - Lot F
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079859searchGrid">
+										$150.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079859searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079859searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079859, "4079859searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079858searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079858"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079858/70367919"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079858searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079858"
+								title="#4079858 - 20 Black Banquet Chairs - Lot E"
+							>
+								#4079858 - 20 Black Banquet Chairs - Lot E
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079858searchGrid">
+										$150.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079858searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079858searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079858, "4079858searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079860searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079860"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079860/70367919"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079860searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079860"
+								title="#4079860 - 20 Black Banquet Chairs - Lot G"
+							>
+								#4079860 - 20 Black Banquet Chairs - Lot G
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079860searchGrid">
+										$150.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079860searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079860searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079860, "4079860searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079863searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079863"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079863/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079863searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079863"
+								title="#4079863 - 40 Yellow Banquet Chairs - Lot B"
+							>
+								#4079863 - 40 Yellow Banquet Chairs - Lot B
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079863searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079863searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079863searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079863, "4079863searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079862searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079862"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079862/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079862searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079862"
+								title="#4079862 - 40 Yellow Banquet Chairs - Lot A"
+							>
+								#4079862 - 40 Yellow Banquet Chairs - Lot A
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079862searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079862searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079862searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079862, "4079862searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079865searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079865"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079865/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079865searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079865"
+								title="#4079865 - 40 Yellow Banquet Chairs - Lot C"
+							>
+								#4079865 - 40 Yellow Banquet Chairs - Lot C
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079865searchGrid">
+										$325.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079865searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079865searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079865, "4079865searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079867searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079867"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079867/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079867searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079867"
+								title="#4079867 - 20 Yellow Banquet Chairs - Lot D"
+							>
+								#4079867 - 20 Yellow Banquet Chairs - Lot D
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079867searchGrid">
+										$150.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079867searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079867searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079867, "4079867searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079868searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079868"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079868/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079868searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079868"
+								title="#4079868 - 20 Yellow Banquet Chairs - Lot E"
+							>
+								#4079868 - 20 Yellow Banquet Chairs - Lot E
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079868searchGrid">
+										$150.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079868searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079868searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079868, "4079868searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+
+
+				<div class="auction-item" id="4079871searchGrid">
+					<div class="auction-item-img">
+						<a
+								href="/sms/auction/view?auc=4079871"
+						>
+								<div class="position-relative lazy-loading-container lazy-loading-container-loader">
+									<img
+										class="lazy-img-loading"
+										loading="lazy"
+										src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079871/70367925"
+										alt="Picture"
+									/>
+<div class="loading-spinner lazy-loading-icon" style="" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>								</div>
+						</a>
+						<span class="auction-item-state">
+							MI
+						</span>
+					</div>
+					<div class="auction-item-body px-0">
+						<div id="ai_4079871searchGrid" class="hidden">
+							<div class="d-flex align-items-center">
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+							</div>
+						</div>
+
+						<h6 class="w-100 card-title ps-card-feat__body--title ps-1 mb-2">
+							<a
+									href="/sms/auction/view?auc=4079871"
+								title="#4079871 - 19 Yellow Banquet Chairs - Lot F"
+							>
+								#4079871 - 19 Yellow Banquet Chairs - Lot F
+							</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation align-baseline" style="color: var(--ps-color-green-plus); font-size: 0.79rem"></i>
+
+
+
+
+
+
+
+
+
+
+						</h6>
+
+						<div class="w-100 ps-card__body--children px-1">
+								Price:
+								<b id="val_4079871searchGrid">
+										$150.00
+								</b>
+								<br/>
+
+								<div class="fw-bold">
+	<div id="timeLeft4079871searchGrid" class="d-inline w-100 auction-time_left">
+			<label class="text-nowrap w-auto align-self-center fw-normal">
+				Time Left:
+			</label>
+			<span id="timeLeftValue4079871searchGrid" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079871, "4079871searchGrid",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchList"
+				, timeLeftCallback);
+		</script>
+								</div>
+						</div>
+
+						<div id="buttons" class="d-flex w-100 justify-content-end align-items-center mt-auto">
+						</div>
+					</div>
+				</div>
+			</section>
+		</div>
+				</div>
+
+				<div id="auctionListView" class="w-100 table-responsive" style="display: none">
+					<table class="ps-table table">
+						<thead>
+						<tr>
+							<th scope="col">
+	<div role="button" class="sort-by-table" onclick="sort('id', 'N');">
+<i aria-hidden="true" class="bi bi-caret-right-fill " style="color: var(--ps-color-gray-plus); font-size: 0.9rem; "></i>		Auction
+	</div>
+								</th>
+							<th scope="col">
+	<div role="button" class="sort-by-table" onclick="sort('title', 'N');">
+<i aria-hidden="true" class="bi bi-caret-right-fill " style="color: var(--ps-color-gray-plus); font-size: 0.9rem; "></i>		Title
+	</div>
+	 							</th>
+							<th scope="col" aria-label='Picture'>&nbsp;</th>
+							<th scope="col" aria-label='State'>&nbsp;</th>
+							<th nowrap scope="col">
+	<div role="button" class="sort-by-table" onclick="sort('timeLeft', 'N');">
+<i aria-hidden="true" class="bi bi-caret-right-fill " style="color: var(--ps-color-gray-plus); font-size: 0.9rem; "></i>		Time Left
+	</div>
+								</th>
+							<th scope="col">
+	<div role="button" class="sort-by-table" onclick="sort('price', 'N');">
+<i aria-hidden="true" class="bi bi-caret-right-fill " style="color: var(--ps-color-gray-plus); font-size: 0.9rem; "></i>		Current Price
+	</div>
+								</th>
+						</tr>
+						</thead>
+						<tbody>
+								<tr id="4079872searchList">
+									<td>4079872</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079872">40 Black Banquet Chairs - Lot C</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079872"
+        rel="-ajax-lightbox-4079872"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079872/70367919"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079872searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079872searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079872, "4079872searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079872searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079843searchList">
+									<td>4079843</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079843">40 Yellow Banquet Chairs - Lot B</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079843"
+        rel="-ajax-lightbox-4079843"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079843/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079843searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079843searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079843, "4079843searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079843searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079855searchList">
+									<td>4079855</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079855">40 Black Banquet Chairs - Lot B</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079855"
+        rel="-ajax-lightbox-4079855"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079855/70367919"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079855searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079855searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079855, "4079855searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079855searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079856searchList">
+									<td>4079856</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079856">40 Black Banquet Chairs - Lot D</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079856"
+        rel="-ajax-lightbox-4079856"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079856/70367919"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079856searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079856searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079856, "4079856searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079856searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079859searchList">
+									<td>4079859</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079859">20 Black Banquet Chairs - Lot F</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079859"
+        rel="-ajax-lightbox-4079859"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079859/70367919"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079859searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079859searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079859, "4079859searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079859searchList">
+											$150.00
+									</td>
+								</tr>
+								<tr id="4079858searchList">
+									<td>4079858</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079858">20 Black Banquet Chairs - Lot E</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079858"
+        rel="-ajax-lightbox-4079858"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079858/70367919"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079858searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079858searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079858, "4079858searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079858searchList">
+											$150.00
+									</td>
+								</tr>
+								<tr id="4079860searchList">
+									<td>4079860</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079860">20 Black Banquet Chairs - Lot G</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079860"
+        rel="-ajax-lightbox-4079860"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079860/70367919"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079860searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079860searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079860, "4079860searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079860searchList">
+											$150.00
+									</td>
+								</tr>
+								<tr id="4079863searchList">
+									<td>4079863</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079863">40 Yellow Banquet Chairs - Lot B</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079863"
+        rel="-ajax-lightbox-4079863"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079863/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079863searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079863searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079863, "4079863searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079863searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079862searchList">
+									<td>4079862</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079862">40 Yellow Banquet Chairs - Lot A</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079862"
+        rel="-ajax-lightbox-4079862"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079862/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079862searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079862searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079862, "4079862searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079862searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079865searchList">
+									<td>4079865</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079865">40 Yellow Banquet Chairs - Lot C</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079865"
+        rel="-ajax-lightbox-4079865"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079865/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079865searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079865searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079865, "4079865searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079865searchList">
+											$325.00
+									</td>
+								</tr>
+								<tr id="4079867searchList">
+									<td>4079867</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079867">20 Yellow Banquet Chairs - Lot D</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079867"
+        rel="-ajax-lightbox-4079867"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079867/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079867searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079867searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079867, "4079867searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079867searchList">
+											$150.00
+									</td>
+								</tr>
+								<tr id="4079868searchList">
+									<td>4079868</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079868">20 Yellow Banquet Chairs - Lot E</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079868"
+        rel="-ajax-lightbox-4079868"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079868/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079868searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079868searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079868, "4079868searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079868searchList">
+											$150.00
+									</td>
+								</tr>
+								<tr id="4079871searchList">
+									<td>4079871</td>
+									<td class="text-start">
+										<a href="/sms/auction/view?auc=4079871">19 Yellow Banquet Chairs - Lot F</a>
+
+
+
+<i title="Newly Listed Item" data-bs-toggle="tooltip" aria-label="Newly Listed Item" data-bs-custom-class="icon-tooltip" class="bi bi-patch-exclamation me-1 align-baseline" style="color: var(--ps-color-green-plus); "></i>
+
+
+
+
+
+
+
+
+
+
+
+									</td>
+									<td class="text-center">
+        <div class="auction-thumbnail">
+    <a href="/sms/auction/ajaxpicloader?auctionId=4079871"
+        rel="-ajax-lightbox-4079871"
+        onClick="alert('Please wait for the page to complete loading and try again.'); event.preventDefault();"
+        aria-label="Picture"
+    >
+                <div class="position-relative auction-thumbnail-lazy-container lazy-loading-container-loader">
+                   <img
+                       class="lazy-img-loading lazy-img-loading--table"
+                       loading="lazy"
+                       src="https://d37qv0n5b4mbzm.cloudfront.net/sms/docviewer/cdnmainaucdoc/thumb-b/4079871/70367925"
+                       title=""
+                       alt="Picture"
+                    />
+<div class="loading-spinner lazy-loading-icon" style="top: 30%; right: 30%;" role="status" aria-hidden="true">
+<div class="load-spinner__roller">
+<div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div><div><div></div></div>
+</div>
+</div>                </div>
+    </a>
+        </div>
+
+									</td>
+									<td class="text-center text-success fw-bold">
+										MI
+									</td>
+									<td nowrap>
+	<div id="timeLeft4079871searchList" class="d-inline w-100 auction-time_left">
+			<span id="timeLeftValue4079871searchList" class="">
+					13 days 22 hours
+			</span>
+	</div>
+
+		<script>
+			updateTimeLeftSpan(timeLeftInfoMap, 4079871, "4079871searchList",
+				1788473623037, 1789678800000, 0,
+				0, "", "", "searchGrid"
+				, timeLeftCallback);
+		</script>
+									</td>
+									<td class="text-end pe-4" id="val_4079871searchList">
+											$150.00
+									</td>
+								</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<div class="w-100 mb-2">
+					<div id="hideShowImages" style="display: none">
+	<div class="d-flex justify-content-end me-2">
+		[
+			<span class="a me-2" role="button" onclick="listimg('n');">
+				Hide Images
+			</span>
+			|
+			<span class="a disabled ms-2">
+				Show Images
+			</span>
+		]
+	</div>
+</div>
+
+				</div>
+			<div class="text-center w-100 my-4 d-none" id="noAuctionsFound">
+				No auctions found
+			</div>
+		</div>
+
+                </main>
+
+                    <footer>
+                        <div style="clear:left;">
+    <div class="d-none d-md-flex ps-border-top-gross d-print-none"></div>
+
+    <div class="d-none d-md-flex ps-main-bar d-print-none">
+        <div class="left-sidebar"></div>
+        <div class="right-sidebar"></div>
+    </div>
+
+    <div class="ps-footer-line-slim d-md-none d-print-none"></div>
+
+    <div class="d-flex justify-content-center flex-wrap ps-footer-info mt-3 d-print-none">
+        Customer Support:&nbsp            <a href="mailto:support@publicsurplus.com">support@publicsurplus.com</a>
+         |
+
+        Copyright 1999-2026 The Public Group, LLC.
+            |
+        All rights reserved. 
+    </div>
+
+    <div class="d-flex justify-content-center pt-2">
+        <img src="/sms/20260805/images/logoGroup_footer.png"
+                                          alt="The Public Group"/>
+    </div>
+</div>
+                    </footer>
+            </div>
+
+<div style='width:100%; display: none;' id="cookiesAcceptedDiv">
+    <div class="message-container">
+        <h2>
+            This website uses cookies to ensure you get the best experience on our website. Please accept cookies for optimal performance.
+        </h2>
+    </div>
+    <div class="container-button">
+        <button type="button" class="ps-button" color="light" onclick="acceptCookies();">
+            Yes, I Accept Cookies
+        </button>
+        <button
+                class="ps-button mx-4" color="link"
+                type="button"
+                data-bs-toggle="modal"
+                data-bs-target="#iframeModal"
+                onclick="iframeModalBootstrap('iframeModal', '/sms/help/public/privacy.html');"
+        >
+            [
+            Public Surplus Privacy Policy
+            ]
+        </button>
+        <button
+                class="ps-button" color="link"
+                type="button"
+                data-bs-toggle="modal"
+                data-bs-target="#iframeModal"
+                onclick="iframeModalBootstrap('iframeModal', '/sms/help/public/info_cookies.ftlh');"
+        >
+            [
+            How to manage the cookies
+            ]
+        </button>
+    </div>
+</div>
+
+        </body>
+
+        <script type="text/javascript">
+            function hideIconTooltip(icon){
+		var tooltip = bootstrap.Tooltip.getInstance(icon);
+		if(tooltip) {
+			tooltip.hide();
+		}
+	}
+
+	function disposeIconTooltip(icon){
+		var tooltip = bootstrap.Tooltip.getInstance(icon);
+		if(tooltip) {
+			tooltip.dispose();
+		}
+	}
+
+	function reactivateTooltipAfterIconChange(icon) {
+		var parent = icon.parentElement;
+		if (parent && parent.tagName === 'BUTTON') {
+			//if the tooltip is visible, the tooltip is hidden before changing the current icon
+			parent.addEventListener("click", (event) => hideIconTooltip(icon));
+			//after call ajax function, detects if there is a change in the button icon and reactivates the tooltip on the new icon
+			var observer = new MutationObserver(function(mutationsList, observer) {
+				mutationsList.forEach(mutation => {
+					if (mutation.type === 'childList') {
+						var newIcon = parent.querySelector('[data-bs-custom-class*="icon-tooltip"]');
+						bootstrap.Tooltip.getOrCreateInstance(newIcon);
+						parent.addEventListener("click", (event) => hideIconTooltip(newIcon));
+					}
+				});
+			});
+			var config = { childList: true };
+			observer.observe(parent, config);
+		} else if (parent) {
+			icon.addEventListener("click", (event) => hideIconTooltip(icon));
+		}
+	}
+
+	function activateIconTooltips() {
+		document.querySelectorAll('[data-bs-custom-class*="icon-tooltip"]').forEach(icon => {
+			activateIconTooltip(icon);
+		});
+	}
+
+	function activateIconTooltip(icon) {
+		bootstrap.Tooltip.getOrCreateInstance(icon);
+		reactivateTooltipAfterIconChange(icon);
+	}
+
+	if (document.addEventListener) {
+		document.addEventListener("DOMContentLoaded", (event) => {
+			activateIconTooltips();
+		});
+	}
+        </script>
+    </html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

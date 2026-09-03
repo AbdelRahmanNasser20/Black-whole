@@ -23,3 +23,10 @@ def test_unknown_site_fails_loud(make_lot):
     from deals.sites import lot_url
     with pytest.raises(KeyError):
         lot_url(make_lot(site="nope"))
+
+
+def test_publicsurplus_registered_but_disabled(make_lot):
+    from deals.sites import SITES, enabled_sites, lot_url
+    assert SITES["publicsurplus"].ordinal == 2 and "publicsurplus" not in enabled_sites()
+    assert lot_url(make_lot(site="publicsurplus", native_id="4079872")) == \
+        "https://www.publicsurplus.com/sms/auction/view?auc=4079872"
