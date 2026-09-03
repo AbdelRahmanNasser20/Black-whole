@@ -66,7 +66,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Chrome profile: `~/.listing_automation/chrome_profile/` (logged into FB + eBay). Photos: `~/Desktop/Banquet chiars Pictures/`.
 - Photos onto a lot: `scripts/backfill_listing_images.py --lot|--missing`; `scripts/import_deal_images.py --lot <key>`.
 - Public deals: `http://127.0.0.1:8765/deals` (JSON `/deals/api/lots?page=&per_page=`). Indexes: `scripts/apply_sql.py scripts/sql/007_deal_lots_active_indexes.sql` (operator gate).
-- Deals: `.venv/bin/python -m deals.cli discover|watch-once|archive-active|archive-raw|track-bidders|digest|backfill-classify|saved-search-alerts|track add|list|sync|history`; `scripts/check_llm_provider.py`; `scripts/reclaim_db_space.py --all`; `scripts/query_cold_archive.py`.
+- Deals: `.venv/bin/python -m deals.cli discover|watch-once|archive-active|archive-raw|track-bidders|digest|backfill-classify|saved-search-alerts|track add|list|sync|history`; `--profile <slug>` (or `DEALS_PROFILE`) on `discover|watch-once|digest|track-bidders`; research profiles CRUD at `/api/profiles` (`deals/profiles.py`, migration `scripts/sql/006_research_profiles.sql` — **not applied to prod yet**); `scripts/check_llm_provider.py`; `scripts/reclaim_db_space.py --all`; `scripts/query_cold_archive.py`.
 - Dewatermark audit: `python -m automation.dewatermark stats|verify <file>`.
 - Tests: `.venv/bin/python -m pytest tests/deals/ -q` (no `pytest` console script).
 - Pre-allowed session: `claude --permission-mode bypassPermissions`.
