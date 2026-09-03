@@ -56,6 +56,7 @@ from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
 from . import auth as auth_svc
+from deals import profiles
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
 
@@ -593,6 +594,16 @@ def _parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
         raise HTTPException(400, "bbox must be 'south,west,north,east'")
     return (s, w, n, e)
 
+
+def _profile_where(slug: str | None) -> tuple[str, list] | None:
+    """Resolve ?profile=<slug> into a deal_lots SQL fragment. Empty → no filter."""
+    if not slug:
+        return None
+    try:
+        return profiles.deal_lots_where(profiles.resolve(slug))
+    except KeyError:
+        raise HTTPException(404, f"unknown profile {slug!r}")
+
 # Latest-verdict join (alias `v`) — build_where's min_margin filter and the
 # "margin" sort both reference v.margin_pct, so the same FROM clause is used
 # for the row and count queries alike.
@@ -663,6 +674,7 @@ async def list_deals(
     tag: str | None = None,
     max_distance: float | None = None,
     bbox: str | None = None,
+    profile: str | None = None,
 ):
     """Search/filter/sort deal_lots for the admin Deals tab.
 
@@ -683,6 +695,7 @@ async def list_deals(
         min_margin=min_margin, min_price=min_price, max_price=max_price,
         list_id=list_id, tag=tag,
         bbox=_parse_bbox(bbox),
+        profile_where=_profile_where(profile),
     )
     order = deals_query.order_clause(sort, dir)
 
@@ -735,6 +748,7 @@ async def deals_geo(
     max_price: float | None = None,
     list_id: int | None = None,
     tag: str | None = None,
+    profile: str | None = None,
 ):
     """All mappable lots for the current filter set — feeds the Deals map.
 
@@ -749,6 +763,7 @@ async def deals_geo(
         ending_within=ending_within, status=status,
         min_margin=min_margin, min_price=min_price, max_price=max_price,
         list_id=list_id, tag=tag,
+        profile_where=_profile_where(profile),
     )
 
     def _fetch():
@@ -851,13 +866,14 @@ async def public_deals_facets():
 
 
 @app.get("/api/deals/tree")
-async def deals_tree(status: str = "active"):
+async def deals_tree(status: str = "active", profile: str | None = None):
     """Category tree for the Deals tab explorer: canonical bucket (branch) →
     native GovDeals category (twig), each with lot / zero-bid / ending-24h
     counts. Same status semantics as /api/deals."""
     if status not in ("active", "closed", "all"):
         raise HTTPException(400, "status must be active|closed|all")
-    where, args = deals_query.build_where(status=status)
+    where, args = deals_query.build_where(status=status,
+                                          profile_where=_profile_where(profile))
 
     def _fetch():
         return db.fetch_all(
