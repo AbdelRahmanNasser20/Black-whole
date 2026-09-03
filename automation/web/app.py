@@ -573,6 +573,17 @@ _DEALS_COLS = (
 
 _DEALS_ACTIVE = "outcome_complete IS NOT TRUE AND end_utc > now()"
 
+
+def _parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
+    """Parse "south,west,north,east" into a float 4-tuple, or None."""
+    if not raw:
+        return None
+    try:
+        s, w, n, e = (float(x) for x in raw.split(","))
+    except ValueError:
+        raise HTTPException(400, "bbox must be 'south,west,north,east'")
+    return (s, w, n, e)
+
 # Latest-verdict join (alias `v`) — build_where's min_margin filter and the
 # "margin" sort both reference v.margin_pct, so the same FROM clause is used
 # for the row and count queries alike.
@@ -600,14 +611,21 @@ async def list_deals(
     limit: int = 50,
     offset: int = 0,
     min_margin: float | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
     list_id: int | None = None,
     tag: str | None = None,
     max_distance: float | None = None,
+    bbox: str | None = None,
 ):
     """Search/filter/sort deal_lots for the admin Deals tab.
 
     Facets reflect the full active set (not the filtered subset) — v1 keeps
     the SQL simple; counts guide, not gate.
+
+    `bbox` is "south,west,north,east" (map viewport). It filters in SQL, so
+    the paged rows and `total` both reflect the viewport — unlike
+    `max_distance`, which still trims post-LIMIT in Python.
     """
     if status not in ("active", "closed", "all"):
         raise HTTPException(400, "status must be active|closed|all")
@@ -616,7 +634,9 @@ async def list_deals(
     where, args = deals_query.build_where(
         q=q, category=category, native=native, state=state, max_bids=max_bids,
         ending_within=ending_within, status=status,
-        min_margin=min_margin, list_id=list_id, tag=tag,
+        min_margin=min_margin, min_price=min_price, max_price=max_price,
+        list_id=list_id, tag=tag,
+        bbox=_parse_bbox(bbox),
     )
     order = deals_query.order_clause(sort, dir)
 
@@ -668,6 +688,74 @@ async def list_deals(
         "facets": {"categories": cats, "states": states},
         "stats": stats,
     }
+
+
+@app.get("/api/deals/geo")
+async def deals_geo(
+    q: str | None = None,
+    category: str | None = None,
+    native: str | None = None,
+    state: str | None = None,
+    max_bids: int | None = None,
+    ending_within: int | None = None,
+    status: str = "active",
+    min_margin: float | None = None,
+    min_price: float | None = None,
+    max_price: float | None = None,
+    list_id: int | None = None,
+    tag: str | None = None,
+):
+    """All mappable lots for the current filter set — feeds the Deals map.
+
+    Unpaged on purpose: the map clusters client-side over the whole filtered
+    set (GovAuctions-style), while /api/deals stays the paged table source.
+    Minimal columns keep ~20k active rows to a few MB of JSON.
+    """
+    if status not in ("active", "closed", "all"):
+        raise HTTPException(400, "status must be active|closed|all")
+    where, args = deals_query.build_where(
+        q=q, category=category, native=native, state=state, max_bids=max_bids,
+        ending_within=ending_within, status=status,
+        min_margin=min_margin, min_price=min_price, max_price=max_price,
+        list_id=list_id, tag=tag,
+    )
+
+    def _fetch():
+        points = db.fetch_all(
+            "SELECT asset_id, account_id, auction_id, title, current_bid, "
+            "bid_count, end_utc, city, state, lat, lng "
+            f"{_DEALS_FROM} WHERE {where} AND lat IS NOT NULL AND lng IS NOT NULL "
+            "LIMIT 25000",
+            tuple(args),
+        )
+        unmapped = db.fetch_one(
+            f"SELECT count(*) AS c {_DEALS_FROM} WHERE {where} AND lat IS NULL",
+            tuple(args),
+        )["c"]
+        return points, unmapped
+
+    try:
+        points, unmapped = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        raise HTTPException(503, f"deals geo query failed: {e!r}")
+    for p in points:
+        p["govdeals_url"] = (
+            f"https://www.govdeals.com/en/asset/{p['asset_id']}/{p['account_id']}"
+        )
+    return {"points": points, "unmapped": unmapped}
+
+
+@app.get("/api/geo/zip")
+async def geo_zip(zip: str):
+    """Geocode a 5-digit ZIP so the admin map can center on it."""
+    z = zip.strip()
+    if not re.fullmatch(r"\d{5}", z):
+        raise HTTPException(400, "zip must be 5 digits")
+    # Lazy import: pgeocode loads a dataset — same pattern as _annotate_auction_geo.
+    from automation.alerts.geo import resolve_latlon
+
+    lat, lng, precision = await asyncio.to_thread(resolve_latlon, z, None)
+    return {"zip": z, "lat": lat, "lng": lng, "precision": precision}
 
 
 @app.get("/api/deals/tree")
@@ -1824,6 +1912,55 @@ async def scrape_stream(request: Request):
 
 # ───────────────────────────── auctions ─────────────────────────────
 
+# Full state name → USPS abbreviation, for parsing the scraper cache's
+# pre-formatted "City, State, Country" location strings into something
+# alerts.geo.resolve_latlon understands (it wants a 2-letter state).
+_STATE_ABBREV = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR",
+    "california": "CA", "colorado": "CO", "connecticut": "CT", "delaware": "DE",
+    "district of columbia": "DC", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN",
+    "iowa": "IA", "kansas": "KS", "kentucky": "KY", "louisiana": "LA",
+    "maine": "ME", "maryland": "MD", "massachusetts": "MA", "michigan": "MI",
+    "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
+    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ",
+    "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR",
+    "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT",
+    "vermont": "VT", "virginia": "VA", "washington": "WA",
+    "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+}
+
+
+def _auction_state(location: str | None) -> str | None:
+    """Best-effort 2-letter state from a "City, State, Country" string."""
+    for part in (location or "").split(","):
+        part = part.strip()
+        if len(part) == 2 and part.upper() in _STATE_ABBREV.values():
+            return part.upper()
+        abbrev = _STATE_ABBREV.get(part.lower())
+        if abbrev:
+            return abbrev
+    return None
+
+
+def _annotate_auction_geo(items: list[dict]) -> None:
+    """Attach lat/lng/geo_precision to scraper-cache items, in place.
+
+    The cache stores only a location string + pickup_zip, so coordinates are
+    resolved zip-first (pgeocode, offline) with a state-centroid fallback —
+    same ladder the alert matcher uses. Feeds the Auctions tab map.
+    """
+    from automation.alerts.geo import resolve_latlon
+
+    for it in items:
+        lat, lng, precision = resolve_latlon(
+            it.get("pickup_zip"), _auction_state(it.get("location"))
+        )
+        it["lat"], it["lng"], it["geo_precision"] = lat, lng, precision
+
+
 # In-memory cache for /api/auctions responses. Condition-scoring LLM calls
 # are 3-10s per request; cache by query-string for ~10 min so toggling
 # filters in the UI doesn't re-run the LLM on every click.
@@ -1881,6 +2018,11 @@ async def list_auctions(
         )
     except Exception as e:
         raise HTTPException(500, f"get_top_chairs failed: {e!r}")
+
+    try:
+        _annotate_auction_geo(items)
+    except Exception as e:
+        print(f"[auctions] geo annotation failed: {e!r}")
 
     _AUCTIONS_CACHE[key] = (now, items)
     return {"items": items, "cached": False, "age": 0}

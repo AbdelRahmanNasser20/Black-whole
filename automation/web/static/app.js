@@ -87,11 +87,11 @@ function activateTab(name, {persist = true} = {}) {
   });
   if (name === 'drafts') loadDrafts();
   if (name === 'compare') loadCompare();
-  if (name === 'auctions') loadAuctions();
+  if (name === 'auctions') { loadAuctions(); autoOpenAucMap(); }
   if (name === 'inventory') loadInventory();
   if (name === 'inquiries') loadInquiries();
   if (name === 'subscribers') loadSubscribers();
-  if (name === 'deals') loadDeals();
+  if (name === 'deals') { loadDeals(); autoOpenDealMap(); }
   if (name === 'tracking') loadTracking();
   if (name === 'listings-db') loadListingsDb();
   if (name === 'test-scrape') $('#ts-q')?.focus();
@@ -571,6 +571,8 @@ const auc = {
   favoriteIds: new Set(), // asset_id strings — for fast "is starred?" lookup
   intervals: [],          // alert interval labels in display order
   telegramConfigured: false,
+  mapOn: false,           // 🗺 map toggle — cards follow the map viewport
+  map: null,              // AdminMap handle (lazy-mounted)
 };
 
 const SOURCE_NAMES = { gd: 'GovDeals', ps: 'Public Surplus', bs: 'BidSpotter' };
@@ -904,6 +906,7 @@ async function loadAuctions() {
     status.textContent = `${auc.items.length} shown · ${body.cached ? `cached ${body.age}s ago` : 'fresh'}`;
     renderAuctions(auc.items, maxStaleDays);
     renderFilterSummary(auc.items.length, maxStaleDays);
+    syncAuctionMap();
   } catch (err) {
     status.textContent = '';
     grid.innerHTML = `<div class="drafts-empty">Error loading auctions: ${err.message || err}</div>`;
@@ -963,6 +966,94 @@ function renderAuctions(items, maxStaleDays) {
   }
   grid.innerHTML = '';
   for (const it of items) grid.appendChild(renderAuctionCard(it));
+}
+
+// ── Auctions map (GovAuctions-style: pins cluster, cards follow the viewport) ──
+
+function auctionMapPopup(it) {
+  const loc = [it.location, it.pickup_zip].filter(Boolean).join(' · ');
+  const img = it.image_url
+    ? `<img class="amap-popup-img" src="${esc(it.image_url)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`
+    : '';
+  return `${img}
+    <strong>${esc(it.title || it.raw_title || '—')}</strong><br>
+    ${(it.quantity || 0).toLocaleString()} × ${it.price ? esc(it.price) : ''}<br>
+    ${loc ? `📍 ${esc(loc)}${it.geo_precision === 'state' ? ' <em>(state-level pin)</em>' : ''}<br>` : ''}
+    <a href="${esc(it.link)}" target="_blank" rel="noopener">↗ view auction</a>`;
+}
+
+function updateAuctionMapNote() {
+  const note = $('#auction-map-note');
+  if (!auc.map || !note) return;
+  const mapped = auc.map.count();
+  const unmapped = auc.items.length - auc.items.filter(i => i.lat != null).length;
+  const inView = auc.map.visibleCount();
+  note.textContent =
+    `${inView} of ${mapped} lots in view — pan/zoom to filter the cards below.` +
+    (unmapped ? ` ${unmapped} lot${unmapped > 1 ? 's have' : ' has'} no location and stays listed.` : '');
+}
+
+// Cards follow the viewport: unmapped lots always stay visible (a missing
+// zip must never hide a good lot), mapped ones must be inside the bounds.
+function applyAuctionViewport() {
+  if (!auc.mapOn || !auc.map) return;
+  const maxStaleDays = Number($('#auc-stale').value) || 7;
+  renderAuctions(
+    auc.items.filter(it => it.lat == null || auc.map.inBounds(it)),
+    maxStaleDays,
+  );
+  updateAuctionMapNote();
+}
+
+function syncAuctionMap(fit = false) {
+  if (!auc.mapOn || !auc.map) return;
+  auc.map.setPoints(auc.items.map(it => ({
+    lat: it.lat, lng: it.lng,
+    title: it.title || it.raw_title || '',
+    approx: it.geo_precision === 'state',
+    popup: auctionMapPopup(it),
+  })));
+  if (fit) auc.map.fit();
+  applyAuctionViewport();
+}
+
+async function setAucMapOn(on) {
+  const btn = $('#auc-map-toggle');
+  const wrap = $('#auction-map-wrap');
+  auc.mapOn = on;
+  btn.classList.toggle('btn-primary', auc.mapOn);
+  wrap.hidden = !auc.mapOn;
+  if (!auc.mapOn) {
+    // back to the plain full list
+    renderAuctions(auc.items, Number($('#auc-stale').value) || 7);
+    return;
+  }
+  if (!auc.map) {
+    try {
+      auc.map = await AdminMap.mount($('#auction-map'));
+      auc.map.onViewport(() => applyAuctionViewport());
+    } catch (e) {
+      auc.mapOn = false; wrap.hidden = true; btn.classList.remove('btn-primary');
+      toast('Map failed to load: ' + (e.message || e), 'err');
+      return;
+    }
+  }
+  auc.map.invalidateSize();
+  syncAuctionMap(true);
+}
+$('#auc-map-toggle').addEventListener('click', () => {
+  const on = !auc.mapOn;
+  try { localStorage.setItem('admin.aucMapOn', on ? 'on' : 'off'); } catch (_) {}
+  setAucMapOn(on);
+});
+
+// Map is on by default; only an explicit toggle-off is remembered.
+function autoOpenAucMap() {
+  let pref = null;
+  try { pref = localStorage.getItem('admin.aucMapOn'); } catch (_) {}
+  if (pref === 'off') return;
+  if (!auc.mapOn) setAucMapOn(true);
+  else if (auc.map) auc.map.invalidateSize();  // pane was hidden while away
 }
 
 function renderAuctionCard(it) {
@@ -2185,9 +2276,9 @@ function renderTestScrapeCard(it, match) {
 }
 
 /* ── Deals tab ─────────────────────────────────────────────── */
-const deal = {q: '', category: '', native: '', state: '', zero: false, ending: '',
+const deal = {q: '', category: '', native: '', state: '', maxBids: '', ending: '',
               status: 'active', sort: 'ends', dir: null, offset: 0, limit: 50,
-              minMargin: '', maxDist: '', listId: '', tag: '',
+              minMargin: '', maxDist: '', minPrice: '', maxPrice: '', listId: '', tag: '',
               facetsLoaded: false, treeStatus: null, expanded: new Set(),
               // Deal-browser chrome (lists / tags / saved searches).
               // rows: last page fetched (drawer lookup). memb/tags: client-side
@@ -2195,7 +2286,10 @@ const deal = {q: '', category: '', native: '', state: '', zero: false, ending: '
               // kept current by the user's own PUT/DELETEs — the /api/deals
               // rows themselves don't carry per-lot membership in v1.
               rows: [], lists: [], tagList: [], searches: [],
-              metaLoaded: false, memb: new Map(), lotTags: new Map()};
+              metaLoaded: false, memb: new Map(), lotTags: new Map(),
+              // 🗺 map view: bbox = "s,w,n,e" viewport filter pushed into SQL,
+              // map = AdminMap handle, geoQS = last /api/deals/geo query string.
+              mapOn: false, map: null, bbox: null, geoQS: null};
 
 const dealKey = (r) => `${r.asset_id}/${r.account_id}/${r.auction_id}`;
 const dealMemb = (key) => deal.memb.get(key) || (deal.memb.set(key, new Set()), deal.memb.get(key));
@@ -2314,12 +2408,15 @@ async function loadDeals() {
   if (deal.category) p.set('category', deal.category);
   if (deal.native) p.set('native', deal.native);
   if (deal.state) p.set('state', deal.state);
-  if (deal.zero) p.set('max_bids', '0');
+  if (deal.maxBids !== '') p.set('max_bids', deal.maxBids);
   if (deal.ending) p.set('ending_within', deal.ending);
   if (deal.minMargin !== '') p.set('min_margin', deal.minMargin);
+  if (deal.minPrice !== '') p.set('min_price', deal.minPrice);
+  if (deal.maxPrice !== '') p.set('max_price', deal.maxPrice);
   if (deal.maxDist !== '') p.set('max_distance', deal.maxDist);
   if (deal.listId) p.set('list_id', deal.listId);
   if (deal.tag) p.set('tag', deal.tag);
+  if (deal.mapOn && deal.bbox) p.set('bbox', deal.bbox);
   p.set('status', deal.status);
   p.set('sort', deal.sort);
   if (deal.dir) p.set('dir', deal.dir);
@@ -2353,6 +2450,8 @@ async function loadDeals() {
     fill('#deal-category', body.facets.categories || []);
     fill('#deal-state', body.facets.states || []);
     deal.facetsLoaded = true;
+    deal._catFacets = body.facets.categories || [];
+    renderDealCatPills();
   }
   const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
   if (!body.rows.length) {
@@ -2391,10 +2490,114 @@ async function loadDeals() {
   }
   const page = Math.floor(deal.offset / deal.limit) + 1;
   const pages = Math.max(1, Math.ceil(body.total / deal.limit));
-  $('#deal-page-info').textContent = `${page} / ${pages} (${body.total} lots)`;
+  const scope = deal.mapOn && deal.bbox ? ' in map view' : '';
+  $('#deal-page-info').textContent = `${page} / ${pages} (${body.total} lots${scope})`;
   $('#deal-prev').disabled = deal.offset === 0;
   $('#deal-next').disabled = deal.offset + deal.limit >= body.total;
+  if (deal.mapOn) refreshDealMapPoints(body.total);
+  syncDealCatPills();
+  renderDealActiveChips();
 }
+
+/* one-click canonical-category pill row (top 8 by count, from facets) */
+function renderDealCatPills() {
+  const host = $('#deal-cat-pills');
+  if (!host) return;
+  const cats = (deal._catFacets || []).slice(0, 8);
+  if (!cats.length) { host.hidden = true; host.innerHTML = ''; return; }
+  const total = (deal._catFacets || []).reduce((a, f) => a + Number(f.count || 0), 0);
+  host.innerHTML =
+    `<span class="cat-pill" data-cat="">all <span class="cp-n">${total}</span></span>` +
+    cats.map(f =>
+      `<span class="cat-pill" data-cat="${_dealEsc(f.value)}">${_dealEsc(f.value)} <span class="cp-n">${f.count}</span></span>`
+    ).join('');
+  host.hidden = false;
+  syncDealCatPills();
+}
+
+function syncDealCatPills() {
+  $$('#deal-cat-pills .cat-pill').forEach(p =>
+    p.classList.toggle('active', p.dataset.cat === deal.category));
+}
+
+$('#deal-cat-pills').addEventListener('click', (e) => {
+  const pill = e.target.closest('.cat-pill');
+  if (!pill) return;
+  deal.category = pill.dataset.cat;
+  deal.native = '';
+  const dd = $('#deal-category');
+  dd.value = [...dd.options].some(o => o.value === deal.category) ? deal.category : '';
+  deal.offset = 0;
+  renderDealTree();
+  syncDealCatPills();
+  loadDeals();
+});
+
+/* removable "label ×" chips for every active filter (status + bbox excluded) */
+function renderDealActiveChips() {
+  const host = $('#deal-active-chips');
+  if (!host) return;
+  const chips = [];
+  if (deal.q) chips.push({k: 'q', label: `“${deal.q}”`});
+  if (deal.category) chips.push({k: 'category', label: deal.category});
+  if (deal.state) chips.push({k: 'state', label: deal.state});
+  if (deal.maxBids !== '') chips.push({k: 'bids', label: deal.maxBids === '0' ? '0 bids' : `≤${deal.maxBids} bids`});
+  if (deal.ending) chips.push({k: 'ending', label: `< ${deal.ending}h`});
+  if (deal.minMargin !== '') chips.push({k: 'margin', label: `margin ≥ ${deal.minMargin}%`});
+  if (deal.minPrice !== '' || deal.maxPrice !== '')
+    chips.push({k: 'price', label: `$${deal.minPrice || 0}–${deal.maxPrice !== '' ? '$' + deal.maxPrice : '∞'}`});
+  if (deal.maxDist !== '') chips.push({k: 'dist', label: `≤ ${deal.maxDist} mi`});
+  if (deal.listId) {
+    const l = deal.lists.find(l => String(l.id) === String(deal.listId));
+    chips.push({k: 'list', label: `list: ${l ? l.name : deal.listId}`});
+  }
+  if (deal.tag) chips.push({k: 'tag', label: `tag: ${deal.tag}`});
+  host.hidden = !chips.length;
+  host.innerHTML = chips.map(c =>
+    `<span class="deal-chip deal-af-chip">${_dealEsc(c.label)}<button type="button" class="deal-chip-x" data-k="${c.k}" title="clear filter">×</button></span>`
+  ).join('') + (chips.length ? '<a href="#" id="deal-clear-filters">clear all</a>' : '');
+}
+
+/* clear one filter's state AND its control (no reload — callers do that) */
+function clearDealFilter(k) {
+  switch (k) {
+    case 'q': deal.q = ''; $('#deal-q').value = ''; break;
+    case 'category':
+      deal.category = ''; deal.native = ''; $('#deal-category').value = '';
+      renderDealTree(); break;
+    case 'state': deal.state = ''; $('#deal-state').value = ''; break;
+    case 'bids':
+      deal.maxBids = '';
+      $$('#deal-bids-filter .seg-btn').forEach(b =>
+        b.classList.toggle('active', b.dataset.value === ''));
+      break;
+    case 'ending': deal.ending = ''; $('#deal-ending').value = ''; break;
+    case 'margin': deal.minMargin = ''; $('#deal-min-margin').value = ''; break;
+    case 'price':
+      deal.minPrice = ''; deal.maxPrice = '';
+      $('#deal-min-price').value = ''; $('#deal-max-price').value = ''; break;
+    case 'dist': deal.maxDist = ''; $('#deal-max-dist').value = ''; break;
+    case 'list': deal.listId = ''; $('#deal-list').value = ''; break;
+    case 'tag': deal.tag = ''; $('#deal-tag').value = ''; break;
+  }
+}
+
+$('#deal-active-chips').addEventListener('click', (e) => {
+  const x = e.target.closest('.deal-chip-x');
+  if (x) {
+    clearDealFilter(x.dataset.k);
+    deal.offset = 0;
+    loadDeals();
+    return;
+  }
+  if (e.target.closest('#deal-clear-filters')) {
+    e.preventDefault();
+    ['q', 'category', 'state', 'bids', 'ending', 'margin', 'price', 'dist', 'list', 'tag']
+      .forEach(clearDealFilter);
+    deal.offset = 0;
+    loadDeals();
+  }
+});
 
 let _dealQTimer;
 $('#deal-q').addEventListener('input', (e) => {
@@ -2407,7 +2610,13 @@ $('#deal-category').addEventListener('change', (e) => {
 });
 $('#deal-state').addEventListener('change', (e) => { deal.state = e.target.value; deal.offset = 0; loadDeals(); });
 $('#deal-ending').addEventListener('change', (e) => { deal.ending = e.target.value; deal.offset = 0; loadDeals(); });
-$('#deal-zero-bids').addEventListener('change', (e) => { deal.zero = e.target.checked; deal.offset = 0; loadDeals(); });
+$$('#deal-bids-filter .seg-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    $$('#deal-bids-filter .seg-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    deal.maxBids = btn.dataset.value; deal.offset = 0; loadDeals();
+  });
+});
 $$('#deal-status-filter .seg-btn').forEach(btn => {
   btn.addEventListener('click', () => {
     $$('#deal-status-filter .seg-btn').forEach(b => b.classList.remove('active'));
@@ -2440,8 +2649,140 @@ $('#deal-max-dist').addEventListener('input', (e) => {
   clearTimeout(_dealDistTimer);
   _dealDistTimer = setTimeout(() => { deal.maxDist = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 400);
 });
+let _dealMinPriceTimer;
+$('#deal-min-price').addEventListener('input', (e) => {
+  clearTimeout(_dealMinPriceTimer);
+  _dealMinPriceTimer = setTimeout(() => { deal.minPrice = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 400);
+});
+let _dealMaxPriceTimer;
+$('#deal-max-price').addEventListener('input', (e) => {
+  clearTimeout(_dealMaxPriceTimer);
+  _dealMaxPriceTimer = setTimeout(() => { deal.maxPrice = e.target.value.trim(); deal.offset = 0; loadDeals(); }, 400);
+});
 $('#deal-list').addEventListener('change', (e) => { deal.listId = e.target.value; deal.offset = 0; loadDeals(); });
 $('#deal-tag').addEventListener('change', (e) => { deal.tag = e.target.value; deal.offset = 0; loadDeals(); });
+
+// ── Deals map (GovAuctions-style: all filtered lots cluster on the map,
+//    pan/zoom pushes a bbox into /api/deals so the table follows the viewport) ──
+
+function dealMapPopup(p) {
+  const ends = p.end_utc ? new Date(p.end_utc).toLocaleString() : '';
+  return `
+    <strong><a href="${esc(p.govdeals_url)}" target="_blank" rel="noopener">${esc(p.title)}</a></strong><br>
+    ${p.current_bid != null ? '$' + p.current_bid : '—'} · ${p.bid_count ?? 0} bids<br>
+    ${esc(p.city || '')}${p.state ? ', ' + esc(p.state) : ''}<br>
+    ${ends ? `⏱ ends ${esc(ends)}` : ''}`;
+}
+
+function updateDealMapNote(tableTotal) {
+  const note = $('#deal-map-note');
+  if (!note || !deal.map) return;
+  const parts = [
+    `${deal.map.visibleCount().toLocaleString()} of ${deal.map.count().toLocaleString()} mapped lots in view`,
+  ];
+  if (tableTotal != null && deal.bbox) parts.push(`table shows the ${tableTotal.toLocaleString()} in the viewport`);
+  if (deal._geoUnmapped) parts.push(`${deal._geoUnmapped.toLocaleString()} lots have no coords (visible with map off)`);
+  note.textContent = parts.join(' · ') + ' — pan or zoom to narrow.';
+}
+
+// Fetch pins for the current *filter* state (never the bbox — clusters must
+// stay visible outside the viewport). Skips the network when filters are
+// unchanged; loadDeals calls this on every map-on load.
+async function refreshDealMapPoints(tableTotal) {
+  if (!deal.map) return;
+  const p = new URLSearchParams();
+  if (deal.q) p.set('q', deal.q);
+  if (deal.category) p.set('category', deal.category);
+  if (deal.native) p.set('native', deal.native);
+  if (deal.state) p.set('state', deal.state);
+  if (deal.maxBids !== '') p.set('max_bids', deal.maxBids);
+  if (deal.ending) p.set('ending_within', deal.ending);
+  if (deal.minMargin !== '') p.set('min_margin', deal.minMargin);
+  if (deal.minPrice !== '') p.set('min_price', deal.minPrice);
+  if (deal.maxPrice !== '') p.set('max_price', deal.maxPrice);
+  if (deal.listId) p.set('list_id', deal.listId);
+  if (deal.tag) p.set('tag', deal.tag);
+  p.set('status', deal.status);
+  const qs = p.toString();
+  if (qs === deal.geoQS) { updateDealMapNote(tableTotal); return; }
+  try {
+    const body = await apiFetch('/api/deals/geo?' + qs);
+    deal.geoQS = qs;
+    deal._geoUnmapped = body.unmapped || 0;
+    deal.map.setPoints(body.points.map(pt => ({
+      lat: pt.lat, lng: pt.lng, title: pt.title, popup: dealMapPopup(pt),
+    })));
+    updateDealMapNote(tableTotal);
+  } catch (e) {
+    toast('Deals map load failed: ' + (e.message || e), 'err');
+  }
+}
+
+let _dealMapMove;
+async function setDealMapOn(on) {
+  const btn = $('#deal-map-toggle');
+  const wrap = $('#deal-map-wrap');
+  deal.mapOn = on;
+  btn.classList.toggle('btn-primary', deal.mapOn);
+  wrap.hidden = !deal.mapOn;
+  if (!deal.mapOn) {
+    deal.bbox = null; deal.offset = 0;
+    loadDeals();
+    return;
+  }
+  if (!deal.map) {
+    try {
+      deal.map = await AdminMap.mount($('#deal-map'));
+      deal.map.onViewport(() => {
+        updateDealMapNote(null);
+        clearTimeout(_dealMapMove);
+        _dealMapMove = setTimeout(() => {
+          deal.bbox = deal.map.bboxParam();
+          deal.offset = 0;
+          loadDeals();
+        }, 350);
+      });
+    } catch (e) {
+      deal.mapOn = false; wrap.hidden = true; btn.classList.remove('btn-primary');
+      toast('Map failed to load: ' + (e.message || e), 'err');
+      return;
+    }
+  }
+  deal.map.invalidateSize();
+  await refreshDealMapPoints(null);
+  deal.map.fit();  // fit fires moveend → bbox lands → table follows
+}
+$('#deal-map-toggle').addEventListener('click', () => {
+  const on = !deal.mapOn;
+  try { localStorage.setItem('admin.dealMapOn', on ? 'on' : 'off'); } catch (_) {}
+  setDealMapOn(on);
+});
+
+// Map is on by default; only an explicit toggle-off is remembered.
+function autoOpenDealMap() {
+  let pref = null;
+  try { pref = localStorage.getItem('admin.dealMapOn'); } catch (_) {}
+  if (pref === 'off') return;
+  if (!deal.mapOn) setDealMapOn(true);
+  else if (deal.map) deal.map.invalidateSize();  // pane was hidden while away
+}
+
+/* ZIP → center the map (opens it first when off) */
+async function centerDealMapOnZip() {
+  const z = $('#deal-zip').value.trim();
+  if (!/^\d{5}$/.test(z)) { if (z) toast('ZIP must be 5 digits', 'err'); return; }
+  let body;
+  try { body = await apiFetch('/api/geo/zip?zip=' + z); }
+  catch (e) { toast('ZIP lookup failed: ' + (e.message || e), 'err'); return; }
+  if (body.precision == null || body.lat == null) { toast(`ZIP ${z} not found`, 'err'); return; }
+  if (!deal.mapOn) await setDealMapOn(true);
+  if (!deal.map) return;  // mount failed; toast already shown
+  deal.map.leaflet.setView([body.lat, body.lng], 9);
+}
+$('#deal-zip').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); centerDealMapOnZip(); }
+});
+$('#deal-zip').addEventListener('change', centerDealMapOnZip);
 
 /* ── Deal browser chrome: lists / tags / saved searches / comps drawer ── */
 
@@ -2491,11 +2832,15 @@ function currentDealParams() {
   if (deal.category) p.category = deal.category;
   if (deal.native) p.native = deal.native;
   if (deal.state) p.state = deal.state;
-  if (deal.zero) p.max_bids = 0;
+  if (deal.maxBids !== '') p.max_bids = Number(deal.maxBids);
   if (deal.ending) p.ending_within = Number(deal.ending);
   if (deal.minMargin !== '') p.min_margin = Number(deal.minMargin);
+  if (deal.minPrice !== '') p.min_price = Number(deal.minPrice);
+  if (deal.maxPrice !== '') p.max_price = Number(deal.maxPrice);
+  if (deal.maxDist !== '') p.max_distance = Number(deal.maxDist);
   if (deal.listId) p.list_id = Number(deal.listId);
   if (deal.tag) p.tag = deal.tag;
+  if (deal.mapOn && deal.bbox) p.bbox = deal.bbox;
   p.status = deal.status;
   return p;
 }
@@ -2505,9 +2850,12 @@ function applyDealSearch(params) {
   deal.category = params.category || '';
   deal.native = params.native || '';
   deal.state = params.state || '';
-  deal.zero = params.max_bids === 0;
+  deal.maxBids = params.max_bids != null ? String(params.max_bids) : '';
   deal.ending = params.ending_within != null ? String(params.ending_within) : '';
   deal.minMargin = params.min_margin != null ? String(params.min_margin) : '';
+  deal.minPrice = params.min_price != null ? String(params.min_price) : '';
+  deal.maxPrice = params.max_price != null ? String(params.max_price) : '';
+  deal.maxDist = params.max_distance != null ? String(params.max_distance) : '';
   deal.listId = params.list_id != null ? String(params.list_id) : '';
   deal.tag = params.tag || '';
   deal.status = params.status || 'active';
@@ -2523,11 +2871,25 @@ function applyDealSearch(params) {
   syncSel('#deal-ending', deal.ending);
   syncSel('#deal-list', deal.listId);
   syncSel('#deal-tag', deal.tag);
-  $('#deal-zero-bids').checked = deal.zero;
+  $$('#deal-bids-filter .seg-btn').forEach(b =>
+    b.classList.toggle('active', b.dataset.value === deal.maxBids));
   $('#deal-min-margin').value = deal.minMargin;
+  $('#deal-min-price').value = deal.minPrice;
+  $('#deal-max-price').value = deal.maxPrice;
   $('#deal-max-dist').value = deal.maxDist;
   $$('#deal-status-filter .seg-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.value === deal.status));
+  // saved map viewport: turn the map on (if needed) and restore its bounds
+  if (params.bbox) {
+    deal.bbox = params.bbox;
+    (async () => {
+      if (!deal.mapOn) await setDealMapOn(true);
+      if (deal.map) {
+        const [s, w, n, e] = params.bbox.split(',').map(Number);
+        deal.map.leaflet.fitBounds([[s, w], [n, e]]);
+      }
+    })();
+  }
   renderDealTree();
   loadDeals();
 }
@@ -2695,19 +3057,19 @@ $('#deal-rows').addEventListener('click', async (e) => {
   }
 });
 
-/* ★ save-search popover: name + alert checkbox → POST /api/deals/searches */
-$('#deal-save-search').addEventListener('click', (e) => {
-  e.stopPropagation();
-  openDealPop($('#deal-searchpop'), e.currentTarget, `
-    <div class="deal-pop-head">SAVE THIS SEARCH</div>
+/* ★ save-search / 🔔 create-alert popover: name + alert checkbox → POST /api/deals/searches */
+function openSaveSearchPop(anchor, {alert = false} = {}) {
+  openDealPop($('#deal-searchpop'), anchor, `
+    <div class="deal-pop-head">${alert ? 'CREATE ALERT' : 'SAVE THIS SEARCH'}</div>
     <div class="deal-pop-new">
       <input type="text" id="deal-search-name" placeholder="name…">
     </div>
     <label class="deal-pop-row">
-      <input type="checkbox" id="deal-search-alert"> Telegram-alert on new matches
+      <input type="checkbox" id="deal-search-alert" ${alert ? 'checked' : ''}> Telegram-alert on new matches
     </label>
+    <div class="deal-pop-hint">checked hourly → Telegram (deals topic)</div>
     <div class="deal-pop-new">
-      <button type="button" class="btn btn-small btn-primary" id="deal-search-save">★ save</button>
+      <button type="button" class="btn btn-small btn-primary" id="deal-search-save">${alert ? '🔔 create' : '★ save'}</button>
     </div>`);
   $('#deal-search-name').focus();
   const save = async () => {
@@ -2728,6 +3090,14 @@ $('#deal-save-search').addEventListener('click', (e) => {
   };
   $('#deal-search-save').addEventListener('click', save);
   $('#deal-search-name').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') save(); });
+}
+$('#deal-save-search').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openSaveSearchPop(e.currentTarget);
+});
+$('#deal-create-alert').addEventListener('click', (e) => {
+  e.stopPropagation();
+  openSaveSearchPop(e.currentTarget, {alert: true});
 });
 
 // ───────── 11 Tracking: bid history for chosen lots ─────────

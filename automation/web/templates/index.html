@@ -240,8 +240,14 @@
         </div>
       </div>
       <button type="button" class="btn btn-small btn-primary" id="auc-queue-all" title="Queue every visible GovDeals lot for the pipeline">▶ queue all</button>
+      <button type="button" class="btn btn-small" id="auc-map-toggle" title="Map of where the visible chair lots are — pan/zoom to filter the cards below">🗺 map</button>
     </div>
   </form>
+
+  <div class="admin-map-wrap" id="auction-map-wrap" hidden>
+    <div class="admin-map" id="auction-map"></div>
+    <div class="map-note" id="auction-map-note"></div>
+  </div>
 
   <div class="cache-header" id="auction-cache-stats" hidden></div>
 
@@ -528,13 +534,21 @@
       </select>
     </div>
     <div class="ac-group">
-      <label class="opt" title="Only lots nobody has bid on yet">
-        <input type="checkbox" id="deal-zero-bids"> 0 bids only
-      </label>
+      <span class="ac-label">BIDS</span>
+      <div class="seg" id="deal-bids-filter">
+        <button type="button" class="seg-btn active" data-value="">any</button>
+        <button type="button" class="seg-btn" data-value="0">0 bids</button>
+        <button type="button" class="seg-btn" data-value="3">≤3</button>
+      </div>
     </div>
     <div class="ac-group">
       <span class="ac-label" title="Only analyzed lots with margin ≥ this %">MARGIN ≥</span>
       <input type="number" id="deal-min-margin" class="deal-num" placeholder="%" min="0" step="10">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Filter on current bid ($)">PRICE</span>
+      <input type="number" id="deal-min-price" class="deal-num" placeholder="$ min" min="0">
+      <input type="number" id="deal-max-price" class="deal-num" placeholder="$ max" min="0">
     </div>
     <div class="ac-group">
       <span class="ac-label" title="Max distance from home (mi); drops lots with unknown coords">DIST ≤</span>
@@ -556,11 +570,25 @@
         <button type="button" class="seg-btn" data-value="all">all</button>
       </div>
     </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Center the map on a ZIP">ZIP</span>
+      <input type="text" id="deal-zip" class="deal-num" placeholder="ZIP →" maxlength="5" inputmode="numeric">
+    </div>
     <div class="ac-actions">
       <button type="button" class="btn btn-small" id="deal-save-search" title="Save the current filter state as a named search">★ save search</button>
+      <button type="button" class="btn btn-small" id="deal-create-alert" title="Save current filters as an alert — checked hourly, new matches → Telegram">🔔 create alert</button>
       <button type="button" class="btn btn-small" id="deal-refresh">↻ refresh</button>
+      <button type="button" class="btn btn-small" id="deal-map-toggle" title="Map of the filtered lots — pan/zoom to narrow the table to the viewport">🗺 map</button>
     </div>
   </form>
+
+  <div class="cat-pills" id="deal-cat-pills" hidden></div>
+  <div class="deal-active-chips" id="deal-active-chips" hidden></div>
+
+  <div class="admin-map-wrap" id="deal-map-wrap" hidden>
+    <div class="admin-map" id="deal-map"></div>
+    <div class="map-note" id="deal-map-note"></div>
+  </div>
 
   <div class="deal-layout">
     <aside class="deal-tree" aria-label="Category tree">
@@ -772,6 +800,7 @@
   <span class="meta-mono">~/Desktop/Banquet chiars Pictures</span>
 </footer>
 
+<script src="/static/admin_map.js?v={{ now }}"></script>
 <script src="/static/app.js?v={{ now }}"></script>
 </body>
 </html>

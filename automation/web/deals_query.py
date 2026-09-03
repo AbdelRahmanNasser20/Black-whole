@@ -27,8 +27,12 @@ def build_where(*, q: str | None = None, category: str | None = None,
                 ending_within: int | None = None,
                 status: str = "active",
                 min_margin: float | None = None,
+                min_price: float | None = None,
+                max_price: float | None = None,
                 list_id: int | None = None,
-                tag: str | None = None) -> tuple[str, list]:
+                tag: str | None = None,
+                bbox: tuple[float, float, float, float] | None = None,
+                ) -> tuple[str, list]:
     where: list[str] = []
     args: list = []
     if status == "active":
@@ -56,12 +60,25 @@ def build_where(*, q: str | None = None, category: str | None = None,
     if min_margin is not None:
         where.append("v.margin_pct >= %s")
         args.append(min_margin)
+    # NULL current_bid never matches >=/<=, so unpriced lots drop out of a
+    # price-bounded query on their own (same as bbox with NULL lat).
+    if min_price is not None:
+        where.append("current_bid >= %s")
+        args.append(min_price)
+    if max_price is not None:
+        where.append("current_bid <= %s")
+        args.append(max_price)
     if list_id is not None:
         where.append("""EXISTS (SELECT 1 FROM deal_list_items li
             WHERE li.list_id = %s AND li.asset_id = deal_lots.asset_id
               AND li.account_id = deal_lots.account_id
               AND li.auction_id = deal_lots.auction_id)""")
         args.append(list_id)
+    if bbox is not None:
+        # (south, west, north, east) — a NULL lat/lng never matches BETWEEN,
+        # so unmapped lots drop out of a map-bounded query on their own.
+        where.append("lat BETWEEN %s AND %s AND lng BETWEEN %s AND %s")
+        args += [bbox[0], bbox[2], bbox[1], bbox[3]]
     if tag is not None:
         where.append("""EXISTS (SELECT 1 FROM deal_lot_tags t
             WHERE t.tag = %s AND t.asset_id = deal_lots.asset_id
