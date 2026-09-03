@@ -4,10 +4,10 @@ Launch with::
 
     python -m automation.web
 
-Serves on http://127.0.0.1:8765 — three tabs:
-  1. Launcher  — paste GovDeals URL, stream pipeline progress
-  2. Drafts    — review per-listing folders, FB + eBay draft URLs
-  3. Compare   — side-by-side LLM A/B viewer with star ratings
+Serves on http://127.0.0.1:8765 — public storefront (`/`, `/listings`,
+`/deals`) + admin console (`/admin`, ten tabs). The A/B compare tab was
+removed 2026-09-04; `llm_compare_logs` is still written by the pipeline and
+read by the Inventory backfill.
 """
 from .app import app, main
 

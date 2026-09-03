@@ -64,7 +64,6 @@ async function apiFetch(url, opts) {
 const panels = {
   launcher: $('[data-pane="launcher"]'),
   drafts:   $('[data-pane="drafts"]'),
-  compare:  $('[data-pane="compare"]'),
   auctions: $('[data-pane="auctions"]'),
   inventory: $('[data-pane="inventory"]'),
   inquiries: $('[data-pane="inquiries"]'),
@@ -86,7 +85,6 @@ function activateTab(name, {persist = true} = {}) {
     if (el) el.hidden = (k !== name);
   });
   if (name === 'drafts') loadDrafts();
-  if (name === 'compare') loadCompare();
   if (name === 'auctions') { loadAuctions(); autoOpenAucMap(); }
   if (name === 'inventory') loadInventory();
   if (name === 'inquiries') loadInquiries();
@@ -465,98 +463,6 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => (
     {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
   ));
-}
-
-// ───────── compare ─────────
-
-const FIELDS = ['title','location','city','state','zip_code','quantity',
-                'chair_type','dimensions','suggested_price_per_chair','style_suffix'];
-
-async function loadCompare() {
-  const list = $('#compare-list');
-  const summary = $('#compare-summary');
-  list.innerHTML = '<div class="drafts-empty">Loading comparisons…</div>';
-  const res = await fetch('/api/compare');
-  const {entries} = await res.json();
-
-  let nMatch = 0, nWrong = 0, nPending = 0;
-  for (const e of entries) {
-    if (e.rating === 'match') nMatch++;
-    else if (e.rating === 'wrong') nWrong++;
-    else nPending++;
-  }
-  summary.innerHTML = `
-    <div><strong>${entries.length}</strong> comparisons logged</div>
-    <div class="stat-ok"><strong>${nMatch}</strong> Gemini matched</div>
-    <div class="stat-bad"><strong>${nWrong}</strong> Gemini wrong</div>
-    <div class="stat-pend"><strong>${nPending}</strong> unrated</div>
-  `;
-
-  if (!entries.length) {
-    list.innerHTML = '<div class="drafts-empty">No llm_compare logs yet.</div>';
-    return;
-  }
-  list.innerHTML = '';
-  for (const e of entries) list.appendChild(renderCompareEntry(e));
-}
-
-function renderCompareEntry(e) {
-  const wrap = document.createElement('article');
-  wrap.className = 'compare-entry';
-  const date = new Date(e.timestamp * 1000);
-  const dateStr = date.toISOString().replace('T', ' ').slice(0, 19);
-
-  const head = document.createElement('header');
-  head.className = 'compare-entry-head';
-  head.innerHTML = `
-    <span class="ce-id">#${e.id}</span>
-    <span class="ce-time">${dateStr} · ${esc(e.filename)}</span>
-    <span class="ce-rate">
-      <button data-rate="match" class="${e.rating==='match'?'active match':''}">★ Match</button>
-      <button data-rate="wrong" class="${e.rating==='wrong'?'active wrong':''}">✕ Wrong</button>
-    </span>
-  `;
-  wrap.appendChild(head);
-
-  const table = document.createElement('div');
-  table.className = 'diff-table';
-  table.innerHTML = `
-    <div class="diff-header">field</div>
-    <div class="diff-header">primary · ${esc((e.primary || {}).source || 'claude')}</div>
-    <div class="diff-header">secondary · ${esc((e.secondary || {}).source || 'gemini')}</div>
-  `;
-  for (const f of FIELDS) {
-    const a = (e.primary || {})[f];
-    const b = (e.secondary || {})[f];
-    const same = String(a ?? '') === String(b ?? '');
-    const cls = same ? '' : 'diff-mismatch';
-    table.insertAdjacentHTML('beforeend', `
-      <div>${f}</div>
-      <div class="${cls}">${a == null || a === '' ? '<span class="diff-empty">—</span>' : esc(String(a))}</div>
-      <div class="${cls}">${b == null || b === '' ? '<span class="diff-empty">—</span>' : esc(String(b))}</div>
-    `);
-  }
-  wrap.appendChild(table);
-
-  head.querySelectorAll('.ce-rate button').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const newRate = btn.classList.contains('active') ? null : btn.dataset.rate;
-      await withButtonLoading(btn, null, async () => {
-        try {
-          await apiFetch(`/api/compare/${e.id}/rate`, {
-            method: 'POST',
-            headers: {'content-type': 'application/json'},
-            body: JSON.stringify({rating: newRate}),
-          });
-          e.rating = newRate;
-          loadCompare();
-        } catch (err) {
-          toast('Rating failed: ' + (err.message || err), 'err');
-        }
-      });
-    });
-  });
-  return wrap;
 }
 
 // ───────── auctions ─────────
@@ -1359,14 +1265,13 @@ async function loadInventory() {
   const tbody = $('#inv-tbody');
   tbody.innerHTML = '<tr><td colspan="11" class="drafts-empty">Loading…</td></tr>';
   try {
-    const [invRes, statsRes] = await Promise.all([
-      fetch('/api/inventory' + (_invStatusFilter ? `?status=${_invStatusFilter}` : '')),
-      fetch('/api/inventory-stats'),
-    ]);
-    const inv = await invRes.json();
-    const stats = await statsRes.json();
-    _invItems = inv.items || [];
-    renderInvStats(stats);
+    const qs = new URLSearchParams({with_stats: '1'});
+    if (_invStatusFilter) qs.set('status', _invStatusFilter);
+    const res = await fetch('/api/inventory?' + qs.toString());
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _invItems = data.items || [];
+    renderInvStats(data.stats || {lots: 0, chairs: 0, cities: 0});
     renderInvTable(_invItems);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="11" class="drafts-empty">Load failed: ${e}</td></tr>`;
@@ -1395,7 +1300,7 @@ function renderInvTable(items) {
     tr.innerHTML = `
       <td class="mono tiny">${escapeHtml(item.lot_id)}</td>
       <td class="inv-hero">${item.hero_image_url
-        ? `<img src="${item.hero_image_url}" alt="">`
+        ? `<img src="${item.hero_image_url}" alt="" loading="lazy" decoding="async" width="72" height="54">`
         : '<div class="inv-hero-fallback">◉</div>'}</td>
       <td>
         <div class="inv-title">${escapeHtml(item.title || '—')}</div>
@@ -2428,7 +2333,7 @@ async function loadDeals() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     body = await r.json();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="16" class="drafts-empty">deals API error: ${e}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="18" class="drafts-empty">deals API error: ${e}</td></tr>`;
     return;
   }
   deal.rows = body.rows;
@@ -2455,7 +2360,7 @@ async function loadDeals() {
   }
   const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
   if (!body.rows.length) {
-    tbody.innerHTML = '<tr><td colspan="16" class="drafts-empty">no lots match</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="18" class="drafts-empty">no lots match</td></tr>';
   } else {
     tbody.innerHTML = body.rows.map(r => {
       const key = dealKey(r);
@@ -2481,6 +2386,8 @@ async function loadDeals() {
         <td>${r.distance_mi != null ? Math.round(r.distance_mi) + ' mi' : '—'}</td>
         <td>${r.bid_count ?? '—'}</td>
         <td>${r.current_bid != null ? '$' + r.current_bid : '—'}</td>
+        <td class="num">${r.quantity}${r.quantity_source === 'default' ? '<span class="deal-qty-src" title="no count in title">·</span>' : ''}</td>
+        <td class="num">${r.unit_bid != null ? '$' + r.unit_bid : '—'}</td>
         <td>$${r.landed_cost}</td>
         ${dealVerdictCells(r, key)}
         ${dealEndsCell(r.end_utc)}
@@ -2488,12 +2395,7 @@ async function loadDeals() {
       </tr>`;
     }).join('');
   }
-  const page = Math.floor(deal.offset / deal.limit) + 1;
-  const pages = Math.max(1, Math.ceil(body.total / deal.limit));
-  const scope = deal.mapOn && deal.bbox ? ' in map view' : '';
-  $('#deal-page-info').textContent = `${page} / ${pages} (${body.total} lots${scope})`;
-  $('#deal-prev').disabled = deal.offset === 0;
-  $('#deal-next').disabled = deal.offset + deal.limit >= body.total;
+  renderDealPager(body.total);
   if (deal.mapOn) refreshDealMapPoints(body.total);
   syncDealCatPills();
   renderDealActiveChips();
@@ -2633,8 +2535,32 @@ $$('#deal-table th.sortable').forEach(th => {
     deal.offset = 0; loadDeals();
   });
 });
-$('#deal-prev').addEventListener('click', () => { deal.offset = Math.max(0, deal.offset - deal.limit); loadDeals(); });
-$('#deal-next').addEventListener('click', () => { deal.offset += deal.limit; loadDeals(); });
+const DEAL_PAGE_SIZES = [25, 50, 100, 200];
+function renderDealPager(total) {
+  const page = Math.floor(deal.offset / deal.limit) + 1;
+  const pages = Math.max(1, Math.ceil(total / deal.limit));
+  const scope = deal.mapOn && deal.bbox ? ' · in map view' : '';
+  const html = `
+    <span class="deal-pager-total">page ${page} / ${pages} · ${total.toLocaleString()} lots${scope}</span>
+    <button type="button" class="btn btn-small" data-page="1" ${page <= 1 ? 'disabled' : ''}>«</button>
+    <button type="button" class="btn btn-small" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>‹ prev</button>
+    <button type="button" class="btn btn-small" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>next ›</button>
+    <button type="button" class="btn btn-small" data-page="${pages}" ${page >= pages ? 'disabled' : ''}>»</button>
+    <input type="number" class="deal-num" min="1" max="${pages}" value="${page}" data-jump title="jump to page">
+    <select data-limit>${DEAL_PAGE_SIZES.map(n => `<option value="${n}" ${n === deal.limit ? 'selected' : ''}>${n}/page</option>`).join('')}</select>`;
+  $('#deal-pager-top').innerHTML = html;
+  $('#deal-pager-bottom').innerHTML = html;
+}
+['#deal-pager-top', '#deal-pager-bottom'].forEach(sel => {
+  $(sel).addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-page]'); if (!b || b.disabled) return;
+    deal.offset = (Number(b.dataset.page) - 1) * deal.limit; loadDeals();
+  });
+  $(sel).addEventListener('change', (e) => {
+    if (e.target.matches('[data-jump]')) { deal.offset = (Math.max(1, Number(e.target.value) || 1) - 1) * deal.limit; loadDeals(); }
+    if (e.target.matches('[data-limit]')) { deal.limit = Number(e.target.value); deal.offset = 0; loadDeals(); }
+  });
+});
 $('#deal-refresh').addEventListener('click', () => {
   deal.facetsLoaded = false; deal.metaLoaded = false;
   loadDealTree(); loadDeals();

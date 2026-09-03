@@ -453,83 +453,6 @@ main {
 .draft-actions a:hover { background: var(--bg-elev-2); color: var(--ink); }
 .draft-actions a.disabled { color: var(--ink-dim); pointer-events: none; }
 
-/* ───────────── compare ───────────── */
-
-.compare-summary {
-  font-family: var(--mono); font-size: 12px; color: var(--ink-mute);
-  margin-bottom: 18px;
-  border: 1px solid var(--line); padding: 12px 16px;
-  background: var(--bg-elev);
-  display: flex; gap: 28px; flex-wrap: wrap;
-}
-.compare-summary strong { color: var(--ink); font-weight: 500; }
-.compare-summary .stat-ok   { color: var(--ok); }
-.compare-summary .stat-bad  { color: var(--err); }
-.compare-summary .stat-pend { color: var(--ink-dim); }
-
-.compare-list { display: grid; gap: 24px; }
-
-.compare-entry {
-  border: 1px solid var(--line); background: var(--bg-elev);
-}
-.compare-entry-head {
-  display: grid; grid-template-columns: auto 1fr auto;
-  align-items: center; gap: 18px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--line);
-}
-.ce-id {
-  font-family: var(--mono); font-size: 11px; color: var(--accent);
-  letter-spacing: 0.12em;
-}
-.ce-time {
-  font-family: var(--mono); font-size: 11px; color: var(--ink-mute);
-}
-.ce-rate { display: flex; gap: 6px; }
-.ce-rate button {
-  border: 1px solid var(--line-bold); background: transparent;
-  color: var(--ink-mute); padding: 5px 12px;
-  font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
-  text-transform: uppercase; transition: all .12s;
-}
-.ce-rate button:hover { color: var(--ink); }
-.ce-rate button.active.match {
-  background: var(--ok); color: #0c2410; border-color: var(--ok);
-}
-.ce-rate button.active.wrong {
-  background: var(--err); color: #2a0a04; border-color: var(--err);
-}
-
-.diff-table {
-  display: grid;
-  grid-template-columns: 160px 1fr 1fr;
-  font-family: var(--mono); font-size: 12px;
-}
-.diff-table > div {
-  padding: 10px 16px; border-bottom: 1px solid var(--line);
-  word-break: break-word;
-}
-.diff-table > div:nth-child(3n+1) { color: var(--ink-dim); }
-.diff-table > div:nth-child(3n+2) {
-  border-right: 1px solid var(--line);
-  background: rgba(122, 185, 255, 0.025);
-}
-.diff-table > div:nth-child(3n+3) {
-  background: rgba(108, 212, 126, 0.025);
-}
-.diff-table > div:last-child,
-.diff-table > div:nth-last-child(2),
-.diff-table > div:nth-last-child(3) { border-bottom: 0; }
-.diff-mismatch { background: rgba(255, 108, 77, 0.10) !important; color: var(--err) !important; }
-.diff-empty { color: var(--ink-dim); font-style: italic; }
-.diff-header {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.16em;
-  text-transform: uppercase; color: var(--ink-mute) !important;
-  background: var(--bg-elev-2) !important;
-  padding: 8px 16px !important;
-  border-bottom: 1px solid var(--line-bold) !important;
-}
-
 /* ───────────── footer ───────────── */
 
 .footstrip {
@@ -1288,12 +1211,19 @@ main {
 /* category tree explorer: branch = canonical bucket, twig = native category */
 .deal-layout { display: flex; gap: 16px; align-items: flex-start; }
 .deal-layout .inv-table-wrap { flex: 1; min-width: 0; }
-.deal-tree {
-  flex: 0 0 250px; position: sticky; top: 12px;
-  max-height: calc(100vh - 24px); overflow-y: auto;
-  background: var(--bg-elev); border: 1px solid var(--line);
-  font-family: var(--mono); font-size: 11px;
-}
+.deal-topbar .ac-grow { flex: 1 1 320px; }
+.deal-topbar .ac-grow input[type=text] { width: 100%; }
+.deal-side { flex: 0 0 280px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; }
+.deal-side-box { background: var(--bg-elev); border: 1px solid var(--line); font-family: var(--mono); font-size: 11px; }
+.deal-tree { max-height: 42vh; overflow-y: auto; }
+.deal-side-filters { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.deal-side-filters select, .deal-side-filters .deal-num { width: 100%; }
+.deal-side-row { display: flex; gap: 6px; }
+.deal-side-row .deal-num { width: 50%; }
+.deal-pager .deal-pager-total { flex: 1; }
+.deal-pager select { padding: 3px 6px; background: var(--bg); border: 1px solid var(--line); color: var(--ink); font: inherit; }
+.deal-qty-src { color: var(--ink-dim); margin-left: 2px; }
 .deal-tree-head {
   padding: 8px 10px; color: var(--ink-dim); letter-spacing: .08em;
   border-bottom: 1px solid var(--line);
@@ -1321,7 +1251,7 @@ main {
 .dt-twigs .dt-node { padding-left: 30px; }
 @media (max-width: 900px) {
   .deal-layout { flex-direction: column; }
-  .deal-tree { position: static; flex: none; width: 100%; max-height: 40vh; }
+  .deal-side { position: static; flex: none; width: 100%; max-height: none; }
 }
 
 /* ── Deal browser (T13): verdicts, lists, tags, saved searches ── */

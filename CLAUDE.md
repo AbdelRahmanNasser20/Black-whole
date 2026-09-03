@@ -53,6 +53,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - **No-bid = `bid_count==0` only.** Outcome columns are never overwritten by a re-sweep.
 - Don't switch `DEALS_LLM_PROVIDER` to cerebras without buying credits (HTTP 402). Gemini prepay is spent.
 - Render secrets (`TELEGRAM_*`, `COMPS_*`) are set in the dashboard; values are never committed.
+- **Public `/deals` never shows auction photos, verdicts, home distance, seating lots, or any lot in `tracked_lots`/`auction_favorites`/`deal_list_items`.** The policy is `automation/web/public_deals.py` — add exclusions there (env `PUBLIC_DEALS_EXCLUDE_*`), never in a template. Public JSON lives under `/deals/api/`, not `/api/`. SQL regexes use `\y` word boundaries (Postgres reads `\b` as backspace).
 - Tracking list (`tracked_lots`): polling runs **in the web process** (`_tracking_loop`), not a Render cron; closed = `assetStatusCd != 'STA'` or clock+15 min; on close `record_outcome` writes the exact final into `deal_lots`. Detail: `docs/claude-reference/deals.md`.
 
 **Ops:**
@@ -64,6 +65,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - `.env` (gitignored): `DEWATERMARK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `BLACKWHOLE_DB_URL`, `R2_*`, `SUPABASE_STORAGE_URL/KEY`, `GROQ_API_KEY` + `DEALS_LLM_PROVIDER=groq`, `TELEGRAM_BOT_TOKEN/CHAT_ID`. `auction_extractors/.env`: Ollama + `HEADLESS=0`.
 - Chrome profile: `~/.listing_automation/chrome_profile/` (logged into FB + eBay). Photos: `~/Desktop/Banquet chiars Pictures/`.
 - Photos onto a lot: `scripts/backfill_listing_images.py --lot|--missing`; `scripts/import_deal_images.py --lot <key>`.
+- Public deals: `http://127.0.0.1:8765/deals` (JSON `/deals/api/lots?page=&per_page=`). Indexes: `scripts/apply_sql.py scripts/sql/007_deal_lots_active_indexes.sql` (operator gate).
 - Deals: `.venv/bin/python -m deals.cli discover|watch-once|archive-active|archive-raw|track-bidders|digest|backfill-classify|saved-search-alerts|track add|list|sync|history`; `scripts/check_llm_provider.py`; `scripts/reclaim_db_space.py --all`; `scripts/query_cold_archive.py`.
 - Dewatermark audit: `python -m automation.dewatermark stats|verify <file>`.
 - Tests: `.venv/bin/python -m pytest tests/deals/ -q` (no `pytest` console script).

@@ -5,10 +5,11 @@
 1. **eBay flow doesn't land on a real draft.** Final URL was `ebay.com/sh/lst/active?sku=...` (seller hub search), not `sell.ebay.com/sell/form/...`. Selectors in `automation/ebay.py` need end-to-end verification. First step: open the URL the script lands on, compare against what a manual "List an item" flow produces, update `SELL_URL` and the subsequent form-fill selectors.
 2. `facebook.py` and `ebay.py` selectors are best-effort. They print `[fallback]` warnings instead of crashing — check the dashboard log for which ones are firing on real runs.
 3. Quantity parsing in `govdeals.py` JS uses `\((\d{1,5})\)` — brittle. The `dom_fallback` description-priority logic (added 2026-04-17) compensates, but the JS regex is still worth tightening at the source.
-4. **Dashboard cost-tracking tile.** `dewatermark_usage.jsonl` exists; surface `today: N calls / cache: M hashes` somewhere on the A/B tab.
+4. **Dashboard cost-tracking tile.** `dewatermark_usage.jsonl` exists; surface `today: N calls / cache: M hashes` on the Launcher tab (the A/B tab is gone).
 
 ## Done (recently completed — kept here briefly so future-Claude knows what changed)
 
+- Public Surplus Radar (/deals) + admin Deals reshape + Inventory speed fix + A/B tab removal — 2026-09-04. Plan: docs/superpowers/plans/2026-09-04-public-deals-site.md. Operator gate: apply `scripts/sql/007_deal_lots_active_indexes.sql`.
 - GovAuctions-style maps + filter parity on the admin — 2026-08-31. 🗺 map toggles on Deals + Auctions tabs (`static/admin_map.js`: lazy Leaflet + markercluster, CARTO dark); new unpaged `/api/deals/geo` pin feed; `bbox=s,w,n,e` filter on `/api/deals` (viewport pan → SQL); `/api/geo/zip` ZIP→center via pgeocode; Deals gains min/max price + bids seg control (Any/0/≤3), removable filter chips, category pills, and a Create Alert 🔔 button; the saved-search Telegram sweep now honors price + bbox; new `deals.cli saved-search-alerts` verb. Feature-by-feature comparison: `docs/govauctions-feature-map.md`.
 - Watermark idempotency + API cost log + budget caps + offline-by-default — 2026-04-17. See "Dewatermark behavior" above.
 - `_extract_quantity` in `dom_fallback.py` now prefers description match over DOM when DOM quantity is `< 20` (the Athens-style bug). Tunable via `DOM_QUANTITY_SUSPICION_THRESHOLD`.

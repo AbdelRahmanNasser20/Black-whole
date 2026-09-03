@@ -69,3 +69,12 @@ def test_enrich_null_bid():
     out = deals_query.enrich({"asset_id": 1, "account_id": 2, "auction_id": 3,
                               "current_bid": None}, fees)
     assert out["landed_cost"] == 0.0
+
+
+def test_enrich_adds_quantity_and_unit_columns():
+    row = {"asset_id": 1, "account_id": 2, "auction_id": 3,
+           "title": "Lot of (30) Lenovo Thinkpads", "current_bid": 300.0}
+    out = deals_query.enrich(row, FeeModel(buyer_premium_pct=0.125, tax_pct=0, freight=0))
+    assert out["quantity"] == 30 and out["quantity_source"] == "title"
+    assert out["unit_bid"] == 10.0
+    assert out["landed_cost"] == 337.5 and out["unit_landed"] == 11.25

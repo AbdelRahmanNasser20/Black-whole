@@ -25,6 +25,9 @@ We explored https://govauctions.app/feed and rebuilt its core features in the ad
 | 15 | "+2 more like this" similarity | | Skipped |
 | 16 | Multi-source aggregation ("18 sources") | | Partially had (gd/ps/bs) |
 | 17 | Weekly email digest / Pro tier | SaaS | Skipped |
+| 18 | (they lack) quantity per lot | — | Built: `deals/quantity.py` → Qty + $/unit + landed/unit columns, admin + public |
+| 19 | (they lack) closed-auction outcomes | — | Already had (`outcome`, `final_bid`); now public on /deals with status=closed |
+| 20 | Public site | govauctions.app/feed | Built: `/deals` (2026-09-04), exclusion-filtered, paged 25/50/100, noindex |
 
 ## How their reactivity works (and our mirror)
 

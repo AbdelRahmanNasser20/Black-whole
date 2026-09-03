@@ -28,7 +28,8 @@ deployment (nothing to invalidate but the cookie, nothing to persist).
 Route protection (see ``session_auth_middleware``): every ``/admin`` page and
 every ``/api/*`` route requires the session cookie once ``ADMIN_PASSWORD`` is
 set. The public storefront (``/``, ``/listings``, ``/sell``, ``/contact``,
-``/subscribe``, ``/image/*``, ``/static/*`` ...) is never gated. This mirrors
+``/subscribe``, ``/image/*``, ``/static/*``, and the public deals surface
+``/deals`` + ``/deals/api/*`` ...) is never gated. This mirrors
 the Cloudflare Access route rule from the deploy design, moved into the app so
 the operator can extend the session to a full year (Cloudflare Access caps
 sessions at ~1 month).

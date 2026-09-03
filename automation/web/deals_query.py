@@ -6,6 +6,7 @@ All values are bound via %s placeholders; sort columns come only from SORTS.
 from __future__ import annotations
 
 from deals.fees import FeeModel, landed_cost
+from deals.quantity import lot_quantity, unit_price
 
 # landed cost is monotonic in current_bid for a fixed fee model, so SQL can
 # sort by current_bid for both "bid" and "landed".
@@ -32,6 +33,7 @@ def build_where(*, q: str | None = None, category: str | None = None,
                 list_id: int | None = None,
                 tag: str | None = None,
                 bbox: tuple[float, float, float, float] | None = None,
+                search_fields: tuple[str, ...] = ("title", "description"),
                 ) -> tuple[str, list]:
     where: list[str] = []
     args: list = []
@@ -40,8 +42,8 @@ def build_where(*, q: str | None = None, category: str | None = None,
     elif status == "closed":
         where.append("outcome_complete IS TRUE")
     if q:
-        where.append("(title ILIKE %s OR description ILIKE %s)")
-        args += [f"%{q}%", f"%{q}%"]
+        where.append("(" + " OR ".join(f"{f} ILIKE %s" for f in search_fields) + ")")
+        args += [f"%{q}%"] * len(search_fields)
     if category:
         where.append("canonical_category = %s")
         args.append(category)
@@ -97,7 +99,13 @@ def order_clause(sort: str, direction: str | None) -> str:
 
 def enrich(row: dict, fees: FeeModel) -> dict:
     bid = float(row.get("current_bid") or 0)
-    row["landed_cost"] = round(landed_cost(bid, qty=1, fees=fees).total, 2)
+    qty, src = lot_quantity(row.get("title"))
+    lc = landed_cost(bid, qty=qty, fees=fees)
+    row["landed_cost"] = round(lc.total, 2)
+    row["quantity"] = qty
+    row["quantity_source"] = src
+    row["unit_bid"] = unit_price(row.get("current_bid"), qty)
+    row["unit_landed"] = round(lc.per_unit, 2)
     row["govdeals_url"] = (
         f"https://www.govdeals.com/en/asset/{row['asset_id']}/{row['account_id']}"
     )

@@ -6,8 +6,6 @@ Routes:
   POST /api/runs/start    → kick off run.py with a GovDeals URL
   GET  /api/runs/stream   → SSE: progress + raw stdout lines
   GET  /api/drafts        → JSON list of listing folders + metadata
-  GET  /api/compare       → JSON list of llm_compare_logs rows (Supabase)
-  POST /api/compare/{ts}/rate → save a star rating (matched / wrong)
   GET  /image/{folder}/{name} → serve image from a listing folder
   GET  /screenshot/{folder}/{name} → serve a Playwright screenshot
   POST /subscribe             → public alerts signup → subscribers table
@@ -56,6 +54,7 @@ from .. import favorites
 from .. import telegram_alerts
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import public_deals
 from . import auth as auth_svc
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -551,15 +550,25 @@ async def public_listing_detail(request: Request, lot_id: str):
 
 @app.get("/deals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
 async def deal_listing(request: Request, asset_id: int, account_id: int, auction_id: int):
+    """Archived-lot viewer. Public visitors get text only (no source photos —
+    copyright) and never see a seating/operator lot (chair-buyer isolation);
+    an operator session sees everything."""
     row = db.fetch_one("""SELECT * FROM deal_lots
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
         (asset_id, account_id, auction_id))
     if not row:
         raise HTTPException(status_code=404, detail="lot not archived")
+    operator = (not auth_svc.auth_enabled()) or auth_svc.request_has_session(request)
+    if not operator and (
+        public_deals.is_excluded(row)
+        or await asyncio.to_thread(public_deals.is_operator_lot, asset_id, account_id, auction_id)
+    ):
+        raise HTTPException(status_code=404, detail="lot not archived")
     from deals import tracking, tracking_store
     history = tracking_store.history(asset_id, account_id)
     return templates.TemplateResponse(request, "deal_listing.html", {
-        "lot": row, "history": history, "bidders": tracking.bidder_summary(history)})
+        "lot": row, "history": history, "bidders": tracking.bidder_summary(history),
+        "show_images": operator})
 
 
 # ── Deals dashboard API (BLACKWHOLE-12) ─────────────────────────────────────
@@ -595,6 +604,43 @@ LEFT JOIN LATERAL (
     WHERE v0.asset_id = deal_lots.asset_id AND v0.account_id = deal_lots.account_id
       AND v0.auction_id = deal_lots.auction_id
     ORDER BY v0.analyzed_at DESC LIMIT 1) v ON TRUE"""
+
+
+_DEALS_FACETS_TTL = 120
+_DEALS_FACETS: dict[str, tuple[float, tuple]] = {}
+
+
+def deals_facets_cache_clear() -> None:
+    _DEALS_FACETS.clear()
+
+
+def _deals_facets_and_stats() -> tuple[list, list, dict]:
+    """Categories/states facets + headline stats for the admin Deals tab.
+
+    These three queries don't depend on the filter set and each opened its own
+    pooler connection (~1.3 s) on every page flip. 120 s cache."""
+    hit = _DEALS_FACETS.get("v")
+    if hit and time.monotonic() - hit[0] < _DEALS_FACETS_TTL:
+        return hit[1]
+    cats = db.fetch_all(
+        "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
+        f"WHERE {_DEALS_ACTIVE} AND canonical_category IS NOT NULL "
+        "GROUP BY 1 ORDER BY count DESC"
+    )
+    states = db.fetch_all(
+        "SELECT state AS value, count(*) AS count FROM deal_lots "
+        f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
+        "GROUP BY 1 ORDER BY count DESC"
+    )
+    stats = db.fetch_one(
+        "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
+        "(SELECT count(*) FROM deal_candidates) AS candidates, "
+        f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
+        "AND end_utc <= now() + interval '24 hours') AS ending_24h"
+    )
+    value = (cats, states, stats)
+    _DEALS_FACETS["v"] = (time.monotonic(), value)
+    return value
 
 
 @app.get("/api/deals")
@@ -650,22 +696,7 @@ async def list_deals(
         total = db.fetch_one(
             f"SELECT count(*) AS c {_DEALS_FROM} WHERE {where}", tuple(args)
         )["c"]
-        cats = db.fetch_all(
-            "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
-            f"WHERE {_DEALS_ACTIVE} AND canonical_category IS NOT NULL "
-            "GROUP BY 1 ORDER BY count DESC"
-        )
-        states = db.fetch_all(
-            "SELECT state AS value, count(*) AS count FROM deal_lots "
-            f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
-            "GROUP BY 1 ORDER BY count DESC"
-        )
-        stats = db.fetch_one(
-            "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
-            "(SELECT count(*) FROM deal_candidates) AS candidates, "
-            f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
-            "AND end_utc <= now() + interval '24 hours') AS ending_24h"
-        )
+        cats, states, stats = _deals_facets_and_stats()
         return rows, total, cats, states, stats
 
     try:
@@ -756,6 +787,67 @@ async def geo_zip(zip: str):
 
     lat, lng, precision = await asyncio.to_thread(resolve_latlon, z, None)
     return {"zip": z, "lat": lat, "lng": lng, "precision": precision}
+
+
+# ── Public deals surface ("Surplus Radar") — outside the /api/ auth prefix ──
+# Policy + queries: automation/web/public_deals.py. Nothing here touches
+# photos, verdicts, or the operator's home distance.
+
+_PUBLIC_STATUSES = ("active", "closed", "all")
+
+
+@app.get("/deals", response_class=HTMLResponse)
+async def public_deals_page(request: Request):
+    return templates.TemplateResponse(request, "deals_public.html", {
+        "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
+        "per_page_choices": public_deals.PER_PAGE_CHOICES})
+
+
+@app.get("/deals/api/lots")
+async def public_deals_lots(
+    q: str | None = None, category: str | None = None, state: str | None = None,
+    max_bids: int | None = None, ending_within: int | None = None,
+    status: str = "active", min_price: float | None = None,
+    max_price: float | None = None, bbox: str | None = None,
+    sort: str = "ends", dir: str | None = None, page: int = 1, per_page: int = 25,
+):
+    if status not in _PUBLIC_STATUSES:
+        raise HTTPException(400, "status must be active|closed|all")
+    try:
+        return await asyncio.to_thread(
+            public_deals.fetch_page, q=q, category=category, state=state,
+            max_bids=max_bids, ending_within=ending_within, status=status,
+            min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
+            sort=sort, dir=dir, page=page, per_page=per_page)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"deals query failed: {e!r}")
+
+
+@app.get("/deals/api/pins")
+async def public_deals_pins(
+    q: str | None = None, category: str | None = None, state: str | None = None,
+    max_bids: int | None = None, ending_within: int | None = None,
+    status: str = "active", min_price: float | None = None, max_price: float | None = None,
+):
+    if status not in _PUBLIC_STATUSES:
+        raise HTTPException(400, "status must be active|closed|all")
+    try:
+        return await asyncio.to_thread(
+            public_deals.fetch_pins, q=q, category=category, state=state,
+            max_bids=max_bids, ending_within=ending_within, status=status,
+            min_price=min_price, max_price=max_price)
+    except Exception as e:
+        raise HTTPException(503, f"pins query failed: {e!r}")
+
+
+@app.get("/deals/api/facets")
+async def public_deals_facets():
+    try:
+        return await asyncio.to_thread(public_deals.fetch_facets)
+    except Exception as e:
+        raise HTTPException(503, f"facets query failed: {e!r}")
 
 
 @app.get("/api/deals/tree")
@@ -1051,6 +1143,7 @@ async def robots_txt():
         "User-agent: *\n"
         "Disallow: /admin\n"
         "Disallow: /api/\n"
+        "Disallow: /deals\n"
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
@@ -1524,56 +1617,6 @@ async def serve_screenshot(folder: str, name: str):
     if not target.exists():
         raise HTTPException(404, "not found")
     return FileResponse(str(target))
-
-
-# ───────────────────────────── compare ─────────────────────────────
-
-@app.get("/api/compare")
-async def list_compare():
-    rows = db.fetch_all(
-        "SELECT id, ts, dom_hint, primary_extraction, secondary_extraction, rating "
-        "FROM llm_compare_logs ORDER BY ts DESC"
-    )
-    out = []
-    for row in rows:
-        ts_epoch = int(row["ts"].timestamp())
-        out.append({
-            "id": str(row["id"]),
-            "filename": f"llm_compare_{row['id']}.json",
-            "timestamp": row["id"],
-            "modified": ts_epoch,
-            "dom_hint": row["dom_hint"],
-            "primary": row["primary_extraction"],
-            "secondary": row["secondary_extraction"],
-            "rating": row["rating"],
-        })
-    return {"entries": out}
-
-
-@app.post("/api/compare/{cid}/rate")
-async def rate_compare(cid: str, payload: dict):
-    rating = (payload or {}).get("rating")
-    if rating not in (None, "", "match", "wrong"):
-        raise HTTPException(400, "rating must be 'match', 'wrong', or null")
-    try:
-        cid_int = int(cid)
-    except ValueError:
-        raise HTTPException(400, "id must be an integer")
-    if rating in (None, ""):
-        db.execute(
-            "UPDATE llm_compare_logs SET rating = NULL, rated_at = NULL WHERE id = %s",
-            (cid_int,),
-        )
-    else:
-        db.execute(
-            "UPDATE llm_compare_logs SET rating = %s, rated_at = now() WHERE id = %s",
-            (rating, cid_int),
-        )
-    rows = db.fetch_all(
-        "SELECT id, rating FROM llm_compare_logs WHERE rating IS NOT NULL"
-    )
-    ratings = {str(r["id"]): r["rating"] for r in rows}
-    return {"ok": True, "ratings": ratings}
 
 
 # ───────────────────────────── scraper ─────────────────────────────
@@ -2521,7 +2564,13 @@ def _inventory_to_public(row: dict) -> dict:
 
 
 @app.get("/api/inventory")
-async def inv_list(status: str | None = None):
+async def inv_list(status: str | None = None, with_stats: int = 0):
+    """`with_stats=1` returns rows + headline counts from ONE connection —
+    the admin tab uses it so a tab open costs one pooler handshake, not two."""
+    if with_stats:
+        data = await asyncio.to_thread(inventory.list_with_stats, status)
+        return {"items": [_inventory_to_public(r) for r in data["items"]],
+                "stats": data["stats"]}
     rows = inventory.list_all(status=status)
     return {"items": [_inventory_to_public(r) for r in rows]}
 

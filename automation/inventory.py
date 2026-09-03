@@ -198,18 +198,20 @@ def get(lot_id: str) -> dict | None:
     return _row_to_dict(row)
 
 
+def _list_on(conn, status: str | None) -> list[dict]:
+    if status:
+        rows = conn.execute(
+            "SELECT * FROM inventory WHERE status = %s ORDER BY updated_at DESC",
+            (status,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM inventory ORDER BY updated_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
 def list_all(status: str | None = None) -> list[dict]:
     with connect() as conn:
-        if status:
-            rows = conn.execute(
-                "SELECT * FROM inventory WHERE status = %s ORDER BY updated_at DESC",
-                (status,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM inventory ORDER BY updated_at DESC"
-            ).fetchall()
-    return [dict(r) for r in rows]
+        return _list_on(conn, status)
 
 
 def list_public() -> list[dict]:
@@ -276,37 +278,51 @@ def list_sold_showcase(limit: int | None = None) -> list[dict]:
     return [dict(r) for r in rows]
 
 
-def stats() -> dict:
+def _stats_on(conn) -> dict:
     """Headline counts for the landing page (same visible set as list_public)."""
     statuses = list(PUBLIC_STATUSES)
-    with connect() as conn:
-        total = conn.execute(
-            "SELECT COUNT(*) AS n FROM inventory WHERE status = ANY(%s) "
-            "AND (quantity_remaining IS NULL OR quantity_remaining > 0)",
-            (statuses,),
-        ).fetchone()["n"]
-        chairs = conn.execute(
-            "SELECT COALESCE(SUM(quantity_remaining), 0) AS n FROM inventory "
-            "WHERE status = ANY(%s)",
-            (statuses,),
-        ).fetchone()["n"]
-        cities = conn.execute(
-            "SELECT COUNT(DISTINCT city) AS n FROM inventory "
-            "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)",
-            (statuses,),
-        ).fetchone()["n"]
-        # Chairs already moved — the landing page's credibility number.
-        moved = conn.execute(
-            f"SELECT COALESCE(SUM(quantity_original), 0) AS n FROM inventory "
-            f"WHERE {_SOLD_SHOWCASE_WHERE}",
-            (list(SOLD_STATUSES),),
-        ).fetchone()["n"]
+    total = conn.execute(
+        "SELECT COUNT(*) AS n FROM inventory WHERE status = ANY(%s) "
+        "AND (quantity_remaining IS NULL OR quantity_remaining > 0)",
+        (statuses,),
+    ).fetchone()["n"]
+    chairs = conn.execute(
+        "SELECT COALESCE(SUM(quantity_remaining), 0) AS n FROM inventory "
+        "WHERE status = ANY(%s)",
+        (statuses,),
+    ).fetchone()["n"]
+    cities = conn.execute(
+        "SELECT COUNT(DISTINCT city) AS n FROM inventory "
+        "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)",
+        (statuses,),
+    ).fetchone()["n"]
+    # Chairs already moved — the landing page's credibility number.
+    moved = conn.execute(
+        f"SELECT COALESCE(SUM(quantity_original), 0) AS n FROM inventory "
+        f"WHERE {_SOLD_SHOWCASE_WHERE}",
+        (list(SOLD_STATUSES),),
+    ).fetchone()["n"]
     return {
         "lots": int(total),
         "chairs": int(chairs or 0),
         "cities": int(cities),
         "moved": int(moved or 0),
     }
+
+
+def stats() -> dict:
+    with connect() as conn:
+        return _stats_on(conn)
+
+
+def list_with_stats(status: str | None = None) -> dict:
+    """Admin Inventory tab: rows + headline counts on ONE pooler connection.
+
+    Two separate endpoints cost two ~1.3 s handshakes per tab open (2026-09-04
+    diagnosis). Keep them together.
+    """
+    with connect() as conn:
+        return {"items": _list_on(conn, status), "stats": _stats_on(conn)}
 
 
 # Statuses whose lots belong in the Facebook Business catalog feed

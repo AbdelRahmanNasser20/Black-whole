@@ -44,11 +44,11 @@
     {% endif %}
     <span class="chip">{{ lot.bid_count if lot.bid_count is not none else 0 }} bids</span>
     {% if lot.canonical_category %}<span class="chip">{{ lot.canonical_category }}</span>{% endif %}
-    {% if lot.images_archived %}
+    {% if show_images %}{% if lot.images_archived %}
       <span class="chip green">images archived</span>
     {% else %}
       <span class="chip red">images from GovDeals CDN — not archived</span>
-    {% endif %}
+    {% endif %}{% endif %}
   </div>
   <div class="price">{{ lot.currency_code or 'USD' }} {{ '%.2f'|format(lot.final_bid if lot.final_bid is not none else (lot.current_bid or 0)) }}
     <small>{{ 'final' if lot.final_bid is not none else 'current bid' }}</small></div>
@@ -60,11 +60,13 @@
 
   {% set hero = lot.archived_hero_url or lot.hero_image_url %}
   {% set gallery = lot.gallery_urls or [] %}
-  {% if hero or gallery %}
+  {% if show_images and (hero or gallery) %}
   <div class="gallery" id="gallery">
     {% if hero %}<a href="{{ hero }}" target="_blank"><img src="{{ hero }}" alt="{{ lot.title }}"></a>{% endif %}
     {% for g in gallery %}<a href="{{ g }}" target="_blank"><img src="{{ g }}" alt="" loading="lazy"></a>{% endfor %}
   </div>
+  {% elif not show_images %}
+  <p class="meta">Photos are on the GovDeals listing — we don't republish auction images.</p>
   {% endif %}
 
   <h2>Description</h2>
@@ -91,6 +93,7 @@
     <div><b>Native category</b>{{ lot.native_category_id }} {{ lot.native_category_name }}</div>
   </div>
 </div>
+{% if show_images %}
 <script src="/static/deal_card.js"></script>
 <script>
   // click an image → DealCard carousel at that image (instead of raw open-in-tab)
@@ -101,4 +104,5 @@
     });
   });
 </script>
+{% endif %}
 </body></html>
