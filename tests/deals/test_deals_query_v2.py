@@ -66,3 +66,13 @@ def test_combined_bbox_and_price():
     # args follow fragment order: q, q, min, max, then lat pair + lng pair
     assert args == ["%chair%", "%chair%", 50.0, 250.0, 33.0, 34.0, -112.5, -111.5]
     assert where.count(" AND ") >= 4
+
+
+def test_profile_where_is_spliced_with_binding():
+    where, args = build_where(status="active", profile_where=("(title ILIKE ANY(%s))", [["%desk%"]]))
+    assert "(title ILIKE ANY(%s))" in where and [["%desk%"]][0] in args
+
+
+def test_profile_where_none_adds_nothing():
+    where, _ = build_where(status="active", profile_where=None)
+    assert "ILIKE ANY" not in where

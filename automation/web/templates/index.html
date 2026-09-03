@@ -178,7 +178,7 @@
     <div class="hero-eyebrow">FEED / AUCTION CANDIDATES</div>
     <h1 class="hero-title">Pick a lot. <em>Launch</em> the pipeline. Queue more.</h1>
     <p class="hero-sub">
-      Live (and archived) bulk-chair lots from GovDeals + Public Surplus.
+      Live (and archived) bulk lots for the selected research profile, from GovDeals + Public Surplus.
       Quantities verified by <span class="lex done">LLM</span>,
       condition scored <span class="lex running">1-10</span>. Hit <strong>Launch</strong>
       to run <span class="hero-mono">extract → list</span> against it.
@@ -195,20 +195,30 @@
       </div>
     </div>
     <div class="ac-group">
-      <span class="ac-label" title="Filter by on-read vertical classifier (keyword match on title + description)">CATEGORY</span>
-      <div class="seg" id="auc-category">
-        <button type="button" class="seg-btn active" data-value="">all</button>
-        <button type="button" class="seg-btn" data-value="banquet">banquet</button>
-        <button type="button" class="seg-btn" data-value="medical">medical</button>
-      </div>
+      <span class="ac-label" title="Research profile: keyword set + quantity floor + sweep categories (research_profiles)">PROFILE</span>
+      <div class="seg" id="auc-profile"></div>
+      <button type="button" class="btn btn-small" id="auc-profile-new" title="Create a research profile for another item">＋ profile</button>
+      <button type="button" class="btn btn-small" id="auc-profile-del" title="Delete the selected profile (not the default)">×</button>
+    </div>
+    <div class="ac-group" id="auc-profile-form" hidden>
+      <input type="text" id="pf-slug" placeholder="slug (office-desks)" style="width:130px">
+      <input type="text" id="pf-name" placeholder="name" style="width:140px">
+      <input type="text" id="pf-keywords" placeholder="keywords: desk, credenza" style="width:220px">
+      <input type="text" id="pf-exclude" placeholder="exclude: lamp, mat" style="width:160px">
+      <input type="text" id="pf-terms" placeholder="site search terms: desks, office desks" style="width:220px">
+      <input type="text" id="pf-native" placeholder="GovDeals cat ids: 372,47B" style="width:160px">
+      <input type="number" id="pf-minqty" placeholder="min qty" value="1" min="1" style="width:80px">
+      <input type="text" id="pf-noun" placeholder="noun: desks" style="width:100px">
+      <button type="button" class="btn btn-small btn-primary" id="pf-save">save</button>
+      <button type="button" class="btn btn-small" id="pf-cancel">cancel</button>
     </div>
     <div class="ac-group">
-      <span class="ac-label" title="Hide lots where the LLM-extracted quantity is below this">Min chairs per lot</span>
+      <span class="ac-label" title="Hide lots where the LLM-extracted quantity is below this">Min units per lot</span>
       <input type="range" id="auc-min-qty" min="1" max="500" step="1" value="50">
       <span class="ac-out" id="auc-min-qty-out">50</span>
     </div>
     <div class="ac-group">
-      <span class="ac-label" title="Most listings to show after ranking by chair count">Show top</span>
+      <span class="ac-label" title="Most listings to show after ranking by quantity">Show top</span>
       <input type="number" id="auc-n" min="1" max="100" step="1" value="20">
     </div>
     <div class="ac-group">
@@ -237,7 +247,7 @@
         </div>
       </div>
       <button type="button" class="btn btn-small btn-primary" id="auc-queue-all" title="Queue every visible GovDeals lot for the pipeline">▶ queue all</button>
-      <button type="button" class="btn btn-small" id="auc-map-toggle" title="Map of where the visible chair lots are — pan/zoom to filter the cards below">🗺 map</button>
+      <button type="button" class="btn btn-small" id="auc-map-toggle" title="Map of where the visible lots are — pan/zoom to filter the cards below">🗺 map</button>
     </div>
   </form>
 
@@ -529,6 +539,7 @@
 
   <div class="cat-pills" id="deal-cat-pills" hidden></div>
   <div class="deal-active-chips" id="deal-active-chips" hidden></div>
+  <div class="cache-header" id="deal-outcomes" hidden></div>
 
   <div class="admin-map-wrap" id="deal-map-wrap" hidden>
     <div class="admin-map" id="deal-map"></div>
@@ -546,6 +557,8 @@
       <div class="deal-side-box deal-side-filters">
         <label class="ac-label" for="deal-category">CATEGORY</label>
         <select id="deal-category"><option value="">all</option></select>
+        <label class="ac-label" for="deal-profile" title="Restrict to a research profile's keywords/states/price band">PROFILE</label>
+        <select id="deal-profile" title="Restrict to a research profile's keywords/states/price band"><option value="">any profile</option></select>
         <label class="ac-label" for="deal-state">STATE</label>
         <select id="deal-state"><option value="">all</option></select>
         <label class="ac-label" title="Filter on current bid ($)">PRICE</label>

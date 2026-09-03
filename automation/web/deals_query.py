@@ -34,6 +34,7 @@ def build_where(*, q: str | None = None, category: str | None = None,
                 tag: str | None = None,
                 bbox: tuple[float, float, float, float] | None = None,
                 search_fields: tuple[str, ...] = ("title", "description"),
+                profile_where: tuple[str, list] | None = None,
                 ) -> tuple[str, list]:
     where: list[str] = []
     args: list = []
@@ -87,6 +88,11 @@ def build_where(*, q: str | None = None, category: str | None = None,
               AND t.account_id = deal_lots.account_id
               AND t.auction_id = deal_lots.auction_id)""")
         args.append(tag)
+    # Research-profile fragment (deals/profiles.deal_lots_where) — spliced last
+    # so its bound args stay in order after the filters above.
+    if profile_where is not None and profile_where[0] and profile_where[0] != "TRUE":
+        where.append(f"({profile_where[0]})")
+        args += list(profile_where[1])
     return (" AND ".join(where) or "TRUE", args)
 
 

@@ -66,7 +66,15 @@ except ValueError:
 BASE_URL = "https://www.publicsurplus.com"
 
 # Same search terms as govdeals_chairs_extraction.py (this folder)
-SEARCH_TERMS = [
+def search_terms_from_env(default: list[str], env: dict | None = None) -> list[str]:
+    """Dashboard-launched scrapes pass the research profile's terms as
+    SCRAPE_SEARCH_TERMS (comma list). Empty/unset → the chair defaults."""
+    raw = (env if env is not None else os.environ).get("SCRAPE_SEARCH_TERMS", "")
+    terms = [t.strip() for t in raw.split(",") if t.strip()]
+    return terms or list(default)
+
+
+_DEFAULT_SEARCH_TERMS = [
     "stackable chairs",
     "banquet chairs",
     "chairs",
@@ -81,6 +89,7 @@ SEARCH_TERMS = [
     "procedure chair",
     "exam table",
 ]
+SEARCH_TERMS = search_terms_from_env(_DEFAULT_SEARCH_TERMS)
 
 MIN_CHAIR_QUANTITY = 50
 MAX_SEARCH_PAGES = 40

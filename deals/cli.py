@@ -1,7 +1,9 @@
 # deals/cli.py
 import argparse
+import os
 from datetime import datetime
 from deals import sites
+from deals import profiles as _profiles
 from deals.discover import run_discovery
 from deals.watch import poll_once
 from deals.digest import send_daily_digest
@@ -33,6 +35,15 @@ def sweep_categories(arg: str | None, env: dict) -> list[str]:
         return [c.strip() for c in raw.split(",") if c.strip()]
     return DEFAULT_CATEGORIES
 
+def profile_arg(p):
+    """--profile <slug>: a research_profiles row (deals/profiles.py). Unset
+    (and no DEALS_PROFILE env) = today's chairs-shaped behaviour."""
+    p.add_argument("--profile", default=os.environ.get("DEALS_PROFILE") or None,
+                   help="research profile slug (research_profiles); env DEALS_PROFILE")
+
+def resolve_profile(slug):
+    return _profiles.resolve(slug) if slug else None
+
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -43,6 +54,7 @@ def main():
     d.add_argument("--dry-run", action="store_true",
                    help="print Lots (full_key, title, bid, close) — never writes the store")
     d.add_argument("--limit", type=int, default=None, help="dry-run only: stop after N lots")
+    profile_arg(d)
     ar = sub.add_parser("archive-active",
                         help="backfill image archives for active lots before their listings expire")
     ar.add_argument("--limit", type=int, default=100)
@@ -60,6 +72,7 @@ def main():
     tb.add_argument("--min-bids", type=int, default=0,
                     help="only lots with at least N bids (an un-bid lot has no bidder to name)")
     tb.add_argument("--limit", type=int, default=100)
+    profile_arg(tb)
     tk = sub.add_parser("track", help="tracking list: follow chosen lots through their close")
     tks = tk.add_subparsers(dest="track_cmd", required=True)
     tka = tks.add_parser("add", help="add a lot by URL or asset/account")
@@ -88,23 +101,28 @@ def main():
                     help="skip lots touched recently; absorbs anti-snipe re-sweeps")
     rawa.add_argument("--no-null", action="store_true",
                     help="export and verify only; leave raw in place")
-    sub.add_parser("watch-once")
+    wo = sub.add_parser("watch-once"); profile_arg(wo)
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
-    sub.add_parser("digest")
+    dg = sub.add_parser("digest"); profile_arg(dg)
     sub.add_parser("rank")
     sub.add_parser("saved-search-alerts",
                    help="run the saved-search alert sweep once (manual test path)")
     sub.add_parser("init-schema")
     a = ap.parse_args()
+    prof = resolve_profile(getattr(a, "profile", None))
+    pw = _profiles.deal_lots_where(prof) if prof else None
     # non-discover commands are GovDeals-only for now; discover picks per --site
     adapter = sites.get_adapter(getattr(a, "site", None) or "govdeals") \
         if getattr(a, "site", "govdeals") != "all" else None
     if a.cmd == "init-schema":
         init_schema(); print("schema ready")
     elif a.cmd == "discover":
-        import os
-        cats = sweep_categories(a.categories, os.environ)
+        # explicit --categories always wins; else the profile's native ids; else the sweep default
+        cats = (list(prof.native_category_ids)
+                if prof and prof.native_category_ids and a.categories is None
+                else sweep_categories(a.categories, os.environ))
+        pred = (lambda lot: _profiles.matches(prof, lot.title, lot.description)) if prof else None
         for key in (sites.enabled_sites() if a.site == "all" else [a.site]):
             if a.dry_run:
                 # onboarding verification path: bypass run_discovery entirely,
@@ -119,7 +137,8 @@ def main():
                         break
                 print(f"[dry-run] {key}: {n} lot(s), nothing written")
                 continue
-            rep = run_discovery(sites.get_adapter(key), categories=cats, max_pages=a.max_pages)
+            rep = run_discovery(sites.get_adapter(key), categories=cats, max_pages=a.max_pages,
+                                archive_predicate=pred)
             print(f"[{key}] {rep}" if a.site == "all" else rep)
     elif a.cmd == "archive-active":
         from deals.archive import archive_active
@@ -130,11 +149,12 @@ def main():
         if a.favorites:
             keys = bidders.favorite_targets(adapter)
         else:
+            # with a profile, the profile is the filter: drop the seating default
             keys = store.bidder_targets(
                 limit=a.limit,
-                category=(None if a.category == "all" else a.category),
+                category=(None if (a.category == "all" or prof) else a.category),
                 title_like=a.title_like, ending_within_hours=a.ending_within,
-                min_bids=a.min_bids)
+                min_bids=a.min_bids, extra_where=pw)
         print(f"sampling {len(keys)} lots")
         print(bidders.track_bidders(adapter, keys))
     elif a.cmd == "track":
@@ -178,7 +198,7 @@ def main():
         print(run_archive_raw(limit=a.limit, lag_hours=a.lag_hours,
                               null_after=not a.no_null))
     elif a.cmd == "watch-once":
-        print(poll_once(adapter, datetime.now().astimezone()))
+        print(poll_once(adapter, datetime.now().astimezone(), extra_where=pw))
     elif a.cmd == "backfill-outcomes":
         from deals.backfill import run_backfill
         print(f"closed {run_backfill()} lots")
@@ -186,7 +206,7 @@ def main():
         from deals.analyze import run_analysis
         print(run_analysis())
     elif a.cmd == "digest":
-        ok, err = send_daily_digest(fee_model_from_env())
+        ok, err = send_daily_digest(fee_model_from_env(), profile=prof)
         print("digest sent" if ok else f"digest failed: {err}")
     elif a.cmd == "rank":
         from deals.rank import run_rank

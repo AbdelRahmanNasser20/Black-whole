@@ -75,3 +75,15 @@ def test_archived_urls_are_persisted(monkeypatch):
     run_discovery(FakeAdapter([_lot()]), categories=["x"],
                   now=datetime(2026, 7, 3, 12, tzinfo=timezone.utc))
     assert saved == [("https://store/hero.jpg", ["https://store/2.jpg"])]
+
+def test_archive_predicate_overrides_seating_gate(monkeypatch):
+    arch = []
+    monkeypatch.setattr("deals.discover.upsert_lot", lambda l: None)
+    monkeypatch.setattr("deals.discover.set_poll_schedule", lambda k, t, ln: None)
+    monkeypatch.setattr("deals.discover.apply_classification", lambda l, **k: l)
+    monkeypatch.setattr("deals.discover.archive_lot_images", lambda l, g: arch.append(l) or [])
+    lots = [_lot(cat="266", canon="general_merchandise")]      # not seating, but title says chairs
+    rep = run_discovery(FakeAdapter(lots), categories=["x"],
+                        now=datetime(2026, 7, 3, 12, tzinfo=timezone.utc),
+                        archive_predicate=lambda lot: "chairs" in lot.title)
+    assert rep.archived == 1

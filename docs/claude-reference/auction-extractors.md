@@ -78,6 +78,13 @@ templates and Python modules.
 LLM model (`OLLAMA_MODEL=gpt-oss:120b-cloud`) is load-bearing — benchmarks
 showed smaller local models hallucinate quantities. Don't swap without
 re-benchmarking via the upstream `quantity_eval/`.
+`SCRAPE_SEARCH_TERMS` (comma list) and `SCRAPE_ITEM_NOUN` override the chair
+defaults (`search_terms_from_env()` in `govdeals_chairs_extraction.py` /
+`public_surplus_automation.py`, `_quantity_prompt_header()` in `quantity_llm.py`);
+the dashboard sets both from the selected research profile when it launches a
+scrape. Unset = today's chair terms and prompt, byte-for-byte. The scraper's own
+Telegram alert (`partition_for_alert`) is still chairs-only; the cache (and
+therefore the Auctions tab) keeps every scraped row.
 
 **Day-to-day gotchas (from upstream HANDOFF.md):**
 1. Read-only. Empty DB → empty Auctions tab. Run the scrapers to fill it.

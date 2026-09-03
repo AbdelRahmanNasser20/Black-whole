@@ -20,7 +20,7 @@ def format_search_alert(name: str, rows: list[dict]) -> str:
 
 _ALLOWED = {"q", "category", "native", "state", "max_bids", "ending_within",
             "status", "min_margin", "list_id", "tag", "min_price", "max_price",
-            "bbox"}
+            "bbox", "profile"}
 
 def _sanitize_params(params: dict | None) -> dict:
     """Whitelist + coerce saved-search params for build_where(). Defensive:
@@ -52,6 +52,10 @@ def run_saved_search_alerts(now: datetime | None = None) -> int:
     for s in db.fetch_all("SELECT * FROM saved_searches WHERE alert = true"):
         try:
             params = _sanitize_params(s["params"])
+            slug = params.pop("profile", None)
+            if slug:
+                from deals import profiles
+                params["profile_where"] = profiles.deal_lots_where(profiles.resolve(slug))
             where, args = build_where(**params)
             if s["last_run_at"]:
                 where += " AND deal_lots.first_seen_at > %s"

@@ -155,14 +155,18 @@ def update_live_state(key, s: Snapshot, next_poll_at, lane: str) -> None:
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
         (s.bid_count, s.current_bid, s.end_utc, next_poll_at, lane, *key))
 
-def due_for_poll(now: datetime) -> list[Lot]:
+def due_for_poll(now: datetime, extra_where: tuple[str, list] | None = None) -> list[Lot]:
     from deals.mapping import asset_to_lot
     # `raw IS NOT NULL` guards against a cold-archived row leaking in: raw is
     # nulled once a lot closes and its blob is exported to R2, and
     # asset_to_lot(None) would raise AttributeError, killing the whole pass.
-    rows = db.fetch_all("""SELECT raw FROM deal_lots
-        WHERE outcome_complete IS NOT TRUE AND raw IS NOT NULL
-          AND (next_poll_at IS NULL OR next_poll_at<=%s)""", (now,))
+    # `extra_where` = a research-profile fragment (deals/profiles.deal_lots_where).
+    where = ("outcome_complete IS NOT TRUE AND raw IS NOT NULL "
+             "AND (next_poll_at IS NULL OR next_poll_at<=%s)")
+    params: list = [now]
+    if extra_where and extra_where[0] != "TRUE":
+        where += f" AND ({extra_where[0]})"; params += list(extra_where[1])
+    rows = db.fetch_all(f"SELECT raw FROM deal_lots WHERE {where}", tuple(params))
     lots = []
     for r in rows:
         try:
@@ -217,7 +221,8 @@ def live_auction_id(asset_id: int, account_id: int) -> int | None:
 
 def bidder_targets(limit: int = 200, *, category: str | None = "seating_furniture",
                    title_like: str | None = None, ending_within_hours: int | None = None,
-                   min_bids: int = 0) -> list[tuple[int, int, int]]:
+                   min_bids: int = 0,
+                   extra_where: tuple[str, list] | None = None) -> list[tuple[int, int, int]]:
     """Open lots worth sampling for bidder identity, soonest-closing first.
 
     Soonest-first is the whole ordering rationale: a lead change on a lot that
@@ -236,6 +241,8 @@ def bidder_targets(limit: int = 200, *, category: str | None = "seating_furnitur
     if ending_within_hours:
         where.append("end_utc < now() + make_interval(hours => %s)")
         params.append(ending_within_hours)
+    if extra_where and extra_where[0] != "TRUE":   # research-profile fragment
+        where.append(f"({extra_where[0]})"); params += list(extra_where[1])
     params.append(limit)
     rows = db.fetch_all(f"""SELECT asset_id, account_id, auction_id FROM deal_lots
         WHERE {' AND '.join(where)} ORDER BY end_utc ASC LIMIT %s""", tuple(params))

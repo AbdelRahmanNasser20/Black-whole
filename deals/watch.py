@@ -10,9 +10,10 @@ from deals.watcher_logic import schedule_lane, next_poll_delay, detect_outcome, 
 class PollReport:
     polled: int = 0; snapshotted: int = 0; finalized: int = 0; requeued: int = 0
 
-def poll_once(adapter, now: datetime) -> PollReport:
+def poll_once(adapter, now: datetime, extra_where: tuple[str, list] | None = None) -> PollReport:
     rep = PollReport()
-    due = due_for_poll(now)
+    # keep the bare call when no profile is given (existing callers + test fakes)
+    due = due_for_poll(now, extra_where) if extra_where else due_for_poll(now)
     if not due:
         return rep
     keys = [(l.asset_id, l.account_id, l.auction_id) for l in due]

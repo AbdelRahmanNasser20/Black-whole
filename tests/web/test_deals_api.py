@@ -9,6 +9,9 @@ def _client(monkeypatch, rows):
     webapp = importlib.import_module("automation.web.app")
 
     captured = {}
+    # /api/deals facets+stats are cached 120 s (#74) — never let one test's
+    # fake stats leak into the next.
+    webapp.deals_facets_cache_clear()
 
     def fake_fetch_all(sql, params=()):
         captured.setdefault("sqls", []).append(sql)

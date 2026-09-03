@@ -56,6 +56,7 @@ from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
 from . import auth as auth_svc
+from deals import profiles
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
 
@@ -63,9 +64,10 @@ try:
     # Auctions tab reads the shared Supabase `auction_listings` table. The
     # loader reuses the upstream ranking/condition helpers, so card output is
     # identical to the old SQLite path — only the data source changed.
-    from ..auctions_supabase import get_top_chairs, cache_stats as _auctions_cache_stats
+    from ..auctions_supabase import get_top_chairs, get_top_lots, cache_stats as _auctions_cache_stats
 except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
+    get_top_lots = None
     _auctions_cache_stats = None
 
 PKG_DIR = Path(__file__).parent
@@ -593,6 +595,16 @@ def _parse_bbox(raw: str | None) -> tuple[float, float, float, float] | None:
         raise HTTPException(400, "bbox must be 'south,west,north,east'")
     return (s, w, n, e)
 
+
+def _profile_where(slug: str | None) -> tuple[str, list] | None:
+    """Resolve ?profile=<slug> into a deal_lots SQL fragment. Empty → no filter."""
+    if not slug:
+        return None
+    try:
+        return profiles.deal_lots_where(profiles.resolve(slug))
+    except KeyError:
+        raise HTTPException(404, f"unknown profile {slug!r}")
+
 # Latest-verdict join (alias `v`) — build_where's min_margin filter and the
 # "margin" sort both reference v.margin_pct, so the same FROM clause is used
 # for the row and count queries alike.
@@ -663,6 +675,7 @@ async def list_deals(
     tag: str | None = None,
     max_distance: float | None = None,
     bbox: str | None = None,
+    profile: str | None = None,
 ):
     """Search/filter/sort deal_lots for the admin Deals tab.
 
@@ -683,6 +696,7 @@ async def list_deals(
         min_margin=min_margin, min_price=min_price, max_price=max_price,
         list_id=list_id, tag=tag,
         bbox=_parse_bbox(bbox),
+        profile_where=_profile_where(profile),
     )
     order = deals_query.order_clause(sort, dir)
 
@@ -735,6 +749,7 @@ async def deals_geo(
     max_price: float | None = None,
     list_id: int | None = None,
     tag: str | None = None,
+    profile: str | None = None,
 ):
     """All mappable lots for the current filter set — feeds the Deals map.
 
@@ -749,6 +764,7 @@ async def deals_geo(
         ending_within=ending_within, status=status,
         min_margin=min_margin, min_price=min_price, max_price=max_price,
         list_id=list_id, tag=tag,
+        profile_where=_profile_where(profile),
     )
 
     def _fetch():
@@ -851,13 +867,14 @@ async def public_deals_facets():
 
 
 @app.get("/api/deals/tree")
-async def deals_tree(status: str = "active"):
+async def deals_tree(status: str = "active", profile: str | None = None):
     """Category tree for the Deals tab explorer: canonical bucket (branch) →
     native GovDeals category (twig), each with lot / zero-bid / ending-24h
     counts. Same status semantics as /api/deals."""
     if status not in ("active", "closed", "all"):
         raise HTTPException(400, "status must be active|closed|all")
-    where, args = deals_query.build_where(status=status)
+    where, args = deals_query.build_where(status=status,
+                                          profile_where=_profile_where(profile))
 
     def _fetch():
         return db.fetch_all(
@@ -1020,6 +1037,98 @@ async def deals_search_delete(search_id: int):
     if not n:
         raise HTTPException(404, "search not found")
     return {"ok": True}
+
+
+# ── Research profiles: what we're hunting for (deals/profiles.py) ────────────
+
+@app.get("/api/profiles")
+async def profiles_list():
+    rows = await asyncio.to_thread(profiles.list_all, True)
+    default = next((p.slug for p in rows if p.is_default), "chairs")
+    return {"profiles": [p.to_row() for p in rows], "default": default}
+
+
+@app.post("/api/profiles")
+async def profiles_create(payload: dict):
+    payload = payload or {}
+    try:
+        p = profiles.from_row({**payload, "slug": profiles.validate_slug(payload.get("slug", ""))})
+        if not p.name.strip():
+            raise ValueError("name required")
+        saved = await asyncio.to_thread(profiles.upsert, p)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except profiles.ProfilesUnavailable as e:
+        raise HTTPException(503, str(e))
+    _AUCTIONS_CACHE.clear()
+    return saved.to_row()
+
+
+@app.delete("/api/profiles/{slug}")
+async def profiles_delete(slug: str):
+    try:
+        ok = await asyncio.to_thread(profiles.delete, slug)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    except profiles.ProfilesUnavailable as e:
+        raise HTTPException(503, str(e))
+    if not ok:
+        raise HTTPException(404, "profile not found")
+    _AUCTIONS_CACHE.clear()
+    return {"ok": True}
+
+
+@app.get("/api/profiles/{slug}/outcomes")
+async def profiles_outcomes(slug: str, days: int = 365):
+    """Past results for a profile: closed lots + their sold comps. This is the
+    'research the past' half — the Deals tab with status=closed is the table,
+    this is the roll-up above it."""
+    pw = _profile_where(slug)
+    where, args = (pw or ("TRUE", []))
+    days = max(1, min(int(days), 3650))
+
+    def _fetch():
+        roll = db.fetch_one(
+            f"""SELECT count(*) AS closed,
+                       count(*) FILTER (WHERE outcome = 'no_bid') AS no_bid,
+                       count(*) FILTER (WHERE outcome = 'sold') AS sold,
+                       percentile_cont(0.5) WITHIN GROUP (ORDER BY final_bid)
+                         FILTER (WHERE final_bid > 0) AS median_final_bid,
+                       max(closed_at) AS last_closed_at
+                FROM deal_lots
+                WHERE outcome_complete IS TRUE
+                  AND closed_at >= now() - make_interval(days => %s)
+                  AND ({where})""",
+            (days, *args))
+        comps = db.fetch_all(
+            f"""SELECT v.asset_id, v.account_id, v.auction_id, v.analyzed_at, v.method,
+                       v.comp_count, v.per_unit, v.margin_pct, v.comps, deal_lots.title
+                FROM deal_verdicts v
+                JOIN deal_lots ON deal_lots.asset_id = v.asset_id
+                              AND deal_lots.account_id = v.account_id
+                              AND deal_lots.auction_id = v.auction_id
+                WHERE v.comp_count > 0 AND ({where})
+                ORDER BY v.analyzed_at DESC LIMIT 20""",
+            tuple(args))
+        return roll or {}, comps
+
+    try:
+        roll, comps = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        raise HTTPException(503, f"outcomes query failed: {e!r}")
+    closed = int(roll.get("closed") or 0)
+    no_bid = int(roll.get("no_bid") or 0)
+    return {
+        "profile": slug, "days": days, "closed": closed, "no_bid": no_bid,
+        "sold": int(roll.get("sold") or 0),
+        "no_bid_pct": round(100.0 * no_bid / closed, 1) if closed else 0.0,
+        "median_final_bid": (None if roll.get("median_final_bid") is None
+                             else round(float(roll["median_final_bid"]), 2)),
+        "last_closed_at": (roll["last_closed_at"].isoformat()
+                           if roll.get("last_closed_at") else None),
+        "comps": [dict(c, analyzed_at=c["analyzed_at"].isoformat() if c.get("analyzed_at") else None)
+                  for c in comps],
+    }
 # ── Tracking list: follow chosen lots through their close (deals/tracking.py) ─
 
 _tracking_adapter = None
@@ -1764,7 +1873,7 @@ async def _pump_scrape_stream(stream: asyncio.StreamReader, kind: str) -> None:
         await scrape_state.broadcast({"t": time.time(), "stream": kind, "data": line})
 
 
-async def _run_scraper(source: str, test_mode: bool) -> None:
+async def _run_scraper(source: str, test_mode: bool, profile_slug: str | None = None) -> None:
     """Run one or all scrapers sequentially (gd → ps → bs when source='both')."""
     steps: list[str] = ["gd", "ps", "bs"] if source == "both" else [source]
     overall_rc = 0
@@ -1789,6 +1898,19 @@ async def _run_scraper(source: str, test_mode: bool) -> None:
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        if profile_slug:
+            # Research profile → scraper env (auction_extractors reads both;
+            # unset = the chair defaults, so a bare launch is unchanged).
+            try:
+                prof = profiles.resolve(profile_slug)
+                if prof.search_terms:
+                    env["SCRAPE_SEARCH_TERMS"] = ",".join(prof.search_terms)
+                env["SCRAPE_ITEM_NOUN"] = prof.item_noun
+                await scrape_state.broadcast({"t": time.time(), "stream": "system",
+                    "data": f"[profile {prof.slug}] terms={prof.search_terms} noun={prof.item_noun}"})
+            except KeyError:
+                await scrape_state.broadcast({"t": time.time(), "stream": "system",
+                    "data": f"[profile {profile_slug!r} unknown — using scraper defaults]"})
 
         await scrape_state.broadcast({
             "t": time.time(), "stream": "system",
@@ -1902,14 +2024,15 @@ async def scrape_start(payload: dict):
     if source not in ("gd", "ps", "bs", "both"):
         raise HTTPException(400, "source must be 'gd', 'ps', 'bs', or 'both'")
     test_mode = bool(payload.get("test"))
+    profile_slug = (payload.get("profile") or "").strip() or None
 
     async with scrape_state.lock:
         if scrape_state.status == "running":
             raise HTTPException(409, "a scrape is already running")
         scrape_state.reset(source, test_mode)
-        asyncio.create_task(_run_scraper(source, test_mode))
+        asyncio.create_task(_run_scraper(source, test_mode, profile_slug))
 
-    return {"ok": True, "source": source, "test_mode": test_mode}
+    return {"ok": True, "source": source, "test_mode": test_mode, "profile": profile_slug}
 
 
 @app.post("/api/scrape/cancel")
@@ -2020,47 +2143,53 @@ async def list_auctions(
     active_only: int = 1,
     max_stale_days: int = 2,
     category: str | None = None,
+    profile: str | None = None,
 ):
-    if get_top_chairs is None:
+    """Top cached lots for a research profile (`profile=<slug>`; default =
+    the default profile, i.e. chairs). Legacy `category=banquet|medical`
+    still works and maps onto a profile."""
+    if get_top_lots is None:
         raise HTTPException(503, "auction_extractors package not available")
     if source not in ("gd", "ps", "bs"):
         raise HTTPException(400, "source must be 'gd', 'ps', or 'bs'")
-    _CATS = {"banquet", "medical", "other"}
-    if category in ("", "all"):
-        category = None
-    if category is not None and category not in _CATS:
-        raise HTTPException(400, f"category must be one of {sorted(_CATS)}")
+    # legacy sub-tab param → profile slug (banquet == default chairs profile)
+    if not profile and category not in (None, "", "all"):
+        if category not in ("banquet", "medical"):
+            raise HTTPException(400, "category must be banquet|medical (or use profile=)")
+        profile = "medical" if category == "medical" else None
+    try:
+        prof = await asyncio.to_thread(profiles.resolve, profile)
+    except KeyError:
+        raise HTTPException(404, f"unknown profile {profile!r}")
     n = max(1, min(int(n), 100))
-    # min_qty default depends on category: medical lots sell as singles.
-    if min_qty is None:
-        min_qty = 1 if category == "medical" else 50
-    min_qty = max(1, int(min_qty))
+    # min_qty default is the profile's floor (chairs 50, medical 1, …).
+    min_qty = prof.min_quantity if min_qty is None else max(1, int(min_qty))
     include_condition = bool(int(condition))
     active_flag = bool(int(active_only))
     stale = max(1, int(max_stale_days))
 
     key = (
-        f"{source}|{n}|{min_qty}|{int(include_condition)}|"
-        f"{int(active_flag)}|{stale}|{category or ''}"
+        f"{prof.slug}|{source}|{n}|{min_qty}|{int(include_condition)}|"
+        f"{int(active_flag)}|{stale}"
     )
     now = time.time()
     cached = _AUCTIONS_CACHE.get(key)
     if cached and (now - cached[0]) < _AUCTIONS_TTL:
-        return {"items": cached[1], "cached": True, "age": int(now - cached[0])}
+        return {"items": cached[1], "cached": True, "age": int(now - cached[0]),
+                "profile": prof.slug}
 
     try:
         items = await asyncio.to_thread(
-            get_top_chairs,
+            get_top_lots, prof,
             source=source,
             n=n,
             min_quantity=min_qty,
             include_condition=include_condition,
             active_only=active_flag,
             max_stale_days=stale,
-            category=category,
         )
     except Exception as e:
-        raise HTTPException(500, f"get_top_chairs failed: {e!r}")
+        raise HTTPException(500, f"get_top_lots failed: {e!r}")
 
     try:
         _annotate_auction_geo(items)
@@ -2068,7 +2197,7 @@ async def list_auctions(
         print(f"[auctions] geo annotation failed: {e!r}")
 
     _AUCTIONS_CACHE[key] = (now, items)
-    return {"items": items, "cached": False, "age": 0}
+    return {"items": items, "cached": False, "age": 0, "profile": prof.slug}
 
 
 @app.post("/api/auctions/refresh")
