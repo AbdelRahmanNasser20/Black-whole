@@ -33,6 +33,7 @@ def build_where(*, q: str | None = None, category: str | None = None,
                 list_id: int | None = None,
                 tag: str | None = None,
                 bbox: tuple[float, float, float, float] | None = None,
+                search_fields: tuple[str, ...] = ("title", "description"),
                 ) -> tuple[str, list]:
     where: list[str] = []
     args: list = []
@@ -41,8 +42,8 @@ def build_where(*, q: str | None = None, category: str | None = None,
     elif status == "closed":
         where.append("outcome_complete IS TRUE")
     if q:
-        where.append("(title ILIKE %s OR description ILIKE %s)")
-        args += [f"%{q}%", f"%{q}%"]
+        where.append("(" + " OR ".join(f"{f} ILIKE %s" for f in search_fields) + ")")
+        args += [f"%{q}%"] * len(search_fields)
     if category:
         where.append("canonical_category = %s")
         args.append(category)
