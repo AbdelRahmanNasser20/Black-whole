@@ -1,1 +1,130 @@
-<!doctype html><html><head><title>Surplus Radar</title></head><body>stub — replaced in Task 7</body></html>
+{# automation/web/templates/deals_public.html — public "Surplus Radar" page.
+   Standalone: NOT _public_base.html (no chair-storefront nav, no Apollo tracker).
+   Never renders auction photos. Data comes from /deals/api/* (public_deals.py). #}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Surplus Radar — every US government surplus auction, tracked to close</title>
+  <meta name="description" content="Live GovDeals lots with quantity-aware $/unit, landed cost, and recorded outcomes. A side project by Black Whole.">
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=JetBrains+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/deals_public.css?v={{ now }}">
+</head>
+<body>
+<header class="sr-head">
+  <a class="sr-brand" href="/deals"><span class="sr-mark">◉</span> SURPLUS RADAR</a>
+  <span class="sr-tag mono">every US government surplus auction, tracked to close</span>
+  <a class="sr-head-link mono" href="#sr-about">ABOUT</a>
+</header>
+
+<details class="sr-about" id="sr-about">
+  <summary class="mono">WHAT THIS IS <span id="sr-about-hint">— tap to collapse</span></summary>
+  <div class="sr-about-grid">
+    <div class="sr-about-copy">
+      <h1>Government surplus, priced by the unit.</h1>
+      <p>Surplus Radar sweeps every live GovDeals auction every six hours, follows each lot to its close, and records how it ended — the no-bids, the $1 wins, the final prices GovDeals itself never publishes.</p>
+      <p>It reads the quantity out of the listing text so a "Lot of (286) HP EliteOne" is priced per machine, not per lot, and adds buyer premium so the number you see is what you'd actually pay.</p>
+    </div>
+    <div class="sr-stats" id="sr-stats">
+      <div class="sr-stat"><div class="sr-stat-num" data-stat="tracked">—</div><div class="sr-stat-lab mono">LOTS TRACKED</div></div>
+      <div class="sr-stat"><div class="sr-stat-num" data-stat="active">—</div><div class="sr-stat-lab mono">LIVE NOW</div></div>
+      <div class="sr-stat"><div class="sr-stat-num" data-stat="closed">—</div><div class="sr-stat-lab mono">OUTCOMES RECORDED</div></div>
+      <div class="sr-stat"><div class="sr-stat-num" data-stat="no_bid">—</div><div class="sr-stat-lab mono">CLOSED WITH NO BIDS</div></div>
+      <div class="sr-stat"><div class="sr-stat-num" data-stat="states">—</div><div class="sr-stat-lab mono">STATES LIVE</div></div>
+    </div>
+  </div>
+  <div class="sr-how">
+    <div><b class="mono">01 SWEEP</b> maestro search API, whole site, every 6 h</div>
+    <div><b class="mono">02 WATCH</b> re-read each lot's clock to its close; anti-snipe extensions included</div>
+    <div><b class="mono">03 RECORD</b> outcome + final bid stored per auction — relists never overwrite history</div>
+    <div><b class="mono">04 PRICE</b> quantity from the title → $/unit, plus 12.5 % buyer premium → landed</div>
+  </div>
+  <p class="sr-diff mono">vs GovAuctions: + quantity &amp; $/unit · + landed cost · + closed-auction history · − their multi-source aggregation (GovDeals only, for now)</p>
+</details>
+
+<form class="sr-topbar" id="sr-topbar" onsubmit="return false;">
+  <input type="search" id="sr-q" placeholder="search titles — laptops, forklift, fryer…" autocomplete="off">
+  <div class="sr-seg" data-key="max_bids">
+    <button type="button" data-value="" class="on">any bids</button>
+    <button type="button" data-value="0">no bids</button>
+    <button type="button" data-value="3">≤ 3</button>
+  </div>
+  <div class="sr-seg" data-key="ending_within">
+    <button type="button" data-value="" class="on">any time</button>
+    <button type="button" data-value="24">&lt; 24 h</button>
+    <button type="button" data-value="48">&lt; 48 h</button>
+    <button type="button" data-value="168">&lt; 7 d</button>
+  </div>
+  <div class="sr-seg" data-key="status">
+    <button type="button" data-value="active" class="on">live</button>
+    <button type="button" data-value="closed">closed</button>
+  </div>
+  <select id="sr-sort" aria-label="sort">
+    <option value="ends">ending soonest</option>
+    <option value="newest">newest</option>
+    <option value="bid:asc">lowest bid</option>
+    <option value="bid:desc">highest bid</option>
+    <option value="bids:desc">most bids</option>
+  </select>
+  <button type="button" class="sr-btn" id="sr-map-toggle">🗺 map</button>
+</form>
+<div class="sr-pills" id="sr-pills"></div>
+
+<div class="sr-map-wrap" id="sr-map-wrap" hidden>
+  <div class="sr-map" id="sr-map"></div>
+  <div class="sr-map-note mono" id="sr-map-note"></div>
+</div>
+
+<div class="sr-layout">
+  <aside class="sr-side" id="sr-side">
+    <details open class="sr-side-box">
+      <summary class="mono">CATEGORY</summary>
+      <div id="sr-cats"></div>
+    </details>
+    <div class="sr-side-box">
+      <label class="mono" for="sr-state">STATE</label>
+      <select id="sr-state"><option value="">all states</option></select>
+    </div>
+    <div class="sr-side-box">
+      <label class="mono">CURRENT BID $</label>
+      <div class="sr-range">
+        <input type="number" id="sr-min-price" placeholder="min" min="0">
+        <input type="number" id="sr-max-price" placeholder="max" min="0">
+      </div>
+    </div>
+    <div class="sr-side-box mono sr-fees">LANDED = bid × 1.125 (buyer premium). Tax and freight not included.</div>
+    <button type="button" class="sr-btn sr-btn-ghost" id="sr-clear">clear all filters</button>
+  </aside>
+
+  <main class="sr-main">
+    <div class="sr-pager" id="sr-pager-top"></div>
+    <div class="sr-table-wrap">
+      <table class="sr-table" id="sr-table">
+        <thead><tr>
+          <th>Title</th><th>Category</th><th>Location</th><th class="num">Bids</th>
+          <th class="num">Bid</th><th class="num" title="parsed from the title; 1 when the title states no count">Qty</th>
+          <th class="num" title="current bid ÷ quantity">$/unit</th><th class="num" title="bid + 12.5% buyer premium, per unit">Landed/unit</th>
+          <th>Ends</th><th></th>
+        </tr></thead>
+        <tbody id="sr-rows"><tr><td colspan="10" class="sr-empty">Loading…</td></tr></tbody>
+      </table>
+    </div>
+    <div class="sr-cards" id="sr-cards"></div>
+    <div class="sr-pager" id="sr-pager-bottom"></div>
+  </main>
+</div>
+
+<footer class="sr-foot mono">
+  <span>SURPLUS RADAR · a Black Whole side project</span>
+  <span>data: GovDeals public search API · photos stay on GovDeals</span>
+</footer>
+
+<script src="/static/admin_map.js"></script>
+<script>window.SR_PER_PAGE = {{ per_page_choices | list | tojson }};</script>
+<script src="/static/deals_public.js?v={{ now }}"></script>
+</body>
+</html>
