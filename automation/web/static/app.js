@@ -469,7 +469,9 @@ function esc(s) {
 
 const auc = {
   source: 'gd',
-  category: '',           // '' | 'banquet' | 'medical' (on-read keyword classifier)
+  profile: '',            // research profile slug (research_profiles); '' = default
+  profiles: [],           // rows from /api/profiles
+  defaultProfile: 'chairs',
   items: [],
   stats: null,
   loading: false,
@@ -519,21 +521,68 @@ $$('#auc-source .seg-btn').forEach(btn => {
   });
 });
 
-// Category sub-tab — medical defaults min-qty to 1 (singles), banquet to 50.
-$$('#auc-category .seg-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    $$('#auc-category .seg-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    auc.category = btn.dataset.value;
-    const minQty = $('#auc-min-qty');
-    if (minQty) {
-      const desired = auc.category === 'medical' ? '1' : '50';
-      minQty.value = desired;
-      const out = $('#auc-min-qty-out');
-      if (out) out.textContent = desired;
-    }
+// ── research profiles (what we're hunting for) — /api/profiles ──
+// Picking a profile sets the min-qty slider to its floor (chairs 50, medical 1).
+async function loadProfiles() {
+  const body = await apiFetch('/api/profiles');
+  auc.profiles = body.profiles || [];
+  auc.defaultProfile = body.default || 'chairs';
+  if (!auc.profile || !auc.profiles.some(p => p.slug === auc.profile)) auc.profile = auc.defaultProfile;
+  renderProfileSeg();
+  const sel = $('#deal-profile');
+  if (sel) {
+    sel.innerHTML = '<option value="">any profile</option>' +
+      auc.profiles.map(p => `<option value="${esc(p.slug)}">${esc(p.name)}</option>`).join('');
+    sel.value = deal.profile || '';
+  }
+  return auc.profiles;
+}
+
+function renderProfileSeg() {
+  const seg = $('#auc-profile');
+  seg.innerHTML = auc.profiles.map(p =>
+    `<button type="button" class="seg-btn ${p.slug === auc.profile ? 'active' : ''}" data-value="${esc(p.slug)}"
+       title="${esc((p.keywords || []).join(', '))} · min ${p.min_quantity}">${esc(p.name)}</button>`).join('');
+  $('#auc-profile-del').disabled = !!(auc.profiles.find(p => p.slug === auc.profile) || {}).is_default;
+}
+
+$('#auc-profile').addEventListener('click', (e) => {
+  const btn = e.target.closest('.seg-btn'); if (!btn) return;
+  auc.profile = btn.dataset.value;
+  const p = auc.profiles.find(x => x.slug === auc.profile);
+  if (p) { $('#auc-min-qty').value = p.min_quantity; $('#auc-min-qty-out').textContent = p.min_quantity; }
+  renderProfileSeg();
+  loadAuctions();
+});
+
+$('#auc-profile-new').addEventListener('click', () => { $('#auc-profile-form').hidden = false; });
+$('#pf-cancel').addEventListener('click', () => { $('#auc-profile-form').hidden = true; });
+$('#pf-save').addEventListener('click', (e) => withButtonLoading(e.currentTarget, 'saving…', async () => {
+  const body = {
+    slug: $('#pf-slug').value, name: $('#pf-name').value, keywords: $('#pf-keywords').value,
+    exclude_terms: $('#pf-exclude').value, search_terms: $('#pf-terms').value,
+    native_category_ids: $('#pf-native').value, min_quantity: $('#pf-minqty').value,
+    item_noun: $('#pf-noun').value || 'units',
+  };
+  try {
+    const saved = await apiFetch('/api/profiles', {method: 'POST', body: JSON.stringify(body),
+                                                   headers: {'content-type': 'application/json'}});
+    auc.profile = saved.slug;
+    $('#auc-profile-form').hidden = true;
+    await loadProfiles();
+    toast(`profile ${saved.slug} saved`, 'ok');
     loadAuctions();
-  });
+  } catch (err) { toast(`save failed: ${err.message || err}`, 'err'); }
+}));
+
+$('#auc-profile-del').addEventListener('click', async () => {
+  if (!auc.profile || !confirm(`Delete profile "${auc.profile}"?`)) return;
+  try {
+    await apiFetch(`/api/profiles/${encodeURIComponent(auc.profile)}`, {method: 'DELETE'});
+    auc.profile = '';
+    await loadProfiles();
+    loadAuctions();
+  } catch (err) { toast(`delete failed: ${err.message || err}`, 'err'); }
 });
 
 $('#auc-min-qty').addEventListener('input', (e) => {
@@ -597,7 +646,7 @@ async function startScrape(source, test) {
     await apiFetch('/api/scrape/start', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
-      body: JSON.stringify({source, test}),
+      body: JSON.stringify({source, test, profile: auc.profile || auc.defaultProfile}),
     });
   } catch (err) {
     setScrapeStrip({status: 'error', source, last_line: err.message || String(err)});
@@ -801,8 +850,9 @@ async function loadAuctions() {
     active_only: $('#auc-expired').checked ? '0' : '1',
     max_stale_days: String(maxStaleDays),
   });
-  if (auc.category) qs.set('category', auc.category);
   try {
+    if (!auc.profiles.length) await loadProfiles();
+    qs.set('profile', auc.profile || auc.defaultProfile);
     const [body, _stats, _favs] = await Promise.all([
       apiFetch('/api/auctions?' + qs.toString()),
       fetchCacheStats(),
@@ -840,7 +890,7 @@ function renderFilterSummary(shownCount, maxStaleDays) {
       reasons.push(`<span class="fs-bad">staleness</span> (newest ${srcKey} row is ${_fmtAge(ageDays)}, filter hides anything past ${maxStaleDays} days)`);
     }
     if ($('#auc-min-qty').value > 50) {
-      reasons.push(`<span class="fs-bad">min-chairs</span> set to ${$('#auc-min-qty').value}`);
+      reasons.push(`<span class="fs-bad">min-units</span> set to ${$('#auc-min-qty').value}`);
     }
     if (activeOnly) {
       reasons.push(`<span class="fs-hint">“Show ended auctions”</span> is off`);
@@ -853,7 +903,7 @@ function renderFilterSummary(shownCount, maxStaleDays) {
       `${srcCount.toLocaleString()} ${srcKey} lots in cache, filters excluded all of them. ${hint}`;
   } else if (shownCount > 0 && shownCount < srcCount) {
     summary.hidden = false;
-    summary.innerHTML = `Showing ${shownCount} of ${srcCount.toLocaleString()} ${srcKey} lots (ranked by chair count).`;
+    summary.innerHTML = `Showing ${shownCount} of ${srcCount.toLocaleString()} ${srcKey} lots (ranked by quantity).`;
   } else {
     summary.hidden = true;
   }
@@ -2181,7 +2231,7 @@ function renderTestScrapeCard(it, match) {
 }
 
 /* ── Deals tab ─────────────────────────────────────────────── */
-const deal = {q: '', category: '', native: '', state: '', maxBids: '', ending: '',
+const deal = {q: '', category: '', native: '', state: '', maxBids: '', ending: '', profile: '',
               status: 'active', sort: 'ends', dir: null, offset: 0, limit: 50,
               minMargin: '', maxDist: '', minPrice: '', maxPrice: '', listId: '', tag: '',
               facetsLoaded: false, treeStatus: null, expanded: new Set(),
@@ -2271,7 +2321,8 @@ function renderDealTree() {
 async function loadDealTree() {
   deal.treeStatus = deal.status;
   try {
-    const r = await fetch('/api/deals/tree?status=' + deal.status);
+    const r = await fetch('/api/deals/tree?status=' + deal.status +
+                          (deal.profile ? '&profile=' + encodeURIComponent(deal.profile) : ''));
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     _dealTree = await r.json();
   } catch (e) {
@@ -2321,6 +2372,7 @@ async function loadDeals() {
   if (deal.maxDist !== '') p.set('max_distance', deal.maxDist);
   if (deal.listId) p.set('list_id', deal.listId);
   if (deal.tag) p.set('tag', deal.tag);
+  if (deal.profile) p.set('profile', deal.profile);
   if (deal.mapOn && deal.bbox) p.set('bbox', deal.bbox);
   p.set('status', deal.status);
   p.set('sort', deal.sort);
@@ -2454,6 +2506,7 @@ function renderDealActiveChips() {
     chips.push({k: 'list', label: `list: ${l ? l.name : deal.listId}`});
   }
   if (deal.tag) chips.push({k: 'tag', label: `tag: ${deal.tag}`});
+  if (deal.profile) chips.push({k: 'profile', label: 'profile: ' + deal.profile});
   host.hidden = !chips.length;
   host.innerHTML = chips.map(c =>
     `<span class="deal-chip deal-af-chip">${_dealEsc(c.label)}<button type="button" class="deal-chip-x" data-k="${c.k}" title="clear filter">×</button></span>`
@@ -2481,6 +2534,7 @@ function clearDealFilter(k) {
     case 'dist': deal.maxDist = ''; $('#deal-max-dist').value = ''; break;
     case 'list': deal.listId = ''; $('#deal-list').value = ''; break;
     case 'tag': deal.tag = ''; $('#deal-tag').value = ''; break;
+    case 'profile': deal.profile = ''; $('#deal-profile').value = ''; $('#deal-outcomes').hidden = true; break;
   }
 }
 
@@ -2494,7 +2548,7 @@ $('#deal-active-chips').addEventListener('click', (e) => {
   }
   if (e.target.closest('#deal-clear-filters')) {
     e.preventDefault();
-    ['q', 'category', 'state', 'bids', 'ending', 'margin', 'price', 'dist', 'list', 'tag']
+    ['q', 'category', 'state', 'bids', 'ending', 'margin', 'price', 'dist', 'list', 'tag', 'profile']
       .forEach(clearDealFilter);
     deal.offset = 0;
     loadDeals();
@@ -2511,6 +2565,29 @@ $('#deal-category').addEventListener('change', (e) => {
   renderDealTree(); loadDeals();
 });
 $('#deal-state').addEventListener('change', (e) => { deal.state = e.target.value; deal.offset = 0; loadDeals(); });
+$('#deal-profile').addEventListener('change', (e) => {
+  deal.profile = e.target.value; deal.offset = 0; deal.treeStatus = null;
+  loadDeals(); loadDealOutcomes();
+});
+
+/* PAST results strip for the chosen profile: /api/profiles/{slug}/outcomes */
+async function loadDealOutcomes() {
+  const host = $('#deal-outcomes');
+  if (!deal.profile) { host.hidden = true; return; }
+  try {
+    const o = await apiFetch(`/api/profiles/${encodeURIComponent(deal.profile)}/outcomes?days=365`);
+    const med = o.median_final_bid == null ? '—' : '$' + o.median_final_bid.toLocaleString();
+    host.hidden = false;
+    host.innerHTML = `PAST 365d · ${o.closed} closed · ${o.no_bid_pct}% no-bid · median final ${med} · ${o.comps.length} lots with sold comps` +
+      (o.comps.length ? ` · <a href="#" id="deal-outcomes-comps">show comps</a>` : '');
+    const a = $('#deal-outcomes-comps');
+    if (a) a.addEventListener('click', (ev) => {
+      ev.preventDefault();
+      host.innerHTML += '<div class="mono tiny">' + o.comps.map(c =>
+        `${esc(c.title || '')} — ${c.comp_count} comps, $${c.per_unit ?? '—'}/unit, margin ${c.margin_pct ?? '—'}%`).join('<br>') + '</div>';
+    });
+  } catch (err) { host.hidden = false; host.textContent = `outcomes unavailable: ${err.message || err}`; }
+}
 $('#deal-ending').addEventListener('change', (e) => { deal.ending = e.target.value; deal.offset = 0; loadDeals(); });
 $$('#deal-bids-filter .seg-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -2628,6 +2705,7 @@ async function refreshDealMapPoints(tableTotal) {
   if (deal.maxPrice !== '') p.set('max_price', deal.maxPrice);
   if (deal.listId) p.set('list_id', deal.listId);
   if (deal.tag) p.set('tag', deal.tag);
+  if (deal.profile) p.set('profile', deal.profile);
   p.set('status', deal.status);
   const qs = p.toString();
   if (qs === deal.geoQS) { updateDealMapNote(tableTotal); return; }
@@ -2738,6 +2816,7 @@ async function loadDealMeta() {
   };
   fillSel('#deal-list', deal.lists.map(l => ({value: l.id, text: `${l.name} (${l.count})`})), deal.listId);
   fillSel('#deal-tag', deal.tagList.map(t => ({value: t.tag, text: `${t.tag} (${t.count})`})), deal.tag);
+  loadProfiles().catch(e => console.warn('profiles load failed:', e));
   renderDealSearches();
 }
 
@@ -2766,6 +2845,7 @@ function currentDealParams() {
   if (deal.maxDist !== '') p.max_distance = Number(deal.maxDist);
   if (deal.listId) p.list_id = Number(deal.listId);
   if (deal.tag) p.tag = deal.tag;
+  if (deal.profile) p.profile = deal.profile;
   if (deal.mapOn && deal.bbox) p.bbox = deal.bbox;
   p.status = deal.status;
   return p;
@@ -2784,6 +2864,7 @@ function applyDealSearch(params) {
   deal.maxDist = params.max_distance != null ? String(params.max_distance) : '';
   deal.listId = params.list_id != null ? String(params.list_id) : '';
   deal.tag = params.tag || '';
+  deal.profile = params.profile || '';
   deal.status = params.status || 'active';
   deal.offset = 0;
   // sync controls back to the restored state
@@ -2797,6 +2878,8 @@ function applyDealSearch(params) {
   syncSel('#deal-ending', deal.ending);
   syncSel('#deal-list', deal.listId);
   syncSel('#deal-tag', deal.tag);
+  syncSel('#deal-profile', deal.profile);
+  loadDealOutcomes();
   $$('#deal-bids-filter .seg-btn').forEach(b =>
     b.classList.toggle('active', b.dataset.value === deal.maxBids));
   $('#deal-min-margin').value = deal.minMargin;
