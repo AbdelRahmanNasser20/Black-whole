@@ -54,6 +54,7 @@ from .. import favorites
 from .. import telegram_alerts
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import public_deals
 from . import auth as auth_svc
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -549,15 +550,25 @@ async def public_listing_detail(request: Request, lot_id: str):
 
 @app.get("/deals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
 async def deal_listing(request: Request, asset_id: int, account_id: int, auction_id: int):
+    """Archived-lot viewer. Public visitors get text only (no source photos —
+    copyright) and never see a seating/operator lot (chair-buyer isolation);
+    an operator session sees everything."""
     row = db.fetch_one("""SELECT * FROM deal_lots
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
         (asset_id, account_id, auction_id))
     if not row:
         raise HTTPException(status_code=404, detail="lot not archived")
+    operator = (not auth_svc.auth_enabled()) or auth_svc.request_has_session(request)
+    if not operator and (
+        public_deals.is_excluded(row)
+        or await asyncio.to_thread(public_deals.is_operator_lot, asset_id, account_id, auction_id)
+    ):
+        raise HTTPException(status_code=404, detail="lot not archived")
     from deals import tracking, tracking_store
     history = tracking_store.history(asset_id, account_id)
     return templates.TemplateResponse(request, "deal_listing.html", {
-        "lot": row, "history": history, "bidders": tracking.bidder_summary(history)})
+        "lot": row, "history": history, "bidders": tracking.bidder_summary(history),
+        "show_images": operator})
 
 
 # ── Deals dashboard API (BLACKWHOLE-12) ─────────────────────────────────────
@@ -754,6 +765,67 @@ async def geo_zip(zip: str):
 
     lat, lng, precision = await asyncio.to_thread(resolve_latlon, z, None)
     return {"zip": z, "lat": lat, "lng": lng, "precision": precision}
+
+
+# ── Public deals surface ("Surplus Radar") — outside the /api/ auth prefix ──
+# Policy + queries: automation/web/public_deals.py. Nothing here touches
+# photos, verdicts, or the operator's home distance.
+
+_PUBLIC_STATUSES = ("active", "closed", "all")
+
+
+@app.get("/deals", response_class=HTMLResponse)
+async def public_deals_page(request: Request):
+    return templates.TemplateResponse(request, "deals_public.html", {
+        "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
+        "per_page_choices": public_deals.PER_PAGE_CHOICES})
+
+
+@app.get("/deals/api/lots")
+async def public_deals_lots(
+    q: str | None = None, category: str | None = None, state: str | None = None,
+    max_bids: int | None = None, ending_within: int | None = None,
+    status: str = "active", min_price: float | None = None,
+    max_price: float | None = None, bbox: str | None = None,
+    sort: str = "ends", dir: str | None = None, page: int = 1, per_page: int = 25,
+):
+    if status not in _PUBLIC_STATUSES:
+        raise HTTPException(400, "status must be active|closed|all")
+    try:
+        return await asyncio.to_thread(
+            public_deals.fetch_page, q=q, category=category, state=state,
+            max_bids=max_bids, ending_within=ending_within, status=status,
+            min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
+            sort=sort, dir=dir, page=page, per_page=per_page)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"deals query failed: {e!r}")
+
+
+@app.get("/deals/api/pins")
+async def public_deals_pins(
+    q: str | None = None, category: str | None = None, state: str | None = None,
+    max_bids: int | None = None, ending_within: int | None = None,
+    status: str = "active", min_price: float | None = None, max_price: float | None = None,
+):
+    if status not in _PUBLIC_STATUSES:
+        raise HTTPException(400, "status must be active|closed|all")
+    try:
+        return await asyncio.to_thread(
+            public_deals.fetch_pins, q=q, category=category, state=state,
+            max_bids=max_bids, ending_within=ending_within, status=status,
+            min_price=min_price, max_price=max_price)
+    except Exception as e:
+        raise HTTPException(503, f"pins query failed: {e!r}")
+
+
+@app.get("/deals/api/facets")
+async def public_deals_facets():
+    try:
+        return await asyncio.to_thread(public_deals.fetch_facets)
+    except Exception as e:
+        raise HTTPException(503, f"facets query failed: {e!r}")
 
 
 @app.get("/api/deals/tree")
@@ -1049,6 +1121,7 @@ async def robots_txt():
         "User-agent: *\n"
         "Disallow: /admin\n"
         "Disallow: /api/\n"
+        "Disallow: /deals\n"
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
