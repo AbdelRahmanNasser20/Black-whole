@@ -71,3 +71,60 @@ def test_deals_geo_and_tree_take_profile(monkeypatch):
     assert geo and "title ILIKE ANY(%s)" in geo[0]
     assert tree and "title ILIKE ANY(%s)" in tree[0]
     assert client.get("/api/deals/tree?profile=nope").status_code == 404
+
+
+# ── /api/profiles CRUD + outcomes (Task 4) ───────────────────────────────────
+
+def test_list_profiles(monkeypatch):
+    client, _ = _client(monkeypatch)
+    body = client.get("/api/profiles").json()
+    assert body["default"] == "chairs" and [p["slug"] for p in body["profiles"]] == ["chairs", "desks"]
+
+
+def test_create_profile_coerces_comma_lists(monkeypatch):
+    client, _ = _client(monkeypatch)
+    webapp = importlib.import_module("automation.web.app")
+    saved = {}
+    monkeypatch.setattr(webapp.profiles, "upsert", lambda p: saved.setdefault("p", p) or p)
+    r = client.post("/api/profiles", json={"slug": "Office-Desks", "name": "Office desks",
+                                           "keywords": "desk, credenza", "min_quantity": "5"})
+    assert r.status_code == 200
+    assert saved["p"].slug == "office-desks" and saved["p"].keywords == ["desk", "credenza"]
+    assert saved["p"].min_quantity == 5
+
+
+def test_create_profile_bad_slug_400(monkeypatch):
+    client, _ = _client(monkeypatch)
+    assert client.post("/api/profiles", json={"slug": "no way", "name": "x"}).status_code == 400
+
+
+def test_create_profile_table_absent_503(monkeypatch):
+    client, _ = _client(monkeypatch)
+    webapp = importlib.import_module("automation.web.app")
+    def boom(p):
+        raise webapp.profiles.ProfilesUnavailable("apply 006 first")
+    monkeypatch.setattr(webapp.profiles, "upsert", boom)
+    r = client.post("/api/profiles", json={"slug": "desks", "name": "Desks"})
+    assert r.status_code == 503 and "006" in r.json()["detail"]
+
+
+def test_delete_default_409(monkeypatch):
+    client, _ = _client(monkeypatch)
+    webapp = importlib.import_module("automation.web.app")
+    def boom(slug):
+        raise ValueError("default")
+    monkeypatch.setattr(webapp.profiles, "delete", boom)
+    assert client.delete("/api/profiles/chairs").status_code == 409
+
+
+def test_outcomes_rollup_uses_profile_filter(monkeypatch):
+    client, cap = _client(monkeypatch)
+    webapp = importlib.import_module("automation.web.app")
+    monkeypatch.setattr(webapp.db, "fetch_one", lambda sql, params=(): {
+        "closed": 10, "no_bid": 4, "sold": 6, "median_final_bid": 120.0, "last_closed_at": None})
+    r = client.get("/api/profiles/desks/outcomes")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["closed"] == 10 and body["no_bid_pct"] == 40.0 and body["comps"] == []
+    comps_sql = [s for s, _ in cap["sqls"] if "deal_verdicts" in s]
+    assert comps_sql and "title ILIKE ANY(%s)" in comps_sql[0]

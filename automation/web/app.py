@@ -1036,6 +1036,98 @@ async def deals_search_delete(search_id: int):
     if not n:
         raise HTTPException(404, "search not found")
     return {"ok": True}
+
+
+# ── Research profiles: what we're hunting for (deals/profiles.py) ────────────
+
+@app.get("/api/profiles")
+async def profiles_list():
+    rows = await asyncio.to_thread(profiles.list_all, True)
+    default = next((p.slug for p in rows if p.is_default), "chairs")
+    return {"profiles": [p.to_row() for p in rows], "default": default}
+
+
+@app.post("/api/profiles")
+async def profiles_create(payload: dict):
+    payload = payload or {}
+    try:
+        p = profiles.from_row({**payload, "slug": profiles.validate_slug(payload.get("slug", ""))})
+        if not p.name.strip():
+            raise ValueError("name required")
+        saved = await asyncio.to_thread(profiles.upsert, p)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except profiles.ProfilesUnavailable as e:
+        raise HTTPException(503, str(e))
+    _AUCTIONS_CACHE.clear()
+    return saved.to_row()
+
+
+@app.delete("/api/profiles/{slug}")
+async def profiles_delete(slug: str):
+    try:
+        ok = await asyncio.to_thread(profiles.delete, slug)
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    except profiles.ProfilesUnavailable as e:
+        raise HTTPException(503, str(e))
+    if not ok:
+        raise HTTPException(404, "profile not found")
+    _AUCTIONS_CACHE.clear()
+    return {"ok": True}
+
+
+@app.get("/api/profiles/{slug}/outcomes")
+async def profiles_outcomes(slug: str, days: int = 365):
+    """Past results for a profile: closed lots + their sold comps. This is the
+    'research the past' half — the Deals tab with status=closed is the table,
+    this is the roll-up above it."""
+    pw = _profile_where(slug)
+    where, args = (pw or ("TRUE", []))
+    days = max(1, min(int(days), 3650))
+
+    def _fetch():
+        roll = db.fetch_one(
+            f"""SELECT count(*) AS closed,
+                       count(*) FILTER (WHERE outcome = 'no_bid') AS no_bid,
+                       count(*) FILTER (WHERE outcome = 'sold') AS sold,
+                       percentile_cont(0.5) WITHIN GROUP (ORDER BY final_bid)
+                         FILTER (WHERE final_bid > 0) AS median_final_bid,
+                       max(closed_at) AS last_closed_at
+                FROM deal_lots
+                WHERE outcome_complete IS TRUE
+                  AND closed_at >= now() - make_interval(days => %s)
+                  AND ({where})""",
+            (days, *args))
+        comps = db.fetch_all(
+            f"""SELECT v.asset_id, v.account_id, v.auction_id, v.analyzed_at, v.method,
+                       v.comp_count, v.per_unit, v.margin_pct, v.comps, deal_lots.title
+                FROM deal_verdicts v
+                JOIN deal_lots ON deal_lots.asset_id = v.asset_id
+                              AND deal_lots.account_id = v.account_id
+                              AND deal_lots.auction_id = v.auction_id
+                WHERE v.comp_count > 0 AND ({where})
+                ORDER BY v.analyzed_at DESC LIMIT 20""",
+            tuple(args))
+        return roll or {}, comps
+
+    try:
+        roll, comps = await asyncio.to_thread(_fetch)
+    except Exception as e:
+        raise HTTPException(503, f"outcomes query failed: {e!r}")
+    closed = int(roll.get("closed") or 0)
+    no_bid = int(roll.get("no_bid") or 0)
+    return {
+        "profile": slug, "days": days, "closed": closed, "no_bid": no_bid,
+        "sold": int(roll.get("sold") or 0),
+        "no_bid_pct": round(100.0 * no_bid / closed, 1) if closed else 0.0,
+        "median_final_bid": (None if roll.get("median_final_bid") is None
+                             else round(float(roll["median_final_bid"]), 2)),
+        "last_closed_at": (roll["last_closed_at"].isoformat()
+                           if roll.get("last_closed_at") else None),
+        "comps": [dict(c, analyzed_at=c["analyzed_at"].isoformat() if c.get("analyzed_at") else None)
+                  for c in comps],
+    }
 # ── Tracking list: follow chosen lots through their close (deals/tracking.py) ─
 
 _tracking_adapter = None
