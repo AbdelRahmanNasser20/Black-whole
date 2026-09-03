@@ -1,0 +1,587 @@
+    <!DOCTYPE html>
+    <html lang='en'>
+        <head>
+            <title>Public Surplus: 
+     File Not Found
+</title>
+            <meta http-equiv="Content-Type" content="text/html; charset=iso-8859-1" />
+            <meta name="template" content="psV2/en/error/Error404.ftlh" />
+            <meta name="viewport" content="width=device-width, initial-scale=1"/>
+<link href="/sms/20260805/styles/bootstrap-icons-1.11.1/bootstrap-icons.css" rel="stylesheet" type="text/css" />
+<link href="/sms/20260805/styles/bootstrap-5.2.3/bootstrap.min.css" rel="stylesheet" type="text/css" />
+<link href="/sms/20260805/styles/ps-v2.css" rel="stylesheet" type="text/css" />
+<script type="text/javascript" src="/sms/20260805/js/bootstrap-5.2.3/bootstrap.bundle.min.js"></script>
+
+
+            <link rel="icon" href="/sms/20260805/images/ps_favicon.ico"/>
+	<script type="text/javascript">
+	onerror = function(msg,url,l){
+		var txt="_s=5b5e9db0aec477a3e701f61252e3b064&_r=img";
+		txt+="&Msg="+escape(msg);
+		txt+="&URL="+escape(url);
+		txt+="&Line="+l;
+		txt+="&Platform="+escape(navigator.platform);
+		txt+="&UserAgent="+escape(navigator.userAgent);
+		var i = document.createElement("img");
+		i.setAttribute("src", (("https:" == document.location.protocol) ? "https://errorstack.appspot.com" : "http://www.errorstack.com") + "/submit?" + txt);
+		document.body.appendChild(i);
+	}
+	</script>
+
+
+            <script type="text/javascript" src="/sms/20260805/js/scriptaculous-js-1.8.0/lib/prototype.js"></script>
+            <script type="text/javascript" src="/sms/20260805/js/cookie.js"></script>
+            
+
+            
+            <script type="text/javascript">
+                function Auction_PopupWindow(thispage, name, params, popup) {
+	if(!popup){
+		if(this.frameElement){
+			document.location.href=thispage;
+			return;
+		}else{
+			if(iframeModalBootstrap){
+				var modal = document.getElementById(name);
+				if (modal == null) {
+					name = 'iframeModal'
+					modal = document.getElementById(name)
+				}
+				if(modal){
+					modal = bootstrap.Modal.getOrCreateInstance(modal);
+					if(modal){
+						modal.show();
+						iframeModalBootstrap(name, thispage);
+						return;
+					}
+				}
+			}
+		}
+	}
+
+	if (name == null) { name = "pop"; }
+	thiswindow = window.open(thispage,'psw_'+name,params);
+}
+                /**
+     * Sets the 'src' property for an iframe embedded in a given modal.
+     * Creates an event listener event to reset the src value once the modal is hidden.
+     */
+    function iframeModalBootstrap(modalId, iframeSource) {
+        let iframeModal = document.getElementById("iframe"+modalId);
+        if (iframeModal !== null) {
+            iframeModal.setAttribute("src", iframeSource);
+            let iframeModalBootstrap = document.getElementById(modalId);
+            iframeModalBootstrap.addEventListener('hide.bs.modal', event => {
+                iframeModal.setAttribute("src", "");
+            });
+        }
+    }
+                function loggingOut() {
+ if (confirm('Are you sure you want to logout?')) {
+   self.location.href="/sms/login/logout";
+ }
+}
+                function loggingIn() {
+  var currLoc;
+  if (self.location.pathname && self.location.pathname.indexOf("/login/") < 0 && self.location.pathname.indexOf("/about/") < 0) {
+    currLoc = "?&dst=" + escape(self.location.pathname.substring("/sms".length) + self.location.search.replace(/\?_mls=(f|m)/, "").replace(/&_mls=(f|m)/, ""));
+  }
+  else {
+    currLoc = "";
+  }
+  self.location.href="/sms/login/login" + currLoc;
+}
+                function addCustomZoom(targetId, enableZoom = false) {
+		if(!enableZoom) return;
+
+		const handleResize = throttle(() => {
+			setPageScale(targetId)
+		});
+
+		document.addEventListener("DOMContentLoaded", () => setPageScale(targetId))
+		window.addEventListener("resize", () => { handleResize() } )
+	}
+
+	
+		function setPageScale(targetId) {
+			const target = document.getElementById(targetId)
+			if (!target) return
+
+			const baseWidth = 1610;
+			const scrollBarWidth = window.innerWidth - document.documentElement.clientWidth;
+			const currentWidth = window.innerWidth - scrollBarWidth;
+			const currentHeight = window.innerHeight;
+
+			if(currentWidth <= baseWidth) {
+				target.style.transform = 'none';
+				target.style.margin = '0';
+				return;
+			}
+
+			const scalePercentage = Math.round((currentWidth / baseWidth) * 100);
+			target.style.transform = 'scale(' + scalePercentage + '%)';
+
+			const verticalMargin = Math.ceil(((currentHeight * (scalePercentage / 100)) - currentHeight) / 2);
+			const horizontalMargin = Math.ceil((((currentWidth * (scalePercentage / 100)) - currentWidth) / 2) / (scalePercentage / 100));
+
+			target.style.margin = verticalMargin + 'px ' + horizontalMargin + 'px';
+		}
+                function throttle (cb, delay = 200) {
+          let shouldWait = false
+          let waitingArgs = null
+          let timeout
+
+          const timeoutFn = () => {
+            if (waitingArgs === null) {
+              shouldWait = false
+            } else {
+              cb(...waitingArgs)
+              waitingArgs = null
+              setTimeout(timeoutFn, delay)
+            }
+          }
+
+          return (...args) => {
+            if (shouldWait) {
+              waitingArgs = args
+              return
+            }
+
+            cb(...args)
+            shouldWait = true
+
+            clearTimeout(timeout) // Clear the timeout before setting a new one
+            timeout = setTimeout(timeoutFn, delay)
+          }
+        }
+                
+
+                    addCustomZoom('zoom-target-id');
+            </script>
+
+            
+
+            <script type="text/javascript">
+   	function acceptCookies() 
+	{
+		var aYearFromNow = new Date();
+		aYearFromNow.setFullYear(aYearFromNow.getFullYear() + 1);
+		
+		$('cookiesAcceptedDiv').hide();
+		setCookie("cookiesAccepted_1", "Y", aYearFromNow, '/');
+	}
+            </script>
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-ML1H9LELDC"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+
+        function gtag() {
+            dataLayer.push(arguments);
+        }
+
+        gtag('js', new Date());
+        gtag('config', 'G-ML1H9LELDC');
+    </script>
+        </head>
+
+        <body id="main-body-id" >
+
+
+
+<div style='width:100%; display: none;' id="cookiesAcceptedDiv">
+    <div class="message-container">
+        <h2>
+            This website uses cookies to ensure you get the best experience on our website. Please accept cookies for optimal performance.
+        </h2>
+    </div>
+    <div class="container-button">
+        <button type="button" class="ps-button" color="light" onclick="acceptCookies();">
+            Yes, I Accept Cookies
+        </button>
+        <button
+                class="ps-button mx-4" color="link"
+                type="button"
+                data-bs-toggle="modal"
+                data-bs-target="#iframeModal"
+                onclick="iframeModalBootstrap('iframeModal', '/sms/help/public/privacy.html');"
+        >
+            [
+            Public Surplus Privacy Policy
+            ]
+        </button>
+        <button
+                class="ps-button" color="link"
+                type="button"
+                data-bs-toggle="modal"
+                data-bs-target="#iframeModal"
+                onclick="iframeModalBootstrap('iframeModal', '/sms/help/public/info_cookies.ftlh');"
+        >
+            [
+            How to manage the cookies
+            ]
+        </button>
+    </div>
+</div>
+
+            <a class="skiplink" href="#startcontent" style="display:none;">Skip over navigation</a>
+
+
+	<div class="modal fade" id="iframeModal" tabindex="-1" role="dialog"
+		data-bs-backdrop="true" data-bs-keyboard="true" data-bs-focus="true"
+	>
+		<div class="modal-dialog d-flex align-items-center" style="--bs-modal-width: 60rem;height: calc(100% - var(--bs-modal-margin) * 2);">
+			<div class="modal-content h-100" style="max-height: 54rem;">
+				<div class="modal-body pt-1 px-1 pb-0 h-100">
+					<div class="embed-responsive z-depth-1-half h-100">
+						<iframe id="iframeiframeModal" class="embed-responsive-item w-100 h-100" src=""></iframe>
+					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+            
+            
+
+
+            <div id="zoom-target-id" class="w-100 h-100 d-flex flex-column">
+                    <header>
+
+
+
+	
+	<div class="header">
+	<script type="text/javascript">
+		//
+		var navfuncs = {
+		 	selectApp : function(sapp) {
+		 	    if (sapp == 'gems') {
+		   			document.location.href = "http://www.publicpurchase.com" + "/gems/browse/home";
+		   		}
+		 	  	if (sapp == 'con') {
+		  			document.location.href = "http://www.publicpurchase.com" + "/contract/home/home";
+		  		} 
+				if (sapp == 'req') {
+		  			document.location.href = "http://" + "/gems/pr/home/dash";
+		  		} 
+		  		if (sapp == 'vendor') {
+		  			document.location.href = "http://www.publicpurchase.com" + "/vendor/agency/home";
+		  		}
+		  		if (sapp == 'cat') {
+		  			document.location.href = "http://" + "/gems/cat/home/dash";
+		  		}
+		  		if (sapp == 'portal') {
+		  			document.location.href = "http://www.publicpurchase.com" + "/portal/view/home";
+		  		}
+		  		if (sapp == 'surplus') {
+		  			document.location.href = "http://www.publicsurplus.com" + "/sms/browse/home";
+		  		}
+		 	}
+		 }
+	 </script>
+		 <div class="logo">
+			<a href="javascript:navfuncs.selectApp('surplus');"><img style="width: 249px" src="/sms/20260805/images/pslogo.svg" alt="Public Surplus Logo" border="0"/></a>
+	     </div>
+			
+    <script type="text/javascript">
+        var pslanguage = "en";
+    </script>
+
+    <div class="pb-1 d-flex justify-content-end me-2 mt-2 ms-lg-0 ms-auto mb-md-2 mb-lg-0 align-self-start language-container">
+        <div
+                id="langdiv"
+                class="ps-lang-position"
+                onmouseover="$('langlistdiv').show();"
+                onmouseout="$('langlistdiv').hide();"
+        >
+            <script type="text/javascript">
+                function base_changeLangugage(locale) {
+                    if (locale == null) { return; }
+                    new Ajax.Request('/sms/about/home.ftlh?locale='+locale, {
+                        onComplete: function() {
+                            document.location.reload();
+                        }
+                    });
+                }
+
+                function base_changeTheme(theme) {
+                    if (!theme) return;
+                    new Ajax.Request('/sms/login/changeTheme?theme=' + theme, {
+                        method: 'post',
+                        onSuccess: function(transport) {
+                            if (isThemeChangeAccepted(transport)) {
+                                location.href = setLayoutSkinParam(location.href, 'm');
+                            }
+                        }
+                    });
+                }
+
+                function isThemeChangeAccepted(transport) {
+                    var response = transport.responseJSON;
+                    if (!response && transport.responseText) {
+                        try {
+                            response = transport.responseText.evalJSON(true);
+                        } catch (e) {
+                            response = null;
+                        }
+                    }
+                    return response && response.response && response.response.statusCode == 'found';
+                }
+
+                function setLayoutSkinParam(url, value) {
+                    url = url
+                        .replace(/([?&])_mls=[^&]*&/, '$1')
+                        .replace(/[?&]_mls=[^&]*$/, '')
+                        .replace(/\?&/, '?');
+                    return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_mls=' + value;
+                }
+            </script>
+
+            <div class="ps-lang-menu">
+                <a class="d-flex align-items-center justify-content-between">
+                    <img style="vertical-align: top; padding-top: 2px;" alt="English" src="/sms/20260805/images/ps/en.png"/>English
+
+<i title="More Languages" data-bs-toggle="tooltip" aria-label="More Languages" data-bs-custom-class="icon-tooltip" class="bi bi-caret-down-fill small me-2" style="color: var(--ps-color-white); "></i>                </a>
+            </div>
+
+            <div id="langlistdiv" class="ps-lang-list" style="display: none;">
+                <ul class="ps-0 mb-0 py-2">
+                            <li>
+                                <a class="d-flex align-items-center justify-content-start" href="javascript:base_changeLangugage('es');"/>
+                                    <img style="vertical-align: top; padding-top: 2px;" alt="Spanish" src="/sms/20260805/images/ps/es.png"/>Spanish
+
+                                </a>
+                            </li>
+                            <li>
+                                <a class="d-flex align-items-center justify-content-start" href="javascript:base_changeLangugage('fr');"/>
+                                    <img style="vertical-align: top; padding-top: 2px;" alt="French" src="/sms/20260805/images/ps/fr.png"/>French
+
+                                </a>
+                            </li>
+                    <li>
+                        <a class="d-flex align-items-center justify-content-start" href="javascript:base_changeTheme('psmobile');">
+<i aria-hidden="true" class="bi bi-universal-access-circle me-2 pe-1" style="color: var(--ps-color-dark-blue-plus); "></i>                            WCAG
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+	
+		 </div>
+		 <div class="small header-change-theme" style="text-align: right; padding-right: 8px">
+		 </div>
+
+		<div class="small header-change-theme pb-1" style="text-align: right; padding-right: 8px">
+		</div>
+
+	
+
+
+	<nav
+		class="ps-main-bar d-flex flex-wrap navbar navbar-expand-md navbar-light py-0 mt-2 d-print-none">
+		<div class="menu-button-container d-flex d-md-none w-100 pe-2 py-2">
+			<button
+					class="navbar-toggler-menu-button navbar-toggler d-flex ms-auto"
+					type="button"
+					data-bs-toggle="collapse"
+					data-bs-target="#navbarTogglerMenu"
+					aria-controls="navbarTogglerMenu"
+					aria-expanded="false"
+					aria-label="Toggle navigation"
+			>
+				<span class="navbar-toggler-icon align-self-center"></span>
+			</button>
+		</div>
+
+		<div id="navbarTogglerMenu" class="top-menu collapse navbar-collapse h-100">
+			<div class="navbar-nav top-menu__left nav-sup-left">
+<a
+class="noborder"
+href="javascript:Auction_PopupWindow('/sms/help/onlineHelp.ftlh','onlineHelp','width=540,height=400,scrollbars=yes,resizable=yes', true);"
+>
+Chat
+<span class="ms-1 nav-bar-chat" title="Live Chat" aria-label="Live Chat" data-bs-custom-class="icon-tooltip">
+<i class="bi bi-chat-left-dots-fill" style="position: absolute; font-size: 0.92rem; color: var(--ps-color-light-blue); color: var(--ps-color-white)"></i>
+<i class="bi bi-chat-right" style="position: relative; top: -4px; left: 6px; font-size: 0.92rem; color: var(--ps-color-light-blue); color: var(--ps-color-white)"></i>
+</span></a>    <span class="d-none d-md-inline">|</span>
+<a
+href="#iframeModal"
+data-bs-toggle="modal"
+data-bs-target="#iframeModal"
+onclick="iframeModalBootstrap('iframeModal', '/sms/help/mainhelp.ftlh?frame1=public/info.ftlh&amp;frame2=public/info_email.ftlh');"
+>
+Help
+</a>    <span class="d-none d-md-inline">|</span>
+					<a href="javascript:loggingIn();">
+						Login
+					</a>
+			</div>
+
+			<div class="navbar-nav top-menu__right nav-sup-right">
+				<a  href="/sms/browse/home?tm=m"
+				   target="_top" >
+					Home
+				</a>    <span class="d-none d-md-inline">|</span>
+
+				<a  href="/sms/browse/allcat?tm=m"
+				   target="_top" >
+					Browse
+				</a>    <span class="d-none d-md-inline">|</span>
+
+
+				<a  href="/sms/browse/search?tm=m"
+				   target="_top" >
+					Search
+				</a>
+					    <span class="d-none d-md-inline">|</span>
+<a  href="/sms/about/home.ftlh">
+						About</a>			</div>
+		</div>
+	</nav>
+
+<div class="w-100 ps-border-bottom-gross d-none d-md-block"></div>
+
+
+
+                    </header>
+
+                <main class="ps-container container-fluid" style="flex: 1; min-height: auto">
+                    <section class="h-100 w-100">
+                        
+
+                        <span id="startcontent"></span>
+
+                        
+
+                        
+    <div class="h-100 w-100 d-flex justify-content-center align-items-center row g-0">
+        <div class="info-box col-10 col-md-6 col-xl-5 col-xxl-4" role="alert">
+            <section class="info-box__content p-3">
+                <div class="d-flex align-items-center mb-4">
+<i title="Warning" data-bs-toggle="tooltip" aria-label="Warning" data-bs-custom-class="icon-tooltip" class="bi bi-exclamation-circle me-3" style="color: var(--ps-color-danger); font-size:3rem;"></i>                    <h3>
+                        File Not Found - Error 404
+                    </h3>
+                </div>
+
+                <p>
+                    <span class="text-danger">
+                        Sorry!
+                    </span>
+                    <span>
+                        The file you have requested cannot be found. &nbsp;Please press your Back button and request a different file.
+                    </span>
+                </p>
+
+                <p>
+                    If you are certain that this URL is valid, please contact our Customer Support at:
+                    <a href="mailto:support@publicsurplus.com?subject=File%20Not%20Found%20-%20404">
+                        support@publicsurplus.com
+                    </a>
+                </p>
+
+                <p>
+                    Thank you, <br/>Public Surplus Engineering Team
+                </p>
+            </section>
+        </div>
+    </div>
+
+                    </section>
+
+                    
+                </main>
+
+                    <footer>
+                        <div style="clear:left;">
+    <div class="d-none d-md-flex ps-border-top-gross d-print-none"></div>
+
+    <div class="d-none d-md-flex ps-main-bar d-print-none">
+        <div class="left-sidebar"></div>
+        <div class="right-sidebar"></div>
+    </div>
+
+    <div class="ps-footer-line-slim d-md-none d-print-none"></div>
+
+    <div class="d-flex justify-content-center flex-wrap ps-footer-info mt-3 d-print-none">
+        Customer Support:&nbsp            <a href="mailto:support@publicsurplus.com">support@publicsurplus.com</a>
+         |
+
+        Copyright 1999-2026 The Public Group, LLC.
+            |
+        All rights reserved. 
+    </div>
+
+    <div class="d-flex justify-content-center pt-2">
+        <img src="/sms/20260805/images/logoGroup_footer.png"
+                                          alt="The Public Group"/>
+    </div>
+</div>
+                    </footer>
+             </div>
+
+
+        </body>
+
+        <script type="text/javascript">
+            function hideIconTooltip(icon){
+		var tooltip = bootstrap.Tooltip.getInstance(icon);
+		if(tooltip) {
+			tooltip.hide();
+		}
+	}
+
+	function disposeIconTooltip(icon){
+		var tooltip = bootstrap.Tooltip.getInstance(icon);
+		if(tooltip) {
+			tooltip.dispose();
+		}
+	}
+
+	function reactivateTooltipAfterIconChange(icon) {
+		var parent = icon.parentElement;
+		if (parent && parent.tagName === 'BUTTON') {
+			//if the tooltip is visible, the tooltip is hidden before changing the current icon
+			parent.addEventListener("click", (event) => hideIconTooltip(icon));
+			//after call ajax function, detects if there is a change in the button icon and reactivates the tooltip on the new icon
+			var observer = new MutationObserver(function(mutationsList, observer) {
+				mutationsList.forEach(mutation => {
+					if (mutation.type === 'childList') {
+						var newIcon = parent.querySelector('[data-bs-custom-class*="icon-tooltip"]');
+						bootstrap.Tooltip.getOrCreateInstance(newIcon);
+						parent.addEventListener("click", (event) => hideIconTooltip(newIcon));
+					}
+				});
+			});
+			var config = { childList: true };
+			observer.observe(parent, config);
+		} else if (parent) {
+			icon.addEventListener("click", (event) => hideIconTooltip(icon));
+		}
+	}
+
+	function activateIconTooltips() {
+		document.querySelectorAll('[data-bs-custom-class*="icon-tooltip"]').forEach(icon => {
+			activateIconTooltip(icon);
+		});
+	}
+
+	function activateIconTooltip(icon) {
+		bootstrap.Tooltip.getOrCreateInstance(icon);
+		reactivateTooltipAfterIconChange(icon);
+	}
+
+	if (document.addEventListener) {
+		document.addEventListener("DOMContentLoaded", (event) => {
+			activateIconTooltips();
+		});
+	}
+        </script>
+    </html>
+
+
+
+
+
