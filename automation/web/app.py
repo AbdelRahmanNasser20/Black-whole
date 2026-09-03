@@ -556,7 +556,10 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
         (asset_id, account_id, auction_id))
     if not row:
         raise HTTPException(status_code=404, detail="lot not archived")
-    return templates.TemplateResponse(request, "deal_listing.html", {"lot": row})
+    from deals import tracking, tracking_store
+    history = tracking_store.history(asset_id, account_id)
+    return templates.TemplateResponse(request, "deal_listing.html", {
+        "lot": row, "history": history, "bidders": tracking.bidder_summary(history)})
 
 
 # ── Deals dashboard API (BLACKWHOLE-12) ─────────────────────────────────────
@@ -837,6 +840,89 @@ async def deals_search_delete(search_id: int):
     if not n:
         raise HTTPException(404, "search not found")
     return {"ok": True}
+# ── Tracking list: follow chosen lots through their close (deals/tracking.py) ─
+
+_tracking_adapter = None
+
+
+def _govdeals_adapter():
+    global _tracking_adapter
+    if _tracking_adapter is None:
+        from deals import sites
+        _tracking_adapter = sites.get_adapter("govdeals")
+    return _tracking_adapter
+
+
+@app.get("/api/tracking")
+async def tracking_list(label: str | None = None):
+    from deals import tracking_store
+    return {"items": tracking_store.list_all(label or None),
+            "labels": tracking_store.labels()}
+
+
+@app.post("/api/tracking")
+async def tracking_add(payload: dict):
+    from deals import tracking
+    payload = payload or {}
+    ref = (payload.get("ref") or "").strip()
+    if not ref:
+        raise HTTPException(400, "ref required (GovDeals URL or asset/account)")
+    label = (payload.get("label") or "").strip() or "default"
+    note = (payload.get("note") or "").strip() or None
+    try:
+        row = await asyncio.to_thread(
+            tracking.add_tracked, _govdeals_adapter(), ref, label=label, note=note)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return row
+
+
+@app.patch("/api/tracking/{asset_id}/{account_id}")
+async def tracking_patch(asset_id: int, account_id: int, payload: dict):
+    from deals import tracking_store
+    payload = payload or {}
+    label = payload.get("label")
+    row = tracking_store.patch(asset_id, account_id,
+                               label=(label.strip() or "default") if isinstance(label, str) else None,
+                               note=payload.get("note"))
+    if not row:
+        raise HTTPException(404, "not tracked")
+    return row
+
+
+@app.delete("/api/tracking/{asset_id}/{account_id}")
+async def tracking_remove(asset_id: int, account_id: int):
+    from deals import tracking_store
+    if not tracking_store.delete(asset_id, account_id):
+        raise HTTPException(404, "not tracked")
+    return {"ok": True}
+
+
+@app.get("/api/tracking/{asset_id}/{account_id}/history")
+async def tracking_history(asset_id: int, account_id: int):
+    """Bid timeline (every observed change), the bidders collapsed by id, and
+    the other lots those same bidders have been seen leading."""
+    from deals import tracking, tracking_store
+    row = tracking_store.get(asset_id, account_id)
+    observations = tracking_store.history(asset_id, account_id)
+    bidders = tracking.bidder_summary(observations)
+    rivals = tracking_store.rival_lots([b["bidder_id"] for b in bidders],
+                                       exclude=(asset_id, account_id))
+    return {"lot": row, "observations": observations, "bidders": bidders, "rivals": rivals}
+
+
+@app.post("/api/tracking/sync")
+async def tracking_sync_now():
+    """Poll every open tracked lot right now, ignoring the schedule."""
+    from deals import tracking, tracking_store
+    adapter = _govdeals_adapter()
+    adopted = await asyncio.to_thread(tracking.adopt_favorites, adapter)
+    # Force everything due, then run the normal pass.
+    db.execute("UPDATE tracked_lots SET next_poll_at = now() WHERE closed_at IS NULL")
+    report = await asyncio.to_thread(tracking.sync_tracked, adapter)
+    return {"adopted_favorites": adopted, **report}
+
+
 def _deal_images(row: dict) -> list[str]:
     """Ordered image list for a lot: archived copies when we have them
     (durable Supabase URLs), else the GovDeals CDN hero."""
@@ -2084,15 +2170,51 @@ async def _alerts_tick() -> None:
         print(f"[favorites] tick error: {e!r}")
 
 
+def _tracking_pass() -> dict:
+    """Blocking: adopt new favorites, then poll whatever tracked lots are due.
+    Runs in a worker thread off the scheduler tick. Cheap when nothing is due
+    (two indexed SELECTs); the per-lot schedule in tracked_lots.next_poll_at
+    decides how often the bidbox is actually hit."""
+    from deals import tracking
+    adapter = _govdeals_adapter()
+    tracking.adopt_favorites(adapter)
+    return tracking.sync_tracked(adapter, verbose=False)
+
+
+async def _tracking_tick() -> None:
+    try:
+        rep = await asyncio.to_thread(_tracking_pass)
+        if rep.get("recorded") or rep.get("closed") or rep.get("errors"):
+            print(f"[tracking] {rep}")
+    except Exception as e:
+        # Same rule as the favorites tick: one bad pass must not kill the loop.
+        print(f"[tracking] tick error: {e!r}")
+
+
 async def _alerts_loop() -> None:
     while True:
         await _alerts_tick()
         await asyncio.sleep(_SCHEDULER_TICK_SEC)
 
 
+_tracking_task: asyncio.Task | None = None
+
+
+async def _tracking_loop() -> None:
+    # Its own task, not a step of _alerts_loop: every db call opens a fresh
+    # pooler connection (~1s), so a pass over ten due lots can run a minute,
+    # and the 5-minute countdown alert must not wait behind it.
+    while True:
+        await _tracking_tick()
+        await asyncio.sleep(_SCHEDULER_TICK_SEC)
+
+
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
-    global _alerts_task
+    global _alerts_task, _tracking_task
+    if _tracking_task is None or _tracking_task.done():
+        _tracking_task = asyncio.create_task(_tracking_loop())
+        print(f"[tracking] bid-history poller started (tick={_SCHEDULER_TICK_SEC:.0f}s)")
     if _alerts_task is None or _alerts_task.done():
         _alerts_task = asyncio.create_task(_alerts_loop())
         print(

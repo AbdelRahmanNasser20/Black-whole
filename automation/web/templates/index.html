@@ -48,6 +48,9 @@
     <button class="tab" data-tab="deals">
       <span class="tab-num">10</span><span class="tab-label">Deals</span>
     </button>
+    <button class="tab" data-tab="tracking">
+      <span class="tab-num">11</span><span class="tab-label">Tracking</span>
+    </button>
   </nav>
   <div class="meta">
     <span class="status-dot" id="conn-dot"></span>
@@ -431,6 +434,62 @@
 
   <div class="inq-list" id="sub-list">
     <div class="drafts-empty">Loading subscribers…</div>
+  </div>
+</section>
+
+
+<!-- ───────────── Tracking ───────────── -->
+<section class="panel" data-pane="tracking" hidden>
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">TRACKING LIST / GOVDEALS BID HISTORY</div>
+    <h1 class="hero-title">What it really sold for, and to whom.</h1>
+    <p class="hero-sub">
+      Lots on this list are polled through their close (every minute in the last
+      half hour). Every change of price, bid count or leader is kept, so a closed
+      lot shows its final price and the masked handle that won it. Starred
+      favorites join automatically under <span class="lex done">favorites</span>.
+    </p>
+  </div>
+
+  <form class="auction-controls" id="trk-add-form" onsubmit="return false;">
+    <div class="ac-group ac-grow">
+      <span class="ac-label">LOT</span>
+      <input type="text" id="trk-ref" placeholder="https://www.govdeals.com/en/asset/96/27562  or  96/27562">
+    </div>
+    <div class="ac-group">
+      <span class="ac-label">LIST</span>
+      <input type="text" id="trk-label" list="trk-label-options" placeholder="banquet chairs" value="banquet chairs">
+      <datalist id="trk-label-options"></datalist>
+    </div>
+    <div class="ac-actions">
+      <button type="button" class="btn btn-primary btn-small" id="trk-add">+ track</button>
+      <button type="button" class="btn btn-small" id="trk-sync" title="Poll every open lot right now">⟳ poll now</button>
+      <button type="button" class="btn btn-small" id="trk-refresh">↻ refresh</button>
+    </div>
+  </form>
+
+  <div class="inv-controls">
+    <div class="ac-group">
+      <span class="ac-label">LIST</span>
+      <div class="seg" id="trk-label-filter">
+        <button type="button" class="seg-btn active" data-value="">all</button>
+      </div>
+    </div>
+    <div class="ac-group trk-summary" id="trk-summary"></div>
+  </div>
+
+  <div class="inv-table-wrap">
+    <table class="inv-table trk-table">
+      <thead>
+        <tr>
+          <th>LIST</th><th>LOT</th><th>STATUS</th><th class="num">BIDS</th>
+          <th class="num">PRICE</th><th>LEADER / WINNER</th><th>LAST POLL</th><th></th>
+        </tr>
+      </thead>
+      <tbody id="trk-rows">
+        <tr><td colspan="8" class="drafts-empty">Loading tracked lots…</td></tr>
+      </tbody>
+    </table>
   </div>
 </section>
 

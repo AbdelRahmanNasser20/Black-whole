@@ -79,6 +79,8 @@ def init_schema() -> None:
         db.execute(stmt)
     from deals.verdict_store import init_verdict_schema
     init_verdict_schema()
+    from deals.tracking_store import init_schema as init_tracking_schema
+    init_tracking_schema()
 
 def lot_row(lot: Lot) -> tuple:
     return (lot.asset_id, lot.account_id, lot.auction_id, lot.title, lot.description,
@@ -199,8 +201,12 @@ def latest_bid_observation(key: tuple[int, int, int]):
 
 def favorite_asset_ids() -> list[str]:
     """Raw `asset_id` keys the operator starred on the Auctions tab."""
-    return [r["asset_id"] for r in db.fetch_all(
-        "SELECT asset_id FROM auction_favorites ORDER BY starred_at DESC")]
+    return [r["asset_id"] for r in favorite_rows()]
+
+def favorite_rows() -> list[dict]:
+    """Starred lots with the display fields the tracking list adopts."""
+    return db.fetch_all(
+        "SELECT asset_id, title, link FROM auction_favorites ORDER BY starred_at DESC")
 
 def live_auction_id(asset_id: int, account_id: int) -> int | None:
     """Newest still-open auction we've stored for this asset."""

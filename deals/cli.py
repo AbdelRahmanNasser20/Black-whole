@@ -60,6 +60,18 @@ def main():
     tb.add_argument("--min-bids", type=int, default=0,
                     help="only lots with at least N bids (an un-bid lot has no bidder to name)")
     tb.add_argument("--limit", type=int, default=100)
+    tk = sub.add_parser("track", help="tracking list: follow chosen lots through their close")
+    tks = tk.add_subparsers(dest="track_cmd", required=True)
+    tka = tks.add_parser("add", help="add a lot by URL or asset/account")
+    tka.add_argument("ref")
+    tka.add_argument("--label", default="default", help="list name, e.g. 'banquet chairs'")
+    tka.add_argument("--note", default=None)
+    tkr = tks.add_parser("remove")
+    tkr.add_argument("ref")
+    tks.add_parser("list")
+    tks.add_parser("sync", help="one poll pass over due tracked lots (the web app does this itself)")
+    tkh = tks.add_parser("history", help="bid timeline + bidders for one lot")
+    tkh.add_argument("ref")
     bc = sub.add_parser("backfill-classify",
                         help="fill in lots the str.format bug left unclassified")
     bc.add_argument("--limit", type=int, default=450)
@@ -125,6 +137,39 @@ def main():
                 min_bids=a.min_bids)
         print(f"sampling {len(keys)} lots")
         print(bidders.track_bidders(adapter, keys))
+    elif a.cmd == "track":
+        from deals import tracking, tracking_store
+        if a.track_cmd == "add":
+            row = tracking.add_tracked(adapter, a.ref, label=a.label, note=a.note)
+            print(f"tracking {row['asset_id']}/{row['account_id']} [{row['label']}] "
+                  f"auction={row['auction_id']} {row['title'] or ''}")
+        elif a.track_cmd == "remove":
+            pair = tracking.parse_lot_ref(a.ref)
+            print("removed" if pair and tracking_store.delete(*pair) else "not tracked")
+        elif a.track_cmd == "list":
+            for r in tracking_store.list_all():
+                state = (f"CLOSED ${r['final_bid'] or 0:,.2f} / {r['final_bid_count'] or 0} bids "
+                         f"→ {r['final_bidder_username'] or '—'}" if r["closed_at"]
+                         else f"${r['current_bid'] or 0:,.2f} / {r['bid_count'] or 0} bids "
+                              f"high={r['high_bidder_username'] or '—'} "
+                              f"ends={r['end_utc'].isoformat() if r['end_utc'] else '?'}")
+                print(f"[{r['label']}] {r['asset_id']}/{r['account_id']}  {state}  {r['title'] or ''}")
+        elif a.track_cmd == "sync":
+            print(f"adopted {tracking.adopt_favorites(adapter, verbose=True)} favorite(s)")
+            print(tracking.sync_tracked(adapter))
+        elif a.track_cmd == "history":
+            pair = tracking.parse_lot_ref(a.ref)
+            if not pair:
+                raise SystemExit(f"not a lot ref: {a.ref}")
+            rows = tracking_store.history(*pair)
+            for o in rows:
+                print(f"{o['observed_at'].isoformat(timespec='minutes')}  auction {o['auction_id']}  "
+                      f"{o['bid_count']:>3} bids  ${float(o['current_bid']):>9,.2f}  "
+                      f"{o['high_bidder_username'] or '—'} ({o['high_bidder'] or '—'})")
+            print("bidders:")
+            for b in tracking.bidder_summary(rows):
+                print(f"  {b['handle'] or '—'} ({b['bidder_id']})  led {b['times_led']}x  "
+                      f"max ${b['max_bid'] or 0:,.2f}")
     elif a.cmd == "backfill-classify":
         from deals.backfill_classify import run as run_backfill_classify
         print(run_backfill_classify(limit=a.limit, rpm=a.rpm, reset=a.reset_fakes))
