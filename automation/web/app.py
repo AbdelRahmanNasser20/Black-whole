@@ -6,8 +6,6 @@ Routes:
   POST /api/runs/start    → kick off run.py with a GovDeals URL
   GET  /api/runs/stream   → SSE: progress + raw stdout lines
   GET  /api/drafts        → JSON list of listing folders + metadata
-  GET  /api/compare       → JSON list of llm_compare_logs rows (Supabase)
-  POST /api/compare/{ts}/rate → save a star rating (matched / wrong)
   GET  /image/{folder}/{name} → serve image from a listing folder
   GET  /screenshot/{folder}/{name} → serve a Playwright screenshot
   POST /subscribe             → public alerts signup → subscribers table
@@ -1524,56 +1522,6 @@ async def serve_screenshot(folder: str, name: str):
     if not target.exists():
         raise HTTPException(404, "not found")
     return FileResponse(str(target))
-
-
-# ───────────────────────────── compare ─────────────────────────────
-
-@app.get("/api/compare")
-async def list_compare():
-    rows = db.fetch_all(
-        "SELECT id, ts, dom_hint, primary_extraction, secondary_extraction, rating "
-        "FROM llm_compare_logs ORDER BY ts DESC"
-    )
-    out = []
-    for row in rows:
-        ts_epoch = int(row["ts"].timestamp())
-        out.append({
-            "id": str(row["id"]),
-            "filename": f"llm_compare_{row['id']}.json",
-            "timestamp": row["id"],
-            "modified": ts_epoch,
-            "dom_hint": row["dom_hint"],
-            "primary": row["primary_extraction"],
-            "secondary": row["secondary_extraction"],
-            "rating": row["rating"],
-        })
-    return {"entries": out}
-
-
-@app.post("/api/compare/{cid}/rate")
-async def rate_compare(cid: str, payload: dict):
-    rating = (payload or {}).get("rating")
-    if rating not in (None, "", "match", "wrong"):
-        raise HTTPException(400, "rating must be 'match', 'wrong', or null")
-    try:
-        cid_int = int(cid)
-    except ValueError:
-        raise HTTPException(400, "id must be an integer")
-    if rating in (None, ""):
-        db.execute(
-            "UPDATE llm_compare_logs SET rating = NULL, rated_at = NULL WHERE id = %s",
-            (cid_int,),
-        )
-    else:
-        db.execute(
-            "UPDATE llm_compare_logs SET rating = %s, rated_at = now() WHERE id = %s",
-            (rating, cid_int),
-        )
-    rows = db.fetch_all(
-        "SELECT id, rating FROM llm_compare_logs WHERE rating IS NOT NULL"
-    )
-    ratings = {str(r["id"]): r["rating"] for r in rows}
-    return {"ok": True, "ratings": ratings}
 
 
 # ───────────────────────────── scraper ─────────────────────────────

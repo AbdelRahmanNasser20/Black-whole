@@ -64,7 +64,6 @@ async function apiFetch(url, opts) {
 const panels = {
   launcher: $('[data-pane="launcher"]'),
   drafts:   $('[data-pane="drafts"]'),
-  compare:  $('[data-pane="compare"]'),
   auctions: $('[data-pane="auctions"]'),
   inventory: $('[data-pane="inventory"]'),
   inquiries: $('[data-pane="inquiries"]'),
@@ -86,7 +85,6 @@ function activateTab(name, {persist = true} = {}) {
     if (el) el.hidden = (k !== name);
   });
   if (name === 'drafts') loadDrafts();
-  if (name === 'compare') loadCompare();
   if (name === 'auctions') { loadAuctions(); autoOpenAucMap(); }
   if (name === 'inventory') loadInventory();
   if (name === 'inquiries') loadInquiries();
@@ -465,98 +463,6 @@ function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => (
     {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
   ));
-}
-
-// ───────── compare ─────────
-
-const FIELDS = ['title','location','city','state','zip_code','quantity',
-                'chair_type','dimensions','suggested_price_per_chair','style_suffix'];
-
-async function loadCompare() {
-  const list = $('#compare-list');
-  const summary = $('#compare-summary');
-  list.innerHTML = '<div class="drafts-empty">Loading comparisons…</div>';
-  const res = await fetch('/api/compare');
-  const {entries} = await res.json();
-
-  let nMatch = 0, nWrong = 0, nPending = 0;
-  for (const e of entries) {
-    if (e.rating === 'match') nMatch++;
-    else if (e.rating === 'wrong') nWrong++;
-    else nPending++;
-  }
-  summary.innerHTML = `
-    <div><strong>${entries.length}</strong> comparisons logged</div>
-    <div class="stat-ok"><strong>${nMatch}</strong> Gemini matched</div>
-    <div class="stat-bad"><strong>${nWrong}</strong> Gemini wrong</div>
-    <div class="stat-pend"><strong>${nPending}</strong> unrated</div>
-  `;
-
-  if (!entries.length) {
-    list.innerHTML = '<div class="drafts-empty">No llm_compare logs yet.</div>';
-    return;
-  }
-  list.innerHTML = '';
-  for (const e of entries) list.appendChild(renderCompareEntry(e));
-}
-
-function renderCompareEntry(e) {
-  const wrap = document.createElement('article');
-  wrap.className = 'compare-entry';
-  const date = new Date(e.timestamp * 1000);
-  const dateStr = date.toISOString().replace('T', ' ').slice(0, 19);
-
-  const head = document.createElement('header');
-  head.className = 'compare-entry-head';
-  head.innerHTML = `
-    <span class="ce-id">#${e.id}</span>
-    <span class="ce-time">${dateStr} · ${esc(e.filename)}</span>
-    <span class="ce-rate">
-      <button data-rate="match" class="${e.rating==='match'?'active match':''}">★ Match</button>
-      <button data-rate="wrong" class="${e.rating==='wrong'?'active wrong':''}">✕ Wrong</button>
-    </span>
-  `;
-  wrap.appendChild(head);
-
-  const table = document.createElement('div');
-  table.className = 'diff-table';
-  table.innerHTML = `
-    <div class="diff-header">field</div>
-    <div class="diff-header">primary · ${esc((e.primary || {}).source || 'claude')}</div>
-    <div class="diff-header">secondary · ${esc((e.secondary || {}).source || 'gemini')}</div>
-  `;
-  for (const f of FIELDS) {
-    const a = (e.primary || {})[f];
-    const b = (e.secondary || {})[f];
-    const same = String(a ?? '') === String(b ?? '');
-    const cls = same ? '' : 'diff-mismatch';
-    table.insertAdjacentHTML('beforeend', `
-      <div>${f}</div>
-      <div class="${cls}">${a == null || a === '' ? '<span class="diff-empty">—</span>' : esc(String(a))}</div>
-      <div class="${cls}">${b == null || b === '' ? '<span class="diff-empty">—</span>' : esc(String(b))}</div>
-    `);
-  }
-  wrap.appendChild(table);
-
-  head.querySelectorAll('.ce-rate button').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const newRate = btn.classList.contains('active') ? null : btn.dataset.rate;
-      await withButtonLoading(btn, null, async () => {
-        try {
-          await apiFetch(`/api/compare/${e.id}/rate`, {
-            method: 'POST',
-            headers: {'content-type': 'application/json'},
-            body: JSON.stringify({rating: newRate}),
-          });
-          e.rating = newRate;
-          loadCompare();
-        } catch (err) {
-          toast('Rating failed: ' + (err.message || err), 'err');
-        }
-      });
-    });
-  });
-  return wrap;
 }
 
 // ───────── auctions ─────────
