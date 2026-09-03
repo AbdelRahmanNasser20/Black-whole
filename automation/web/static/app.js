@@ -2333,7 +2333,7 @@ async function loadDeals() {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     body = await r.json();
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="16" class="drafts-empty">deals API error: ${e}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="18" class="drafts-empty">deals API error: ${e}</td></tr>`;
     return;
   }
   deal.rows = body.rows;
@@ -2360,7 +2360,7 @@ async function loadDeals() {
   }
   const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;');
   if (!body.rows.length) {
-    tbody.innerHTML = '<tr><td colspan="16" class="drafts-empty">no lots match</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="18" class="drafts-empty">no lots match</td></tr>';
   } else {
     tbody.innerHTML = body.rows.map(r => {
       const key = dealKey(r);
@@ -2386,6 +2386,8 @@ async function loadDeals() {
         <td>${r.distance_mi != null ? Math.round(r.distance_mi) + ' mi' : '—'}</td>
         <td>${r.bid_count ?? '—'}</td>
         <td>${r.current_bid != null ? '$' + r.current_bid : '—'}</td>
+        <td class="num">${r.quantity}${r.quantity_source === 'default' ? '<span class="deal-qty-src" title="no count in title">·</span>' : ''}</td>
+        <td class="num">${r.unit_bid != null ? '$' + r.unit_bid : '—'}</td>
         <td>$${r.landed_cost}</td>
         ${dealVerdictCells(r, key)}
         ${dealEndsCell(r.end_utc)}
@@ -2393,12 +2395,7 @@ async function loadDeals() {
       </tr>`;
     }).join('');
   }
-  const page = Math.floor(deal.offset / deal.limit) + 1;
-  const pages = Math.max(1, Math.ceil(body.total / deal.limit));
-  const scope = deal.mapOn && deal.bbox ? ' in map view' : '';
-  $('#deal-page-info').textContent = `${page} / ${pages} (${body.total} lots${scope})`;
-  $('#deal-prev').disabled = deal.offset === 0;
-  $('#deal-next').disabled = deal.offset + deal.limit >= body.total;
+  renderDealPager(body.total);
   if (deal.mapOn) refreshDealMapPoints(body.total);
   syncDealCatPills();
   renderDealActiveChips();
@@ -2538,8 +2535,32 @@ $$('#deal-table th.sortable').forEach(th => {
     deal.offset = 0; loadDeals();
   });
 });
-$('#deal-prev').addEventListener('click', () => { deal.offset = Math.max(0, deal.offset - deal.limit); loadDeals(); });
-$('#deal-next').addEventListener('click', () => { deal.offset += deal.limit; loadDeals(); });
+const DEAL_PAGE_SIZES = [25, 50, 100, 200];
+function renderDealPager(total) {
+  const page = Math.floor(deal.offset / deal.limit) + 1;
+  const pages = Math.max(1, Math.ceil(total / deal.limit));
+  const scope = deal.mapOn && deal.bbox ? ' · in map view' : '';
+  const html = `
+    <span class="deal-pager-total">page ${page} / ${pages} · ${total.toLocaleString()} lots${scope}</span>
+    <button type="button" class="btn btn-small" data-page="1" ${page <= 1 ? 'disabled' : ''}>«</button>
+    <button type="button" class="btn btn-small" data-page="${page - 1}" ${page <= 1 ? 'disabled' : ''}>‹ prev</button>
+    <button type="button" class="btn btn-small" data-page="${page + 1}" ${page >= pages ? 'disabled' : ''}>next ›</button>
+    <button type="button" class="btn btn-small" data-page="${pages}" ${page >= pages ? 'disabled' : ''}>»</button>
+    <input type="number" class="deal-num" min="1" max="${pages}" value="${page}" data-jump title="jump to page">
+    <select data-limit>${DEAL_PAGE_SIZES.map(n => `<option value="${n}" ${n === deal.limit ? 'selected' : ''}>${n}/page</option>`).join('')}</select>`;
+  $('#deal-pager-top').innerHTML = html;
+  $('#deal-pager-bottom').innerHTML = html;
+}
+['#deal-pager-top', '#deal-pager-bottom'].forEach(sel => {
+  $(sel).addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-page]'); if (!b || b.disabled) return;
+    deal.offset = (Number(b.dataset.page) - 1) * deal.limit; loadDeals();
+  });
+  $(sel).addEventListener('change', (e) => {
+    if (e.target.matches('[data-jump]')) { deal.offset = (Math.max(1, Number(e.target.value) || 1) - 1) * deal.limit; loadDeals(); }
+    if (e.target.matches('[data-limit]')) { deal.limit = Number(e.target.value); deal.offset = 0; loadDeals(); }
+  });
+});
 $('#deal-refresh').addEventListener('click', () => {
   deal.facetsLoaded = false; deal.metaLoaded = false;
   loadDealTree(); loadDeals();

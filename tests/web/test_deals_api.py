@@ -87,3 +87,16 @@ def test_deals_tree_groups_twigs_under_branches(monkeypatch):
 def test_deals_tree_rejects_bad_status(monkeypatch):
     client, _ = _client(monkeypatch, [])
     assert client.get("/api/deals/tree?status=bogus").status_code == 400
+
+
+def test_facets_and_stats_are_cached_between_calls(monkeypatch):
+    webapp = importlib.import_module("automation.web.app")
+    webapp.deals_facets_cache_clear()
+    client, cap = _client(monkeypatch, [ROW])
+    client.get("/api/deals")
+    client.get("/api/deals?page=2")
+    facet_sqls = [s for s in cap["sqls"] if "GROUP BY 1 ORDER BY count DESC" in s]
+    row_sqls = [s for s in cap["sqls"] if "row_to_json(v.*) AS verdict" in s]
+    assert len(row_sqls) == 2          # every call fetches rows
+    assert len(facet_sqls) == 2        # categories + states: ONE pair, not two
+    webapp.deals_facets_cache_clear()

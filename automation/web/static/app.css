@@ -1211,12 +1211,19 @@ main {
 /* category tree explorer: branch = canonical bucket, twig = native category */
 .deal-layout { display: flex; gap: 16px; align-items: flex-start; }
 .deal-layout .inv-table-wrap { flex: 1; min-width: 0; }
-.deal-tree {
-  flex: 0 0 250px; position: sticky; top: 12px;
-  max-height: calc(100vh - 24px); overflow-y: auto;
-  background: var(--bg-elev); border: 1px solid var(--line);
-  font-family: var(--mono); font-size: 11px;
-}
+.deal-topbar .ac-grow { flex: 1 1 320px; }
+.deal-topbar .ac-grow input[type=text] { width: 100%; }
+.deal-side { flex: 0 0 280px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 10px; }
+.deal-side-box { background: var(--bg-elev); border: 1px solid var(--line); font-family: var(--mono); font-size: 11px; }
+.deal-tree { max-height: 42vh; overflow-y: auto; }
+.deal-side-filters { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.deal-side-filters select, .deal-side-filters .deal-num { width: 100%; }
+.deal-side-row { display: flex; gap: 6px; }
+.deal-side-row .deal-num { width: 50%; }
+.deal-pager .deal-pager-total { flex: 1; }
+.deal-pager select { padding: 3px 6px; background: var(--bg); border: 1px solid var(--line); color: var(--ink); font: inherit; }
+.deal-qty-src { color: var(--ink-dim); margin-left: 2px; }
 .deal-tree-head {
   padding: 8px 10px; color: var(--ink-dim); letter-spacing: .08em;
   border-bottom: 1px solid var(--line);
@@ -1244,7 +1251,7 @@ main {
 .dt-twigs .dt-node { padding-left: 30px; }
 @media (max-width: 900px) {
   .deal-layout { flex-direction: column; }
-  .deal-tree { position: static; flex: none; width: 100%; max-height: 40vh; }
+  .deal-side { position: static; flex: none; width: 100%; max-height: none; }
 }
 
 /* ── Deal browser (T13): verdicts, lists, tags, saved searches ── */

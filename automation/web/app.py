@@ -606,6 +606,43 @@ LEFT JOIN LATERAL (
     ORDER BY v0.analyzed_at DESC LIMIT 1) v ON TRUE"""
 
 
+_DEALS_FACETS_TTL = 120
+_DEALS_FACETS: dict[str, tuple[float, tuple]] = {}
+
+
+def deals_facets_cache_clear() -> None:
+    _DEALS_FACETS.clear()
+
+
+def _deals_facets_and_stats() -> tuple[list, list, dict]:
+    """Categories/states facets + headline stats for the admin Deals tab.
+
+    These three queries don't depend on the filter set and each opened its own
+    pooler connection (~1.3 s) on every page flip. 120 s cache."""
+    hit = _DEALS_FACETS.get("v")
+    if hit and time.monotonic() - hit[0] < _DEALS_FACETS_TTL:
+        return hit[1]
+    cats = db.fetch_all(
+        "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
+        f"WHERE {_DEALS_ACTIVE} AND canonical_category IS NOT NULL "
+        "GROUP BY 1 ORDER BY count DESC"
+    )
+    states = db.fetch_all(
+        "SELECT state AS value, count(*) AS count FROM deal_lots "
+        f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
+        "GROUP BY 1 ORDER BY count DESC"
+    )
+    stats = db.fetch_one(
+        "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
+        "(SELECT count(*) FROM deal_candidates) AS candidates, "
+        f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
+        "AND end_utc <= now() + interval '24 hours') AS ending_24h"
+    )
+    value = (cats, states, stats)
+    _DEALS_FACETS["v"] = (time.monotonic(), value)
+    return value
+
+
 @app.get("/api/deals")
 async def list_deals(
     q: str | None = None,
@@ -659,22 +696,7 @@ async def list_deals(
         total = db.fetch_one(
             f"SELECT count(*) AS c {_DEALS_FROM} WHERE {where}", tuple(args)
         )["c"]
-        cats = db.fetch_all(
-            "SELECT canonical_category AS value, count(*) AS count FROM deal_lots "
-            f"WHERE {_DEALS_ACTIVE} AND canonical_category IS NOT NULL "
-            "GROUP BY 1 ORDER BY count DESC"
-        )
-        states = db.fetch_all(
-            "SELECT state AS value, count(*) AS count FROM deal_lots "
-            f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
-            "GROUP BY 1 ORDER BY count DESC"
-        )
-        stats = db.fetch_one(
-            "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
-            "(SELECT count(*) FROM deal_candidates) AS candidates, "
-            f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
-            "AND end_utc <= now() + interval '24 hours') AS ending_24h"
-        )
+        cats, states, stats = _deals_facets_and_stats()
         return rows, total, cats, states, stats
 
     try:

@@ -490,18 +490,18 @@
 
   <div class="deal-searches" id="deal-searches" hidden></div>
 
-  <form class="auction-controls deal-controls" onsubmit="return false;">
-    <div class="ac-group">
+  <form class="auction-controls deal-controls deal-topbar" onsubmit="return false;">
+    <div class="ac-group ac-grow">
       <span class="ac-label">SEARCH</span>
       <input type="text" id="deal-q" placeholder="title or description…">
     </div>
     <div class="ac-group">
-      <span class="ac-label">CATEGORY</span>
-      <select id="deal-category"><option value="">all</option></select>
-    </div>
-    <div class="ac-group">
-      <span class="ac-label">STATE</span>
-      <select id="deal-state"><option value="">all</option></select>
+      <span class="ac-label">BIDS</span>
+      <div class="seg" id="deal-bids-filter">
+        <button type="button" class="seg-btn active" data-value="">any</button>
+        <button type="button" class="seg-btn" data-value="0">0 bids</button>
+        <button type="button" class="seg-btn" data-value="3">≤3</button>
+      </div>
     </div>
     <div class="ac-group">
       <span class="ac-label">ENDING</span>
@@ -514,35 +514,6 @@
       </select>
     </div>
     <div class="ac-group">
-      <span class="ac-label">BIDS</span>
-      <div class="seg" id="deal-bids-filter">
-        <button type="button" class="seg-btn active" data-value="">any</button>
-        <button type="button" class="seg-btn" data-value="0">0 bids</button>
-        <button type="button" class="seg-btn" data-value="3">≤3</button>
-      </div>
-    </div>
-    <div class="ac-group">
-      <span class="ac-label" title="Only analyzed lots with margin ≥ this %">MARGIN ≥</span>
-      <input type="number" id="deal-min-margin" class="deal-num" placeholder="%" min="0" step="10">
-    </div>
-    <div class="ac-group">
-      <span class="ac-label" title="Filter on current bid ($)">PRICE</span>
-      <input type="number" id="deal-min-price" class="deal-num" placeholder="$ min" min="0">
-      <input type="number" id="deal-max-price" class="deal-num" placeholder="$ max" min="0">
-    </div>
-    <div class="ac-group">
-      <span class="ac-label" title="Max distance from home (mi); drops lots with unknown coords">DIST ≤</span>
-      <input type="number" id="deal-max-dist" class="deal-num" placeholder="mi" min="0" step="25">
-    </div>
-    <div class="ac-group">
-      <span class="ac-label">LIST</span>
-      <select id="deal-list"><option value="">all</option></select>
-    </div>
-    <div class="ac-group">
-      <span class="ac-label">TAG</span>
-      <select id="deal-tag"><option value="">all</option></select>
-    </div>
-    <div class="ac-group">
       <span class="ac-label">STATUS</span>
       <div class="seg" id="deal-status-filter">
         <button type="button" class="seg-btn active" data-value="active">active</button>
@@ -550,15 +521,9 @@
         <button type="button" class="seg-btn" data-value="all">all</button>
       </div>
     </div>
-    <div class="ac-group">
-      <span class="ac-label" title="Center the map on a ZIP">ZIP</span>
-      <input type="text" id="deal-zip" class="deal-num" placeholder="ZIP →" maxlength="5" inputmode="numeric">
-    </div>
     <div class="ac-actions">
-      <button type="button" class="btn btn-small" id="deal-save-search" title="Save the current filter state as a named search">★ save search</button>
-      <button type="button" class="btn btn-small" id="deal-create-alert" title="Save current filters as an alert — checked hourly, new matches → Telegram">🔔 create alert</button>
-      <button type="button" class="btn btn-small" id="deal-refresh">↻ refresh</button>
       <button type="button" class="btn btn-small" id="deal-map-toggle" title="Map of the filtered lots — pan/zoom to narrow the table to the viewport">🗺 map</button>
+      <button type="button" class="btn btn-small" id="deal-refresh">↻ refresh</button>
     </div>
   </form>
 
@@ -571,14 +536,42 @@
   </div>
 
   <div class="deal-layout">
-    <aside class="deal-tree" aria-label="Category tree">
-      <div class="deal-tree-head">CATEGORY TREE
-        <span class="deal-tree-legend" title="lots · zero-bid lots · ending &lt;24h">n · ⚑ 0-bid · ⏱ &lt;24h</span>
+    <aside class="deal-side" aria-label="Filters">
+      <div class="deal-side-box">
+        <div class="deal-tree-head">CATEGORY TREE
+          <span class="deal-tree-legend" title="lots · zero-bid lots · ending &lt;24h">n · ⚑ 0-bid · ⏱ &lt;24h</span>
+        </div>
+        <div class="deal-tree" id="deal-tree-nodes"><div class="drafts-empty">Loading…</div></div>
       </div>
-      <div id="deal-tree-nodes"><div class="drafts-empty">Loading…</div></div>
+      <div class="deal-side-box deal-side-filters">
+        <label class="ac-label" for="deal-category">CATEGORY</label>
+        <select id="deal-category"><option value="">all</option></select>
+        <label class="ac-label" for="deal-state">STATE</label>
+        <select id="deal-state"><option value="">all</option></select>
+        <label class="ac-label" title="Filter on current bid ($)">PRICE</label>
+        <div class="deal-side-row">
+          <input type="number" id="deal-min-price" class="deal-num" placeholder="$ min" min="0">
+          <input type="number" id="deal-max-price" class="deal-num" placeholder="$ max" min="0">
+        </div>
+        <label class="ac-label" for="deal-min-margin" title="Only analyzed lots with margin ≥ this %">MARGIN ≥ %</label>
+        <input type="number" id="deal-min-margin" class="deal-num" placeholder="%" min="0" step="10">
+        <label class="ac-label" for="deal-max-dist" title="Max distance from home (mi); drops lots with unknown coords">DIST ≤ MI</label>
+        <input type="number" id="deal-max-dist" class="deal-num" placeholder="mi" min="0" step="25">
+        <label class="ac-label" for="deal-zip" title="Center the map on a ZIP">ZIP</label>
+        <input type="text" id="deal-zip" class="deal-num" placeholder="ZIP →" maxlength="5" inputmode="numeric">
+        <label class="ac-label" for="deal-list">LIST</label>
+        <select id="deal-list"><option value="">all</option></select>
+        <label class="ac-label" for="deal-tag">TAG</label>
+        <select id="deal-tag"><option value="">all</option></select>
+        <div class="deal-side-row">
+          <button type="button" class="btn btn-small" id="deal-save-search" title="Save the current filter state as a named search">★ save search</button>
+          <button type="button" class="btn btn-small" id="deal-create-alert" title="Save current filters as an alert — checked hourly, new matches → Telegram">🔔 alert</button>
+        </div>
+      </div>
     </aside>
 
     <div class="inv-table-wrap">
+      <div class="deal-pager" id="deal-pager-top"></div>
       <table class="inv-table" id="deal-table">
         <thead>
           <tr>
@@ -590,6 +583,8 @@
             <th title="miles from home (DEALS_HOME_LAT/LNG)">Dist</th>
             <th class="sortable" data-sort="bids">Bids</th>
             <th class="sortable" data-sort="bid">Bid</th>
+            <th class="num" title="parsed from the title (deals/quantity.py); 1 when the title states no count">Qty</th>
+            <th class="num" title="current bid ÷ quantity">$/unit</th>
             <th class="sortable" data-sort="landed" title="bid + buyer premium + tax + freight (DEALS_* env)">Landed</th>
             <th title="latest verdict's estimated resale">Est. resale</th>
             <th class="sortable" data-sort="margin" title="(est resale − landed) / landed, latest verdict">Margin</th>
@@ -601,14 +596,10 @@
           </tr>
         </thead>
         <tbody id="deal-rows">
-          <tr><td colspan="16" class="drafts-empty">Loading deals…</td></tr>
+          <tr><td colspan="18" class="drafts-empty">Loading deals…</td></tr>
         </tbody>
       </table>
-      <div class="deal-pager">
-        <button type="button" class="btn btn-small" id="deal-prev">‹ prev</button>
-        <span id="deal-page-info"></span>
-        <button type="button" class="btn btn-small" id="deal-next">next ›</button>
-      </div>
+      <div class="deal-pager" id="deal-pager-bottom"></div>
     </div>
   </div>
 
