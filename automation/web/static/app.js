@@ -1265,14 +1265,13 @@ async function loadInventory() {
   const tbody = $('#inv-tbody');
   tbody.innerHTML = '<tr><td colspan="11" class="drafts-empty">Loading…</td></tr>';
   try {
-    const [invRes, statsRes] = await Promise.all([
-      fetch('/api/inventory' + (_invStatusFilter ? `?status=${_invStatusFilter}` : '')),
-      fetch('/api/inventory-stats'),
-    ]);
-    const inv = await invRes.json();
-    const stats = await statsRes.json();
-    _invItems = inv.items || [];
-    renderInvStats(stats);
+    const qs = new URLSearchParams({with_stats: '1'});
+    if (_invStatusFilter) qs.set('status', _invStatusFilter);
+    const res = await fetch('/api/inventory?' + qs.toString());
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _invItems = data.items || [];
+    renderInvStats(data.stats || {lots: 0, chairs: 0, cities: 0});
     renderInvTable(_invItems);
   } catch (e) {
     tbody.innerHTML = `<tr><td colspan="11" class="drafts-empty">Load failed: ${e}</td></tr>`;
@@ -1301,7 +1300,7 @@ function renderInvTable(items) {
     tr.innerHTML = `
       <td class="mono tiny">${escapeHtml(item.lot_id)}</td>
       <td class="inv-hero">${item.hero_image_url
-        ? `<img src="${item.hero_image_url}" alt="">`
+        ? `<img src="${item.hero_image_url}" alt="" loading="lazy" decoding="async" width="72" height="54">`
         : '<div class="inv-hero-fallback">◉</div>'}</td>
       <td>
         <div class="inv-title">${escapeHtml(item.title || '—')}</div>

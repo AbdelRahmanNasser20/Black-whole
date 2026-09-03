@@ -2469,7 +2469,13 @@ def _inventory_to_public(row: dict) -> dict:
 
 
 @app.get("/api/inventory")
-async def inv_list(status: str | None = None):
+async def inv_list(status: str | None = None, with_stats: int = 0):
+    """`with_stats=1` returns rows + headline counts from ONE connection —
+    the admin tab uses it so a tab open costs one pooler handshake, not two."""
+    if with_stats:
+        data = await asyncio.to_thread(inventory.list_with_stats, status)
+        return {"items": [_inventory_to_public(r) for r in data["items"]],
+                "stats": data["stats"]}
     rows = inventory.list_all(status=status)
     return {"items": [_inventory_to_public(r) for r in rows]}
 
