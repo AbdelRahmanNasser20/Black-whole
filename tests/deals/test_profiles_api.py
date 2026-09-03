@@ -128,3 +128,39 @@ def test_outcomes_rollup_uses_profile_filter(monkeypatch):
     assert body["closed"] == 10 and body["no_bid_pct"] == 40.0 and body["comps"] == []
     comps_sql = [s for s, _ in cap["sqls"] if "deal_verdicts" in s]
     assert comps_sql and "title ILIKE ANY(%s)" in comps_sql[0]
+
+
+# ── Auctions loader + /api/auctions?profile= (Task 5) ────────────────────────
+
+def test_get_top_lots_filters_by_profile_sql(monkeypatch):
+    from automation import auctions_supabase as aus
+    cap = {}
+    def fake_fetch_all(sql, params=()):
+        cap["sql"], cap["params"] = sql, params
+        return [{"asset_id": "1/2", "link": "https://www.govdeals.com/en/asset/1/2", "title": "40 desks",
+                 "description": "", "quantity": 40, "quantity_source": "llm", "price": "$10",
+                 "location": "Phoenix, Arizona", "pickup_zip": "85054", "end_date": "", "time_left": "",
+                 "image_url": "", "last_seen_at": None, "contact_email": "", "contact_phone": ""}]
+    monkeypatch.setattr(aus.db, "fetch_all", fake_fetch_all)
+    rows = aus.get_top_lots(_profile(), source="gd", n=5, include_condition=False, active_only=False)
+    assert "title ILIKE ANY(%s)" in cap["sql"] and ["%desk%"] in list(cap["params"])
+    assert rows[0]["category"] == "desks" and rows[0]["category_keyword"] == "desk"
+
+
+def test_auctions_endpoint_profile_and_legacy_category(monkeypatch):
+    client, _ = _client(monkeypatch)
+    webapp = importlib.import_module("automation.web.app")
+    seen = []
+    def fake_top(profile, **kw):
+        seen.append((profile.slug, kw["min_quantity"]))
+        return []
+    monkeypatch.setattr(webapp, "get_top_lots", fake_top)
+    webapp._AUCTIONS_CACHE.clear()
+    assert client.get("/api/auctions?profile=desks&n=3").status_code == 200
+    assert client.get("/api/auctions?category=medical&n=3").status_code == 200
+    assert client.get("/api/auctions?profile=nope").status_code == 404
+    assert client.get("/api/auctions?n=3").json()["profile"] == "chairs"
+    assert seen[0][0] == "desks" and seen[0][1] == 1      # profile.min_quantity when min_qty absent
+    assert seen[1][0] == "medical"
+    assert seen[2] == ("chairs", 50)                       # bare call = default profile, its floor
+    webapp._AUCTIONS_CACHE.clear()

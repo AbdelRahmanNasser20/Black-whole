@@ -64,9 +64,10 @@ try:
     # Auctions tab reads the shared Supabase `auction_listings` table. The
     # loader reuses the upstream ranking/condition helpers, so card output is
     # identical to the old SQLite path — only the data source changed.
-    from ..auctions_supabase import get_top_chairs, cache_stats as _auctions_cache_stats
+    from ..auctions_supabase import get_top_chairs, get_top_lots, cache_stats as _auctions_cache_stats
 except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
+    get_top_lots = None
     _auctions_cache_stats = None
 
 PKG_DIR = Path(__file__).parent
@@ -2128,47 +2129,53 @@ async def list_auctions(
     active_only: int = 1,
     max_stale_days: int = 2,
     category: str | None = None,
+    profile: str | None = None,
 ):
-    if get_top_chairs is None:
+    """Top cached lots for a research profile (`profile=<slug>`; default =
+    the default profile, i.e. chairs). Legacy `category=banquet|medical`
+    still works and maps onto a profile."""
+    if get_top_lots is None:
         raise HTTPException(503, "auction_extractors package not available")
     if source not in ("gd", "ps", "bs"):
         raise HTTPException(400, "source must be 'gd', 'ps', or 'bs'")
-    _CATS = {"banquet", "medical", "other"}
-    if category in ("", "all"):
-        category = None
-    if category is not None and category not in _CATS:
-        raise HTTPException(400, f"category must be one of {sorted(_CATS)}")
+    # legacy sub-tab param → profile slug (banquet == default chairs profile)
+    if not profile and category not in (None, "", "all"):
+        if category not in ("banquet", "medical"):
+            raise HTTPException(400, "category must be banquet|medical (or use profile=)")
+        profile = "medical" if category == "medical" else None
+    try:
+        prof = await asyncio.to_thread(profiles.resolve, profile)
+    except KeyError:
+        raise HTTPException(404, f"unknown profile {profile!r}")
     n = max(1, min(int(n), 100))
-    # min_qty default depends on category: medical lots sell as singles.
-    if min_qty is None:
-        min_qty = 1 if category == "medical" else 50
-    min_qty = max(1, int(min_qty))
+    # min_qty default is the profile's floor (chairs 50, medical 1, …).
+    min_qty = prof.min_quantity if min_qty is None else max(1, int(min_qty))
     include_condition = bool(int(condition))
     active_flag = bool(int(active_only))
     stale = max(1, int(max_stale_days))
 
     key = (
-        f"{source}|{n}|{min_qty}|{int(include_condition)}|"
-        f"{int(active_flag)}|{stale}|{category or ''}"
+        f"{prof.slug}|{source}|{n}|{min_qty}|{int(include_condition)}|"
+        f"{int(active_flag)}|{stale}"
     )
     now = time.time()
     cached = _AUCTIONS_CACHE.get(key)
     if cached and (now - cached[0]) < _AUCTIONS_TTL:
-        return {"items": cached[1], "cached": True, "age": int(now - cached[0])}
+        return {"items": cached[1], "cached": True, "age": int(now - cached[0]),
+                "profile": prof.slug}
 
     try:
         items = await asyncio.to_thread(
-            get_top_chairs,
+            get_top_lots, prof,
             source=source,
             n=n,
             min_quantity=min_qty,
             include_condition=include_condition,
             active_only=active_flag,
             max_stale_days=stale,
-            category=category,
         )
     except Exception as e:
-        raise HTTPException(500, f"get_top_chairs failed: {e!r}")
+        raise HTTPException(500, f"get_top_lots failed: {e!r}")
 
     try:
         _annotate_auction_geo(items)
@@ -2176,7 +2183,7 @@ async def list_auctions(
         print(f"[auctions] geo annotation failed: {e!r}")
 
     _AUCTIONS_CACHE[key] = (now, items)
-    return {"items": items, "cached": False, "age": 0}
+    return {"items": items, "cached": False, "age": 0, "profile": prof.slug}
 
 
 @app.post("/api/auctions/refresh")
