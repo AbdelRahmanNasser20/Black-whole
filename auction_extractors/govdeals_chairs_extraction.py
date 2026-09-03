@@ -89,13 +89,22 @@ except ValueError:
 # TEMPORARY: narrowed to a single broad term while we validate the new
 # regex_fulltext + cache pipeline. Restore the full list once accuracy is
 # confirmed on real GovDeals data.
-SEARCH_TERMS = [
+def search_terms_from_env(default: list[str], env: dict | None = None) -> list[str]:
+    """Dashboard-launched scrapes pass the research profile's terms as
+    SCRAPE_SEARCH_TERMS (comma list). Empty/unset → the chair defaults."""
+    raw = (env if env is not None else os.environ).get("SCRAPE_SEARCH_TERMS", "")
+    terms = [t.strip() for t in raw.split(",") if t.strip()]
+    return terms or list(default)
+
+
+_DEFAULT_SEARCH_TERMS = [
     "chairs", "banquet chairs", "stackable chairs", "church chairs",
     "event chairs", "conference chairs", "folding chairs",
     # medical vertical — single-unit lots (qty filter gated by category)
     "dental chair", "exam chair", "treatment chair", "phlebotomy chair",
     "procedure chair", "exam table",
 ]
+SEARCH_TERMS = search_terms_from_env(_DEFAULT_SEARCH_TERMS)
 
 
 

@@ -21,6 +21,15 @@ from typing import Any
 
 import requests
 
+
+def _quantity_prompt_header() -> str:
+    """First line of the quantity prompt. SCRAPE_ITEM_NOUN (set by the
+    dashboard from the research profile) swaps the counted noun; unset =
+    chairs, today's prompt byte-for-byte."""
+    noun = (os.getenv("SCRAPE_ITEM_NOUN") or "chairs").strip().lower()
+    singular = noun[:-1] if noun.endswith("s") and not noun.endswith("ss") else noun
+    return f"You estimate how many {noun.upper()} (individual {singular} units) are in each auction lot."
+
 # Chunk size keeps prompts small for free-tier limits and fast failures.
 #
 # 8, not the old 12: Groq's gpt-oss tier allows 8,000 tokens per MINUTE and
@@ -432,7 +441,7 @@ def refine_quantities_with_llm(
             rows.append({"i": start + j, "title": title, "description": desc})
 
         payload = json.dumps(rows, ensure_ascii=False)
-        prompt = f"""You estimate how many CHAIRS (individual chair units) are in each auction lot.
+        prompt = f"""{_quantity_prompt_header()}
 
 Input (JSON array; each row has i, title, description). Description may be empty — use title only if so.
 

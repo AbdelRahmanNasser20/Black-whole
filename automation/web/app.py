@@ -1873,7 +1873,7 @@ async def _pump_scrape_stream(stream: asyncio.StreamReader, kind: str) -> None:
         await scrape_state.broadcast({"t": time.time(), "stream": kind, "data": line})
 
 
-async def _run_scraper(source: str, test_mode: bool) -> None:
+async def _run_scraper(source: str, test_mode: bool, profile_slug: str | None = None) -> None:
     """Run one or all scrapers sequentially (gd → ps → bs when source='both')."""
     steps: list[str] = ["gd", "ps", "bs"] if source == "both" else [source]
     overall_rc = 0
@@ -1898,6 +1898,19 @@ async def _run_scraper(source: str, test_mode: bool) -> None:
 
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        if profile_slug:
+            # Research profile → scraper env (auction_extractors reads both;
+            # unset = the chair defaults, so a bare launch is unchanged).
+            try:
+                prof = profiles.resolve(profile_slug)
+                if prof.search_terms:
+                    env["SCRAPE_SEARCH_TERMS"] = ",".join(prof.search_terms)
+                env["SCRAPE_ITEM_NOUN"] = prof.item_noun
+                await scrape_state.broadcast({"t": time.time(), "stream": "system",
+                    "data": f"[profile {prof.slug}] terms={prof.search_terms} noun={prof.item_noun}"})
+            except KeyError:
+                await scrape_state.broadcast({"t": time.time(), "stream": "system",
+                    "data": f"[profile {profile_slug!r} unknown — using scraper defaults]"})
 
         await scrape_state.broadcast({
             "t": time.time(), "stream": "system",
@@ -2011,14 +2024,15 @@ async def scrape_start(payload: dict):
     if source not in ("gd", "ps", "bs", "both"):
         raise HTTPException(400, "source must be 'gd', 'ps', 'bs', or 'both'")
     test_mode = bool(payload.get("test"))
+    profile_slug = (payload.get("profile") or "").strip() or None
 
     async with scrape_state.lock:
         if scrape_state.status == "running":
             raise HTTPException(409, "a scrape is already running")
         scrape_state.reset(source, test_mode)
-        asyncio.create_task(_run_scraper(source, test_mode))
+        asyncio.create_task(_run_scraper(source, test_mode, profile_slug))
 
-    return {"ok": True, "source": source, "test_mode": test_mode}
+    return {"ok": True, "source": source, "test_mode": test_mode, "profile": profile_slug}
 
 
 @app.post("/api/scrape/cancel")
