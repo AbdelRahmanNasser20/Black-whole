@@ -70,6 +70,17 @@
   <h2>Description</h2>
   <pre class="desc">{{ lot.description }}</pre>
 
+  {% if history %}
+  <h2>Bid history <small style="text-transform:none;letter-spacing:0">({{ history|length }} observed changes — GovDeals publishes none, this is what we sampled)</small></h2>
+  <div class="grid2" style="grid-template-columns:1fr">
+    {% for b in bidders %}
+    <div><b>{{ b.handle or '—' }} · id {{ b.bidder_id }}</b>led {{ b.times_led }}× · high point ${{ '%.2f'|format(b.max_bid or 0) }}</div>
+    {% endfor %}
+  </div>
+  <pre class="desc" style="font-family:ui-monospace,Menlo,monospace;font-size:.85rem">{% for o in history %}{{ o.observed_at.strftime('%b %d %H:%M') }}  auction {{ o.auction_id }}  {{ '%3d'|format(o.bid_count or 0) }} bids  ${{ '%9.2f'|format(o.current_bid or 0) }}  {{ o.high_bidder_username or '—' }}
+{% endfor %}</pre>
+  {% endif %}
+
   <h2>Details</h2>
   <div class="grid2">
     <div><b>Lot key</b>{{ lot.asset_id }} / {{ lot.account_id }} / {{ lot.auction_id }}</div>
