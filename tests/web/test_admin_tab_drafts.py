@@ -35,8 +35,7 @@ def test_drafts_pane_ships_skeleton_twin_not_loading_text():
     pane = _drafts_pane(html)
     assert re.search(r'<div[^>]*id="drafts-grid"[^>]*data-state="loading"', pane)
     assert 'class="sk-card"' in pane, "server-side skeleton twin (skeleton_cards macro)"
-    assert "Loading" in html  # other tabs still carry theirs until their branch lands …
-    assert "Loading" not in pane  # … but this pane never writes "Loading…" text again
+    assert "Loading" not in pane  # this pane never writes "Loading…" text again
     assert "drafts-empty" not in pane
     assert "storage_note" not in pane
 

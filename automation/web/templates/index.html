@@ -469,13 +469,17 @@
 
 <!-- ───────────── Deals ───────────── -->
 <section class="panel" data-pane="deals" hidden>
+  {#- the skeleton twins always ship; they only claim data-state="loading" when this is the pane being opened,
+      so another tab's smoke (`no [data-state="loading"] left`) is not tripped by a hidden pane -#}
+  {% set deals_active = request.query_params.get('tab') == 'deals' %}
+  <link rel="stylesheet" href="/static/admin/deals.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">DEAL TRACKER / GOVDEALS</div>
     <h1 class="hero-title">What expires cheap.</h1>
-    <p class="hero-sub" id="deal-stats">Loading…</p>
+    <div class="hero-sub" id="deal-stats"{% if deals_active %} data-state="loading"{% endif %}><div class="sk sk-line" aria-hidden="true" style="--w:48%"></div></div>
   </div>
 
-  <div class="deal-searches" id="deal-searches" hidden></div>
+  <div class="chips deal-searches" id="deal-searches"{% if deals_active %} data-state="loading"{% endif %} hidden><span class="sk sk-pill" aria-hidden="true"></span><span class="sk sk-pill" aria-hidden="true"></span><span class="sk sk-pill" aria-hidden="true"></span></div>
 
   <form class="auction-controls deal-controls deal-topbar" onsubmit="return false;">
     <div class="ac-group ac-grow">
@@ -485,7 +489,7 @@
     <div class="ac-group">
       <span class="ac-label">BIDS</span>
       <div class="seg" id="deal-bids-filter">
-        <button type="button" class="seg-btn active" data-value="">any</button>
+        <button type="button" class="seg-btn is-active" data-value="">any</button>
         <button type="button" class="seg-btn" data-value="0">0 bids</button>
         <button type="button" class="seg-btn" data-value="3">≤3</button>
       </div>
@@ -503,19 +507,19 @@
     <div class="ac-group">
       <span class="ac-label">STATUS</span>
       <div class="seg" id="deal-status-filter">
-        <button type="button" class="seg-btn active" data-value="active">active</button>
+        <button type="button" class="seg-btn is-active" data-value="active">active</button>
         <button type="button" class="seg-btn" data-value="closed">closed</button>
         <button type="button" class="seg-btn" data-value="all">all</button>
       </div>
     </div>
     <div class="ac-actions">
-      <button type="button" class="btn btn-small" id="deal-map-toggle" title="Map of the filtered lots — pan/zoom to narrow the table to the viewport">🗺 map</button>
+      <button type="button" class="btn btn-small" id="deal-map-toggle" aria-pressed="false" title="Map of the filtered lots — pan/zoom to narrow the table to the viewport">🗺 map</button>
       <button type="button" class="btn btn-small" id="deal-refresh">↻ refresh</button>
     </div>
   </form>
 
-  <div class="cat-pills" id="deal-cat-pills" hidden></div>
-  <div class="deal-active-chips" id="deal-active-chips" hidden></div>
+  <div class="chips deal-cat-chips" id="deal-cat-pills" hidden></div>
+  <div class="active-filters" id="deal-active-chips" hidden></div>
   <div class="cache-header" id="deal-outcomes" hidden></div>
 
   <div class="admin-map-wrap" id="deal-map-wrap" hidden>
@@ -525,13 +529,15 @@
 
   <div class="deal-layout">
     <aside class="deal-side" aria-label="Filters">
-      <div class="deal-side-box">
-        <div class="deal-tree-head">CATEGORY TREE
+      <section class="section deal-side-box">
+        <div class="section-head"><h2>Category tree</h2>
           <span class="deal-tree-legend" title="lots · zero-bid lots · ending &lt;24h">n · ⚑ 0-bid · ⏱ &lt;24h</span>
         </div>
-        <div class="deal-tree" id="deal-tree-nodes"><div class="drafts-empty">Loading…</div></div>
-      </div>
-      <div class="deal-side-box deal-side-filters">
+        <div class="deal-tree" id="deal-tree-nodes"{% if deals_active %} data-state="loading"{% endif %}><div class="sk sk-line" aria-hidden="true"></div><div class="sk sk-line" aria-hidden="true"></div><div class="sk sk-line" aria-hidden="true"></div><div class="sk sk-line" aria-hidden="true"></div><div class="sk sk-line" aria-hidden="true"></div><div class="sk sk-line" aria-hidden="true"></div></div>
+      </section>
+      <section class="section deal-side-box">
+        <div class="section-head"><h2>Filters</h2></div>
+        <div class="section-body deal-side-filters">
         <label class="ac-label" for="deal-category">CATEGORY</label>
         <select id="deal-category"><option value="">all</option></select>
         <label class="ac-label" for="deal-profile" title="Restrict to a research profile's keywords/states/price band">PROFILE</label>
@@ -548,7 +554,10 @@
         <label class="ac-label" for="deal-max-dist" title="Max distance from home (mi); drops lots with unknown coords">DIST ≤ MI</label>
         <input type="number" id="deal-max-dist" class="deal-num" placeholder="mi" min="0" step="25">
         <label class="ac-label" for="deal-zip" title="Center the map on a ZIP">ZIP</label>
-        <input type="text" id="deal-zip" class="deal-num" placeholder="ZIP →" maxlength="5" inputmode="numeric">
+        <div class="deal-side-row">
+          <input type="text" id="deal-zip" class="deal-num" placeholder="ZIP" maxlength="5" inputmode="numeric">
+          <button type="button" class="btn btn-small" id="deal-zip-go" title="center the map on this ZIP">→</button>
+        </div>
         <label class="ac-label" for="deal-list">LIST</label>
         <select id="deal-list"><option value="">all</option></select>
         <label class="ac-label" for="deal-tag">TAG</label>
@@ -557,12 +566,14 @@
           <button type="button" class="btn btn-small" id="deal-save-search" title="Save the current filter state as a named search">★ save search</button>
           <button type="button" class="btn btn-small" id="deal-create-alert" title="Save current filters as an alert — checked hourly, new matches → Telegram">🔔 alert</button>
         </div>
-      </div>
+        </div>
+      </section>
     </aside>
 
-    <div class="inv-table-wrap">
-      <div class="deal-pager" id="deal-pager-top"></div>
-      <table class="inv-table" id="deal-table">
+    <div class="deal-main">
+      <div class="pager" id="deal-pager-top"></div>
+      <div class="table-wrap">
+      <table class="table" id="deal-table">
         <thead>
           <tr>
             <th></th>
@@ -585,18 +596,17 @@
             <th>Outcome</th>
           </tr>
         </thead>
-        <tbody id="deal-rows">
-          <tr><td colspan="18" class="drafts-empty">Loading deals…</td></tr>
-        </tbody>
+        <tbody id="deal-rows"{% if deals_active %} data-state="loading"{% endif %}>{% for _ in range(12) %}<tr class="sk-tr" aria-hidden="true"><td colspan="99"><div class="sk sk-line"></div></td></tr>{% endfor %}</tbody>
       </table>
-      <div class="deal-pager" id="deal-pager-bottom"></div>
+      </div>
+      <div class="pager" id="deal-pager-bottom"></div>
     </div>
   </div>
 
   <!-- floating chrome: list-save popover, save-search popover, comps drawer -->
   <div class="deal-pop" id="deal-listpop" hidden></div>
   <div class="deal-pop" id="deal-searchpop" hidden></div>
-  <aside class="deal-drawer" id="deal-drawer" hidden></aside>
+  <aside class="drawer" id="deal-drawer" aria-hidden="true"></aside>
 </section>
 
 
