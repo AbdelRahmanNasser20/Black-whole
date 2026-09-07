@@ -1,0 +1,162 @@
+/* static/admin/inventory.css — Inventory tab (plan §10 E-inventory). Moved out of app.css; the table itself is the
+   shared .table from ui/components.css, the loading/empty/error states come from ui/skeleton.css + state.js.
+   Tokens only — no hex here (tests/web/test_admin_tab_inventory.py). */
+
+/* ── toolbar ── */
+.inv-toolbar {
+  gap: 18px;
+  padding: 12px 0;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+.inv-group {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; max-width: 100%;
+  font-family: var(--mono); font-size: var(--fs-xs);
+}
+/* six status buttons are ~450px — wrap the segmented control on phones instead of scrolling the page */
+.inv-toolbar .seg { flex-wrap: wrap; max-width: 100%; }
+.inv-toolbar .seg-btn { border-bottom: 1px solid var(--border); margin-bottom: -1px; }
+.inv-label { letter-spacing: 0.14em; color: var(--accent); }
+.inv-search { flex: 1 1 220px; max-width: 360px; }
+.inv-q {
+  flex: 1; height: 30px; min-width: 0;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 0 10px; font: inherit; font-size: var(--fs-sm); outline: none;
+}
+.inv-q:focus { border-color: var(--accent); }
+.inv-toolbar .result-count { margin-left: 0; }
+.inv-actions-bar { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+
+/* ── add-listing form ── */
+.inv-add-form {
+  padding: 16px var(--pad);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.inv-add-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
+}
+.inv-add-grid label { display: flex; flex-direction: column; gap: 4px; }
+.inv-add-grid label > span {
+  font-size: var(--fs-xs); letter-spacing: 0.14em; color: var(--muted);
+}
+.inv-add-grid input, .inv-add-grid textarea {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 7px 9px;
+  font: inherit; font-size: var(--fs-sm);
+}
+.inv-add-grid .inv-add-wide { grid-column: 1 / -1; }
+.inv-add-actions { display: flex; gap: 10px; margin-top: 14px; }
+@media (max-width: 760px) { .inv-add-grid { grid-template-columns: repeat(2, 1fr); } }
+
+/* ── stats strip ── */
+.inv-strip {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.strip-cell {
+  padding: 18px 24px;
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.strip-cell:last-child { border-right: none; }
+.strip-num {
+  font-family: var(--display); font-size: 40px; line-height: 1;
+  color: var(--accent); font-variant-numeric: tabular-nums;
+}
+.strip-sk { height: 40px; width: 72px; margin: 0; }
+.strip-lab {
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: 0.18em;
+  color: var(--muted); text-transform: uppercase;
+}
+@media (max-width: 640px) {
+  .inv-strip { grid-template-columns: 1fr; }
+  .strip-cell { border-right: none; border-bottom: 1px solid var(--border); }
+  .strip-cell:last-child { border-bottom: none; }
+}
+
+/* ── table ── */
+.inv-wrap { padding: 16px 0 40px; overflow-x: auto; min-height: 120px; }
+.inv-wrap .table th { white-space: nowrap; background: var(--surface); border-bottom: 1px solid var(--border-strong); }
+.inv-wrap .table td { padding: 10px; }
+.inv-wrap .table tr.flash-ok td { animation: inv-flash-ok .6s ease; }
+.inv-wrap .table tr.flash-err td { animation: inv-flash-err .6s ease; }
+@keyframes inv-flash-ok { from { background: color-mix(in srgb, var(--success) 24%, transparent); } }
+@keyframes inv-flash-err { from { background: color-mix(in srgb, var(--danger) 24%, transparent); } }
+@media (prefers-reduced-motion: reduce) {
+  .inv-wrap .table tr.flash-ok td, .inv-wrap .table tr.flash-err td { animation: none; }
+}
+
+.inv-wrap .mono { font-family: var(--mono); }
+.inv-wrap .tiny { font-size: var(--fs-xs); letter-spacing: 0.14em; color: var(--muted); }
+.inv-title { font-weight: 500; color: var(--text); max-width: 280px; }
+.inv-sub { margin-top: 3px; }
+.inv-hero {
+  width: 72px; height: 54px; padding: 0; background: var(--bg);
+}
+.inv-hero img { width: 72px; height: 54px; object-fit: cover; display: block; }
+.inv-hero-fallback {
+  width: 72px; height: 54px; display: flex; align-items: center; justify-content: center;
+  color: var(--dim); font-family: var(--display); font-size: 22px;
+}
+.inv-wrap .table input[type="number"],
+.inv-wrap .table select {
+  background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-family: var(--mono); font-size: var(--fs-xs);
+  padding: 4px 6px;
+  width: 76px;
+  outline: none;
+}
+.inv-wrap .table input[type="number"]:focus,
+.inv-wrap .table select:focus { border-color: var(--accent); }
+.inv-wrap .table select { width: 102px; }
+.inv-wrap .table input.inv-qty-orig {
+  width: 52px; padding: 2px 4px; font-size: var(--fs-xs);
+  color: var(--muted); margin-left: 2px;
+}
+
+.inv-contact { color: var(--text); opacity: 0.85; }
+.inv-locs { margin-top: 4px; }
+.inv-loc-input {
+  width: 100%;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: inherit;
+  padding: 2px 5px;
+}
+.inv-loc-input:focus { border-style: solid; outline: none; }
+.inv-extras {
+  display: flex; flex-wrap: wrap; gap: 4px;
+  margin-top: 4px;
+}
+.inv-extras .btn { font-size: var(--fs-xs); padding: 2px 6px; }
+.inv-acct { font-family: var(--mono); }
+.inv-cert-link { text-decoration: none; }
+
+/* platform cells */
+.plat-ok {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--success);
+}
+.plat-ok a { color: var(--success); text-decoration: underline; }
+.plat-ok a:hover { color: var(--accent); }
+.plat-ok .tiny { color: var(--dim); }
+.plat-clear {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--dim); cursor: pointer; padding: 2px 6px;
+  font-family: var(--mono); font-size: var(--fs-xs);
+}
+.plat-clear:hover { color: var(--danger); border-color: var(--danger); }
+.plat-set { white-space: nowrap; }
+
+.inv-row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.inv-wrap .inv-danger { color: var(--danger); border-color: var(--danger); }
+.inv-wrap .inv-danger:hover { background: var(--danger); color: var(--bg); }
+
+/* pending row (inline edit in flight) — mirrors skeleton.css tr.is-pending, plus a progress glyph on the lot id */
+.inv-wrap .table tr.is-pending td:first-child::after {
+  content: " ◌"; display: inline-block; color: var(--accent); animation: sk-spin 1s linear infinite;
+}

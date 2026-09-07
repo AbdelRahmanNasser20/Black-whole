@@ -266,6 +266,12 @@
 
 <!-- ───────────── Inventory ───────────── -->
 <section class="panel" data-pane="inventory" hidden>
+  {#- E-inventory: this pane's CSS lives in static/admin/inventory.css; the shared .table/.controls/.seg come from
+      static/ui/components.css. skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% macro skeleton_rows(n) -%}
+  {% for _ in range(n) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}
+  {%- endmacro %}
+  <link rel="stylesheet" href="/static/admin/inventory.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">LEDGER / INVENTORY</div>
     <h1 class="hero-title">Who's up where. What's left to sell.</h1>
@@ -279,11 +285,11 @@
     </p>
   </div>
 
-  <div class="inv-controls">
-    <div class="ac-group">
-      <span class="ac-label">STATUS</span>
-      <div class="seg" id="inv-status-filter">
-        <button type="button" class="seg-btn active" data-value="">all</button>
+  <div class="controls inv-toolbar">
+    <div class="inv-group">
+      <span class="inv-label">STATUS</span>
+      <div class="seg" id="inv-status-filter" role="group" aria-label="Filter by status">
+        <button type="button" class="seg-btn is-active" data-value="">all</button>
         <button type="button" class="seg-btn" data-value="listed">listed</button>
         <button type="button" class="seg-btn" data-value="draft">draft</button>
         <button type="button" class="seg-btn" data-value="hidden">hidden</button>
@@ -291,7 +297,12 @@
         <button type="button" class="seg-btn" data-value="lost_sold_out">lost_sold_out</button>
       </div>
     </div>
-    <div class="ac-actions">
+    <label class="inv-group inv-search">
+      <span class="inv-label">FIND</span>
+      <input type="search" id="inv-q" class="inv-q" placeholder="lot, title, city, chair type…" autocomplete="off" spellcheck="false">
+    </label>
+    <span class="result-count" id="inv-count" aria-live="polite"></span>
+    <div class="inv-actions-bar">
       <button type="button" class="btn btn-small" id="inv-add">+ add listing</button>
       <button type="button" class="btn btn-small" id="inv-refresh">↻ refresh</button>
       <button type="button" class="btn btn-small" id="inv-backfill"
@@ -323,29 +334,14 @@
     </div>
   </form>
 
-  <div class="inv-strip" id="inv-stats"></div>
+  <div class="inv-strip" id="inv-stats" aria-hidden="true">
+    <div class="strip-cell"><div class="sk sk-line strip-sk"></div><div class="strip-lab">ACTIVE LOTS</div></div>
+    <div class="strip-cell"><div class="sk sk-line strip-sk"></div><div class="strip-lab">CHAIRS LEFT</div></div>
+    <div class="strip-cell"><div class="sk sk-line strip-sk"></div><div class="strip-lab">CITIES</div></div>
+  </div>
 
-  <div class="inv-table-wrap">
-    <table class="inv-table" id="inv-table">
-      <thead>
-        <tr>
-          <th>LOT</th>
-          <th>HERO</th>
-          <th>TITLE</th>
-          <th>QTY</th>
-          <th>PRICE</th>
-          <th>STATUS</th>
-          <th>FB</th>
-          <th>EBAY</th>
-          <th>FB BIZ</th>
-          <th>AD</th>
-          <th>ACTIONS</th>
-        </tr>
-      </thead>
-      <tbody id="inv-tbody">
-        <tr><td colspan="11" class="drafts-empty">Loading inventory…</td></tr>
-      </tbody>
-    </table>
+  <div class="inv-wrap" id="inv-wrap" data-state="loading" aria-busy="true">
+    {{ skeleton_rows(10) }}
   </div>
 </section>
 
