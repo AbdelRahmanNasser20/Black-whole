@@ -1,9 +1,31 @@
-// static/admin/subscribers.js — split verbatim from app.js (Workstream F). Bodies unchanged; only import/export/mount added.
-import {$, $$, toast, withButtonLoading, apiFetch, escapeHtml, escapeAttr} from './shared.js';
+// static/admin/subscribers.js — Subscribers tab (plan §10 E-subscribers).
+// The read (GET /api/subscribers) goes through UI.load (skeleton → ready | empty | error, keepOld on refresh),
+// the two mutations (PATCH status, DELETE) through UI.pending. The status filter lives in the URL (?status=).
+import {$, $$, toast, escapeHtml, escapeAttr} from './shared.js';
+import {load as uiLoad, pending, api} from '../ui/state.js';
 
-// ─────────────────────────── Subscribers tab ───────────────────────────
+// URL params — same semantics as shell.js getParams()/setParams() (this tab owns `status`, the shell owns `tab`).
+// Not imported from shell.js on purpose: index.html loads shell as `shell.js?v=…`, so a tab that imports
+// `./shell.js` pulls in a SECOND shell instance that boots every tab mid-evaluation (TDZ crash).
+function getParams() {
+  const out = {};
+  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
+  return out;
+}
+function setParams(patch, {replace = true} = {}) {
+  const sp = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === null || v === undefined || v === '') sp.delete(k);
+    else sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+  const cur = location.pathname + location.search + location.hash;
+  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
+  return getParams();
+}
 
-var _subStatusFilter = '';
+const STATUSES = ['new', 'contacted', 'matched', 'unsubscribed'];
 
 const SUB_LABELS = {
   use_case: {church: 'church', event_venue: 'event venue', wedding_rental: 'wedding rental',
@@ -13,108 +35,191 @@ const SUB_LABELS = {
   delivery: {pickup: 'pickup', delivery: 'ship', either: 'either'},
 };
 
-async function loadSubscribers() {
-  const el = $('#sub-list');
-  el.innerHTML = '<div class="drafts-empty">Loading…</div>';
-  try {
-    const r = await fetch('/api/subscribers' + (_subStatusFilter ? `?status=${_subStatusFilter}` : ''));
-    const data = await r.json();
-    renderSubscribers(data.items || []);
-  } catch (e) {
-    el.innerHTML = `<div class="drafts-empty">Load failed: ${e}</div>`;
-  }
+const filter = {status: ''};            // mirrors ?status=
+const list = () => $('#sub-list');
+
+// ───────── URL ↔ controls ─────────
+
+function statusValues() { return $$('#sub-status-filter .seg-btn').map(b => b.dataset.value); }
+
+function readParams() {
+  const p = getParams();
+  filter.status = statusValues().includes(p.status || '') ? (p.status || '') : '';
+  syncControls();
 }
 
-function renderSubscribers(items) {
-  const el = $('#sub-list');
-  if (!items.length) {
-    el.innerHTML = '<div class="drafts-empty">No alert signups yet. The form lives at /listings#alerts.</div>';
-    return;
+function syncControls() {
+  $$('#sub-status-filter .seg-btn').forEach(b => {
+    const on = b.dataset.value === filter.status;
+    b.classList.toggle('is-active', on);
+    if (on) b.setAttribute('aria-pressed', 'true'); else b.removeAttribute('aria-pressed');
+  });
+}
+
+function setStatus(value) {
+  filter.status = statusValues().includes(value) ? value : '';
+  setParams({status: filter.status});
+  syncControls();
+  loadSubscribers({keepOld: true});
+}
+
+// ───────── data ─────────
+
+function renderCount(n) {
+  const el = $('#sub-count');
+  if (!el) return;
+  if (n == null) el.textContent = '';
+  else el.textContent = filter.status ? `${n} ${filter.status}` : `${n} signup${n === 1 ? '' : 's'}`;
+}
+
+function emptyArgs() {
+  if (filter.status) {
+    return {title: `No ${filter.status} signups`, body: 'Nobody carries this status right now.',
+            cta: {label: 'Show all', onClick: () => setStatus('')}};
   }
-  el.innerHTML = '';
+  return {glyph: '◌', title: 'No alert signups yet', body: 'The public form on /listings#alerts feeds this list.',
+          cta: {label: 'Open the signup form', href: '/listings#alerts'}};
+}
+
+async function loadSubscribers({keepOld = false} = {}) {
+  const el = list();
+  if (!el) return undefined;
+  const qs = new URLSearchParams();
+  if (filter.status) qs.set('status', filter.status);
+  const url = '/api/subscribers' + (qs.toString() ? '?' + qs.toString() : '');
+  return uiLoad(el, ({signal}) => api(url, {signal}), {
+    skeleton: 'row', count: 5, keepOld,
+    isEmpty(data) {
+      const items = data.items || [];
+      renderCount(items.length);
+      return !items.length;
+    },
+    empty: emptyArgs(),
+    render: (data) => cardsFragment(data.items || []),
+    errorMessage: (err) => err.status ? `Couldn't load subscribers. The server said ${err.status}.`
+                                      : "Couldn't load subscribers. The database didn't answer in 15 s.",
+  });
+}
+
+// ───────── render ─────────
+
+function fmtWhen(iso) { return iso ? String(iso).replace('T', ' ').slice(0, 16) : ''; }
+
+function prefsLine(q) {
+  const geo = [q.city, q.state, q.zip_code].filter(Boolean).join(' ');
+  return [
+    q.quantity_wanted ? `qty ${q.quantity_wanted}` : '',
+    geo,
+    SUB_LABELS.use_case[q.use_case] || q.use_case || '',
+    q.chair_type || '',
+    SUB_LABELS.timeline[q.timeline] || q.timeline || '',
+    SUB_LABELS.budget_per_chair[q.budget_per_chair] || q.budget_per_chair || '',
+    SUB_LABELS.delivery[q.delivery] || q.delivery || '',
+  ].filter(Boolean).join(' · ');
+}
+
+function cardHtml(q) {
+  const prefs = prefsLine(q);
+  return `
+    <header class="sub-head">
+      <span class="sub-kind">ALERT</span>
+      <span class="sub-src">${escapeHtml(q.source || '')}</span>
+      <span class="sub-when">${escapeHtml(fmtWhen(q.created_at))}</span>
+      <span class="badge sub-status sub-status-${escapeAttr(q.status)}">${escapeHtml(q.status)}</span>
+    </header>
+    <div class="sub-body">
+      <div class="sub-name">${escapeHtml(q.name || '—')}</div>
+      <div class="sub-contact">
+        ${q.email ? `<a href="mailto:${escapeAttr(q.email)}">${escapeHtml(q.email)}</a>` : ''}
+        ${q.phone ? `<a href="tel:${escapeAttr(q.phone)}">${escapeHtml(q.phone)}</a>` : ''}
+      </div>
+      ${prefs ? `<div class="sub-contact">${escapeHtml(prefs)}</div>` : ''}
+      ${q.notes ? `<blockquote class="sub-notes">${escapeHtml(q.notes)}</blockquote>` : ''}
+    </div>
+    <footer class="sub-foot">
+      ${STATUSES.filter(s => s !== q.status)
+        .map(s => `<button type="button" class="btn btn-small" data-set-status="${s}">→ ${s}</button>`).join('')}
+      <button type="button" class="btn btn-small btn-ghost sub-danger" data-delete>✕ delete</button>
+    </footer>`;
+}
+
+function cardsFragment(items) {
+  const frag = document.createDocumentFragment();
   for (const q of items) {
     const card = document.createElement('article');
-    card.className = `inq-card inq-${q.status}`;
+    card.className = `card card-sub sub-${q.status}`;
     card.dataset.id = q.id;
-    const when = q.created_at ? String(q.created_at).replace('T', ' ').slice(0, 16) : '';
-    const geo = [q.city, q.state, q.zip_code].filter(Boolean).join(' ');
-    const prefs = [
-      q.quantity_wanted ? `qty ${q.quantity_wanted}` : '',
-      geo,
-      SUB_LABELS.use_case[q.use_case] || q.use_case || '',
-      q.chair_type || '',
-      SUB_LABELS.timeline[q.timeline] || q.timeline || '',
-      SUB_LABELS.budget_per_chair[q.budget_per_chair] || q.budget_per_chair || '',
-      SUB_LABELS.delivery[q.delivery] || q.delivery || '',
-    ].filter(Boolean).join(' · ');
-    card.innerHTML = `
-      <header class="inq-head">
-        <span class="inq-kind inq-kind--buy">ALERT</span>
-        <span class="inq-lot mono tiny">${escapeHtml(q.source || '')}</span>
-        <span class="inq-when mono tiny">${when}</span>
-        <span class="inq-status-pill inq-status-${q.status}">${q.status}</span>
-      </header>
-      <div class="inq-body">
-        <div class="inq-name">${escapeHtml(q.name || '—')}</div>
-        <div class="inq-contact mono tiny">
-          ${q.email ? `<a href="mailto:${escapeAttr(q.email)}">${escapeHtml(q.email)}</a>` : ''}
-          ${q.phone ? `<a href="tel:${escapeAttr(q.phone)}">${escapeHtml(q.phone)}</a>` : ''}
-        </div>
-        ${prefs ? `<div class="inq-contact mono tiny">${escapeHtml(prefs)}</div>` : ''}
-        ${q.notes ? `<blockquote class="inq-msg">${escapeHtml(q.notes)}</blockquote>` : ''}
-      </div>
-      <footer class="inq-foot">
-        ${['new','contacted','matched','unsubscribed'].filter(s => s !== q.status)
-          .map(s => `<button class="btn btn-small" data-set-status="${s}">→ ${s}</button>`).join('')}
-        <button class="btn btn-small btn-ghost inv-danger" data-delete>✕ delete</button>
-      </footer>
-    `;
-    card.querySelectorAll('[data-set-status]').forEach(b => b.addEventListener('click', async () => {
-      const status = b.dataset.setStatus;
-      await withButtonLoading(b, '…', async () => {
-        try {
-          await apiFetch(`/api/subscribers/${q.id}`, {
-            method: 'PATCH',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({status}),
-          });
-          toast(`Subscriber #${q.id} → ${status}`, 'ok');
-          loadSubscribers();
-        } catch (err) {
-          toast('Status change failed: ' + (err.message || err), 'err');
-        }
-      });
-    }));
-    card.querySelector('[data-delete]').addEventListener('click', async (e) => {
-      if (!confirm(`Delete subscriber #${q.id}?`)) return;
-      await withButtonLoading(e.currentTarget, '…', async () => {
-        try {
-          await apiFetch(`/api/subscribers/${q.id}`, {method: 'DELETE'});
-          toast(`Subscriber #${q.id} deleted.`, 'ok');
-          loadSubscribers();
-        } catch (err) {
-          toast('Delete failed: ' + (err.message || err), 'err');
-        }
-      });
-    });
-    el.appendChild(card);
+    card.innerHTML = cardHtml(q);
+    frag.appendChild(card);
   }
+  return frag;
 }
+
+// ───────── mutations (delegated — cards are re-rendered on every load) ─────────
+
+async function onListClick(e) {
+  const btn = e.target.closest('button[data-set-status], button[data-delete]');
+  if (!btn) return;
+  const card = btn.closest('.card-sub');
+  const id = card?.dataset.id;
+  if (!id) return;
+
+  if (btn.dataset.setStatus) {
+    const status = btn.dataset.setStatus;
+    await pending(btn, '…', async () => {
+      try {
+        await api(`/api/subscribers/${id}`, {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({status}),
+        });
+        toast(`Subscriber #${id} → ${status}`, 'ok');
+        loadSubscribers({keepOld: true});
+      } catch (err) {
+        toast('Status change failed: ' + (err.message || err), 'err');
+      }
+    });
+    return;
+  }
+
+  if (!confirm(`Delete subscriber #${id}?`)) return;
+  await pending(btn, '…', async () => {
+    try {
+      await api(`/api/subscribers/${id}`, {method: 'DELETE'});
+      toast(`Subscriber #${id} deleted.`, 'ok');
+      loadSubscribers({keepOld: true});
+    } catch (err) {
+      toast('Delete failed: ' + (err.message || err), 'err');
+    }
+  });
+}
+
+// ───────── mount / load ─────────
 
 let mounted = false;
 export function mount() {
   if (mounted) return;
   mounted = true;
+
+  // The pane ships its skeleton twin inside data-state="loading". Until this tab is activated (shell.js →
+  // load()), nothing is actually loading — drop the state so a smoke on another tab is not blocked on a
+  // hidden pane. load() re-sets it when the tab opens.
+  const el = list();
+  const pane = el?.closest('[data-pane]');
+  if (el && pane?.hidden) { delete el.dataset.state; el.removeAttribute('aria-busy'); }
+
+  el?.addEventListener('click', onListClick);
+
   $('#sub-refresh')?.addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '↻ loading…', loadSubscribers);
+    pending(e.currentTarget, '↻ loading…', () => loadSubscribers({keepOld: true}));
   });
 
-  $$('#sub-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => {
-    $$('#sub-status-filter .seg-btn').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    _subStatusFilter = b.dataset.value;
-    loadSubscribers();
-  }));
+  $$('#sub-status-filter .seg-btn').forEach(b => b.addEventListener('click', () => setStatus(b.dataset.value)));
 }
 
-export async function load() { return loadSubscribers(); }
+/** Tab activation (and popstate via the shell): resync from the URL, then fetch — dimming old cards if we have any. */
+export async function load() {
+  readParams();
+  const el = list();
+  return loadSubscribers({keepOld: !!el && el.dataset.state === 'ready'});
+}

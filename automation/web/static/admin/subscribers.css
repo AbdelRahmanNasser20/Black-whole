@@ -1,0 +1,78 @@
+/* static/admin/subscribers.css — Subscribers tab (plan §10 E-subscribers). The tab used to borrow the Inquiries
+   tab's .inq-* rules from app.css; the subscriber-only ones (matched / unsubscribed) moved here and the rest were
+   replaced by the shared .controls/.seg/.card/.badge from ui/components.css plus the loading/empty/error states from
+   ui/skeleton.css + state.js. Tokens only — no hex here (tests/web/test_admin_tab_subscribers.py). */
+
+/* ── toolbar ── */
+.sub-toolbar {
+  gap: 18px;
+  padding: 12px 0;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
+}
+.sub-group {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; max-width: 100%;
+  font-family: var(--mono); font-size: var(--fs-xs);
+}
+/* five status buttons are ~380px — wrap the segmented control on phones instead of scrolling the page */
+.sub-toolbar .seg { flex-wrap: wrap; max-width: 100%; }
+.sub-toolbar .seg-btn { border-bottom: 1px solid var(--border); margin-bottom: -1px; }
+.sub-label { letter-spacing: 0.14em; color: var(--accent); }
+.sub-toolbar .result-count { margin-left: 0; }
+.sub-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-left: auto; }
+
+/* ── list ── */
+.sub-list {
+  position: relative;
+  padding: 20px 0 40px;
+  display: flex; flex-direction: column; gap: 14px;
+}
+.sub-list > .ui-stale-badge { position: absolute; top: 4px; right: 0; }
+
+/* ── one signup = a .card with the tab modifier; the left rule carries the status ── */
+.card.card-sub {
+  min-height: 0;
+  padding: 16px 20px;
+  gap: 10px;
+  border-left: 3px solid var(--border-strong);
+}
+.card-sub.sub-new { border-left-color: var(--accent); }
+.card-sub.sub-contacted { border-left-color: var(--info); }
+.card-sub.sub-matched { border-left-color: var(--success); }
+.card-sub.sub-unsubscribed { border-left-color: var(--danger); opacity: 0.75; }
+
+.sub-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.sub-kind {
+  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
+  padding: 3px 8px;
+  background: var(--accent); color: var(--bg); border: 1px solid var(--accent);
+}
+.sub-src { font-family: var(--mono); font-size: var(--fs-sm); color: var(--muted); }
+.sub-when { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); margin-left: auto; }
+
+/* status pill = shared .badge + a status colour */
+.sub-status { text-transform: uppercase; letter-spacing: 0.2em; border: 1px solid var(--border-strong); color: var(--muted); }
+.sub-status-new { color: var(--accent); border-color: var(--accent); }
+.sub-status-contacted { color: var(--info); border-color: var(--info); }
+.sub-status-matched { color: var(--success); border-color: var(--success); }
+.sub-status-unsubscribed { color: var(--danger); border-color: var(--danger); }
+
+.sub-body { display: flex; flex-direction: column; gap: 6px; }
+.sub-name { font-size: 15px; font-weight: 500; }
+.sub-contact { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; }
+.sub-contact a { color: var(--text); text-decoration: underline; }
+.sub-notes {
+  margin: 4px 0 0 0; padding: 10px 14px;
+  background: var(--bg); border-left: 2px solid var(--accent);
+  font-family: var(--display); font-style: italic; font-size: 15px;
+  color: var(--text); white-space: pre-wrap;
+}
+.sub-foot { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.sub-danger { color: var(--danger); border-color: var(--danger); }
+.sub-danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+@media (max-width: 640px) {
+  .card.card-sub { padding: 14px var(--pad); }
+  .sub-when { margin-left: 0; flex-basis: 100%; }
+}

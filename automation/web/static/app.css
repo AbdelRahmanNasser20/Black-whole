@@ -546,64 +546,8 @@ main {
 .inv-danger:hover { background: var(--err); color: var(--bg); }
 
 
-/* ═══════════════ Inquiries tab — MOVED to static/admin/inquiries.css (E-inquiries) ═══════════════
-   The Inquiries pane no longer uses any .inq-* class (it is .card.card--inquiry + .inquiry-*). The rules below are
-   retained ONLY because static/admin/subscribers.js still renders #sub-list with .inq-list / .inq-card markup.
-   E-subscribers owns them now: move what it keeps into static/admin/subscribers.css and delete this block. */
-.inq-list {
-  padding: 20px var(--pad) 40px var(--pad);
-  display: flex; flex-direction: column; gap: 14px;
-}
-.inq-card {
-  background: var(--bg-elev);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--line-bold);
-  padding: 16px 20px;
-  display: grid; gap: 10px;
-}
-.inq-card.inq-new { border-left-color: var(--accent); }
-.inq-card.inq-contacted { border-left-color: var(--info); }
-.inq-card.inq-closed { border-left-color: var(--ink-dim); opacity: 0.75; }
-.inq-card.inq-matched { border-left-color: var(--ok); }
-.inq-card.inq-unsubscribed { border-left-color: var(--err); opacity: 0.75; }
-
-.inq-head {
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
-}
-.inq-kind {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
-  padding: 3px 8px;
-  border: 1px solid var(--line-bold);
-  color: var(--ink);
-}
-.inq-kind--buy { background: var(--accent); color: var(--bg); border-color: var(--accent); }
-.inq-kind--sell { background: var(--info); color: var(--bg); border-color: var(--info); }
-.inq-lot { font-family: var(--mono); font-size: 12px; }
-.inq-lot a { color: var(--ink); text-decoration: underline; }
-.inq-unlinked { color: var(--ink-dim); }
-.inq-when { color: var(--ink-mute); margin-left: auto; }
-.inq-status-pill {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em;
-  padding: 3px 8px; border: 1px solid var(--line-bold);
-  text-transform: uppercase; color: var(--ink-mute);
-}
-.inq-status-new { color: var(--accent); border-color: var(--accent); }
-.inq-status-contacted { color: var(--info); border-color: var(--info); }
-.inq-status-closed { color: var(--ink-dim); }
-.inq-status-matched { color: var(--ok); border-color: var(--ok); }
-.inq-status-unsubscribed { color: var(--err); border-color: var(--err); }
-
-.inq-body { display: flex; flex-direction: column; gap: 6px; }
-.inq-name { font-size: 15px; font-weight: 500; }
-.inq-contact { color: var(--ink-mute); display: flex; gap: 12px; flex-wrap: wrap; }
-.inq-contact a { color: var(--ink); text-decoration: underline; }
-.inq-msg {
-  margin: 4px 0 0 0; padding: 10px 14px;
-  background: var(--bg); border-left: 2px solid var(--accent);
-  font-family: var(--display); font-style: italic; font-size: 15px;
-  color: var(--ink); white-space: pre-wrap;
-}
-.inq-foot { display: flex; gap: 8px; flex-wrap: wrap; }
+/* Inquiries tab — MOVED to static/admin/inquiries.css (E-inquiries); the legacy .inq-* rules it left behind for
+   subscribers.js went to static/admin/subscribers.css as .card-sub (E-subscribers). Nothing uses .inq-* anymore. */
 
 
 /* ───────────── Listings DB (tab 07) ───────────── */
