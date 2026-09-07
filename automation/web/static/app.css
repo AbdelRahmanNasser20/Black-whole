@@ -104,34 +104,7 @@ main {
 .lex.error { color: var(--err); }
 .lex.pending { color: var(--ink-dim); }
 
-/* ───────────── launcher form ───────────── */
-
-.launcher {
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
-  padding: 24px;
-  display: grid; gap: 18px;
-  margin-bottom: 24px;
-}
-
-.url-field {
-  display: grid; grid-template-columns: auto 1fr; align-items: center;
-  border: 1px solid var(--line);
-  background: var(--bg);
-}
-.url-label {
-  font-family: var(--mono); font-size: 11px; color: var(--accent);
-  padding: 0 14px; border-right: 1px solid var(--line);
-  letter-spacing: 0.18em;
-}
-.url-field input {
-  background: transparent; color: var(--ink); border: 0;
-  padding: 14px 16px;
-  font-family: var(--mono); font-size: 14px;
-  width: 100%; outline: none;
-}
-.url-field input::placeholder { color: var(--ink-dim); }
-.url-field:focus-within { border-color: var(--accent); }
+/* ───────────── form opts + buttons (shared by every tab; the Launcher's own rules live in admin/launcher.css) ───────────── */
 
 .opts {
   display: flex; flex-wrap: wrap; gap: 14px 24px; align-items: center;
@@ -145,7 +118,6 @@ main {
   font: inherit; padding: 4px 6px;
 }
 
-.launch-actions { display: flex; gap: 10px; }
 .btn {
   border: 1px solid var(--line-bold); background: var(--bg);
   color: var(--ink); padding: 10px 18px;
@@ -164,136 +136,9 @@ main {
 .btn-primary:hover:not(:disabled) {
   background: var(--ink); border-color: var(--ink);
 }
-.btn-glyph { font-size: 9px; }
 .btn-small { padding: 6px 12px; font-size: 11px; }
 .btn-ghost { background: transparent; }
 
-/* ───────────── phase grid ───────────── */
-
-.phase-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  border: 1px solid var(--line);
-  background: var(--bg-elev);
-  margin-bottom: 28px;
-}
-.phase {
-  border-right: 1px solid var(--line);
-  padding: 16px 18px 18px;
-  min-height: 130px;
-  position: relative;
-  transition: background .2s;
-}
-.phase:last-child { border-right: 0; }
-.phase[data-state=running] {
-  background:
-    linear-gradient(90deg, transparent, rgba(255,181,71,0.04));
-}
-.phase[data-state=running]::after {
-  content: ""; position: absolute; left: 0; top: 0; height: 2px;
-  width: 30%; background: var(--warn);
-  animation: phase-pulse 1.6s ease-in-out infinite;
-}
-@keyframes phase-pulse {
-  0%, 100% { transform: translateX(0); width: 30%; }
-  50%      { transform: translateX(230%); width: 20%; }
-}
-.phase-head {
-  display: grid; grid-template-columns: auto 1fr auto;
-  align-items: center; gap: 8px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--line);
-  margin-bottom: 12px;
-}
-.phase-num {
-  font-family: var(--mono); font-size: 10px; color: var(--ink-dim);
-  letter-spacing: 0.1em;
-}
-.phase-name {
-  font-family: var(--mono); font-size: 13px; color: var(--ink);
-  text-transform: uppercase; letter-spacing: 0.05em;
-}
-.phase-status {
-  font-family: var(--mono); font-size: 10px; padding: 2px 6px;
-  text-transform: uppercase; letter-spacing: 0.08em;
-  border: 1px solid var(--ink-dim); color: var(--ink-dim);
-}
-.phase-status[data-state=running] { color: var(--warn); border-color: var(--warn); }
-.phase-status[data-state=done]    { color: var(--ok);   border-color: var(--ok); }
-.phase-status[data-state=error]   { color: var(--err);  border-color: var(--err); }
-.phase-status[data-state=skipped] { color: var(--ink-dim); border-style: dashed; }
-
-.phase-body {
-  font-family: var(--mono); font-size: 11px; color: var(--ink-mute);
-  line-height: 1.55;
-}
-.phase-body .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; }
-.phase-body .kv dt { color: var(--ink-dim); }
-.phase-body .kv dd { margin: 0; color: var(--ink); word-break: break-all; }
-.phase-body a {
-  color: var(--info); text-decoration: underline;
-  text-decoration-color: var(--line-bold);
-  text-underline-offset: 3px;
-}
-
-/* ───────────── price prompt ───────────── */
-
-.price-prompt {
-  border: 1px solid var(--accent); background: var(--bg-elev);
-  padding: 14px 18px; margin-bottom: 24px;
-  display: grid; gap: 8px;
-}
-.pp-label {
-  font-family: var(--mono); font-size: 10px; color: var(--accent);
-  letter-spacing: 0.18em;
-}
-.pp-row {
-  display: flex; align-items: center; gap: 14px;
-  font-family: var(--mono); font-size: 13px;
-}
-.pp-suggested { color: var(--accent); font-size: 18px; }
-.pp-row input {
-  background: var(--bg); border: 1px solid var(--line); color: var(--ink);
-  font: inherit; padding: 6px 10px; width: 80px;
-}
-
-/* ───────────── console ───────────── */
-
-.console-block {
-  border: 1px solid var(--line);
-  background: #08080a;
-}
-.console-head {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 10px 14px;
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-elev);
-}
-.console-title {
-  font-family: var(--mono); font-size: 11px; color: var(--accent);
-  letter-spacing: 0.16em; text-transform: uppercase;
-}
-.console-toggle {
-  font-family: var(--mono); font-size: 11px; color: var(--ink-mute);
-  display: flex; gap: 14px;
-}
-.console-toggle input { accent-color: var(--accent); }
-.console {
-  margin: 0; padding: 14px 18px;
-  font-family: var(--mono); font-size: 12px;
-  color: var(--ink); line-height: 1.55;
-  height: 360px; overflow-y: auto;
-  white-space: pre-wrap; word-break: break-word;
-}
-.console::-webkit-scrollbar { width: 8px; }
-.console::-webkit-scrollbar-thumb { background: var(--line-bold); }
-.console-line { display: block; }
-.console-line .ts { color: var(--ink-dim); margin-right: 10px; }
-.console-line .tag { color: var(--ink-dim); margin-right: 8px; }
-.console-line.stderr  .body { color: var(--err); }
-.console-line.system  .body { color: var(--info); }
-.console-line.event   .body { color: var(--accent-2); }
-.console-line.event   .tag  { color: var(--accent); }
 
 /* ───────────── drafts ───────────── */
 /* .drafts-grid / .draft* moved to static/admin/drafts.css (E-drafts). .drafts-empty, .spinner, .pulse stay:
@@ -336,29 +181,6 @@ main {
   backdrop-filter: blur(6px);
 }
 
-/* ───────────── queue strip ───────────── */
-
-.queue-strip {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 14px; margin-bottom: 14px;
-  border: 1px solid var(--accent); background: rgba(255,181,71,0.05);
-  font-family: var(--mono); font-size: 11px;
-}
-.queue-label {
-  color: var(--accent); letter-spacing: 0.18em; font-weight: 500;
-}
-.queue-count {
-  display: inline-block; min-width: 22px; text-align: center;
-  padding: 2px 6px; background: var(--accent); color: #1a1408;
-  font-weight: 700;
-}
-.queue-urls { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
-.queue-chip {
-  padding: 2px 8px; border: 1px solid var(--line-bold);
-  background: var(--bg-elev-2); color: var(--ink-mute);
-  font-size: 10px;
-}
-.queue-chip-more { border-style: dashed; color: var(--ink-dim); }
 
 /* ───────────── scrape strip ───────────── */
 
@@ -688,12 +510,9 @@ main {
 @media (max-width: 900px) {
   .topbar { grid-template-columns: 1fr auto; }
   .meta { display: none; }
-  .phase-grid { grid-template-columns: 1fr 1fr; }
-  .phase { border-bottom: 1px solid var(--line); }
   .diff-table { grid-template-columns: 100px 1fr 1fr; }
 }
 @media (max-width: 600px) {
-  .phase-grid { grid-template-columns: 1fr; }
   .hero-title { font-size: 28px; }
 }
 
@@ -1023,15 +842,6 @@ main {
   letter-spacing: 0.08em; margin-left: -4px;
 }
 
-/* ON/OFF indicator next to launcher console checkboxes */
-.toggle-state {
-  display: inline-block; margin-left: 4px; padding: 1px 6px;
-  font-family: var(--mono); font-size: 9px; font-weight: 700;
-  letter-spacing: 0.14em; border: 1px solid currentColor;
-}
-.toggle-state[data-on="1"] { color: var(--accent); }
-.toggle-state[data-on="0"] { color: var(--ink-dim); }
-
 
 /* ───────── test scrape (08) ───────── */
 
@@ -1222,14 +1032,6 @@ main {
 .deal-drawer-comp a:hover { color: var(--ink); }
 .deal-drawer-price { font-family: var(--mono); color: var(--ok); white-space: nowrap; }
 
-/* Launcher — optional copy fields for the all-channels ▶ (lot_channels add) */
-.opts-copy { display: grid; gap: 6px; }
-.opts-copy input[type=text] {
-  width: 100%; font: inherit; font-size: 12px;
-  background: transparent; color: inherit;
-  border: 1px solid rgba(255,255,255,.14); border-radius: 4px; padding: 6px 8px;
-}
-.opts-copy input[type=text]:focus { outline: none; border-color: rgba(255,255,255,.4); }
 
 /* ───────── 11 Tracking ───────── */
 .ac-grow { flex: 1 1 320px; }
