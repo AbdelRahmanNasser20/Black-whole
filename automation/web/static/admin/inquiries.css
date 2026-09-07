@@ -1,0 +1,58 @@
+/* static/admin/inquiries.css — Inquiries tab (Workstream E-inquiries). Moved out of app.css "Inquiries tab" section.
+   `.inq-card` → shared `.card` (components.css) + the `card--inquiry` modifier; kind/status pills → `.badge` + own kind
+   pill; actions → `.card-chips`. Tokens only (tokens.css), radius 0. Loading/empty/error come from skeleton.css
+   (.sk-card / .ui-empty / .ui-error). The legacy `.inq-*` rules still in app.css belong to subscribers.js (#sub-list)
+   until E-subscribers lands — nothing here uses them. */
+
+/* ── control row ─────────────────────────────────────────────── */
+.inquiry-controls { padding: 12px 0; border-bottom: 1px solid var(--border); margin: 0 0 var(--gap); }
+.inquiry-controls-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.inquiry-controls .btn { margin-left: auto; }
+
+/* ── list ────────────────────────────────────────────────────── */
+.inquiry-list { display: flex; flex-direction: column; gap: 14px; padding: 0 0 40px; }
+.inquiry-list > * { min-width: 0; }
+.inquiry-list .sk-card { min-height: 150px; }   /* twin of a .card--inquiry: band + name + contact + message + actions */
+
+/* ── card ────────────────────────────────────────────────────── */
+.card--inquiry { border-left: 3px solid var(--border-strong); }
+.card--inquiry.is-new { border-left-color: var(--accent); }
+.card--inquiry.is-contacted { border-left-color: var(--info); }
+.card--inquiry.is-closed { border-left-color: var(--dim); opacity: .75; }
+.card--inquiry .card-band { margin-left: -3px; padding-left: calc(var(--pad) + 2px); }   /* band sits flush over the status edge */
+
+.inquiry-kind {
+  flex: 0 0 auto; padding: 3px 8px; letter-spacing: .2em; font-size: 10px;
+  border: 1px solid var(--border-strong); color: var(--text);
+}
+.inquiry-kind--buy { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.inquiry-kind--sell { background: var(--info); color: var(--bg); border-color: var(--info); }
+
+.inquiry-lot a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.inquiry-unlinked { color: var(--dim); }
+.inquiry-when { color: var(--muted); }
+
+.inquiry-status { flex: 0 0 auto; }
+.is-new .inquiry-status { color: var(--accent); border-color: var(--accent); }
+.is-contacted .inquiry-status { color: var(--info); border-color: var(--info); }
+.is-closed .inquiry-status { color: var(--dim); }
+
+.inquiry-who { font-size: 15px; }
+.inquiry-contact { display: flex; gap: 12px; flex-wrap: wrap; font-family: var(--mono); font-size: var(--fs-xs); }
+.inquiry-contact a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+
+.inquiry-msg {
+  margin: 4px 0 0; padding: 10px 14px;
+  background: var(--bg); border-left: 2px solid var(--accent);
+  font-family: var(--display); font-style: italic; font-size: 15px;
+  color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere;
+}
+
+.inquiry-actions { gap: 8px; padding-top: 8px; }
+.inquiry-danger { color: var(--danger); border-color: var(--danger); }
+.inquiry-danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+@media (max-width: 639px) {
+  .card--inquiry .card-band { height: auto; min-height: 28px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; row-gap: 6px; }
+  .inquiry-lot { flex-basis: 100%; }
+}
