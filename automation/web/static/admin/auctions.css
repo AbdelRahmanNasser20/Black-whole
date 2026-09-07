@@ -1,0 +1,148 @@
+/* static/admin/auctions.css — Auctions tab (plan §10 E-auctions). Moved out of app.css; colours are tokens only,
+   radius is var(--radius) (0) everywhere. Shared controls (.auction-controls .ac-* .seg .auction-status .cache-header
+   .admin-map) stay in app.css because other tabs use them.
+   `.auction-card` / `.auction-img` / `.auction-body` … are still emitted by test_scrape.js, so those selectors are
+   kept as aliases of `.card-auction` until E-test-scrape lands. */
+
+/* ── search + filter line ─────────────────────────────────────── */
+.auction-controls .auc-q { width: 200px; padding: 4px 8px; background: var(--bg); border: 1px solid var(--border);
+  color: var(--text); font: inherit; }
+.auction-controls .auc-q::placeholder { color: var(--dim); }
+.ac-unit { color: var(--dim); font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: .08em; margin-left: -4px; }
+.auction-filter-summary { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); margin-bottom: 14px; letter-spacing: .03em; }
+.auction-filter-summary .fs-bad { color: var(--danger); }
+.auction-filter-summary .fs-hint { color: var(--text); }
+
+/* the profile seg is a UI.load host too — keep its error/empty boxes seg-sized */
+#auc-profile .ui-error, #auc-profile .ui-empty { padding: 4px 10px; gap: 4px; grid-auto-flow: column; align-items: center; }
+#auc-profile .ui-error h2, #auc-profile .ui-empty h2 { font-size: var(--fs-sm); }
+
+/* ── scrape strip (fed by setScrapeStrip; SSE errors mark it stale) ── */
+.scrape-strip { display: flex; align-items: center; gap: 10px; padding: 8px 14px; margin-bottom: 14px;
+  border: 1px solid var(--border-strong); background: var(--surface); font-family: var(--mono); font-size: var(--fs-xs); }
+.scrape-label { color: var(--accent); letter-spacing: .18em; font-weight: 500; }
+.scrape-pill { padding: 2px 8px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  border: 1px solid currentColor; color: var(--dim); }
+.scrape-pill[data-state="running"] { color: var(--warn); animation: scrape-pulse 1.1s ease-in-out infinite; }
+@keyframes scrape-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 currentColor; }
+  50%      { opacity: .55; box-shadow: 0 0 0 3px color-mix(in srgb, var(--text) 4%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) { .scrape-pill[data-state="running"] { animation: none; } }
+.scrape-strip:has(.scrape-pill[data-state="running"]) { border-color: var(--warn);
+  background: color-mix(in srgb, var(--warn) 7%, var(--surface)); }
+.scrape-pill[data-state="finished"]  { color: var(--success); }
+.scrape-pill[data-state="error"]     { color: var(--danger); }
+.scrape-pill[data-state="cancelled"] { color: var(--muted); border-style: dashed; }
+.scrape-source { color: var(--muted); }
+.scrape-stage { padding: 2px 8px; border: 1px dashed var(--accent); color: var(--accent); text-transform: uppercase;
+  letter-spacing: .08em; font-weight: 500; font-size: 10px; white-space: nowrap; }
+.scrape-tail { flex: 1; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; opacity: .9; }
+.scrape-strip .ui-stale-badge { position: static; margin-left: auto; }
+
+/* ── scrape-now dropdown ──────────────────────────────────────── */
+.dropdown { position: relative; display: inline-block; }
+.dropdown-toggle { cursor: pointer; }
+.dropdown-menu { position: absolute; top: calc(100% + 4px); right: 0; z-index: 30; display: flex; flex-direction: column;
+  min-width: 200px; background: var(--surface); border: 1px solid var(--border-strong); box-shadow: var(--shadow-overlay); }
+.dropdown-menu button { background: transparent; border: 0; color: var(--text); padding: 10px 14px; text-align: left;
+  font-family: var(--mono); font-size: var(--fs-xs); letter-spacing: .04em; border-bottom: 1px solid var(--border); transition: background .12s; }
+.dropdown-menu button:last-child { border-bottom: 0; }
+.dropdown-menu button:hover { background: var(--surface-2); color: var(--accent); }
+.dropdown-menu button.dropdown-sep { border-top: 1px solid var(--border-strong); color: var(--muted); }
+
+/* ── staleness banner ─────────────────────────────────────────── */
+.staleness-banner { display: flex; align-items: center; gap: 14px; padding: 12px 16px; margin-bottom: 14px;
+  border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface));
+  font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); }
+.staleness-banner .sb-icon { font-size: 18px; color: var(--warn); }
+.staleness-banner .sb-message { flex: 1; }
+.staleness-banner .sb-message strong { color: var(--warn); }
+.staleness-banner .btn-primary { margin-left: auto; white-space: nowrap; }
+
+/* ── cache header as a UI.load host (skeleton twin / error box fill the strip) ── */
+.cache-header[data-state="loading"] { display: block; }
+.cache-header[data-state="loading"] .sk-line { margin: 4px 0; }
+.cache-header > .ui-error, .cache-header > .ui-empty { flex: 1; padding: 12px 16px; gap: 4px; }
+
+/* ── auction card = .card + modifier (photo on top, price block, actions) ── */
+.card.card-auction, .auction-card { padding: 0; gap: 0; min-height: 0; display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--border); transition: border-color .15s; }
+.card.card-auction:hover, .auction-card:hover { border-color: var(--border-strong); }
+.auction-img { position: relative; aspect-ratio: 4 / 3; background: var(--bg); border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.auction-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.auction-img-fallback { font-size: 42px; color: var(--dim); display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 100%; background: var(--surface-2); }
+.auction-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; flex: 1; }
+.auction-title { font-family: var(--display); font-size: 16px; line-height: 1.25; margin: 0; color: var(--text); font-weight: 400; }
+.auction-meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-family: var(--mono); font-size: var(--fs-xs); }
+.auction-qty { color: var(--accent); font-weight: 700; font-size: 13px; }
+.auction-price { color: var(--text); padding: 2px 6px; border: 1px solid var(--border-strong); }
+.auction-cond { padding: 2px 6px; font-weight: 700; border: 1px solid currentColor; }
+.auction-cond.good { color: var(--success); }
+.auction-cond.ok   { color: var(--warn); }
+.auction-cond.bad  { color: var(--danger); }
+.auction-ends, .auction-loc { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: .04em; }
+.auction-contact { font-family: var(--mono); font-size: 10px; color: var(--text); letter-spacing: .04em; }
+.auction-note { font-size: var(--fs-xs); color: var(--muted); font-style: italic; border-left: 2px solid var(--border-strong); padding-left: 8px; }
+.auction-actions { margin-top: auto; display: flex; gap: 8px; align-items: center; padding-top: 8px; border-top: 1px solid var(--border); }
+.auction-link { font-family: var(--mono); font-size: 10px; color: var(--muted); text-decoration: none; letter-spacing: .08em;
+  text-transform: uppercase; padding: 4px 8px; border: 1px solid var(--border); flex: 1; text-align: center; }
+.auction-link:hover { color: var(--text); border-color: var(--border-strong); }
+.auction-launch { flex: 1; justify-content: center; }
+.auction-launch.queued { color: var(--success); border-color: var(--success); background: transparent; opacity: 1; }
+
+/* ── star (overlay on the photo) ──────────────────────────────── */
+.auction-star { position: absolute; top: 6px; right: 6px; width: 30px; height: 30px; display: flex; align-items: center;
+  justify-content: center; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 60%, transparent);
+  color: var(--text); font-size: 18px; line-height: 1; cursor: pointer; border-radius: var(--radius);
+  transition: background .15s, color .15s, transform .1s; }
+.auction-star:hover { background: color-mix(in srgb, var(--bg) 85%, transparent); transform: scale(1.05); }
+.auction-star:disabled, .auction-star.is-pending { opacity: .5; cursor: wait; }
+.auction-star.on { color: var(--accent); background: color-mix(in srgb, var(--bg) 75%, transparent); }
+
+/* ── favorites strip (static markup in index.html; grid is the UI.load target, polled every 30 s) ── */
+.fav-strip { margin: 12px 0 18px; border: 1px solid var(--border-strong); background: var(--surface); }
+.fav-strip-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 12px;
+  border-bottom: 1px solid var(--border); background: var(--bg); }
+.fav-strip-title { font-family: var(--mono); font-size: var(--fs-sm); letter-spacing: .12em; color: var(--accent); }
+.fav-count { display: inline-block; margin-left: 6px; padding: 1px 6px; font-size: 10px; background: var(--accent); color: var(--bg);
+  border-radius: var(--radius); }   /* also used by tracking.js's label seg */
+.fav-strip-meta { display: flex; gap: 8px; align-items: center; font-family: var(--mono); font-size: 10px; }
+.fav-tg.ok { color: var(--success); }
+.fav-tg.off { color: var(--warn); }
+.fav-strip-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; padding: 10px 12px; min-height: 40px; }
+.fav-strip-grid[data-state="empty"], .fav-strip-grid[data-state="error"] { grid-template-columns: 1fr; }
+.fav-strip-grid .sk-row { padding: 6px 0; border: 0; }
+.card.card-fav { display: grid; grid-template-columns: 80px 1fr; gap: 10px; padding: 6px; min-height: 0; background: var(--bg); border: 1px solid var(--border); }
+.card.card-fav.expired { opacity: .55; }
+.fav-card-img { position: relative; width: 80px; height: 80px; overflow: hidden; }
+.fav-card-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.fav-card-img .auction-img-fallback { width: 100%; height: 100%; font-size: 28px; background: var(--border); }
+.fav-card-img .auction-star { width: 22px; height: 22px; font-size: 13px; top: 3px; right: 3px; }
+.fav-card-body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.fav-card-title { position: relative; z-index: 2; font-size: var(--fs-sm); line-height: 1.3; color: var(--text); text-decoration: none;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.fav-card-title:hover { text-decoration: underline; }
+.fav-card-meta { display: flex; gap: 8px; align-items: baseline; font-family: var(--mono); font-size: 10px; }
+.fav-qty { color: var(--muted); }
+.fav-remaining { font-weight: bold; }
+.fav-remaining.live { color: var(--success); }
+.fav-remaining.expired { color: var(--danger); }
+.fav-remaining.no-end { color: var(--muted); }
+.fav-dots { display: flex; gap: 3px; flex-wrap: wrap; margin-top: 2px; }
+.fav-dot { display: inline-block; font-family: var(--mono); font-size: 9px; padding: 1px 4px; border: 1px solid var(--border);
+  color: var(--muted); background: transparent; border-radius: var(--radius); }
+.fav-dot.fired { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* ── grid states ──────────────────────────────────────────────── */
+.grid-auction[data-state="empty"] .ui-empty, .grid-auction[data-state="error"] .ui-error { grid-column: 1 / -1; }
+
+@media (max-width: 639px) {
+  [data-pane="auctions"] .ac-group, #auc-profile { flex-wrap: wrap; max-width: 100%; }   /* PROFILE row (seg + 2 buttons) was 399 px wide at 390 */
+  .auction-controls .auc-q { width: 100%; }
+  .fav-strip-grid { grid-template-columns: 1fr; }
+  .staleness-banner { flex-wrap: wrap; }
+  .staleness-banner .btn-primary { margin-left: 0; }
+}
