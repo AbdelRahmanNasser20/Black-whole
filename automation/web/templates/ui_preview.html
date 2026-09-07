@@ -1,0 +1,270 @@
+{#- templates/ui_preview.html — GET /admin/ui, the design-review page. Every primitive, every state, fixture data only. -#}
+{% extends "_base.html" %}
+{% from "_ui/macros.html" import chip, section, empty, skeleton_cards %}
+{% block title %}UI primitives · BLACK WHOLE{% endblock %}
+{% block head %}
+<style>
+  /* page-local layout only — no colours, no radii (tokens.css / components.css own those) */
+  .pv-section { margin: 0 0 calc(var(--gap) * 2.5); }
+  .pv-h { margin: 0 0 4px; font: 400 var(--fs-xl)/1.2 var(--display); }
+  .pv-note { margin: 0 0 12px; color: var(--muted); font-size: var(--fs-sm); max-width: 72ch; }
+  .pv-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 12px; }
+  .pv-swatches { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); }
+  .pv-swatch { border: 1px solid var(--border); }
+  .pv-swatch i { display: block; height: 44px; }
+  .pv-swatch b { display: block; padding: 6px 8px; font: 400 var(--fs-xs)/1.3 var(--mono); font-weight: 400; color: var(--muted); }
+  .pv-demo { min-height: 120px; }
+  .pv-two { display: grid; gap: var(--gap); grid-template-columns: 1fr; }
+  @media (min-width: 1024px) { .pv-two { grid-template-columns: 1fr 300px; } }
+  .pv-kbd { font-family: var(--mono); font-size: var(--fs-xs); color: var(--dim); }
+</style>
+{% endblock %}
+{% block topbar_center %}
+<form class="topbar-search" role="search" onsubmit="return false">
+  <input type="search" name="q" placeholder="Search lots…" aria-label="Search lots">
+  <button class="btn btn-ghost btn-small topbar-search-btn" type="button" data-rail-open aria-label="Open search and filters">⌕</button>
+</form>
+{% endblock %}
+{% block topbar_right %}<span class="status-dot live" aria-hidden="true"></span><span id="pv-clock" class="mono">--:--:--</span>{% endblock %}
+
+{% block rail %}
+<div class="rail-group">
+  <span class="rail-group-title">Bids</span>
+  <div class="seg" role="group" aria-label="Bid count">
+    <button class="seg-btn is-active" type="button">Any</button><button class="seg-btn" type="button">0</button><button class="seg-btn" type="button">≤ 3</button>
+  </div>
+  <p class="hint">Live bid counts from the source.</p>
+</div>
+<div class="rail-group">
+  <span class="rail-group-title">Ending</span>
+  <select class="select" aria-label="Ending within"><option>Any time</option><option>Next 6 h</option><option>Next 24 h</option><option>Next 3 days</option></select>
+</div>
+<div class="rail-group">
+  <span class="rail-group-title">Status</span>
+  <div class="seg" role="group" aria-label="Status"><button class="seg-btn is-active" type="button">Live</button><button class="seg-btn" type="button">Closed</button><button class="seg-btn" type="button">All</button></div>
+</div>
+<div class="rail-group">
+  <span class="rail-group-title">Price</span>
+  <div class="pv-row"><input class="select" type="number" placeholder="min" aria-label="Min price" style="width:90px"> <span class="muted">–</span> <input class="select" type="number" placeholder="max" aria-label="Max price" style="width:90px"></div>
+</div>
+<div class="rail-group"><button class="clear-all" type="button">Clear all</button> <button class="btn btn-ghost btn-small" type="button" data-rail-close>Close</button></div>
+{% endblock %}
+
+{% block content %}
+<h1 class="page-title">UI primitives</h1>
+<p class="page-sub">Design review for <span class="mono">static/ui/</span> — every component, every state, fixture data only. Resize to 390 for the drawer. <span class="pv-kbd">Esc closes drawers.</span></p>
+
+<div class="pv-section" id="ex-tokens">
+  <h2 class="pv-h">Tokens</h2>
+  <p class="pv-note">From <span class="mono">tokens.css</span>. The only file allowed to spell a hex value. Radius is 0 everywhere.</p>
+  <div class="pv-swatches">
+    {% for t in ["--bg","--surface","--surface-2","--border","--border-strong","--text","--muted","--dim","--accent","--accent-2","--danger","--success","--info","--warn","--sk-a","--sk-b"] %}
+    <div class="pv-swatch"><i style="background:var({{ t }})"></i><b>{{ t }}</b></div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="pv-section" id="ex-type">
+  <h2 class="pv-h">Type</h2>
+  <p class="pv-note">One bold thing per page: the mono price and its timer. Everything else stays quiet.</p>
+  <p style="font:400 var(--fs-2xl)/1.15 var(--display);margin:0 0 6px">Display 28 — Lot of (30) Dell Latitude 5420 <em>laptops</em></p>
+  <p style="margin:0 0 6px">Sans 14 body — Buys lots on GovDeals, lists on FB Marketplace and eBay, runs buyer chats to pickup.</p>
+  <p class="muted" style="font-size:var(--fs-sm);margin:0 0 6px">Sans 12 muted — Houston, TX · 14 bids</p>
+  <p class="mono" style="margin:0"><b style="font-size:var(--fs-lg)">$625</b> <span class="muted" style="font-size:var(--fs-sm)">30 × $20.83 /unit</span> <span class="muted" style="font-size:var(--fs-xs);letter-spacing:.06em">COMPUTERS · TX</span></p>
+</div>
+
+<div class="pv-section" id="ex-buttons">
+  <h2 class="pv-h">Buttons + pending</h2>
+  <p class="pv-note"><span class="mono">UI.pending(btn, 'Saving…', fn)</span> disables, relabels, adds <span class="mono">.is-pending</span>, and always restores.</p>
+  <div class="pv-row" id="ex-pending">
+    <button class="btn btn-primary" type="button" data-pending="Saving…">Save lot</button>
+    <button class="btn" type="button" data-pending="Refreshing…">Refresh</button>
+    <button class="btn btn-ghost" type="button" data-pending="Removing…">Remove</button>
+    <button class="btn btn-small" type="button" data-pending="…">Small</button>
+    <button class="btn" type="button" disabled>Disabled</button>
+    <button class="btn btn-primary is-pending" type="button" disabled>Static pending</button>
+  </div>
+  <div class="pv-row">
+    <button class="btn btn-small" type="button" data-toast="info">Toast info</button>
+    <button class="btn btn-small" type="button" data-toast="ok">Toast ok</button>
+    <button class="btn btn-small" type="button" data-toast="err">Toast err</button>
+  </div>
+</div>
+
+<div class="pv-section" id="ex-chips">
+  <h2 class="pv-h">Chips · controls · active filters</h2>
+  <div class="chips" role="list">
+    {% for label, count, active in categories %}{{ chip(label, '#', active=active, count=count) }}{% endfor %}
+  </div>
+  <div class="controls">
+    <select class="select" aria-label="Sort"><option>Ending soonest</option><option>Newest</option><option>Bid: high → low</option><option>Bids: most</option></select>
+    <select class="select" aria-label="State"><option>All states</option><option>AZ</option><option>TX</option></select>
+    <div class="seg" role="group" aria-label="View"><button class="seg-btn is-active" type="button">List</button><button class="seg-btn" type="button">Map</button></div>
+    <button class="btn btn-ghost btn-small" type="button" data-rail-open>Filters</button>
+    <span class="result-count"><strong>9,791</strong> lots · <strong>44</strong> states</span>
+  </div>
+  <div class="active-filters">
+    <span class="filter-chip">"laptop" <button class="filter-chip-x" type="button" aria-label="Remove laptop">×</button></span>
+    <span class="filter-chip">Vehicles <button class="filter-chip-x" type="button" aria-label="Remove Vehicles">×</button></span>
+    <span class="filter-chip">TX <button class="filter-chip-x" type="button" aria-label="Remove TX">×</button></span>
+    <button class="clear-all" type="button">Clear all</button>
+  </div>
+  <div class="pv-row">
+    <span class="badge badge-live">live</span><span class="badge badge-closed">closed</span><span class="badge badge-stale">stale · 3 min</span><span class="badge">neutral</span>
+  </div>
+</div>
+
+<div class="pv-section" id="ex-cards">
+  <h2 class="pv-h">Feed card (§1.4)</h2>
+  <p class="pv-note">Rendered by <span class="mono">card(row)</span> from fixture rows: live · urgent (&lt; 1 h, timer goes <span style="color:var(--danger)">danger</span>) · no bids · unit price · closed with a final · closed no-bid · long title · no city. Timers tick every 30 s.</p>
+  <div class="grid" id="ex-card" data-state="loading" aria-busy="true">{{ skeleton_cards(8) }}</div>
+  <div class="load-more"><button class="btn" type="button">Load more (9,783 remaining)</button></div>
+</div>
+
+<div class="pv-section" id="ex-skeletons">
+  <h2 class="pv-h">Skeletons</h2>
+  <p class="pv-note">Twins of the final layout so the swap does not reflow. Shimmer 1.5 s, off under <span class="mono">prefers-reduced-motion</span>.</p>
+  <div class="grid" id="ex-skeleton-card">{{ skeleton_cards(4) }}</div>
+  <div class="pv-row" style="margin-top:12px"></div>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Lot</th><th>Bids</th><th>Bid</th><th>Ends</th></tr></thead>
+    <tbody id="ex-skeleton-tr"></tbody></table></div>
+  <div style="margin-top:12px" id="ex-skeleton-row"></div>
+  <div style="margin-top:12px" id="ex-skeleton-line"></div>
+  <div style="margin-top:12px" id="ex-skeleton-pill"></div>
+</div>
+
+<div class="pv-section" id="ex-states">
+  <h2 class="pv-h">Empty · error · stale</h2>
+  <p class="pv-note">Copy is in the interface's voice: what happened, one sentence, one way out.</p>
+  <div class="pv-two">
+    <div>
+      <div id="ex-empty" data-state="empty">{{ empty('No matches for "banquet chairs" in Vehicles', 'There are 24 matches without that filter.', 'Search everywhere', '#') }}</div>
+      <div style="height:var(--gap)"></div>
+      <div id="ex-error" data-state="error"><div class="ui-error" role="alert"><h2>Something didn't load</h2><p>Couldn't load lots. The database didn't answer in 15 s.</p><button class="btn" type="button">Retry</button></div></div>
+      <div style="height:var(--gap)"></div>
+      <div id="ex-stale" data-state="ready" class="section" style="margin:0"><div class="section-head"><h2>Favorites · 30 s poll</h2><span class="badge badge-live">live</span></div><div class="section-body"><p style="margin:0 0 8px">Content stays interactive; a badge says how old it is.</p><button class="btn btn-small" type="button" data-stale-toggle>Mark stale</button></div></div>
+    </div>
+    <div>
+      <div class="rail-card">
+        <div class="pv-row" style="margin:0"><span class="rail-group-title" style="margin:0">Current bid</span><span class="badge badge-live">live</span></div>
+        <div class="big">$625</div>
+        <dl><dt>Bids</dt><dd>14</dd><dt>Time left</dt><dd><span data-ends="{{ rows[0].end_utc }}">⏱ —</span></dd><dt>Ends</dt><dd id="pv-ends">—</dd><dt>Est. all-in</dt><dd>$703.13</dd></dl>
+        <a class="btn btn-primary" href="{{ rows[0].govdeals_url }}" target="_blank" rel="noopener" style="width:100%;justify-content:center">Bid on GovDeals ↗</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="pv-section" id="ex-load">
+  <h2 class="pv-h">UI.load() live demo</h2>
+  <p class="pv-note">Same container, four outcomes. <span class="mono">data-state</span> goes <span class="mono">loading → ready | empty | error</span>; the smoke script waits for it to leave <span class="mono">loading</span>.</p>
+  <div class="pv-row">
+    <button class="btn btn-small" type="button" data-load="resolve">Resolve (800 ms)</button>
+    <button class="btn btn-small" type="button" data-load="empty">Resolve empty</button>
+    <button class="btn btn-small" type="button" data-load="reject">Reject 503</button>
+    <button class="btn btn-small" type="button" data-load="timeout">Timeout (2 s)</button>
+    <button class="btn btn-small" type="button" data-load="keepOld">Refetch keepOld</button>
+    <span class="mono muted" id="pv-load-state">state: —</span>
+  </div>
+  <div class="grid pv-demo" id="ex-load-target" data-state="ready"></div>
+</div>
+
+<div class="pv-section" id="ex-table">
+  <h2 class="pv-h">Table + section + drawer</h2>
+  <div class="table-wrap"><table class="table"><thead><tr><th>Lot</th><th>Category</th><th class="num">Bids</th><th class="num">Bid</th><th>Ends</th></tr></thead>
+    <tbody id="ex-table-body"></tbody></table></div>
+  <div style="height:var(--gap)"></div>
+  {% call section('Seller & pickup') %}
+  <p>Buckeye, AZ · Condition: as-is · Pickup within 10 business days.</p>
+  <p class="muted" style="font-size:var(--fs-sm)">Section body text. Header row uses surface-2, body uses surface.</p>
+  {% endcall %}
+  <div class="pv-row"><button class="btn btn-small" type="button" data-drawer-open>Open drawer</button></div>
+  <div class="drawer" id="pv-drawer" aria-hidden="true">
+    <div class="drawer-head"><h2>Bid history</h2><button class="btn btn-ghost btn-small" type="button" data-drawer-close>Close</button></div>
+    <div class="drawer-body" id="pv-drawer-body" data-state="ready"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block footer %}
+<footer class="footer">
+  <div class="footer-cols">
+    <div><h4>Browse</h4><ul><li><a href="/deals">All deals</a></li><li><a href="/sources">Sources</a></li></ul></div>
+    <div><h4>Store</h4><ul><li><a href="/">Banquet chairs</a></li><li><a href="/listings">Listings</a></li></ul></div>
+    <div><h4>Operator</h4><ul><li><a href="/admin">Admin</a></li></ul></div>
+  </div>
+  <p class="footer-note">BLACK WHOLE indexes public government surplus listings. Not affiliated with GovDeals or any agency.</p>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script type="application/json" id="pv-rows">{{ rows|tojson }}</script>
+<script type="module">
+import {card, tickTimers} from '/static/ui/card.js?v={{ asset_v }}';
+const UI = window.UI;
+const rows = JSON.parse(document.getElementById('pv-rows').textContent);
+const $ = (s, r = document) => r.querySelector(s);
+const sleep = (ms, signal) => new Promise((res, rej) => {
+  const t = setTimeout(res, ms);
+  signal?.addEventListener('abort', () => { clearTimeout(t); const e = new Error('aborted'); e.name = 'AbortError'; rej(e); }, {once: true});
+});
+
+// cards (first paint: skeleton shipped by the server, swapped here)
+UI.load($('#ex-card'), async ({signal}) => { await sleep(700, signal); return rows; },
+  {skeleton: 'card', count: 8, render: rs => rs.map(r => card(r)).join('')}).then(() => tickTimers());
+tickTimers(); setInterval(tickTimers, 30_000);
+$('#pv-ends').textContent = UI.fmt.date(rows[0].end_utc);
+
+// skeleton kinds
+$('#ex-skeleton-tr').innerHTML = UI.skeleton('tr', 4);
+$('#ex-skeleton-row').innerHTML = UI.skeleton('row', 3);
+$('#ex-skeleton-line').innerHTML = UI.skeleton('line', 3);
+$('#ex-skeleton-pill').innerHTML = UI.skeleton('pill', 5);
+
+// table rows
+$('#ex-table-body').innerHTML = rows.slice(0, 5).map(r => `<tr><td><a href="${UI.esc(r.viewer_url)}">${UI.esc(r.title)}</a></td>
+  <td class="mono">${UI.esc((r.canonical_category || '').replace(/_/g, ' '))}</td><td class="num">${UI.fmt.int(r.bid_count)}</td>
+  <td class="num">${UI.fmt.money(r.current_bid)}</td><td class="mono">${UI.esc(UI.fmt.date(r.end_utc))}</td></tr>`).join('');
+
+// pending + toasts
+document.querySelectorAll('[data-pending]').forEach(b => b.addEventListener('click', () =>
+  UI.pending(b, b.dataset.pending, async () => { await sleep(1200); UI.toast('Done.', 'ok'); })));
+document.querySelectorAll('[data-toast]').forEach(b => b.addEventListener('click', () =>
+  UI.toast({info: 'Queued 1 run.', ok: 'Saved lot 1234.', err: "Couldn't save. The server said 500."}[b.dataset.toast], b.dataset.toast)));
+
+// stale
+let staleOn = false; const staleBtn = $('[data-stale-toggle]'), staleEl = $('#ex-stale');
+staleBtn.addEventListener('click', () => { staleOn = !staleOn; staleOn ? UI.markStale(staleEl, {since: Date.now() - 3 * 60_000}) : UI.clearStale(staleEl);
+  staleBtn.textContent = staleOn ? 'Clear stale' : 'Mark stale'; });
+
+// UI.load demo
+const target = $('#ex-load-target'), stateOut = $('#pv-load-state');
+new MutationObserver(() => { stateOut.textContent = 'state: ' + (target.dataset.state || '—'); }).observe(target, {attributes: true, attributeFilter: ['data-state']});
+const fetchers = {
+  resolve: async ({signal}) => { await sleep(800, signal); return rows.slice(0, 4); },
+  empty: async ({signal}) => { await sleep(500, signal); return []; },
+  reject: async ({signal}) => { await sleep(500, signal); const e = new Error('Service Unavailable'); e.status = 503; throw e; },
+  timeout: async ({signal}) => { await sleep(60_000, signal); return rows; },
+  keepOld: async ({signal}) => { await sleep(1500, signal); return rows.slice(4, 8); },
+};
+document.querySelectorAll('[data-load]').forEach(b => b.addEventListener('click', () => {
+  const kind = b.dataset.load;
+  UI.load(target, fetchers[kind], {skeleton: 'card', count: 4, keepOld: kind === 'keepOld', timeoutMs: kind === 'timeout' ? 2000 : 15000,
+    render: rs => rs.map(r => card(r, {compact: true})).join(''),
+    empty: {title: 'No matches for "zzz" in Vehicles', body: 'There are 24 matches without that filter.', cta: {label: 'Search everywhere', onClick: () => UI.toast('Would drop the category filter.')}},
+    errorMessage: err => "Couldn't load lots. " + (err.status ? `The server said ${err.status}.` : `The database didn't answer in ${kind === 'timeout' ? 2 : 15} s.`)});
+}));
+$('[data-load="resolve"]').click();
+
+// drawer
+const drawer = $('#pv-drawer');
+$('[data-drawer-open]').addEventListener('click', () => { drawer.classList.add('is-open'); drawer.setAttribute('aria-hidden', 'false');
+  UI.load($('#pv-drawer-body'), async ({signal}) => { await sleep(600, signal); return [['Aug 27', 360], ['Sep 1', 480], ['Sep 3', 625]]; },
+    {skeleton: 'line', count: 8, render: h => '<dl class="mono" style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0">' + h.map(([d, v]) => `<dt class="muted">${d}</dt><dd style="margin:0">${UI.fmt.money(v)}</dd>`).join('') + '</dl>'}); });
+$('[data-drawer-close]').addEventListener('click', () => { drawer.classList.remove('is-open'); drawer.setAttribute('aria-hidden', 'true'); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { drawer.classList.remove('is-open'); drawer.setAttribute('aria-hidden', 'true'); } });
+
+// clock
+const clock = $('#pv-clock'); const tickClock = () => { clock.textContent = new Date().toLocaleTimeString(undefined, {hour12: false}); }; tickClock(); setInterval(tickClock, 1000);
+</script>
+{% endblock %}

@@ -81,6 +81,9 @@ PHASES = ["scrape", "llm", "download", "dewatermark", "facebook", "ebay"]
 app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
+from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
+app.include_router(_ui_preview_router)
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
