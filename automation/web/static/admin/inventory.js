@@ -3,29 +3,8 @@
 // inline cell edits mark their <tr> is-pending. Filter state (`status`, `q`) lives in the URL via shell.js.
 // `q` is a client-side filter over the rows already fetched — /api/inventory has no search parameter.
 // The private storage note on a lot (facility address + gate code) is never read from a row here and never rendered.
-import {$, $$, toast, escapeHtml, escapeAttr} from './shared.js';
+import {$, $$, toast, escapeHtml, escapeAttr, getParams, setParams} from './shared.js';
 import {load as uiLoad, pending, api, renderEmpty} from '../ui/state.js';
-
-// URL params — same semantics as shell.js getParams()/setParams() (this tab owns `status` and `q`, the shell
-// owns `tab`). Not imported from shell.js on purpose: index.html loads shell as `shell.js?v=…`, so a tab that
-// imports `./shell.js` pulls in a SECOND shell instance that boots every tab mid-evaluation (TDZ crash).
-function getParams() {
-  const out = {};
-  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
-  return out;
-}
-function setParams(patch, {replace = true} = {}) {
-  const sp = new URLSearchParams(location.search);
-  for (const [k, v] of Object.entries(patch || {})) {
-    if (v === null || v === undefined || v === '') sp.delete(k);
-    else sp.set(k, String(v));
-  }
-  const qs = sp.toString();
-  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
-  const cur = location.pathname + location.search + location.hash;
-  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
-  return getParams();
-}
 
 const STATUSES = ['draft', 'listed', 'hidden', 'sold_out', 'lost_sold_out', 'owned', 'won_pickup', 'active_bid', 'lost'];
 const PLATFORM_LABELS = {

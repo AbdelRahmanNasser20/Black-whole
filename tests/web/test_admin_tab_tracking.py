@@ -64,9 +64,9 @@ def test_tracking_js_uses_ui_load_pending_and_url_params():
     assert re.search(r"import \{[^}]*\bload\b[^}]*\} from '\.\./ui/state\.js'", src)
     assert re.search(r"import \{[^}]*\bpending\b[^}]*\} from '\.\./ui/state\.js'", src)
     assert re.search(r"import \{[^}]*\bapi\b[^}]*\} from '\.\./ui/state\.js'", src)
-    # URL state comes from shell.js (E1 contract). test_admin_modules.py forbids a static `from './shell.js'`
-    # today, so a dynamic import of the same module instance is accepted too.
-    assert re.search(r"(from|import\()\s*'\./shell\.js'", src)
+    # E-polish: URL state comes from shared.js getParams/setParams — never shell.js (static or dynamic)
+    assert re.search(r"import \{[^}]*\bgetParams\b[^}]*\bsetParams\b[^}]*\} from '\./shared\.js'", src)
+    assert "shell.js'" not in src
     # every §2 site: list + history are reads (load), add/rename/remove/sync are mutations (pending)
     assert "'/api/tracking'" in src and "/history`" in src
     for verb in ("'DELETE'", "'PATCH'", "'POST'"):

@@ -4,29 +4,8 @@
 // and "Load more" go through UI.pending. `q`, `source`, `offset` live in the URL via shell.js-style params; the
 // other filters (status, qty range, seen-within, sort, page size) stay in the form.
 // auction_extractors/state/listings.db is read-only — this tab only ever GETs.
-import {$, $$, toast, escapeHtml, escapeAttr, _ageInDays, _fmtAge, queueRuns} from './shared.js';
+import {$, $$, toast, escapeHtml, escapeAttr, _ageInDays, _fmtAge, queueRuns, getParams, setParams} from './shared.js';
 import {load as uiLoad, pending, api} from '../ui/state.js';
-
-// URL params — same semantics as shell.js getParams()/setParams() (this tab owns `q`, `source`, `offset`; the
-// shell owns `tab`). Not imported from shell.js on purpose: index.html loads shell as `shell.js?v=…`, so a tab
-// that imports `./shell.js` pulls in a SECOND shell instance that boots every tab mid-evaluation (TDZ crash).
-function getParams() {
-  const out = {};
-  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
-  return out;
-}
-function setParams(patch, {replace = true} = {}) {
-  const sp = new URLSearchParams(location.search);
-  for (const [k, v] of Object.entries(patch || {})) {
-    if (v === null || v === undefined || v === '') sp.delete(k);
-    else sp.set(k, String(v));
-  }
-  const qs = sp.toString();
-  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
-  const cur = location.pathname + location.search + location.hash;
-  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
-  return getParams();
-}
 
 const SOURCES = ['all', 'gd', 'ps', 'bs'];
 const Q_DEBOUNCE_MS = 350;

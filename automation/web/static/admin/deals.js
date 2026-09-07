@@ -1,35 +1,12 @@
 // static/admin/deals.js — admin Deals tab (plan §10 E-deals).
 // Every read goes through UI.load (skeleton → ready|empty|error, keepOld for re-queries), every mutation through
-// UI.pending; filter state lives in the URL via shell.js getParams/setParams (`?map=1` replaced the old browser-side map pref).
+// UI.pending; filter state lives in the URL via shared.js getParams/setParams (`?map=1` replaced the old browser-side map pref).
 // Tree / popovers / comps drawer kept; table rows stay visible (dimmed, "refreshing" badge) while re-querying.
 import * as shared from './shared.js';
 import {load as uiLoad, pending, markStale, clearStale} from '../ui/state.js';
-const {$, $$, toast, apiFetch, esc, hooks} = shared;
+const {$, $$, toast, apiFetch, esc, hooks, getParams, setParams} = shared;
 // hooks: `deal` state is published for auctions.loadProfiles(); loadProfiles itself lives in auctions.js.
 
-// URL params — the shell.js getParams/setParams contract (plan §10 E1), but NOT imported from shell.js: index.html
-// loads shell.js as `shell.js?v=<asset_v>` while `import './shell.js'` resolves to the bare URL, so a tab importing
-// it gets a SECOND shell instance that boots the whole admin again (double mount → TDZ crash). Until the helpers
-// move into shared.js (E1 follow-up) the same 12 lines live here; shared.js's copy wins the moment it exists.
-function _getParams() {
-  const out = {};
-  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
-  return out;
-}
-function _setParams(patch, {replace = true} = {}) {
-  const sp = new URLSearchParams(location.search);
-  for (const [k, v] of Object.entries(patch || {})) {
-    if (v === null || v === undefined || v === '') sp.delete(k);
-    else sp.set(k, String(v));
-  }
-  const qs = sp.toString();
-  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
-  const cur = location.pathname + location.search + location.hash;
-  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
-  return _getParams();
-}
-const getParams = (...a) => (shared.getParams || _getParams)(...a);
-const setParams = (...a) => (shared.setParams || _setParams)(...a);
 
 const loadProfiles = (...a) => hooks.loadProfiles(...a);
 

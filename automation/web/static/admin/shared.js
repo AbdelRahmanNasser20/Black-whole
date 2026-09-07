@@ -6,6 +6,33 @@ export {toast, apiFetch};
 export const hooks = {};
 const applyState = (...a) => hooks.applyState(...a);
 
+// ───────── URL params (the one place admin URL state is read/written) ─────────
+// Pure helpers over location/history: the shell owns `tab`, each tab owns its own keys through these.
+// They live here (not in shell.js) because index.html loads shell as `shell.js?v=…` — a tab that imported
+// `./shell.js` would pull in a SECOND shell instance that boots every tab mid-evaluation (TDZ crash).
+
+/** Current query string as a plain object. */
+export function getParams() {
+  const out = {};
+  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
+  return out;
+}
+
+/** Merge `patch` into the query string. null/undefined/'' deletes a key. replace=true keeps history flat;
+ *  replace=false pushes an entry (used for tab switches so Back works). Returns the new params. */
+export function setParams(patch, {replace = true} = {}) {
+  const sp = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === null || v === undefined || v === '') sp.delete(k);
+    else sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+  const cur = location.pathname + location.search + location.hash;
+  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
+  return getParams();
+}
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
