@@ -44,7 +44,8 @@ def test_tab_module_exports_mount_and_load(tab):
     src = (ADMIN / f"{tab}.js").read_text()
     assert re.search(r"export (async )?function mount\(", src), tab
     assert re.search(r"export (async )?function load\(", src), tab
-    assert not re.search(r"from '\./(?!shared)", src), f"{tab}: tabs import only shared.js / ../ui"
+    # E1 contract: tabs import only shared.js / ../ui, plus getParams/setParams from shell.js (E2+ URL-param state)
+    assert not re.search(r"from '\./(?!shared|shell)", src), f"{tab}: tabs import only shared.js / shell.js / ../ui"
 
 
 def test_shell_mounts_every_tab_then_activates_from_url():

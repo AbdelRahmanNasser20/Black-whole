@@ -1,27 +1,56 @@
-// static/admin/auctions.js — split verbatim from app.js (Workstream F). Bodies unchanged; only import/export/mount added.
-import {$, $$, toast, withButtonLoading, apiFetch, esc, SOURCE_NAMES, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks} from './shared.js';
+// static/admin/auctions.js — Auctions tab (plan §10 E-auctions).
+// Reads go through UI.load (skeleton → ready|empty|error, Retry re-runs the same fetcher), mutations through
+// UI.pending, the 30 s favorites poll keeps old content and marks it stale on failure, the scrape SSE marks the
+// strip stale on `error` and clears on `open`. Filter state lives in the URL (source, q, profile, map) via shell.js.
+import {$, $$, toast, esc, SOURCE_NAMES, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks} from './shared.js';
+import {api, load as uiLoad, pending, markStale, clearStale, renderEmpty} from '../ui/state.js';
+import {getParams, setParams} from './shell.js';
 
 let scrapeES;
-// `deal` (Deals-tab state) is read by loadProfiles(); bound at mount() via the shared hooks registry.
-let deal;
 
-// ───────── auctions ─────────
+// ───────── state ─────────
+
+const SOURCES = ['gd', 'ps', 'bs'];
+const LEGACY_MAP_KEY = 'admin.aucMapOn';   // pre-E-auctions localStorage toggle — read once, moved into ?map=, deleted
 
 const auc = {
   source: 'gd',
+  q: '',                  // client-side title filter (URL `q`)
   profile: '',            // research profile slug (research_profiles); '' = default
   profiles: [],           // rows from /api/profiles
   defaultProfile: 'chairs',
   items: [],
   stats: null,
-  loading: false,
   favorites: [],          // list of favorite dicts from /api/auctions/favorites
   favoriteIds: new Set(), // asset_id strings — for fast "is starred?" lookup
+  favoritesOkAt: null,    // last successful favorites read (the stale badge counts from here)
   intervals: [],          // alert interval labels in display order
   telegramConfigured: false,
-  mapOn: false,           // 🗺 map toggle — cards follow the map viewport
+  mapOn: true,            // 🗺 map — on unless ?map=0; cards follow the map viewport
   map: null,              // AdminMap handle (lazy-mounted)
 };
+
+// ───────── URL params (source, q, profile, map) ─────────
+
+function readParams() {
+  const p = getParams();
+  auc.source = SOURCES.includes(p.source) ? p.source : 'gd';
+  auc.q = (p.q || '').trim();
+  auc.profile = p.profile || auc.profile;
+  if (auc.profiles.length && !auc.profiles.some(x => x.slug === auc.profile)) auc.profile = auc.defaultProfile;
+  auc.mapOn = p.map !== '0';
+}
+
+function writeParams() {
+  setParams({source: auc.source, q: auc.q || null, profile: auc.profile || null, map: auc.mapOn ? '1' : '0'});
+}
+
+function syncControls() {
+  $$('#auc-source .seg-btn').forEach(b => b.classList.toggle('is-active', b.dataset.value === auc.source));
+  const q = $('#auc-q');
+  if (q && q.value !== auc.q) q.value = auc.q;
+  if (auc.profiles.length) renderProfileSeg();
+}
 
 function _assetIdFromLink(link) {
   if (!link) return '';
@@ -34,11 +63,7 @@ function _assetIdFromLink(link) {
   return '';
 }
 
-// Build an eBay sold-listings search URL from an auction row. Used on the
-// MEDICAL sub-tab as the profitability-test hook: GovDeals doesn't expose
-// final winning bids, so we send the operator straight to the demand side.
-// Strips quantity prefixes ("Lot of 3x …") and trailing seller codes that
-// would otherwise dilute the eBay match.
+// Build an eBay sold-listings search URL from an auction row (medical profile: demand-side comps).
 function _ebaySoldUrl(it) {
   const raw = (it.title || it.raw_title || '').trim();
   const cleaned = raw
@@ -50,37 +75,51 @@ function _ebaySoldUrl(it) {
   return `https://www.ebay.com/sch/i.html?_nkw=${q}&LH_Sold=1&LH_Complete=1`;
 }
 
-// ── research profiles (what we're hunting for) — /api/profiles ──
-// Picking a profile sets the min-qty slider to its floor (chairs 50, medical 1).
-async function loadProfiles() {
-  const body = await apiFetch('/api/profiles');
-  auc.profiles = body.profiles || [];
-  auc.defaultProfile = body.default || 'chairs';
-  if (!auc.profile || !auc.profiles.some(p => p.slug === auc.profile)) auc.profile = auc.defaultProfile;
-  renderProfileSeg();
-  const sel = $('#deal-profile');
-  if (sel) {
-    sel.innerHTML = '<option value="">any profile</option>' +
-      auc.profiles.map(p => `<option value="${esc(p.slug)}">${esc(p.name)}</option>`).join('');
-    sel.value = deal.profile || '';
-  }
-  return auc.profiles;
+// ── research profiles (what we're hunting for) — /api/profiles (#8) ──
+
+function profileSegHtml() {
+  return auc.profiles.map(p =>
+    `<button type="button" class="seg-btn ${p.slug === auc.profile ? 'is-active' : ''}" data-value="${esc(p.slug)}"
+       title="${esc((p.keywords || []).join(', '))} · min ${p.min_quantity}">${esc(p.name)}</button>`).join('');
 }
 
 function renderProfileSeg() {
   const seg = $('#auc-profile');
-  seg.innerHTML = auc.profiles.map(p =>
-    `<button type="button" class="seg-btn ${p.slug === auc.profile ? 'active' : ''}" data-value="${esc(p.slug)}"
-       title="${esc((p.keywords || []).join(', '))} · min ${p.min_quantity}">${esc(p.name)}</button>`).join('');
+  seg.innerHTML = profileSegHtml();
+  seg.dataset.state = 'ready';
   $('#auc-profile-del').disabled = !!(auc.profiles.find(p => p.slug === auc.profile) || {}).is_default;
 }
 
-// ── scrape dropdown ──
+async function loadProfiles() {
+  const seg = $('#auc-profile');
+  const body = await uiLoad(seg, ({signal}) => api('/api/profiles', {signal}), {
+    skeleton: 'pill', count: 3, keepOld: auc.profiles.length > 0,
+    isEmpty: () => false,
+    render: (body) => {
+      auc.profiles = body.profiles || [];
+      auc.defaultProfile = body.default || 'chairs';
+      if (!auc.profile || !auc.profiles.some(p => p.slug === auc.profile)) auc.profile = auc.defaultProfile;
+      return profileSegHtml();
+    },
+    errorMessage: () => "Couldn't load research profiles.",
+  });
+  if (!body) return auc.profiles;   // error rendered in the seg; Retry re-runs the same fetch
+  $('#auc-profile-del').disabled = !!(auc.profiles.find(p => p.slug === auc.profile) || {}).is_default;
+  const sel = $('#deal-profile');   // Deals tab's profile picker is fed from here (hooks.loadProfiles)
+  if (sel) {
+    sel.innerHTML = '<option value="">any profile</option>' +
+      auc.profiles.map(p => `<option value="${esc(p.slug)}">${esc(p.name)}</option>`).join('');
+    sel.value = (hooks.deal && hooks.deal.profile) || '';
+  }
+  return auc.profiles;
+}
+
+// ── scrape dropdown + strip ──
 
 const dd = $('#scrape-dropdown');
 const ddMenu = $('.dropdown-menu', dd);
 
-async function startScrape(source, test) {
+async function startScrape(source, test, btn) {
   // Immediate optimistic feedback — don't wait for POST round-trip.
   setScrapeStrip({
     status: 'running',
@@ -92,11 +131,11 @@ async function startScrape(source, test) {
     test_mode: test,
   });
   try {
-    await apiFetch('/api/scrape/start', {
+    await pending(btn, '⟳ starting…', () => api('/api/scrape/start', {
       method: 'POST',
       headers: {'content-type': 'application/json'},
       body: JSON.stringify({source, test, profile: auc.profile || auc.defaultProfile}),
-    });
+    }));
   } catch (err) {
     setScrapeStrip({status: 'error', source, last_line: err.message || String(err)});
     toast(`Scrape failed to start: ${err.message || err}`, 'err');
@@ -122,10 +161,7 @@ function setScrapeStrip(s) {
 
   const stageEl = $('#scrape-stage');
   if (s.status === 'running' && s.current_stage) {
-    const label = s.stage_detail
-      ? `${s.current_stage} · ${s.stage_detail}`
-      : s.current_stage;
-    stageEl.textContent = label;
+    stageEl.textContent = s.stage_detail ? `${s.current_stage} · ${s.stage_detail}` : s.current_stage;
     stageEl.hidden = false;
   } else {
     stageEl.textContent = '';
@@ -136,9 +172,19 @@ function setScrapeStrip(s) {
   $('#scrape-cancel').hidden = (s.status !== 'running');
 }
 
+// #14 — the strip is a fixed set of children, so a failed refetch marks it stale instead of replacing it.
+function refreshScrapeState() {
+  const strip = $('#scrape-strip');
+  api('/api/scrape/state')
+    .then(s => { clearStale(strip); setScrapeStrip(s); })
+    .catch(() => markStale(strip));
+}
+
 function connectScrapeStream() {
   if (scrapeES) scrapeES.close();
   scrapeES = new EventSource('/api/scrape/stream');
+  scrapeES.onopen = () => clearStale($('#scrape-strip'));
+  scrapeES.onerror = () => markStale($('#scrape-strip'), {label: 'stream lost'});   // #63
   scrapeES.addEventListener('stdout', (e) => handleScrapeLine(e, 'stdout'));
   scrapeES.addEventListener('stderr', (e) => handleScrapeLine(e, 'stderr'));
   scrapeES.addEventListener('system', (e) => handleScrapeLine(e, 'system'));
@@ -148,7 +194,7 @@ function connectScrapeStream() {
       const data = msg.data || {};
       if (data.kind === 'scrape') {
         // Refresh full state from server, then reload the card grid.
-        fetch('/api/scrape/state').then(r => r.json()).then(setScrapeStrip);
+        refreshScrapeState();
         if (data.status === 'finished' || data.status === 'error' || data.status === 'cancelled') {
           loadAuctions();
         }
@@ -156,8 +202,7 @@ function connectScrapeStream() {
         // Live stage update without a full state refetch.
         const stageEl = $('#scrape-stage');
         if (data.stage) {
-          const label = data.detail ? `${data.stage} · ${data.detail}` : data.stage;
-          stageEl.textContent = label;
+          stageEl.textContent = data.detail ? `${data.stage} · ${data.detail}` : data.stage;
           stageEl.hidden = false;
         } else {
           stageEl.hidden = true;
@@ -179,15 +224,15 @@ function handleScrapeLine(e, kind) {
   } catch (err) { console.warn(err); }
 }
 
-function renderCacheHeader(stats, maxStaleDays) {
-  const host = $('#auction-cache-stats');
-  if (!host) return;
+// ── cache header + staleness banner — /api/auctions/cache-stats (#15) ──
+
+function _maxStaleDays() { return Number($('#auc-stale').value) || 7; }
+
+function cacheHeaderHtml(host, stats, maxStaleDays) {
   if (!stats || !stats.total) {
-    host.hidden = false;
     host.removeAttribute('data-freshness');
-    host.innerHTML = `<span class="ch-total">0 lots in cache</span>
+    return `<span class="ch-total">0 lots in cache</span>
       <span class="ch-age">hit <strong>⟳ scrape now</strong> to populate</span>`;
-    return;
   }
   const ageDays = _ageInDays(stats.newest_seen_at);
   let freshness = 'fresh';
@@ -200,9 +245,8 @@ function renderCacheHeader(stats, maxStaleDays) {
     .map(([s, v]) => `${s}: ${v.count.toLocaleString()}`)
     .join(' · ');
 
-  host.hidden = false;
   host.dataset.freshness = freshness;
-  host.innerHTML = `
+  return `
     <span class="ch-total">📦 ${stats.total.toLocaleString()} lots in cache</span>
     <span class="ch-age">newest scraped <span class="ch-age-val">${_fmtAge(ageDays)}</span></span>
     ${sources ? `<span class="ch-sources">${sources}</span>` : ''}
@@ -221,32 +265,98 @@ function renderStalenessBanner(stats, maxStaleDays) {
 }
 
 async function fetchCacheStats() {
-  try {
-    const stats = await apiFetch('/api/auctions/cache-stats');
-    auc.stats = stats;
-    renderCacheHeader(stats, Number($('#auc-stale').value) || 7);
-    renderStalenessBanner(stats, Number($('#auc-stale').value) || 7);
-    return stats;
-  } catch (err) {
-    console.warn('cache-stats failed', err);
-    return null;
+  const host = $('#auction-cache-stats');
+  host.hidden = false;
+  const maxStaleDays = _maxStaleDays();
+  const stats = await uiLoad(host, ({signal}) => api('/api/auctions/cache-stats', {signal}), {
+    skeleton: 'line', count: 2, keepOld: !!auc.stats,
+    isEmpty: () => false,
+    render: (stats) => {
+      auc.stats = stats;
+      renderStalenessBanner(stats, maxStaleDays);
+      return cacheHeaderHtml(host, stats, maxStaleDays);
+    },
+    errorMessage: () => "Couldn't read the auction cache stats.",
+  });
+  return stats || null;
+}
+
+// ── the grid — /api/auctions (#16) ──
+
+function _titleOf(it) { return (it.title || it.raw_title || ''); }
+
+// What the grid shows: the fetched lots, narrowed by the title search and (map on) the viewport.
+// Unmapped lots always stay visible — a missing zip must never hide a good lot.
+function visibleItems() {
+  let items = auc.items;
+  if (auc.q) {
+    const needle = auc.q.toLowerCase();
+    items = items.filter(it => _titleOf(it).toLowerCase().includes(needle));
   }
+  if (auc.mapOn && auc.map) items = items.filter(it => it.lat == null || auc.map.inBounds(it));
+  return items;
+}
+
+function gridFragment(items) {
+  const frag = document.createDocumentFragment();
+  for (const it of items) frag.appendChild(renderAuctionCard(it));
+  return frag;
+}
+
+// Plain-text reasons the current filters could be hiding everything (feeds the summary line and the empty state).
+function filterReasons(maxStaleDays) {
+  const srcKey = auc.source;
+  const ageDays = _ageInDays(auc.stats?.by_source?.[srcKey]?.newest_seen_at);
+  const activeOnly = !$('#auc-expired').checked;
+  const reasons = [];
+  if (activeOnly && ageDays != null && ageDays > maxStaleDays) {
+    reasons.push(`staleness (newest ${srcKey} row is ${_fmtAge(ageDays)}, filter hides anything past ${maxStaleDays} days)`);
+  }
+  if (Number($('#auc-min-qty').value) > 50) reasons.push(`min-units set to ${$('#auc-min-qty').value}`);
+  if (activeOnly) reasons.push('“Show ended auctions” is off');
+  return reasons;
+}
+
+// Empty-state copy for "the API returned no lots" (cache empty vs filters too tight).
+function cacheEmptyArgs(maxStaleDays) {
+  const srcName = SOURCE_NAMES[auc.source] || auc.source;
+  const total = auc.stats?.by_source?.[auc.source]?.count ?? 0;
+  if (!auc.stats || total === 0) {
+    return {glyph: '◌', title: `Cache is empty for ${srcName}`,
+      body: 'Run the scraper to fill it, then the ranked lots show up here.',
+      cta: {label: 'Scrape now', onClick: (e) => startScrape(auc.source, false, e.currentTarget)}};
+  }
+  const reasons = filterReasons(maxStaleDays);
+  const activeOnly = !$('#auc-expired').checked;
+  return {glyph: '⌀', title: `No ${srcName} lots match these filters`,
+    body: `${total.toLocaleString()} ${auc.source} lots in cache, filters excluded all of them.`
+      + (reasons.length ? ` Likely culprit: ${reasons.join(' · ')}.` : ' Try lowering the filters.'),
+    cta: activeOnly
+      ? {label: 'Show ended auctions', onClick: () => { $('#auc-expired').checked = true; loadAuctions(); }}
+      : {label: 'Reset filters', onClick: () => { $('#auc-min-qty').value = 1; $('#auc-min-qty-out').textContent = '1';
+                                                  $('#auc-stale').value = 365; loadAuctions(); }}};
+}
+
+// Empty-state copy for "lots exist but the search / map viewport hides them all".
+function narrowedEmptyArgs() {
+  if (auc.q) {
+    return {glyph: '⌕', title: `No lot titles contain “${auc.q}”`, body: `${auc.items.length} lots loaded — the search is client-side.`,
+      cta: {label: 'Clear search', onClick: () => setSearch('')}};
+  }
+  return {glyph: '◎', title: 'No lots in this map view', body: 'Pan or zoom the map — lots without a location always stay listed.',
+    cta: {label: 'Show all on map', onClick: () => { if (auc.map) auc.map.fit(); }}};
 }
 
 async function loadAuctions() {
-  if (auc.loading) return;
-  auc.loading = true;
   const grid = $('#auction-grid');
   const status = $('#auction-status');
   const summary = $('#auction-filter-summary');
   const useCond = $('#auc-condition').checked;
-  const maxStaleDays = Number($('#auc-stale').value) || 7;
-  status.innerHTML = useCond
-    ? '<span class="pulse">●</span> Loading auctions (condition scoring may take 3–10s)…'
-    : '<span class="pulse">●</span> Loading auctions…';
-  grid.innerHTML = '<div class="drafts-empty loading"><span class="spinner"></span> fetching listings from cache…</div>';
+  const maxStaleDays = _maxStaleDays();
+  status.textContent = useCond ? 'condition scoring adds 3–10 s' : '';
   if (summary) summary.hidden = true;
 
+  if (!auc.profiles.length) await loadProfiles();
   const qs = new URLSearchParams({
     source: auc.source,
     n: $('#auc-n').value,
@@ -254,27 +364,30 @@ async function loadAuctions() {
     condition: useCond ? '1' : '0',
     active_only: $('#auc-expired').checked ? '0' : '1',
     max_stale_days: String(maxStaleDays),
+    profile: auc.profile || auc.defaultProfile,
   });
-  try {
-    if (!auc.profiles.length) await loadProfiles();
-    qs.set('profile', auc.profile || auc.defaultProfile);
-    const [body, _stats, _favs] = await Promise.all([
-      apiFetch('/api/auctions?' + qs.toString()),
-      fetchCacheStats(),
-      loadFavorites(),
-    ]);
-    auc.items = body.items || [];
-    status.textContent = `${auc.items.length} shown · ${body.cached ? `cached ${body.age}s ago` : 'fresh'}`;
-    renderAuctions(auc.items, maxStaleDays);
-    renderFilterSummary(auc.items.length, maxStaleDays);
-    syncAuctionMap();
-  } catch (err) {
-    status.textContent = '';
-    grid.innerHTML = `<div class="drafts-empty">Error loading auctions: ${err.message || err}</div>`;
-    toast(`Auction load failed: ${err.message || err}`, 'err');
-  } finally {
-    auc.loading = false;
-  }
+
+  await fetchCacheStats();   // cheap count; the empty-state copy below needs it
+  const [body] = await Promise.all([
+    uiLoad(grid, async ({signal}) => {
+      const body = await api('/api/auctions?' + qs.toString(), {signal});
+      auc.items = body.items || [];
+      return body;
+    }, {
+      skeleton: 'card', count: 8, keepOld: auc.items.length > 0,
+      timeoutMs: useCond ? 60000 : 20000,
+      isEmpty: (body) => !(body.items || []).length,
+      empty: cacheEmptyArgs(maxStaleDays),
+      render: () => { const items = visibleItems(); return items.length ? gridFragment(items) : ''; },
+      errorMessage: (err) => `Couldn't load lots from the cache. ${err.status ? `The server said ${err.status}: ${err.message}.` : (err.message || 'No answer.')}`,
+    }),
+    loadFavorites(),
+  ]);
+  if (!body) { status.textContent = ''; return; }   // error box + Retry are in the grid; toast would be noise
+  status.textContent = `${auc.items.length} shown · ${body.cached ? `cached ${body.age}s ago` : 'fresh'}`;
+  renderFilterSummary(auc.items.length, maxStaleDays);
+  if (auc.items.length && !visibleItems().length) renderEmpty(grid, narrowedEmptyArgs());
+  syncAuctionMap();
 }
 
 function renderFilterSummary(shownCount, maxStaleDays) {
@@ -282,51 +395,33 @@ function renderFilterSummary(shownCount, maxStaleDays) {
   if (!summary) return;
   const stats = auc.stats;
   if (!stats || !stats.total) { summary.hidden = true; return; }
-
-  const srcKey = auc.source; // 'gd' | 'ps'
+  const srcKey = auc.source;
   const srcCount = stats.by_source?.[srcKey]?.count ?? 0;
-
-  if (shownCount === 0 && srcCount > 0) {
-    // Figure out the most likely culprit.
-    const ageDays = _ageInDays(stats.by_source?.[srcKey]?.newest_seen_at);
-    const activeOnly = !$('#auc-expired').checked;
-    const reasons = [];
-    if (activeOnly && ageDays != null && ageDays > maxStaleDays) {
-      reasons.push(`<span class="fs-bad">staleness</span> (newest ${srcKey} row is ${_fmtAge(ageDays)}, filter hides anything past ${maxStaleDays} days)`);
-    }
-    if ($('#auc-min-qty').value > 50) {
-      reasons.push(`<span class="fs-bad">min-units</span> set to ${$('#auc-min-qty').value}`);
-    }
-    if (activeOnly) {
-      reasons.push(`<span class="fs-hint">“Show ended auctions”</span> is off`);
-    }
-    const hint = reasons.length
-      ? `Likely culprit: ${reasons.join(' · ')}`
-      : `Try lowering filters or hit ⟳ scrape now.`;
+  if (shownCount > 0 && shownCount < srcCount) {
     summary.hidden = false;
-    summary.innerHTML =
-      `${srcCount.toLocaleString()} ${srcKey} lots in cache, filters excluded all of them. ${hint}`;
-  } else if (shownCount > 0 && shownCount < srcCount) {
-    summary.hidden = false;
-    summary.innerHTML = `Showing ${shownCount} of ${srcCount.toLocaleString()} ${srcKey} lots (ranked by quantity).`;
+    summary.textContent = `Showing ${shownCount} of ${srcCount.toLocaleString()} ${srcKey} lots (ranked by quantity).`;
   } else {
-    summary.hidden = true;
+    summary.hidden = true;   // the zero case is the grid's empty state
   }
 }
 
-function renderAuctions(items, maxStaleDays) {
+// Re-paint the grid from state (star flips, search, map viewport) — no fetch.
+function renderAuctions() {
   const grid = $('#auction-grid');
-  if (!items.length) {
-    const stats = auc.stats;
-    const total = stats?.by_source?.[auc.source]?.count ?? 0;
-    const msg = total === 0
-      ? `Cache is empty for ${SOURCE_NAMES[auc.source] || auc.source}. Hit ⟳ scrape now to populate.`
-      : `No listings matched the current filters. See details above.`;
-    grid.innerHTML = `<div class="drafts-empty">${msg}</div>`;
-    return;
-  }
+  if (!auc.items.length) { renderEmpty(grid, cacheEmptyArgs(_maxStaleDays())); return; }
+  const items = visibleItems();
+  if (!items.length) { renderEmpty(grid, narrowedEmptyArgs()); return; }
   grid.innerHTML = '';
-  for (const it of items) grid.appendChild(renderAuctionCard(it));
+  grid.appendChild(gridFragment(items));
+  grid.dataset.state = 'ready';
+}
+
+function setSearch(q) {
+  auc.q = (q || '').trim();
+  const input = $('#auc-q');
+  if (input && input.value !== auc.q) input.value = auc.q;
+  writeParams();
+  if (auc.items.length) renderAuctions();
 }
 
 // ── Auctions map (GovAuctions-style: pins cluster, cards follow the viewport) ──
@@ -337,7 +432,7 @@ function auctionMapPopup(it) {
     ? `<img class="amap-popup-img" src="${esc(it.image_url)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`
     : '';
   return `${img}
-    <strong>${esc(it.title || it.raw_title || '—')}</strong><br>
+    <strong>${esc(_titleOf(it) || '—')}</strong><br>
     ${(it.quantity || 0).toLocaleString()} × ${it.price ? esc(it.price) : ''}<br>
     ${loc ? `📍 ${esc(loc)}${it.geo_precision === 'state' ? ' <em>(state-level pin)</em>' : ''}<br>` : ''}
     <a href="${esc(it.link)}" target="_blank" rel="noopener">↗ view auction</a>`;
@@ -354,15 +449,9 @@ function updateAuctionMapNote() {
     (unmapped ? ` ${unmapped} lot${unmapped > 1 ? 's have' : ' has'} no location and stays listed.` : '');
 }
 
-// Cards follow the viewport: unmapped lots always stay visible (a missing
-// zip must never hide a good lot), mapped ones must be inside the bounds.
 function applyAuctionViewport() {
   if (!auc.mapOn || !auc.map) return;
-  const maxStaleDays = Number($('#auc-stale').value) || 7;
-  renderAuctions(
-    auc.items.filter(it => it.lat == null || auc.map.inBounds(it)),
-    maxStaleDays,
-  );
+  if (auc.items.length) renderAuctions();
   updateAuctionMapNote();
 }
 
@@ -370,7 +459,7 @@ function syncAuctionMap(fit = false) {
   if (!auc.mapOn || !auc.map) return;
   auc.map.setPoints(auc.items.map(it => ({
     lat: it.lat, lng: it.lng,
-    title: it.title || it.raw_title || '',
+    title: _titleOf(it),
     approx: it.geo_precision === 'state',
     popup: auctionMapPopup(it),
   })));
@@ -385,8 +474,7 @@ async function setAucMapOn(on) {
   btn.classList.toggle('btn-primary', auc.mapOn);
   wrap.hidden = !auc.mapOn;
   if (!auc.mapOn) {
-    // back to the plain full list
-    renderAuctions(auc.items, Number($('#auc-stale').value) || 7);
+    if (auc.items.length) renderAuctions();   // back to the plain full list
     return;
   }
   if (!auc.map) {
@@ -403,23 +491,24 @@ async function setAucMapOn(on) {
   syncAuctionMap(true);
 }
 
-// Map is on by default; only an explicit toggle-off is remembered.
-function autoOpenAucMap() {
-  let pref = null;
-  try { pref = localStorage.getItem('admin.aucMapOn'); } catch (_) {}
-  if (pref === 'off') return;
-  if (!auc.mapOn) setAucMapOn(true);
-  else if (auc.map) auc.map.invalidateSize();  // pane was hidden while away
+// Map follows ?map= (absent = on). Pane was hidden while away → the map needs a resize.
+function applyMapParam() {
+  if (auc.mapOn) {
+    if (!auc.map || $('#auction-map-wrap').hidden) setAucMapOn(true);
+    else auc.map.invalidateSize();
+  } else if (!$('#auction-map-wrap').hidden) {
+    setAucMapOn(false);
+  }
 }
 
 function renderAuctionCard(it) {
   const card = document.createElement('article');
-  card.className = 'auction-card';
+  card.className = 'card card-auction';
 
   const cond = it.condition;
-  let condCls = '', condPill = '';
+  let condPill = '';
   if (cond != null) {
-    condCls = cond >= 7 ? 'good' : (cond >= 5 ? 'ok' : 'bad');
+    const condCls = cond >= 7 ? 'good' : (cond >= 5 ? 'ok' : 'bad');
     condPill = `<span class="auction-cond ${condCls}">${cond}/10</span>`;
   }
 
@@ -434,13 +523,8 @@ function renderAuctionCard(it) {
     ? 'Queue this listing for the pipeline'
     : 'Pipeline only supports GovDeals URLs';
 
-  // Compose "Location · ZIP" line. The cached `location` is already
-  // "City, State, Country"; we append the ZIP from the asset detail page
-  // when present (newer rows only — older cache entries leave it blank).
-  const locParts = [];
-  if (it.location) locParts.push(it.location);
-  if (it.pickup_zip) locParts.push(it.pickup_zip);
-  const locLine = locParts.join(' · ');
+  // "Location · ZIP" line; the cached `location` is already "City, State, Country".
+  const locLine = [it.location, it.pickup_zip].filter(Boolean).join(' · ');
 
   const assetId = _assetIdFromLink(it.link);
   const isStarred = assetId && auc.favoriteIds.has(assetId);
@@ -448,13 +532,13 @@ function renderAuctionCard(it) {
   card.innerHTML = `
     <div class="auction-img">
       ${img}
-      ${assetId ? `<button class="auction-star ${isStarred ? 'on' : ''}"
+      ${assetId ? `<button type="button" class="auction-star ${isStarred ? 'on' : ''}"
         data-asset-id="${esc(assetId)}"
         title="${isStarred ? 'Unstar — stops countdown alerts' : 'Star — get Telegram pings as the auction winds down'}"
         aria-label="${isStarred ? 'Unstar' : 'Star'}">${isStarred ? '★' : '☆'}</button>` : ''}
     </div>
     <div class="auction-body">
-      <h3 class="auction-title">${esc(it.title || it.raw_title || '—')}</h3>
+      <h3 class="auction-title">${esc(_titleOf(it) || '—')}</h3>
       <div class="auction-meta">
         <span class="auction-qty">${(it.quantity||0).toLocaleString()} ×</span>
         ${it.price ? `<span class="auction-price">${esc(it.price)}</span>` : ''}
@@ -467,7 +551,7 @@ function renderAuctionCard(it) {
       <div class="auction-actions">
         <a href="${esc(it.link)}" target="_blank" rel="noopener" class="auction-link">↗ source</a>
         ${it.category === 'medical' ? `<a href="${esc(_ebaySoldUrl(it))}" target="_blank" rel="noopener" class="auction-link" title="eBay sold-listings search — demand-side comps for this model">📊 sold comps</a>` : ''}
-        <button class="btn btn-small btn-primary auction-launch"
+        <button type="button" class="btn btn-small btn-primary auction-launch"
                 ${launchDisabled ? 'disabled' : ''}
                 title="${esc(launchTitle)}"
                 data-url="${esc(it.link)}">▶ launch</button>
@@ -477,165 +561,121 @@ function renderAuctionCard(it) {
 
   const starBtn = card.querySelector('.auction-star');
   if (starBtn) {
-    starBtn.addEventListener('click', async (e) => {
+    starBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      starBtn.disabled = true;
-      try {
-        await toggleFavorite(assetId, it);
-      } finally {
-        starBtn.disabled = false;
-      }
+      toggleFavorite(assetId, it, starBtn);
     });
   }
 
   const launchBtn = card.querySelector('.auction-launch');
   if (launchBtn && !launchDisabled) {
     launchBtn.addEventListener('click', async () => {
-      const orig = launchBtn.textContent;
-      launchBtn.disabled = true;
-      launchBtn.textContent = '⏱ queuing…';
-      launchBtn.classList.add('is-loading');
       try {
-        await queueRuns([it.link]);
+        await pending(launchBtn, '⏱ queuing…', () => queueRuns([it.link]));
         // Permanent per-session badge so it's clear the lot is already in.
         launchBtn.textContent = '✓ queued';
+        launchBtn.disabled = true;
         launchBtn.classList.add('queued');
         toast(`Queued: ${it.title || it.link}`, 'ok');
       } catch (err) {
-        launchBtn.textContent = orig;
-        launchBtn.disabled = false;
         toast('Queue failed: ' + (err.message || err), 'err');
-      } finally {
-        launchBtn.classList.remove('is-loading');
       }
     });
   }
   return card;
 }
 
-// ─────────── auction favorites + countdown alerts ───────────
+// ─────────── auction favorites + countdown alerts — /api/auctions/favorites (#17–#20) ───────────
 
-async function loadFavorites() {
-  try {
-    const body = await apiFetch('/api/auctions/favorites');
-    auc.favorites = body.items || [];
-    auc.favoriteIds = new Set(auc.favorites.map(f => f.asset_id));
-    auc.intervals = body.intervals || [];
-    auc.telegramConfigured = !!body.telegram_configured;
-    renderFavoritesStrip();
-  } catch (err) {
-    console.warn('Favorites load failed:', err);
-  }
+function applyFavorites(body) {
+  auc.favorites = body.items || [];
+  auc.favoriteIds = new Set(auc.favorites.map(f => f.asset_id));
+  auc.intervals = body.intervals || [];
+  auc.telegramConfigured = !!body.telegram_configured;
+  auc.favoritesOkAt = Date.now();
+  renderFavoritesHead();
 }
 
-async function toggleFavorite(assetId, sourceItem) {
+// First paint / after a star: skeleton → cards (keepOld when cards are already up). Poll: old cards stay,
+// a failed read only adds a `stale · N min` badge (#17 — this poll is the one that wedged the server).
+async function loadFavorites({poll = false} = {}) {
+  const grid = $('#auction-favorites-grid');
+  if (!grid) return;
+  if (poll) {
+    try {
+      applyFavorites(await api('/api/auctions/favorites'));
+      clearStale(grid);
+      if (auc.favorites.length) { grid.innerHTML = favCardsHtml(); grid.dataset.state = 'ready'; }
+    } catch (err) {
+      markStale(grid, {since: auc.favoritesOkAt || Date.now()});
+    }
+    return;
+  }
+  await uiLoad(grid, async ({signal}) => {
+    const body = await api('/api/auctions/favorites', {signal});
+    applyFavorites(body);
+    return body;
+  }, {
+    skeleton: 'row', count: 1, keepOld: auc.favorites.length > 0,
+    isEmpty: (body) => !(body.items || []).length,
+    empty: {glyph: '☆', title: 'No starred lots', body: 'Star a card to get Telegram pings as its auction winds down.'},
+    render: () => favCardsHtml(),
+    errorMessage: () => "Couldn't load your starred lots.",
+    onError: () => { $('#auction-favorites-strip').hidden = false; },
+  });
+}
+
+async function toggleFavorite(assetId, sourceItem, btn) {
   if (!assetId) return;
   const wasStarred = auc.favoriteIds.has(assetId);
   try {
-    if (wasStarred) {
-      await apiFetch(`/api/auctions/favorites/${encodeURIComponent(assetId)}`, {
-        method: 'DELETE',
-      });
-      toast('Unstarred', 'ok');
-    } else {
-      await apiFetch('/api/auctions/favorites', {
-        method: 'POST',
-        headers: {'content-type': 'application/json'},
-        body: JSON.stringify({
-          asset_id: assetId,
-          link: sourceItem.link,
-          title: sourceItem.title || sourceItem.raw_title,
-          quantity: sourceItem.quantity,
-          end_date: sourceItem.end_date || sourceItem.time_left || '',
-          image_url: sourceItem.image_url,
-          location: sourceItem.location,
-        }),
-      });
-      toast(
-        auc.telegramConfigured
-          ? 'Starred — alerts armed'
-          : 'Starred — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to receive pings',
-        'ok'
-      );
-    }
+    await pending(btn, '…', async () => {
+      if (wasStarred) {
+        await api(`/api/auctions/favorites/${encodeURIComponent(assetId)}`, {method: 'DELETE'});
+        toast('Unstarred', 'ok');
+      } else {
+        await api('/api/auctions/favorites', {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify({
+            asset_id: assetId,
+            link: sourceItem.link,
+            title: sourceItem.title || sourceItem.raw_title,
+            quantity: sourceItem.quantity,
+            end_date: sourceItem.end_date || sourceItem.time_left || '',
+            image_url: sourceItem.image_url,
+            location: sourceItem.location,
+          }),
+        });
+        toast(
+          auc.telegramConfigured
+            ? 'Starred — alerts armed'
+            : 'Starred — set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID to receive pings',
+          'ok'
+        );
+      }
+    });
   } catch (err) {
     toast('Star toggle failed: ' + (err.message || err), 'err');
     return;
   }
   await loadFavorites();
-  // Re-render the auctions grid so the star icon flips state.
-  renderAuctions(auc.items, Number($('#auc-stale').value) || 7);
+  if (auc.items.length) renderAuctions();   // flip the star on the grid card
 }
 
-function renderFavoritesStrip() {
-  let strip = $('#auction-favorites-strip');
-  const grid = $('#auction-grid');
-  const host = grid?.parentElement;
-  if (!host) return;
-
-  if (!auc.favorites.length) {
-    if (strip) strip.remove();
-    return;
-  }
-
-  if (!strip) {
-    strip = document.createElement('section');
-    strip.id = 'auction-favorites-strip';
-    strip.className = 'fav-strip';
-    host.insertBefore(strip, grid);
-  }
-
-  const tgPill = auc.telegramConfigured
-    ? '<span class="fav-tg ok">📡 Telegram alerts ON</span>'
-    : '<span class="fav-tg off" title="Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env">⚠ Telegram not configured</span>';
-
-  const cards = auc.favorites.map(_renderFavoriteCard).join('');
-  strip.innerHTML = `
-    <header class="fav-strip-head">
-      <div class="fav-strip-title">★ FAVORITES <span class="fav-count">${auc.favorites.length}</span></div>
-      <div class="fav-strip-meta">
-        ${tgPill}
-        <button class="btn btn-small fav-test-tg" type="button">test ping</button>
-      </div>
-    </header>
-    <div class="fav-strip-grid">${cards}</div>
-  `;
-
-  strip.querySelector('.fav-test-tg').addEventListener('click', async (e) => {
-    const btn = e.currentTarget;
-    btn.disabled = true; btn.textContent = 'sending…';
-    try {
-      await apiFetch('/api/auctions/favorites/test-telegram', {method: 'POST'});
-      toast('Test message sent — check Telegram', 'ok');
-      btn.textContent = '✓ sent';
-    } catch (err) {
-      toast('Test failed: ' + (err.message || err), 'err');
-      btn.textContent = 'test ping';
-    } finally {
-      setTimeout(() => { btn.disabled = false; btn.textContent = 'test ping'; }, 2000);
-    }
-  });
-
-  strip.querySelectorAll('.fav-card .auction-star').forEach(btn => {
-    btn.addEventListener('click', async (e) => {
-      e.preventDefault(); e.stopPropagation();
-      const assetId = btn.dataset.assetId;
-      const fav = auc.favorites.find(f => f.asset_id === assetId);
-      if (!fav) return;
-      btn.disabled = true;
-      try {
-        await toggleFavorite(assetId, {
-          link: fav.link, title: fav.title, quantity: fav.quantity,
-          end_date: fav.end_date_raw, image_url: fav.image_url,
-          location: fav.location,
-        });
-      } finally {
-        btn.disabled = false;
-      }
-    });
-  });
+function renderFavoritesHead() {
+  const strip = $('#auction-favorites-strip');
+  if (!strip) return;
+  strip.hidden = !auc.favorites.length;
+  $('#auction-favorites-count').textContent = String(auc.favorites.length);
+  const tg = $('#auction-favorites-tg');
+  tg.className = 'fav-tg ' + (auc.telegramConfigured ? 'ok' : 'off');
+  tg.title = auc.telegramConfigured ? '' : 'Set TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env';
+  tg.textContent = auc.telegramConfigured ? '📡 Telegram alerts ON' : '⚠ Telegram not configured';
 }
+
+function favCardsHtml() { return auc.favorites.map(_renderFavoriteCard).join(''); }
 
 function _renderFavoriteCard(fav) {
   const remaining = _fmtRemaining(fav.seconds_until_end);
@@ -654,10 +694,10 @@ function _renderFavoriteCard(fav) {
     : `<div class="auction-img-fallback">🪑</div>`;
 
   return `
-    <article class="fav-card ${stateCls}">
+    <article class="card card-fav ${stateCls}">
       <div class="fav-card-img">
         ${img}
-        <button class="auction-star on" data-asset-id="${esc(fav.asset_id)}"
+        <button type="button" class="auction-star on" data-asset-id="${esc(fav.asset_id)}"
           title="Unstar — stops countdown alerts" aria-label="Unstar">★</button>
       </div>
       <div class="fav-card-body">
@@ -680,12 +720,21 @@ let mounted = false;
 export function mount() {
   if (mounted) return;
   mounted = true;
-  deal = hooks.deal;
+
+  // One-time migration: the old localStorage map toggle becomes ?map=0 (only "off" was ever remembered).
+  try {
+    const legacy = localStorage.getItem(LEGACY_MAP_KEY);
+    if (legacy !== null) {
+      localStorage.removeItem(LEGACY_MAP_KEY);
+      if (legacy === 'off' && getParams().map == null) setParams({map: '0'});
+    }
+  } catch (_) {}
+
   $$('#auc-source .seg-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      $$('#auc-source .seg-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
       auc.source = btn.dataset.value;
+      syncControls();
+      writeParams();
       loadAuctions();
     });
   });
@@ -696,13 +745,14 @@ export function mount() {
     const p = auc.profiles.find(x => x.slug === auc.profile);
     if (p) { $('#auc-min-qty').value = p.min_quantity; $('#auc-min-qty-out').textContent = p.min_quantity; }
     renderProfileSeg();
+    writeParams();
     loadAuctions();
   });
 
   $('#auc-profile-new').addEventListener('click', () => { $('#auc-profile-form').hidden = false; });
   $('#pf-cancel').addEventListener('click', () => { $('#auc-profile-form').hidden = true; });
 
-  $('#pf-save').addEventListener('click', (e) => withButtonLoading(e.currentTarget, 'saving…', async () => {
+  $('#pf-save').addEventListener('click', (e) => pending(e.currentTarget, 'saving…', async () => {   // #9
     const body = {
       slug: $('#pf-slug').value, name: $('#pf-name').value, keywords: $('#pf-keywords').value,
       exclude_terms: $('#pf-exclude').value, search_terms: $('#pf-terms').value,
@@ -710,24 +760,34 @@ export function mount() {
       item_noun: $('#pf-noun').value || 'units',
     };
     try {
-      const saved = await apiFetch('/api/profiles', {method: 'POST', body: JSON.stringify(body),
-                                                     headers: {'content-type': 'application/json'}});
+      const saved = await api('/api/profiles', {method: 'POST', body: JSON.stringify(body),
+                                                headers: {'content-type': 'application/json'}});
       auc.profile = saved.slug;
       $('#auc-profile-form').hidden = true;
       await loadProfiles();
       toast(`profile ${saved.slug} saved`, 'ok');
+      writeParams();
       loadAuctions();
     } catch (err) { toast(`save failed: ${err.message || err}`, 'err'); }
   }));
 
-  $('#auc-profile-del').addEventListener('click', async () => {
+  $('#auc-profile-del').addEventListener('click', (e) => {   // #10
     if (!auc.profile || !confirm(`Delete profile "${auc.profile}"?`)) return;
-    try {
-      await apiFetch(`/api/profiles/${encodeURIComponent(auc.profile)}`, {method: 'DELETE'});
-      auc.profile = '';
-      await loadProfiles();
-      loadAuctions();
-    } catch (err) { toast(`delete failed: ${err.message || err}`, 'err'); }
+    pending(e.currentTarget, '…', async () => {
+      try {
+        await api(`/api/profiles/${encodeURIComponent(auc.profile)}`, {method: 'DELETE'});
+        auc.profile = '';
+        await loadProfiles();
+        writeParams();
+        loadAuctions();
+      } catch (err) { toast(`delete failed: ${err.message || err}`, 'err'); }
+    });
+  });
+
+  let qTimer;
+  $('#auc-q').addEventListener('input', (e) => {
+    clearTimeout(qTimer);
+    qTimer = setTimeout(() => setSearch(e.target.value), 150);
   });
 
   $('#auc-min-qty').addEventListener('input', (e) => {
@@ -740,10 +800,10 @@ export function mount() {
   $('#auc-expired').addEventListener('change', loadAuctions);
   $('#auc-stale').addEventListener('change', loadAuctions);
 
-  $('#auc-refresh').addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '↻ reloading…', async () => {
+  $('#auc-refresh').addEventListener('click', (e) => {   // #11
+    pending(e.currentTarget, '↻ reloading…', async () => {
       try {
-        await apiFetch('/api/auctions/refresh', {method: 'POST'});
+        await api('/api/auctions/refresh', {method: 'POST'});
         await loadAuctions();
       } catch (err) {
         toast(`Reload failed: ${err.message || err}`, 'err');
@@ -751,9 +811,7 @@ export function mount() {
     });
   });
 
-  $('#staleness-scrape').addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '⟳ starting…', () => startScrape('gd', false));
-  });
+  $('#staleness-scrape').addEventListener('click', (e) => startScrape('gd', false, e.currentTarget));   // #12
 
   $('#scrape-toggle').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -770,14 +828,14 @@ export function mount() {
       const raw = btn.dataset.scrape;
       let source = raw, test = false;
       if (raw === 'ps-test') { source = 'ps'; test = true; }
-      await startScrape(source, test);
+      await startScrape(source, test, $('#scrape-toggle'));
     });
   });
 
-  $('#scrape-cancel').addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '…cancelling', async () => {
+  $('#scrape-cancel').addEventListener('click', (e) => {   // #13
+    pending(e.currentTarget, '…cancelling', async () => {
       try {
-        await apiFetch('/api/scrape/cancel', {method: 'POST'});
+        await api('/api/scrape/cancel', {method: 'POST'});
         toast('Scrape cancel requested.', 'info');
       } catch (err) {
         toast('Cancel failed: ' + (err.message || err), 'err');
@@ -786,14 +844,14 @@ export function mount() {
   });
 
   $('#auc-queue-all').addEventListener('click', (e) => {
-    const urls = auc.items
+    const urls = visibleItems()
       .map(it => it.link)
       .filter(u => typeof u === 'string' && u.includes('govdeals.com'));
     if (!urls.length) {
       toast('Nothing to queue — only GovDeals lots can run through the pipeline.', 'err');
       return;
     }
-    withButtonLoading(e.currentTarget, `…queuing ${urls.length}`, async () => {
+    pending(e.currentTarget, `…queuing ${urls.length}`, async () => {
       try {
         await queueRuns(urls);
         toast(`Queued ${urls.length} lot${urls.length === 1 ? '' : 's'}. Watch Launcher tab.`, 'ok');
@@ -804,16 +862,44 @@ export function mount() {
   });
 
   $('#auc-map-toggle').addEventListener('click', () => {
-    const on = !auc.mapOn;
-    try { localStorage.setItem('admin.aucMapOn', on ? 'on' : 'off'); } catch (_) {}
-    setAucMapOn(on);
+    setAucMapOn(!auc.mapOn);
+    writeParams();
   });
 
-  // Periodically refresh the strip's countdown numbers without re-fetching the
-  // (slow) auctions LLM call. Cheap GET; the dots reflect server-side sent state.
+  // Favorites strip: star (unstar) is delegated because the cards are re-rendered by UI.load; test ping (#20).
+  $('#auction-favorites-grid').addEventListener('click', (e) => {
+    const btn = e.target.closest('.auction-star'); if (!btn) return;
+    e.preventDefault(); e.stopPropagation();
+    const fav = auc.favorites.find(f => f.asset_id === btn.dataset.assetId);
+    if (!fav) return;
+    toggleFavorite(fav.asset_id, {
+      link: fav.link, title: fav.title, quantity: fav.quantity,
+      end_date: fav.end_date_raw, image_url: fav.image_url, location: fav.location,
+    }, btn);
+  });
+  $('#auction-favorites-test').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    try {
+      await pending(btn, 'sending…', () => api('/api/auctions/favorites/test-telegram', {method: 'POST'}));
+      toast('Test message sent — check Telegram', 'ok');
+      btn.textContent = '✓ sent';
+      setTimeout(() => { btn.textContent = 'test ping'; }, 2000);
+    } catch (err) {
+      toast('Test failed: ' + (err.message || err), 'err');
+    }
+  });
+
+  // Refresh the strip's countdown numbers without re-fetching the (slow) auctions call. Cheap GET, 30 s,
+  // only while the pane is on screen; the dots reflect server-side sent state. Failure → stale badge (#17).
   setInterval(() => {
-    if ($('#auction-grid')) loadFavorites();
+    const pane = $('[data-pane="auctions"]');
+    if (pane && !pane.hidden && document.visibilityState === 'visible') loadFavorites({poll: true});
   }, 30000);
 }
 
-export function load() { loadAuctions(); autoOpenAucMap(); }
+export function load() {
+  readParams();
+  syncControls();
+  loadAuctions();
+  applyMapParam();
+}

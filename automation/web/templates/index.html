@@ -157,6 +157,10 @@
 
 <!-- ───────────── Auctions ───────────── -->
 <section class="panel" data-pane="auctions" hidden>
+  {#- E-auctions: pane-scoped stylesheet (body-ok <link>) so parallel tab branches never touch the shared head block.
+      Reads render into [data-state] hosts that ship their skeleton twin; static/admin/auctions.js swaps them in place. -#}
+  {% from "_ui/macros.html" import skeleton_cards %}
+  <link rel="stylesheet" href="/static/admin/auctions.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">FEED / AUCTION CANDIDATES</div>
     <h1 class="hero-title">Pick a lot. <em>Launch</em> the pipeline. Queue more.</h1>
@@ -172,14 +176,14 @@
     <div class="ac-group">
       <span class="ac-label" title="Which scraper cache to draw from">SOURCE</span>
       <div class="seg" id="auc-source">
-        <button type="button" class="seg-btn active" data-value="gd">GovDeals</button>
+        <button type="button" class="seg-btn is-active" data-value="gd">GovDeals</button>
         <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
         <button type="button" class="seg-btn" data-value="bs">BidSpotter</button>
       </div>
     </div>
     <div class="ac-group">
       <span class="ac-label" title="Research profile: keyword set + quantity floor + sweep categories (research_profiles)">PROFILE</span>
-      <div class="seg" id="auc-profile"></div>
+      <div class="seg" id="auc-profile" data-state="loading" aria-busy="true"><span class="sk sk-pill" aria-hidden="true"></span><span class="sk sk-pill" aria-hidden="true"></span><span class="sk sk-pill" aria-hidden="true"></span></div>
       <button type="button" class="btn btn-small" id="auc-profile-new" title="Create a research profile for another item">＋ profile</button>
       <button type="button" class="btn btn-small" id="auc-profile-del" title="Delete the selected profile (not the default)">×</button>
     </div>
@@ -194,6 +198,10 @@
       <input type="text" id="pf-noun" placeholder="noun: desks" style="width:100px">
       <button type="button" class="btn btn-small btn-primary" id="pf-save">save</button>
       <button type="button" class="btn btn-small" id="pf-cancel">cancel</button>
+    </div>
+    <div class="ac-group">
+      <span class="ac-label" title="Filter the shown lots by title (client-side)">SEARCH</span>
+      <input type="search" class="auc-q" id="auc-q" placeholder="title contains…" autocomplete="off">
     </div>
     <div class="ac-group">
       <span class="ac-label" title="Hide lots where the LLM-extracted quantity is below this">Min units per lot</span>
@@ -230,7 +238,7 @@
         </div>
       </div>
       <button type="button" class="btn btn-small btn-primary" id="auc-queue-all" title="Queue every visible GovDeals lot for the pipeline">▶ queue all</button>
-      <button type="button" class="btn btn-small" id="auc-map-toggle" title="Map of where the visible lots are — pan/zoom to filter the cards below">🗺 map</button>
+      <button type="button" class="btn btn-small" id="auc-map-toggle" title="Map of where the visible lots are — pan/zoom to filter the cards below (?map=0 hides it)">🗺 map</button>
     </div>
   </form>
 
@@ -239,7 +247,7 @@
     <div class="map-note" id="auction-map-note"></div>
   </div>
 
-  <div class="cache-header" id="auction-cache-stats" hidden></div>
+  <div class="cache-header" id="auction-cache-stats" data-state="loading" aria-busy="true"><div class="sk sk-line" aria-hidden="true" style="--w:34%"></div><div class="sk sk-line" aria-hidden="true" style="--w:58%"></div></div>
 
   <div class="staleness-banner" id="staleness-banner" hidden>
     <span class="sb-icon">⚠</span>
@@ -256,11 +264,20 @@
     <button type="button" class="btn btn-small btn-ghost" id="scrape-cancel" hidden>cancel</button>
   </div>
 
+  <section class="fav-strip" id="auction-favorites-strip" hidden>
+    <header class="fav-strip-head">
+      <div class="fav-strip-title">★ FAVORITES <span class="fav-count" id="auction-favorites-count">0</span></div>
+      <div class="fav-strip-meta">
+        <span class="fav-tg" id="auction-favorites-tg"></span>
+        <button class="btn btn-small fav-test-tg" id="auction-favorites-test" type="button">test ping</button>
+      </div>
+    </header>
+    <div class="fav-strip-grid" id="auction-favorites-grid" data-state="loading" aria-busy="true"><div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div></div>
+  </section>
+
   <div class="auction-status" id="auction-status"></div>
   <div class="auction-filter-summary" id="auction-filter-summary" hidden></div>
-  <div class="auction-grid" id="auction-grid">
-    <div class="drafts-empty loading"><span class="spinner"></span> fetching listings from cache…</div>
-  </div>
+  <div class="grid grid-auction" id="auction-grid" data-state="loading" aria-busy="true">{{ skeleton_cards(8) }}</div>
 </section>
 
 
