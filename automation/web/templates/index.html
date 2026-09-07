@@ -348,6 +348,9 @@
 
 <!-- ───────────── Inquiries ───────────── -->
 <section class="panel" data-pane="inquiries" hidden>
+  {#- E-inquiries owns this block: its stylesheet rides inside it so parallel tab branches don't fight over `head` -#}
+  {% from "_ui/macros.html" import skeleton_cards %}
+  <link rel="stylesheet" href="/static/admin/inquiries.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">INBOX / INQUIRIES</div>
     <h1 class="hero-title">Customer messages. Buy-side and sell-side.</h1>
@@ -358,24 +361,20 @@
     </p>
   </div>
 
-  <div class="inv-controls">
-    <div class="ac-group">
-      <span class="ac-label">STATUS</span>
-      <div class="seg" id="inq-status-filter">
-        <button type="button" class="seg-btn active" data-value="">all</button>
-        <button type="button" class="seg-btn" data-value="new">new</button>
-        <button type="button" class="seg-btn" data-value="contacted">contacted</button>
-        <button type="button" class="seg-btn" data-value="closed">closed</button>
-      </div>
+  {#- status filter mirrors ?status= (static/admin/inquiries.js owns the key); shared .seg / .seg-btn.is-active -#}
+  <div class="controls inquiry-controls">
+    <span class="inquiry-controls-label">STATUS</span>
+    <div class="seg" id="inq-status-filter" role="group" aria-label="Filter by status">
+      <button type="button" class="seg-btn is-active" data-value="" aria-pressed="true">all</button>
+      <button type="button" class="seg-btn" data-value="new">new</button>
+      <button type="button" class="seg-btn" data-value="contacted">contacted</button>
+      <button type="button" class="seg-btn" data-value="closed">closed</button>
     </div>
-    <div class="ac-actions">
-      <button type="button" class="btn btn-small" id="inq-refresh">↻ refresh</button>
-    </div>
+    <button type="button" class="btn btn-small" id="inq-refresh">↻ refresh</button>
   </div>
 
-  <div class="inq-list" id="inq-list">
-    <div class="drafts-empty">Loading inquiries…</div>
-  </div>
+  {#- skeleton twin ships in the HTML; static/admin/inquiries.js (UI.load) swaps it for cards / empty / error -#}
+  <div class="inquiry-list" id="inq-list" data-state="loading">{{ skeleton_cards(5) }}</div>
 </section>
 
 
