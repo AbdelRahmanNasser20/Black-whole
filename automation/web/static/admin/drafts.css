@@ -1,0 +1,80 @@
+/* static/admin/drafts.css — Drafts tab (Workstream E-drafts). Moved out of app.css "drafts" section.
+   Tokens only (tokens.css), radius 0. Loading/empty/error come from skeleton.css (.sk-card / .ui-empty / .ui-error);
+   the old .drafts-empty placeholder is no longer used by this tab. */
+
+.drafts-grid {
+  display: grid; gap: 18px;
+  grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+}
+.drafts-grid > * { min-width: 0; }
+.drafts-grid[data-state="empty"], .drafts-grid[data-state="error"] { grid-template-columns: 1fr; }
+.drafts-grid .sk-card { min-height: 420px; }   /* twin of a .draft card: head + 2 image rows + meta + actions */
+
+.draft {
+  border: 1px solid var(--border); background: var(--surface);
+  display: grid; grid-template-rows: auto auto auto auto;
+  transition: border-color .15s;
+}
+.draft:hover { border-color: var(--border-strong); }
+
+.draft-head {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.draft-title {
+  font-family: var(--display); font-size: var(--fs-lg); line-height: 1.2;
+  margin: 0 0 4px; color: var(--text); font-weight: 400;
+}
+.draft-loc {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
+}
+.draft-folder {
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+  margin-top: 4px; word-break: break-all;
+}
+
+.draft-grid-imgs {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px;
+  background: var(--border); padding: 0;
+}
+.draft-grid-imgs img {
+  width: 100%; aspect-ratio: 1; object-fit: cover;
+  background: var(--bg); display: block;
+}
+.draft-grid-imgs .more {
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg); color: var(--muted);
+  font-family: var(--mono); font-size: var(--fs-sm);
+  aspect-ratio: 1;
+}
+
+.draft-meta {
+  padding: 12px 16px;
+  display: grid; grid-template-columns: auto 1fr; gap: 5px 12px;
+  font-family: var(--mono); font-size: var(--fs-xs);
+  border-top: 1px solid var(--border);
+}
+.draft-meta dt { color: var(--dim); text-transform: uppercase; letter-spacing: 0.08em; }
+.draft-meta dd { margin: 0; color: var(--text); word-break: break-word; }
+.draft-meta .price { color: var(--accent); font-weight: 700; }
+
+.draft-actions {
+  border-top: 1px solid var(--border);
+  display: grid; grid-template-columns: 1fr 1fr;
+}
+.draft-actions a {
+  padding: 12px; text-align: center;
+  font-family: var(--mono); font-size: var(--fs-xs);
+  text-transform: uppercase; letter-spacing: 0.1em;
+  color: var(--muted); text-decoration: none;
+  border-right: 1px solid var(--border);
+  transition: background .12s, color .12s;
+}
+.draft-actions a:last-child { border-right: 0; }
+.draft-actions a:hover { background: var(--surface-2); color: var(--text); }
+.draft-actions a.disabled { color: var(--dim); pointer-events: none; }
+
+@media (max-width: 600px) {
+  .drafts-grid { grid-template-columns: 1fr; }
+  .draft-grid-imgs { grid-template-columns: repeat(3, 1fr); }
+}
