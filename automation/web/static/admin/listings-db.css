@@ -1,0 +1,67 @@
+/* static/admin/listings-db.css — Listings DB tab (plan §10 E-listings-db). Moved out of app.css; the table is the
+   shared .table/.table-wrap from ui/components.css, the pager is the shared .load-more "Load more (N remaining)"
+   button, and the loading/empty/error states come from ui/skeleton.css + state.js.
+   Tokens only — no hex, no legacy aliases (tests/web/test_admin_tab_listings_db.py). */
+
+/* ── table ── */
+.ldb-wrap { margin-bottom: 12px; min-height: 120px; }
+.ldb-wrap .table { font-family: var(--mono); font-size: var(--fs-sm); color: var(--text); }
+.ldb-wrap .table th {
+  position: sticky; top: 0; z-index: 1;
+  color: var(--accent); letter-spacing: 0.16em; padding: 10px 12px;
+}
+.ldb-wrap .table td { padding: 10px 12px; }
+.ldb-col-src   { width: 60px; }
+.ldb-col-qty   { width: 70px; text-align: right; }
+.ldb-col-title { min-width: 280px; }
+.ldb-col-price { width: 110px; white-space: nowrap; }
+.ldb-col-loc   { width: 160px; }
+.ldb-col-end   { width: 160px; white-space: nowrap; }
+.ldb-col-seen  { width: 110px; white-space: nowrap; }
+.ldb-col-act   { width: 90px; white-space: nowrap; text-align: right; }
+
+.ldb-qty { font-weight: 700; color: var(--accent); }
+.ldb-title-main {
+  font-family: var(--sans); font-size: var(--fs-base); color: var(--text);
+  line-height: 1.4;
+}
+.ldb-asset {
+  color: var(--dim); font-size: var(--fs-xs); margin-top: 2px;
+  letter-spacing: 0.02em;
+}
+.ldb-asset em { color: var(--muted); font-style: normal; }
+.ldb-asset .ldb-conf {
+  display: inline-block; padding: 0 4px; border: 1px solid var(--border-strong);
+  color: var(--muted); margin-left: 4px;
+}
+.ldb-loc, .ldb-end { color: var(--muted); }
+.ldb-seen { color: var(--dim); white-space: nowrap; }
+.ldb-end.expired { color: var(--danger); }
+.ldb-act { display: flex; gap: 4px; justify-content: flex-end; }
+.ldb-launch.queued {
+  color: var(--success); border-color: var(--success); background: transparent;
+}
+
+.src-pill {
+  display: inline-block; padding: 2px 6px;
+  font-size: var(--fs-xs); font-weight: 700; letter-spacing: 0.1em;
+  border: 1px solid currentColor;
+}
+.src-pill.src-gd    { color: var(--accent); }
+.src-pill.src-ps    { color: var(--info); }
+.src-pill.src-bs    { color: var(--accent-2); }
+.src-pill.src-other { color: var(--dim); }
+
+/* ── controls ── */
+/* four source buttons are wider than a phone — wrap the segmented control instead of scrolling the page */
+#ldb-form .ac-group, #ldb-form .seg { flex-wrap: wrap; max-width: 100%; }
+#ldb-form .seg-btn { border-bottom: 1px solid var(--border); margin-bottom: -1px; }
+#ldb-q {
+  padding: 4px 8px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); font: inherit;
+}
+#ldb-q:focus { outline: none; border-color: var(--accent); }
+#ldb-form select {
+  padding: 4px 8px; background: var(--bg); color: var(--text);
+  border: 1px solid var(--border); font-family: var(--mono); font-size: var(--fs-xs);
+}

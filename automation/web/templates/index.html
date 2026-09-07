@@ -611,6 +611,12 @@
 
 <!-- ───────────── Listings DB ───────────── -->
 <section class="panel" data-pane="listings-db" hidden>
+  {#- E-listings-db: this pane's CSS lives in static/admin/listings-db.css; the table/pager are the shared .table /
+      .load-more from static/ui/components.css. ldb_skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% macro ldb_skeleton_rows(n) -%}
+  {% for _ in range(n) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}
+  {%- endmacro %}
+  <link rel="stylesheet" href="/static/admin/listings-db.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">RAW / LISTINGS DB</div>
     <h1 class="hero-title">Every scraped row. <em>No ranking.</em> No LLM.</h1>
@@ -626,7 +632,7 @@
     <div class="ac-group">
       <span class="ac-label" title="Which scraper cache to draw from">SOURCE</span>
       <div class="seg" id="ldb-source">
-        <button type="button" class="seg-btn active" data-value="all">All</button>
+        <button type="button" class="seg-btn is-active" aria-pressed="true" data-value="all">All</button>
         <button type="button" class="seg-btn" data-value="gd">GovDeals</button>
         <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
         <button type="button" class="seg-btn" data-value="bs">BidSpotter</button>
@@ -635,7 +641,7 @@
     <div class="ac-group">
       <span class="ac-label" title="Hides lots whose end_date has passed (gd) or that have no time_left (ps)">STATUS</span>
       <div class="seg" id="ldb-status">
-        <button type="button" class="seg-btn active" data-value="all">All</button>
+        <button type="button" class="seg-btn is-active" aria-pressed="true" data-value="all">All</button>
         <button type="button" class="seg-btn" data-value="active">Active</button>
         <button type="button" class="seg-btn" data-value="expired">Expired</button>
         <button type="button" class="seg-btn" data-value="unknown">Unknown</button>
@@ -686,32 +692,14 @@
     </div>
   </form>
 
-  <div class="auction-status" id="ldb-status-bar"></div>
+  <div class="auction-status" id="ldb-status-bar" aria-live="polite"></div>
 
-  <div class="ldb-table-wrap">
-    <table class="ldb-table" id="ldb-table">
-      <thead>
-        <tr>
-          <th class="ldb-col-src">SRC</th>
-          <th class="ldb-col-qty">QTY</th>
-          <th class="ldb-col-title">TITLE</th>
-          <th class="ldb-col-price">PRICE</th>
-          <th class="ldb-col-loc">LOCATION</th>
-          <th class="ldb-col-end">ENDS</th>
-          <th class="ldb-col-seen">LAST SEEN</th>
-          <th class="ldb-col-act"></th>
-        </tr>
-      </thead>
-      <tbody id="ldb-tbody">
-        <tr><td colspan="8" class="drafts-empty loading"><span class="spinner"></span> querying listings.db…</td></tr>
-      </tbody>
-    </table>
+  <div class="ldb-wrap" id="ldb-wrap" data-state="loading" aria-busy="true">
+    {{ ldb_skeleton_rows(10) }}
   </div>
 
-  <div class="ldb-pager" id="ldb-pager" hidden>
-    <button type="button" class="btn btn-small" id="ldb-prev">← prev</button>
-    <span class="ldb-page-info" id="ldb-page-info"></span>
-    <button type="button" class="btn btn-small" id="ldb-next">next →</button>
+  <div class="pager load-more" id="ldb-pager">
+    <button type="button" class="btn" id="ldb-more" hidden>Load more</button>
   </div>
 </section>
 
