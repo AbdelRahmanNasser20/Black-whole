@@ -112,6 +112,8 @@
 }
 /* error state (UI.load) replaces the cards; keep the grid from collapsing to a 6-col strip */
 .phase-grid[data-state=error] { grid-template-columns: 1fr; }
+/* refreshing / stale badge sits in the gap above the grid instead of on top of the last card's status pill */
+.phase-grid > .ui-stale-badge { top: auto; bottom: calc(100% + 1px); right: 0; }
 
 /* ── price prompt ── */
 .price-prompt {
