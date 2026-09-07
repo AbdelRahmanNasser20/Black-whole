@@ -1,130 +1,133 @@
-{# automation/web/templates/deals_public.html — public "Surplus Radar" page.
-   Standalone: NOT _public_base.html (no chair-storefront nav, no Apollo tracker).
-   Never renders auction photos. Data comes from /deals/api/* (public_deals.py). #}
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Surplus Radar — every US government surplus auction, tracked to close</title>
-  <meta name="description" content="Live GovDeals lots with quantity-aware $/unit, landed cost, and recorded outcomes. A side project by Black Whole.">
-  <meta name="robots" content="noindex, nofollow">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=JetBrains+Mono:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/deals_public.css?v={{ now }}">
-</head>
-<body>
-<header class="sr-head">
-  <a class="sr-brand" href="/deals"><span class="sr-mark">◉</span> SURPLUS RADAR</a>
-  <span class="sr-tag mono">every US government surplus auction, tracked to close</span>
-  <a class="sr-head-link mono" href="#sr-about">ABOUT</a>
-</header>
+{#- automation/web/templates/deals_public.html — public "Surplus Radar" feed on the shared shell (plan §6).
+    Mounts on _base.html. Never renders auction photos, verdicts, distance, or inventory.storage_note.
+    Data comes from /deals/api/* (public_deals.py owns every exclusion — nothing is filtered here or in feed.js).
+    Element ids below are the §6 contract Workstream D's map.js builds against — keep them. -#}
+{% set nav_active = 'deals' %}
+{% extends "_base.html" %}
+{% from "_ui/macros.html" import skeleton_cards %}
+{% block title %}Surplus Radar — live government surplus lots{% endblock %}
+{% block head %}
+<meta name="description" content="Live GovDeals lots with quantity-aware $/unit, landed cost, and recorded outcomes. A side project by Black Whole.">
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="/static/deals/feed.css?v={{ asset_v }}">
+{% endblock %}
 
-<details class="sr-about" id="sr-about">
-  <summary class="mono">WHAT THIS IS <span id="sr-about-hint">— tap to collapse</span></summary>
-  <div class="sr-about-grid">
-    <div class="sr-about-copy">
-      <h1>Government surplus, priced by the unit.</h1>
+{% block topbar_center %}
+<form class="topbar-search" role="search" id="feed-search" autocomplete="off">
+  <input type="search" id="feed-q" name="q" placeholder="Search lots — laptops, forklift, fryer…" aria-label="Search lots">
+  <button class="btn btn-ghost btn-small topbar-search-btn" type="button" data-rail-open data-feed-search-open aria-label="Open search and filters">⌕</button>
+</form>
+{% endblock %}
+{% block topbar_nav %}
+<a href="/deals" aria-current="page">Deals</a>
+<a href="/sources">Sources</a>
+{% endblock %}
+
+{% block rail %}
+<div id="feed-rail" class="feed-rail">
+  <div class="rail-group feed-rail-search">
+    <label class="rail-group-title" for="feed-rail-q">Search</label>
+    <input type="search" id="feed-rail-q" placeholder="laptops, forklift, fryer…" aria-label="Search lots" autocomplete="off">
+  </div>
+  <div class="rail-group">
+    <span class="rail-group-title" id="feed-bids-label">Bids</span>
+    <div class="seg" role="group" aria-labelledby="feed-bids-label" data-key="max_bids">
+      <button class="seg-btn is-active" type="button" data-value="">Any</button>
+      <button class="seg-btn" type="button" data-value="0">No bids</button>
+      <button class="seg-btn" type="button" data-value="3">≤ 3</button>
+    </div>
+    <p class="hint">Live bid counts from GovDeals.</p>
+  </div>
+  <div class="rail-group">
+    <label class="rail-group-title" for="feed-ending">Ending</label>
+    <select class="select" id="feed-ending" data-key="ending_within" aria-label="Ending within">
+      <option value="">Any time</option>
+      <option value="6">Next 6 h</option>
+      <option value="24">Next 24 h</option>
+      <option value="48">Next 48 h</option>
+      <option value="168">Next 7 days</option>
+    </select>
+  </div>
+  <div class="rail-group">
+    <span class="rail-group-title" id="feed-status-label">Status</span>
+    <div class="seg" role="group" aria-labelledby="feed-status-label" data-key="status">
+      <button class="seg-btn is-active" type="button" data-value="active">Live</button>
+      <button class="seg-btn" type="button" data-value="closed">Closed</button>
+      <button class="seg-btn" type="button" data-value="all">All</button>
+    </div>
+  </div>
+  <div class="rail-group">
+    <span class="rail-group-title" id="feed-price-label">Current bid</span>
+    <div class="feed-range" role="group" aria-labelledby="feed-price-label">
+      <input type="number" id="feed-min-price" inputmode="numeric" placeholder="Min $" min="0" aria-label="Minimum bid">
+      <span class="feed-range-dash" aria-hidden="true">–</span>
+      <input type="number" id="feed-max-price" inputmode="numeric" placeholder="Max $" min="0" aria-label="Maximum bid">
+    </div>
+    <p class="hint">LANDED = bid × 1.125 (buyer premium). Tax and freight not included.</p>
+  </div>
+  <div class="rail-group feed-rail-actions">
+    <button class="btn btn-ghost btn-small" type="button" id="feed-clear">Clear all filters</button>
+    <button class="btn btn-primary btn-small feed-rail-done" type="button" data-rail-close>Done</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<details class="feed-about" id="feed-about">
+  <summary><span class="feed-about-kicker">What this is</span> <span class="feed-about-title">Government surplus, priced by the unit.</span></summary>
+  <div class="feed-about-body">
+    <div class="feed-about-copy">
       <p>Surplus Radar sweeps every live GovDeals auction every six hours, follows each lot to its close, and records how it ended — the no-bids, the $1 wins, the final prices GovDeals itself never publishes.</p>
       <p>It reads the quantity out of the listing text so a "Lot of (286) HP EliteOne" is priced per machine, not per lot, and adds buyer premium so the number you see is what you'd actually pay.</p>
+      <ol class="feed-how">
+        <li><b>Sweep</b> the whole site through the public search API, every 6 h</li>
+        <li><b>Watch</b> each lot's clock to its close; anti-snipe extensions included</li>
+        <li><b>Record</b> outcome + final bid per auction — relists never overwrite history</li>
+        <li><b>Price</b> quantity from the title → $/unit, plus 12.5 % buyer premium → landed</li>
+      </ol>
     </div>
-    <div class="sr-stats" id="sr-stats">
-      <div class="sr-stat"><div class="sr-stat-num" data-stat="tracked">—</div><div class="sr-stat-lab mono">LOTS TRACKED</div></div>
-      <div class="sr-stat"><div class="sr-stat-num" data-stat="active">—</div><div class="sr-stat-lab mono">LIVE NOW</div></div>
-      <div class="sr-stat"><div class="sr-stat-num" data-stat="closed">—</div><div class="sr-stat-lab mono">OUTCOMES RECORDED</div></div>
-      <div class="sr-stat"><div class="sr-stat-num" data-stat="no_bid">—</div><div class="sr-stat-lab mono">CLOSED WITH NO BIDS</div></div>
-      <div class="sr-stat"><div class="sr-stat-num" data-stat="states">—</div><div class="sr-stat-lab mono">STATES LIVE</div></div>
-    </div>
+    <dl class="feed-stats" id="feed-stats">
+      <div><dt>Lots tracked</dt><dd data-stat="tracked">—</dd></div>
+      <div><dt>Live now</dt><dd data-stat="active">—</dd></div>
+      <div><dt>Outcomes recorded</dt><dd data-stat="closed">—</dd></div>
+      <div><dt>Closed with no bids</dt><dd data-stat="no_bid">—</dd></div>
+      <div><dt>States live</dt><dd data-stat="states">—</dd></div>
+    </dl>
   </div>
-  <div class="sr-how">
-    <div><b class="mono">01 SWEEP</b> maestro search API, whole site, every 6 h</div>
-    <div><b class="mono">02 WATCH</b> re-read each lot's clock to its close; anti-snipe extensions included</div>
-    <div><b class="mono">03 RECORD</b> outcome + final bid stored per auction — relists never overwrite history</div>
-    <div><b class="mono">04 PRICE</b> quantity from the title → $/unit, plus 12.5 % buyer premium → landed</div>
-  </div>
-  <p class="sr-diff mono">vs GovAuctions: + quantity &amp; $/unit · + landed cost · + closed-auction history · − their multi-source aggregation (GovDeals only, for now)</p>
 </details>
 
-<form class="sr-topbar" id="sr-topbar" onsubmit="return false;">
-  <input type="search" id="sr-q" placeholder="search titles — laptops, forklift, fryer…" autocomplete="off">
-  <div class="sr-seg" data-key="max_bids">
-    <button type="button" data-value="" class="on">any bids</button>
-    <button type="button" data-value="0">no bids</button>
-    <button type="button" data-value="3">≤ 3</button>
-  </div>
-  <div class="sr-seg" data-key="ending_within">
-    <button type="button" data-value="" class="on">any time</button>
-    <button type="button" data-value="24">&lt; 24 h</button>
-    <button type="button" data-value="48">&lt; 48 h</button>
-    <button type="button" data-value="168">&lt; 7 d</button>
-  </div>
-  <div class="sr-seg" data-key="status">
-    <button type="button" data-value="active" class="on">live</button>
-    <button type="button" data-value="closed">closed</button>
-  </div>
-  <select id="sr-sort" aria-label="sort">
-    <option value="ends">ending soonest</option>
-    <option value="newest">newest</option>
-    <option value="bid:asc">lowest bid</option>
-    <option value="bid:desc">highest bid</option>
-    <option value="bids:desc">most bids</option>
+<div class="chips" id="feed-chips" data-state="loading" aria-label="Category">{% for _ in range(6) %}<span class="sk sk-pill" aria-hidden="true"></span>{% endfor %}</div>
+
+<div class="controls feed-controls" id="feed-controls">
+  <button class="btn btn-ghost btn-small feed-filters-btn" type="button" data-rail-open>Filters</button>
+  <select class="select" id="feed-sort" aria-label="Sort">
+    <option value="ends">Ending soonest</option>
+    <option value="newest">Newest</option>
+    <option value="bid:asc">Bid: low → high</option>
+    <option value="bid:desc">Bid: high → low</option>
+    <option value="bids:desc">Most bids</option>
   </select>
-  <button type="button" class="sr-btn" id="sr-map-toggle">🗺 map</button>
-</form>
-<div class="sr-pills" id="sr-pills"></div>
-
-<div class="sr-map-wrap" id="sr-map-wrap" hidden>
-  <div class="sr-map" id="sr-map"></div>
-  <div class="sr-map-note mono" id="sr-map-note"></div>
+  <select class="select" id="feed-state" aria-label="State"><option value="">All states</option></select>
+  <button class="btn btn-ghost btn-small" type="button" id="feed-view-toggle" aria-pressed="false">Map</button>
+  <span class="result-count" id="feed-count" aria-live="polite"></span>
 </div>
 
-<div class="sr-layout">
-  <aside class="sr-side" id="sr-side">
-    <details open class="sr-side-box">
-      <summary class="mono">CATEGORY</summary>
-      <div id="sr-cats"></div>
-    </details>
-    <div class="sr-side-box">
-      <label class="mono" for="sr-state">STATE</label>
-      <select id="sr-state"><option value="">all states</option></select>
-    </div>
-    <div class="sr-side-box">
-      <label class="mono">CURRENT BID $</label>
-      <div class="sr-range">
-        <input type="number" id="sr-min-price" placeholder="min" min="0">
-        <input type="number" id="sr-max-price" placeholder="max" min="0">
-      </div>
-    </div>
-    <div class="sr-side-box mono sr-fees">LANDED = bid × 1.125 (buyer premium). Tax and freight not included.</div>
-    <button type="button" class="sr-btn sr-btn-ghost" id="sr-clear">clear all filters</button>
-  </aside>
+<div class="active-filters" id="feed-filters" hidden></div>
 
-  <main class="sr-main">
-    <div class="sr-pager" id="sr-pager-top"></div>
-    <div class="sr-table-wrap">
-      <table class="sr-table" id="sr-table">
-        <thead><tr>
-          <th>Title</th><th>Category</th><th>Location</th><th class="num">Bids</th>
-          <th class="num">Bid</th><th class="num" title="parsed from the title; 1 when the title states no count">Qty</th>
-          <th class="num" title="current bid ÷ quantity">$/unit</th><th class="num" title="bid + 12.5% buyer premium, per unit">Landed/unit</th>
-          <th>Ends</th><th></th>
-        </tr></thead>
-        <tbody id="sr-rows"><tr><td colspan="10" class="sr-empty">Loading…</td></tr></tbody>
-      </table>
-    </div>
-    <div class="sr-cards" id="sr-cards"></div>
-    <div class="sr-pager" id="sr-pager-bottom"></div>
-  </main>
-</div>
+<div id="feed-map" hidden></div>
+<aside id="feed-map-panel" hidden aria-label="Lots in view"></aside>
 
-<footer class="sr-foot mono">
-  <span>SURPLUS RADAR · a Black Whole side project</span>
-  <span>data: GovDeals public search API · photos stay on GovDeals</span>
+<div id="feed-grid" class="grid feed-grid" data-state="loading" aria-live="polite">{{ skeleton_cards(8) }}</div>
+<div class="load-more feed-more-wrap"><button id="feed-more" class="btn" type="button" hidden>Load more</button></div>
+{% endblock %}
+
+{% block footer %}
+<footer class="footer feed-footer">
+  <p class="footer-note">Surplus Radar aggregates public GovDeals listings and is not affiliated with GovDeals or any agency. Photos stay on GovDeals.</p>
+  <p class="footer-note">© 2026 Black Whole</p>
 </footer>
+{% endblock %}
 
-<script src="/static/admin_map.js"></script>
-<script>window.SR_PER_PAGE = {{ per_page_choices | list | tojson }};</script>
-<script src="/static/deals_public.js?v={{ now }}"></script>
-</body>
-</html>
+{% block scripts %}
+<script type="module" src="/static/deals/feed.js?v={{ asset_v }}"></script>
+{% endblock %}

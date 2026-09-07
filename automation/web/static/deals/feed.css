@@ -1,0 +1,57 @@
+/* static/deals/feed.css — page-local rules for the public /deals feed (plan §6).
+   Layout + spacing only. Colours come from tokens.css, components from components.css. No hex, no radius. */
+
+/* ── "what this is" portfolio block (collapsed by default) ─────────── */
+.feed-about { margin: 0 0 var(--gap); border: 1px solid var(--border); background: var(--surface); }
+.feed-about > summary { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 10px var(--pad); cursor: pointer; list-style: none; }
+.feed-about > summary::-webkit-details-marker { display: none; }
+.feed-about > summary::before { content: "+"; font-family: var(--mono); color: var(--dim); }
+.feed-about[open] > summary::before { content: "–"; }
+.feed-about-kicker { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.feed-about-title { font: 400 var(--fs-lg)/1.2 var(--display); color: var(--text); }
+.feed-about-body { display: grid; gap: var(--gap); padding: 4px var(--pad) var(--pad); border-top: 1px solid var(--border); grid-template-columns: 1fr; }
+@media (min-width: 1024px) { .feed-about-body { grid-template-columns: 1.3fr 1fr; } }
+.feed-about-copy p { margin: 10px 0 0; color: var(--muted); max-width: 60ch; }
+.feed-how { margin: 12px 0 0; padding: 0 0 0 1.4em; color: var(--muted); font-size: var(--fs-sm); }
+.feed-how li { margin: 0 0 4px; }
+.feed-how b { font-weight: 500; color: var(--text); }
+.feed-stats { display: grid; gap: 1px; margin: 12px 0 0; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); background: var(--border); border: 1px solid var(--border); }
+.feed-stats > div { padding: 12px; background: var(--surface-2); }
+.feed-stats dt { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.feed-stats dd { margin: 6px 0 0; font: 700 var(--fs-xl)/1 var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+
+/* ── rail ──────────────────────────────────────────────────────────── */
+.feed-rail .select { width: 100%; }
+.feed-rail .seg { display: flex; }
+.feed-rail .seg-btn { flex: 1 1 0; }
+.feed-rail-search { display: none; }               /* the topbar search owns ≥ 1024; the rail copy shows when it collapses */
+.feed-rail-search input { width: 100%; height: 32px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: var(--sans); }
+.feed-rail-search input::placeholder { color: var(--dim); }
+.feed-rail-search input:focus { border-color: var(--border-strong); outline: none; }
+@media (max-width: 1023px) { .feed-rail-search { display: block; } }
+.feed-range { display: flex; align-items: center; gap: 6px; }
+.feed-range input { flex: 1 1 0; min-width: 0; height: 32px; padding: 0 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  font: 400 var(--fs-sm)/1 var(--mono); font-variant-numeric: tabular-nums; -moz-appearance: textfield; appearance: textfield; }
+.feed-range input::-webkit-outer-spin-button, .feed-range input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.feed-range input::placeholder { color: var(--dim); }
+.feed-range input:focus { border-color: var(--border-strong); outline: none; }
+.feed-range-dash { color: var(--dim); font-family: var(--mono); }
+.feed-rail-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.feed-rail-done { display: none; }
+@media (max-width: 767px) { .feed-rail-done { display: inline-flex; } }
+
+/* ── control row ───────────────────────────────────────────────────── */
+.feed-filters-btn { display: none; }
+@media (max-width: 767px) {
+  .feed-filters-btn { display: inline-flex; }
+  .feed-controls .select { flex: 1 1 120px; min-width: 0; }
+  .feed-controls .result-count { flex-basis: 100%; margin-left: 0; }
+}
+
+/* ── grid / load more ──────────────────────────────────────────────── */
+.feed-grid { min-height: 160px; }
+.feed-more-wrap:has(> [hidden]) { display: none; }
+body[data-view="map"] .feed-grid, body[data-view="map"] .feed-more-wrap { display: none; }
+
+/* ── footer ────────────────────────────────────────────────────────── */
+.feed-footer .footer-note { margin: 0 0 4px; }
