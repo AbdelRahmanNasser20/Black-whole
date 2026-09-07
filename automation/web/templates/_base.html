@@ -1,0 +1,74 @@
+{#- templates/_base.html — the one layout skeleton every rebuilt page mounts on (plan §5).
+    Blocks: title · head · topbar_center · topbar_nav · topbar_right · rail · content · footer · scripts.
+    Body gets class "has-rail" when the rail block renders non-empty. -#}
+{%- set rail %}{% block rail %}{% endblock %}{% endset -%}
+<!doctype html>
+<html lang="en" data-rail="open">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}BLACK WHOLE{% endblock %}</title>
+<script>/* apply the persisted rail state before first paint so the shell does not jump */
+try { var r = localStorage.getItem('ui.rail'); if (r === 'closed' || r === 'open') document.documentElement.dataset.rail = r; } catch (e) {}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/ui/tokens.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/ui/components.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
+{% block head %}{% endblock %}
+</head>
+<body class="{% if rail|trim %}has-rail{% endif %}">
+<header class="topbar">
+  <a class="brand" href="{{ brand_href|default('/deals') }}" aria-label="BLACK WHOLE home">
+    <span class="brand-mark">◣◢</span><span class="brand-name">BLACK WHOLE</span>
+  </a>
+  {% block topbar_center %}{% endblock %}
+  <nav class="topbar-nav" aria-label="Primary">
+    {% block topbar_nav %}
+    <a href="/deals"{% if nav_active == 'deals' %} aria-current="page"{% endif %}>Deals</a>
+    <a href="/sources"{% if nav_active == 'sources' %} aria-current="page"{% endif %}>Sources</a>
+    <a href="/admin"{% if nav_active == 'admin' %} aria-current="page"{% endif %}>Admin</a>
+    {% endblock %}
+  </nav>
+  <div class="topbar-right">{% block topbar_right %}{% endblock %}</div>
+</header>
+<div class="shell">
+  {% if rail|trim %}
+  <aside class="rail" id="rail" aria-label="Filters">
+    <div class="rail-head">
+      <h2 class="rail-title">Filters</h2>
+      <button class="rail-toggle" type="button" data-rail-toggle aria-label="Collapse filters" title="Collapse filters">‹</button>
+    </div>
+    <div class="rail-body">{{ rail }}</div>
+  </aside>
+  <div class="drawer-scrim" data-rail-scrim hidden></div>
+  {% endif %}
+  <main class="main" id="main">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+{% block footer %}{% endblock %}
+<script type="module" src="/static/ui/state.js?v={{ asset_v }}"></script>
+<script type="module">
+/* rail: ≥768 collapse/expand persisted in localStorage.ui.rail → html[data-rail]; <768 it is a drawer
+   opened by any [data-rail-open] button (page-owned) and closed by the scrim or [data-rail-close]. */
+const html = document.documentElement, rail = document.getElementById('rail'), scrim = document.querySelector('[data-rail-scrim]');
+const toggle = document.querySelector('[data-rail-toggle]');
+if (toggle) toggle.addEventListener('click', () => {
+  const next = html.dataset.rail === 'closed' ? 'open' : 'closed';
+  html.dataset.rail = next; toggle.textContent = next === 'closed' ? '›' : '‹';
+  toggle.setAttribute('aria-label', next === 'closed' ? 'Expand filters' : 'Collapse filters');
+  try { localStorage.setItem('ui.rail', next); } catch (e) {}
+});
+if (toggle && html.dataset.rail === 'closed') { toggle.textContent = '›'; toggle.setAttribute('aria-label', 'Expand filters'); }
+const openDrawer = (open) => { if (!rail) return; rail.classList.toggle('is-open', open); if (scrim) { scrim.hidden = !open; scrim.classList.toggle('is-open', open); } };
+document.addEventListener('click', (e) => {
+  if (e.target.closest('[data-rail-open]')) openDrawer(true);
+  else if (e.target.closest('[data-rail-close]') || e.target === scrim) openDrawer(false);
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') openDrawer(false); });
+</script>
+{% block scripts %}{% endblock %}
+</body>
+</html>

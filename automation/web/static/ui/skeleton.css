@@ -1,0 +1,28 @@
+/* static/ui/skeleton.css — loading/empty/error/stale primitives. Every fetch site uses these via state.js. */
+.sk { position: relative; overflow: hidden; background: var(--sk-a); border-radius: var(--radius); }
+.sk::after { content: ""; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent 0, var(--sk-b) 50%, transparent 100%);
+  animation: sk-sweep 1.5s ease-in-out infinite; }
+@keyframes sk-sweep { to { transform: translateX(100%); } }
+@media (prefers-reduced-motion: reduce) { .sk::after { animation: none; } }
+.sk-line { height: 12px; width: var(--w, 100%); margin: 6px 0; }
+.sk-pill { display: inline-block; height: 26px; width: var(--w, 88px); margin: 0 6px 6px 0; }
+.sk-band { height: 28px; margin: -1px -1px 8px; }
+.sk-card { border: 1px solid var(--border); background: var(--surface); padding: 0 var(--pad) var(--pad); min-height: 150px; }
+.sk-row { display: flex; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.sk-row .sk-cell { flex: 1; height: 14px; }
+.sk-tr td { padding: 10px 8px; }
+[aria-busy="true"] > :not(.ui-stale-badge):not(.sk):not(.sk-card):not(.sk-row):not(.sk-tr) { opacity: .55; pointer-events: none; transition: opacity .15s; }
+.ui-empty, .ui-error { display: grid; justify-items: center; text-align: center; gap: 8px; padding: 48px 16px; border: 1px dashed var(--border); color: var(--muted); }
+.ui-empty .glyph { font-family: var(--mono); font-size: 28px; color: var(--dim); }
+.ui-empty h2, .ui-error h2 { margin: 0; font: 400 var(--fs-xl)/1.2 var(--display); color: var(--text); }
+.ui-empty p, .ui-error p { margin: 0; max-width: 46ch; }
+.ui-error { border-color: var(--danger); }
+.ui-stale-badge { position: absolute; top: 8px; right: 8px; z-index: 2; font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .06em;
+  padding: 4px 8px; background: var(--surface-2); color: var(--warn); border: 1px solid var(--border-strong); }
+[data-state] { position: relative; }
+.btn.is-pending { opacity: .7; cursor: progress; }
+.btn.is-pending::before { content: "◌"; display: inline-block; margin-right: 6px; animation: sk-spin 1s linear infinite; }
+@keyframes sk-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .btn.is-pending::before { animation: none; } }
+.tr.is-pending, tr.is-pending { opacity: .55; pointer-events: none; }

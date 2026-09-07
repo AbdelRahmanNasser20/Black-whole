@@ -1,0 +1,24 @@
+/* static/ui/tokens.css — the one place a colour, font, or size is spelled out.
+   Values copied verbatim from app.css:6-28 (admin "industrial terminal" palette), names normalised.
+   Hard-coded hex anywhere else under static/ui, static/deals, static/admin, static/site is a review reject
+   (tests/web/test_ui_primitives.py::test_no_hardcoded_hex_outside_tokens). */
+:root {
+  --bg: #0c0c0e;  --surface: #131316;  --surface-2: #1a1a1f;
+  --border: #25252c;  --border-strong: #3a3a44;
+  --text: #ece8dd;  --muted: #9e988a;  --dim: #5a5650;
+  --accent: #ffb547;  --accent-soft: rgba(255,181,71,.10);  --accent-2: #c2f7c4;
+  --danger: #ff6c4d;  --success: #6cd47e;  --info: #7ab9ff;  --warn: #ffb547;
+  --sk-a: #16161a;  --sk-b: #202026;                 /* skeleton shimmer stops */
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --display: "Instrument Serif", "New York", Georgia, serif;
+  --sans: "IBM Plex Sans", system-ui, sans-serif;
+  --radius: 0px;  --gap: 16px;  --pad: 16px;
+  --topbar-h: 56px;  --rail-w: 240px;  --rail-w-collapsed: 56px;
+  --shadow-overlay: 0 8px 24px rgba(0,0,0,.5);
+  --fs-xs: 11px; --fs-sm: 12px; --fs-base: 14px; --fs-lg: 18px; --fs-xl: 22px; --fs-2xl: 28px;
+  --bp-sm: 640px; --bp-md: 768px; --bp-lg: 1024px; --bp-xl: 1280px;  /* documentation only — media queries can't read vars */
+}
+/* legacy aliases so app.css keeps working until E/F delete it */
+:root { --bg-elev: var(--surface); --bg-elev-2: var(--surface-2); --line: var(--border);
+        --line-bold: var(--border-strong); --ink: var(--text); --ink-mute: var(--muted);
+        --ink-dim: var(--dim); --ok: var(--success); --err: var(--danger); }
