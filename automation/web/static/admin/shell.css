@@ -27,11 +27,19 @@ html[data-rail="closed"] .rail-tab-label { display: none; }
 .topbar-right .mono { font-variant-numeric: tabular-nums; }
 
 /* ── main ─────────────────────────────────────────────────────── */
-.main { padding: 32px var(--pad) 80px; }   /* bottom room for the fixed .footstrip */
+.main { width: 100%; max-width: none; margin: 0; padding: 32px var(--pad) 80px; }
+/* app.css `main { max-width: 1440px; margin: 0 auto }` was for a full-width page: inside the grid the auto margins
+   drop the stretch and size the column to its max-content, so a wide pane pushed the page past the viewport.
+   Bottom padding = room for the fixed .footstrip. */
 
 /* ── < 768: rail becomes the drawer _base.html owns; the topbar button opens it ── */
 @media (max-width: 767px) {
   .shell-nav-btn { display: inline-flex; }
+}
+@media (max-width: 639px) {
+  .shell-nav-label { display: none; }   /* glyph only — keeps the clock inside a 390 px topbar */
+}
+@media (max-width: 767px) {
   html[data-rail="closed"] .rail-body:has(.rail-nav) { margin: 0 calc(-1 * var(--pad)); }
   html[data-rail="closed"] .rail-tab { justify-content: flex-start; padding: 9px var(--pad); }
   html[data-rail="closed"] .rail-tab-label { display: inline; }
