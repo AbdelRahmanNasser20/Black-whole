@@ -37,6 +37,8 @@
 {% block content %}
 <!-- ───────────── Launcher ───────────── -->
 <section class="panel" data-pane="launcher">
+  {#- tab-owned stylesheet (plan §10 E2): linked inside the pane so each tab branch touches only its own block -#}
+  <link rel="stylesheet" href="/static/admin/launcher.css?v={{ asset_v }}">
 
   <div class="hero">
     <div class="hero-eyebrow">PIPELINE / RUN</div>
@@ -86,9 +88,8 @@
       <label class="opt"><input type="checkbox" name="skip_ebay"> skip ebay</label>
     </div>
     <div class="launch-actions">
-      <button type="submit" class="btn btn-primary" id="run-btn">
-        <span class="btn-glyph">▶</span> <span id="run-btn-label">List everywhere</span>
-      </button>
+      {#- text-only: UI.pending swaps textContent while a start is in flight; the ▶ glyph is .btn-run::before -#}
+      <button type="submit" class="btn btn-primary btn-run" id="run-btn">List everywhere</button>
       <button type="button" class="btn btn-ghost" id="cancel-btn" disabled>
         Cancel
       </button>
@@ -102,7 +103,9 @@
     <button type="button" class="btn btn-small btn-ghost" id="queue-clear">clear</button>
   </div>
 
-  <div class="phase-grid" id="phase-grid">
+  {#- ships in the loading state with a skeleton line per phase; the first /api/runs/state snapshot flips it to
+      ready (launcher.js applyState). data-phases lets the JS rebuild the cards after an error state. -#}
+  <div class="phase-grid" id="phase-grid" data-state="loading" data-phases="{{ phases|join(',') }}">
     {% for ph in phases %}
     <article class="phase" data-phase="{{ ph }}">
       <header class="phase-head">
@@ -110,7 +113,7 @@
         <span class="phase-name">{{ ph }}</span>
         <span class="phase-status" data-state="pending">pending</span>
       </header>
-      <div class="phase-body" data-body></div>
+      <div class="phase-body" data-body><div class="sk sk-line" aria-hidden="true" style="--w:60%"></div></div>
     </article>
     {% endfor %}
   </div>

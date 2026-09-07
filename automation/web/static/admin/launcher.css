@@ -1,0 +1,213 @@
+/* static/admin/launcher.css — Launcher tab (plan §10 E2). Moved out of app.css (launcher form, phase grid,
+   price prompt, console, queue strip, toggle-state, opts-copy). Colours are tokens only (tokens.css); radius 0.
+   Shared rules (.opts/.opt, .btn*, .hero*, .lex) stay in app.css — other tabs use them. */
+
+/* ── launcher form ── */
+.launcher {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  padding: 24px;
+  display: grid; gap: 18px;
+  margin-bottom: 24px;
+}
+
+.url-field {
+  display: grid; grid-template-columns: auto 1fr; align-items: center;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.url-label {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--accent);
+  padding: 0 14px; border-right: 1px solid var(--border);
+  letter-spacing: 0.18em;
+}
+.url-field input {
+  background: transparent; color: var(--text); border: 0;
+  padding: 14px 16px;
+  font-family: var(--mono); font-size: var(--fs-base);
+  width: 100%; outline: none;
+}
+.url-field input::placeholder { color: var(--dim); }
+.url-field:focus-within { border-color: var(--accent); }
+
+/* optional copy fields for the all-channels ▶ (lot_channels add) */
+.opts-copy { display: grid; gap: 6px; }
+.opts-copy input[type=text] {
+  width: 100%; font: inherit; font-size: var(--fs-sm);
+  background: transparent; color: inherit;
+  border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 6px 8px;
+}
+.opts-copy input[type=text]:focus { outline: none; border-color: var(--accent); }
+
+.launch-actions { display: flex; gap: 10px; }
+/* ▶ lives in CSS so UI.pending can swap the button's textContent without losing markup;
+   .btn.is-pending::before (skeleton.css, higher specificity) replaces it with the spinner glyph. */
+.btn-run::before { content: "▶"; font-size: 9px; margin-right: 2px; }
+
+/* ── phase grid ── */
+.phase-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  border: 1px solid var(--border);
+  background: var(--surface);
+  margin-bottom: 28px;
+}
+.phase {
+  border-right: 1px solid var(--border);
+  padding: 16px 18px 18px;
+  min-height: 130px;
+  position: relative;
+  transition: background .2s;
+}
+.phase:last-child { border-right: 0; }
+.phase[data-state=running] {
+  background: linear-gradient(90deg, transparent, var(--accent-soft));
+}
+.phase[data-state=running]::after {
+  content: ""; position: absolute; left: 0; top: 0; height: 2px;
+  width: 30%; background: var(--warn);
+  animation: phase-pulse 1.6s ease-in-out infinite;
+}
+@keyframes phase-pulse {
+  0%, 100% { transform: translateX(0); width: 30%; }
+  50%      { transform: translateX(230%); width: 20%; }
+}
+@media (prefers-reduced-motion: reduce) { .phase[data-state=running]::after { animation: none; } }
+.phase-head {
+  display: grid; grid-template-columns: auto 1fr auto;
+  align-items: center; gap: 8px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.phase-num {
+  font-family: var(--mono); font-size: 10px; color: var(--dim);
+  letter-spacing: 0.1em;
+}
+.phase-name {
+  font-family: var(--mono); font-size: 13px; color: var(--text);
+  text-transform: uppercase; letter-spacing: 0.05em;
+}
+.phase-status {
+  font-family: var(--mono); font-size: 10px; padding: 2px 6px;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  border: 1px solid var(--dim); color: var(--dim);
+}
+.phase-status[data-state=running] { color: var(--warn); border-color: var(--warn); }
+.phase-status[data-state=done]    { color: var(--success); border-color: var(--success); }
+.phase-status[data-state=error]   { color: var(--danger);  border-color: var(--danger); }
+.phase-status[data-state=skipped] { color: var(--dim); border-style: dashed; }
+
+.phase-body {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
+  line-height: 1.55;
+}
+.phase-body .kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; }
+.phase-body .kv dt { color: var(--dim); }
+.phase-body .kv dd { margin: 0; color: var(--text); word-break: break-all; }
+.phase-body a {
+  color: var(--info); text-decoration: underline;
+  text-decoration-color: var(--border-strong);
+  text-underline-offset: 3px;
+}
+/* error state (UI.load) replaces the cards; keep the grid from collapsing to a 6-col strip */
+.phase-grid[data-state=error] { grid-template-columns: 1fr; }
+
+/* ── price prompt ── */
+.price-prompt {
+  border: 1px solid var(--accent); background: var(--surface);
+  padding: 14px 18px; margin-bottom: 24px;
+  display: grid; gap: 8px;
+}
+.pp-label {
+  font-family: var(--mono); font-size: 10px; color: var(--accent);
+  letter-spacing: 0.18em;
+}
+.pp-row {
+  display: flex; align-items: center; gap: 14px;
+  font-family: var(--mono); font-size: 13px;
+}
+.pp-suggested { color: var(--accent); font-size: var(--fs-lg); }
+.pp-row input {
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font: inherit; padding: 6px 10px; width: 80px;
+}
+
+/* ── console ── */
+.console-block {
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.console-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.console-title {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--accent);
+  letter-spacing: 0.16em; text-transform: uppercase;
+}
+.console-toggle {
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
+  display: flex; gap: 14px;
+}
+.console-toggle input { accent-color: var(--accent); }
+/* ON/OFF indicator next to the console checkboxes */
+.toggle-state {
+  display: inline-block; margin-left: 4px; padding: 1px 6px;
+  font-family: var(--mono); font-size: 9px; font-weight: 700;
+  letter-spacing: 0.14em; border: 1px solid currentColor;
+}
+.toggle-state[data-on="1"] { color: var(--accent); }
+.toggle-state[data-on="0"] { color: var(--dim); }
+.console {
+  margin: 0; padding: 14px 18px;
+  font-family: var(--mono); font-size: var(--fs-sm);
+  color: var(--text); line-height: 1.55;
+  height: 360px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word;
+}
+.console::-webkit-scrollbar { width: 8px; }
+.console::-webkit-scrollbar-thumb { background: var(--border-strong); }
+.console-line { display: block; }
+.console-line .ts { color: var(--dim); margin-right: 10px; }
+.console-line .tag { color: var(--dim); margin-right: 8px; }
+.console-line.stderr  .body { color: var(--danger); }
+.console-line.system  .body { color: var(--info); }
+.console-line.event   .body { color: var(--accent-2); }
+.console-line.event   .tag  { color: var(--accent); }
+
+/* ── queue strip ── */
+.queue-strip {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; margin-bottom: 14px;
+  border: 1px solid var(--accent); background: var(--accent-soft);
+  font-family: var(--mono); font-size: var(--fs-xs);
+}
+.queue-label {
+  color: var(--accent); letter-spacing: 0.18em; font-weight: 500;
+}
+.queue-count {
+  display: inline-block; min-width: 22px; text-align: center;
+  padding: 2px 6px; background: var(--accent); color: var(--bg);
+  font-weight: 700;
+}
+.queue-urls { display: flex; gap: 6px; flex-wrap: wrap; flex: 1; }
+.queue-chip {
+  padding: 2px 8px; border: 1px solid var(--border-strong);
+  background: var(--surface-2); color: var(--muted);
+  font-size: 10px;
+}
+.queue-chip-more { border-style: dashed; color: var(--dim); }
+
+/* ── responsive ── */
+@media (max-width: 900px) {
+  .phase-grid { grid-template-columns: 1fr 1fr; }
+  .phase { border-bottom: 1px solid var(--border); }
+}
+@media (max-width: 600px) {
+  .phase-grid { grid-template-columns: 1fr; }
+  .launch-actions { flex-wrap: wrap; }
+  .pp-row { flex-wrap: wrap; }
+}

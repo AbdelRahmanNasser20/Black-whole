@@ -1,11 +1,15 @@
-// static/admin/launcher.js — split verbatim from app.js (Workstream F). Bodies unchanged; only import/export/mount added.
-import {$, $$, toast, withButtonLoading, apiFetch, hooks} from './shared.js';
+// static/admin/launcher.js — Launcher tab (plan §10 E2). Fetch sites #1–#4 → UI.pending, the /api/runs/state
+// read on tab activation → UI.load(keepOld) on #phase-grid, SSE #62 → markStale/clearStale. applyState's
+// state-application logic is unchanged; it only flips the phase grid out of its server-shipped loading state.
+import {$, $$, toast, hooks} from './shared.js';
+import {api, pending, load as uiLoad, markStale, clearStale} from '../ui/state.js';
 
 // ───────── launcher ─────────
 
 const consoleEl = $('#console');
 const showEvents = $('#show-events');
 const autoscroll = $('#autoscroll');
+const phaseGrid = $('#phase-grid');
 
 function _bindToggleIndicator(checkbox, indicatorId) {
   const ind = document.getElementById(indicatorId);
@@ -93,6 +97,9 @@ function applyState(s) {
     $('#price-prompt').hidden = true;
   }
   if (s.queue !== undefined) renderQueueStrip(s.queue);
+  // The grid ships as data-state="loading" with a skeleton line per phase (index.html); the first state
+  // snapshot — from the shell's boot fetch or load() below — is what makes it ready, whichever tab is open.
+  if (phaseGrid) { phaseGrid.dataset.state = 'ready'; $$('.sk', phaseGrid).forEach(el => el.remove()); }
 }
 
 function renderQueueStrip(queue) {
@@ -132,15 +139,38 @@ function shortUrl(u) {
 // ▶ is "list everywhere" by default; the legacy scrape/eBay pipeline is a checkbox.
 const _modeBox = document.querySelector('#launch-form [name="mode_pipeline"]');
 
+// ── phase grid: rebuild after UI.load's error state replaced the cards ──
+// Twin of the Jinja loop in index.html (same classes; the skeleton line is what applyState clears).
+const PHASES = (phaseGrid?.dataset.phases || '').split(',').filter(Boolean);
+function phaseCard(name, i) {
+  const num = String(i + 1).padStart(2, '0');
+  return `<article class="phase" data-phase="${name}"><header class="phase-head">`
+    + `<span class="phase-num">${num}</span><span class="phase-name">${name}</span>`
+    + `<span class="phase-status" data-state="pending">pending</span></header>`
+    + `<div class="phase-body" data-body><div class="sk sk-line" aria-hidden="true" style="--w:60%"></div></div></article>`;
+}
+function ensurePhaseCards() {
+  if (phaseGrid && !phaseGrid.querySelector('.phase')) phaseGrid.innerHTML = PHASES.map(phaseCard).join('');
+}
+
 // ── SSE ──
 let es;
+let streamStaleSince = null;   // set on the first `error`, cleared on `open`, so the badge keeps its real age across retries
 function connectStream() {
   if (es) es.close();
   es = new EventSource('/api/runs/stream');
   const dot = $('#conn-dot');
 
-  es.addEventListener('open', () => dot.classList.add('live'));
-  es.addEventListener('error', () => dot.classList.remove('live'));
+  es.addEventListener('open', () => {
+    dot.classList.add('live');
+    streamStaleSince = null;
+    if (phaseGrid) clearStale(phaseGrid);
+  });
+  es.addEventListener('error', () => {
+    dot.classList.remove('live');
+    if (!streamStaleSince) streamStaleSince = Date.now();
+    if (phaseGrid) markStale(phaseGrid, {since: streamStaleSince});
+  });
 
   es.addEventListener('queue', (e) => {
     try {
@@ -187,7 +217,7 @@ export function mount() {
   _bindToggleIndicator(showEvents, 'show-events-state');
   _bindToggleIndicator(autoscroll, 'autoscroll-state');
 
-  // ── form ──
+  // ── form ── (#1 POST /api/runs/start → UI.pending on ▶)
   $('#launch-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -210,18 +240,24 @@ export function mount() {
       channels,
     };
     consoleEl.innerHTML = '';
+    ensurePhaseCards();
     $$('.phase').forEach(p => setPhase(p.dataset.phase, 'pending', {}));
 
-    const res = await fetch('/api/runs/start', {
-      method: 'POST',
-      headers: {'content-type': 'application/json'},
-      body: JSON.stringify(payload),
+    const started = await pending($('#run-btn'), 'Starting…', async () => {
+      try {
+        await api('/api/runs/start', {
+          method: 'POST',
+          headers: {'content-type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        return true;
+      } catch (err) {
+        appendLine('stderr', `[start failed] ${err.message || err}`);
+        return false;
+      }
     });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({detail: res.statusText}));
-      appendLine('stderr', `[start failed] ${err.detail || res.statusText}`);
-      return;
-    }
+    if (!started) return;
+    // pending() restores the button's pre-click disabled state on the way out, so set the running state after it.
     $('#run-btn').disabled = true;
     $('#cancel-btn').disabled = false;
   });
@@ -231,17 +267,18 @@ export function mount() {
       const on = _modeBox.checked;
       document.querySelectorAll('#launch-form .pipeline-only').forEach(el => el.hidden = !on);
       document.querySelectorAll('#launch-form .opts-copy').forEach(el => el.hidden = on);
-      const lbl = $('#run-btn-label');
-      if (lbl) lbl.textContent = on ? 'Run pipeline' : 'List everywhere';
+      const btn = $('#run-btn');
+      if (btn && !btn.classList.contains('is-pending')) btn.textContent = on ? 'Run pipeline' : 'List everywhere';
     };
     _modeBox.addEventListener('change', sync);
     sync();
   }
 
+  // #2 POST /api/runs/cancel
   $('#cancel-btn').addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '…cancelling', async () => {
+    pending(e.currentTarget, 'Cancelling…', async () => {
       try {
-        await apiFetch('/api/runs/cancel', {method: 'POST'});
+        await api('/api/runs/cancel', {method: 'POST'});
         toast('Cancel requested.', 'info');
       } catch (err) {
         toast('Cancel failed: ' + (err.message || err), 'err');
@@ -249,10 +286,11 @@ export function mount() {
     });
   });
 
+  // #3 POST /api/runs/queue/clear
   $('#queue-clear').addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '…clearing', async () => {
+    pending(e.currentTarget, 'Clearing…', async () => {
       try {
-        await apiFetch('/api/runs/queue/clear', {method: 'POST'});
+        await api('/api/runs/queue/clear', {method: 'POST'});
         toast('Run queue cleared.', 'ok');
       } catch (err) {
         toast('Clear failed: ' + (err.message || err), 'err');
@@ -260,6 +298,7 @@ export function mount() {
     });
   });
 
+  // #4 POST /api/runs/stdin
   $('#pp-confirm').addEventListener('click', (e) => {
     const raw = $('#pp-input').value.trim();
     const v = parseInt(raw, 10);
@@ -267,9 +306,9 @@ export function mount() {
       toast('Enter a positive number first.', 'err');
       return;
     }
-    withButtonLoading(e.currentTarget, '…sending', async () => {
+    pending(e.currentTarget, 'Sending…', async () => {
       try {
-        await apiFetch('/api/runs/stdin', {
+        await api('/api/runs/stdin', {
           method: 'POST',
           headers: {'content-type': 'application/json'},
           body: JSON.stringify({line: String(v)}),
@@ -282,4 +321,18 @@ export function mount() {
   });
 }
 
-export function load() {}
+// Tab activation: refetch the run snapshot through UI.load. keepOld keeps the phase cards on screen (dimmed +
+// "refreshing" badge) instead of swapping them for a skeleton; on error the grid shows the retry block and the
+// next success rebuilds the cards before applying state. A lost SSE stream re-applies its stale badge afterwards.
+export async function load() {
+  if (!phaseGrid) return;
+  await uiLoad(phaseGrid, ({signal}) => api('/api/runs/state', {signal}), {
+    keepOld: true,
+    isEmpty: () => false,
+    render: (s) => { ensurePhaseCards(); applyState(s); },
+    errorMessage: (err) => "Couldn't load the run state. " + (err.status
+      ? `The server said ${err.status}${err.message ? ': ' + err.message : ''}.`
+      : (err.name === 'AbortError' ? "The server didn't answer in 15 s." : (err.message || 'Network error.'))),
+  });
+  if (streamStaleSince) markStale(phaseGrid, {since: streamStaleSince});
+}
