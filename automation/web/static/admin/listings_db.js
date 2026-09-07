@@ -1,15 +1,71 @@
-// static/admin/listings_db.js — split verbatim from app.js (Workstream F). Bodies unchanged; only import/export/mount added.
-import {$, $$, toast, withButtonLoading, apiFetch, escapeHtml, escapeAttr, _ageInDays, _fmtAge, queueRuns} from './shared.js';
+// static/admin/listings_db.js — Listings DB tab (plan §10 E-listings-db): states only, no redesign.
+// The one read (/api/listings, #41) goes through UI.load (skeleton → ready | empty | error, keepOld on refresh
+// and on filter changes so the old rows stay dimmed while re-querying); the two mutations (queue a lot, reload)
+// and "Load more" go through UI.pending. `q`, `source`, `offset` live in the URL via shell.js-style params; the
+// other filters (status, qty range, seen-within, sort, page size) stay in the form.
+// auction_extractors/state/listings.db is read-only — this tab only ever GETs.
+import {$, $$, toast, escapeHtml, escapeAttr, _ageInDays, _fmtAge, queueRuns} from './shared.js';
+import {load as uiLoad, pending, api} from '../ui/state.js';
 
-// ─────────────────────────── Listings DB tab ───────────────────────────
+// URL params — same semantics as shell.js getParams()/setParams() (this tab owns `q`, `source`, `offset`; the
+// shell owns `tab`). Not imported from shell.js on purpose: index.html loads shell as `shell.js?v=…`, so a tab
+// that imports `./shell.js` pulls in a SECOND shell instance that boots every tab mid-evaluation (TDZ crash).
+function getParams() {
+  const out = {};
+  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
+  return out;
+}
+function setParams(patch, {replace = true} = {}) {
+  const sp = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === null || v === undefined || v === '') sp.delete(k);
+    else sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+  const cur = location.pathname + location.search + location.hash;
+  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
+  return getParams();
+}
+
+const SOURCES = ['all', 'gd', 'ps', 'bs'];
+const Q_DEBOUNCE_MS = 350;
 
 const _ldb = {
-  source: 'all',
+  source: 'all',   // mirrors ?source=
   status: 'all',
-  offset: 0,
+  offset: 0,       // mirrors ?offset= — the offset of the last page fetched
   total: 0,
   limit: 50,
+  shownFrom: 0,    // 1-based first row on screen (Load more appends, so this stays put)
+  shownTo: 0,
 };
+
+const wrap = () => $('#ldb-wrap');
+
+// ───────── URL ↔ controls ─────────
+
+function readParams() {
+  const p = getParams();
+  _ldb.source = SOURCES.includes(p.source || '') ? p.source : 'all';
+  const off = Number(p.offset);
+  _ldb.offset = Number.isFinite(off) && off > 0 ? Math.floor(off) : 0;
+  const q = $('#ldb-q');
+  if (q && (p.q || '') !== q.value) q.value = p.q || '';
+  syncControls();
+}
+
+function syncControls() {
+  $$('#ldb-source .seg-btn').forEach(b => setActive(b, b.dataset.value === _ldb.source));
+  $$('#ldb-status .seg-btn').forEach(b => setActive(b, b.dataset.value === _ldb.status));
+}
+
+function setActive(btn, on) {
+  btn.classList.toggle('is-active', on);
+  if (on) btn.setAttribute('aria-pressed', 'true'); else btn.removeAttribute('aria-pressed');
+}
+
+// ───────── data ─────────
 
 function _ldbQuery() {
   return new URLSearchParams({
@@ -25,32 +81,62 @@ function _ldbQuery() {
   });
 }
 
-async function loadListingsDb() {
-  const tbody = $('#ldb-tbody');
-  const statusBar = $('#ldb-status-bar');
-  const pager = $('#ldb-pager');
-  _ldb.limit = Number($('#ldb-limit').value) || 50;
-  tbody.innerHTML = '<tr><td colspan="8" class="drafts-empty loading"><span class="spinner"></span> querying listings.db…</td></tr>';
-  statusBar.innerHTML = '<span class="pulse">●</span> loading…';
-  try {
-    const data = await apiFetch('/api/listings?' + _ldbQuery().toString());
-    _ldb.total = data.total;
-    renderListingsDb(data.items);
-    const shownFrom = data.total === 0 ? 0 : _ldb.offset + 1;
-    const shownTo = Math.min(_ldb.offset + data.items.length, data.total);
-    statusBar.textContent = data.total === 0
-      ? 'No rows match these filters.'
-      : `Showing ${shownFrom}–${shownTo} of ${data.total.toLocaleString()} rows`;
-    pager.hidden = data.total <= _ldb.limit;
-    $('#ldb-page-info').textContent = `page ${Math.floor(_ldb.offset / _ldb.limit) + 1} of ${Math.max(1, Math.ceil(data.total / _ldb.limit))}`;
-    $('#ldb-prev').disabled = _ldb.offset === 0;
-    $('#ldb-next').disabled = _ldb.offset + _ldb.limit >= data.total;
-  } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="8" class="drafts-empty">Query failed: ${escapeHtml(err.message || String(err))}</td></tr>`;
-    statusBar.textContent = '';
-    toast('Listings DB query failed: ' + (err.message || err), 'err');
-  }
+function emptyArgs() {
+  const q = $('#ldb-q').value.trim();
+  return {
+    glyph: '⌕',
+    title: q ? `No rows match “${q}”` : 'No rows match these filters',
+    body: 'Widen the quantity range, allow older rows under SEEN WITHIN, or clear the filters.',
+    cta: {label: 'Clear filters', onClick: resetFilters},
+  };
 }
+
+/** Fetch one page. `append` = Load more (rows are added under the existing ones); otherwise the page replaces. */
+async function loadListingsDb({keepOld = false, append = false} = {}) {
+  const el = wrap();
+  if (!el) return undefined;
+  _ldb.limit = Number($('#ldb-limit').value) || 50;
+  const data = await uiLoad(el, ({signal}) => api('/api/listings?' + _ldbQuery().toString(), {signal}), {
+    skeleton: 'row', count: 10, keepOld: keepOld || append,
+    isEmpty: d => !append && !(d.items || []).length,
+    empty: emptyArgs(),
+    render(d) {
+      const html = d.items.map(rowHtml).join('');
+      if (append) { $('#ldb-tbody', el)?.insertAdjacentHTML('beforeend', html); return null; }
+      return tableHtml(html);
+    },
+    errorMessage: (err) => err.status ? `Couldn't query listings.db. The server said ${err.status}.`
+                         : err.name === 'AbortError' ? "Couldn't query listings.db. The server didn't answer in 15 s."
+                                                     : "Couldn't query listings.db. The server didn't answer at all.",
+    onError: () => { $('#ldb-status-bar').textContent = ''; $('#ldb-more').hidden = true; },
+  });
+  if (!data) return undefined;
+  _ldb.total = data.total;
+  const n = data.items.length;
+  if (append) { _ldb.shownTo = Math.min(_ldb.offset + n, data.total); }
+  else { _ldb.shownFrom = data.total === 0 ? 0 : _ldb.offset + 1; _ldb.shownTo = Math.min(_ldb.offset + n, data.total); }
+  renderStatus();
+  renderMore();
+  return data;
+}
+
+function renderStatus() {
+  const bar = $('#ldb-status-bar');
+  if (!bar) return;
+  bar.textContent = _ldb.total === 0
+    ? 'No rows match these filters.'
+    : `Showing ${_ldb.shownFrom.toLocaleString()}–${_ldb.shownTo.toLocaleString()} of ${_ldb.total.toLocaleString()} rows`;
+}
+
+function renderMore() {
+  const btn = $('#ldb-more');
+  if (!btn) return;
+  const remaining = Math.max(0, _ldb.total - _ldb.shownTo);
+  btn.hidden = !(remaining > 0);
+  if (remaining > 0) btn.textContent = `Load more (${remaining.toLocaleString()} remaining)`;
+}
+
+// ───────── render ─────────
 
 function _fmtEndDate(row) {
   // GovDeals rows populate end_date; Public Surplus populates time_left only.
@@ -66,119 +152,156 @@ function _fmtLastSeen(iso) {
   return _fmtAge(ageD);
 }
 
-function renderListingsDb(items) {
-  const tbody = $('#ldb-tbody');
-  if (!items.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="drafts-empty">No rows match these filters.</td></tr>';
-    return;
-  }
-  tbody.innerHTML = '';
-  for (const r of items) {
-    const tr = document.createElement('tr');
-    tr.className = 'ldb-row';
-    const srcClass = ['gd', 'ps', 'bs'].includes(r.source) ? `src-${r.source}` : 'src-other';
-    const qty = r.quantity == null ? '—' : r.quantity.toLocaleString();
-    const price = r.price || '—';
-    const loc = r.location || '—';
-    const title = r.title || '(untitled)';
-    const endStr = _fmtEndDate(r);
-    const isExpired = r.end_date && new Date(r.end_date) < new Date();
-    tr.innerHTML = `
-      <td><span class="src-pill ${srcClass}">${r.source.toUpperCase()}</span></td>
-      <td class="ldb-qty">${qty}</td>
+function tableHtml(rows) {
+  return `<div class="table-wrap"><table class="table" id="ldb-table">
+    <thead><tr>
+      <th class="ldb-col-src">SRC</th>
+      <th class="ldb-col-qty">QTY</th>
+      <th class="ldb-col-title">TITLE</th>
+      <th class="ldb-col-price">PRICE</th>
+      <th class="ldb-col-loc">LOCATION</th>
+      <th class="ldb-col-end">ENDS</th>
+      <th class="ldb-col-seen">LAST SEEN</th>
+      <th class="ldb-col-act"></th>
+    </tr></thead>
+    <tbody id="ldb-tbody">${rows}</tbody>
+  </table></div>`;
+}
+
+function rowHtml(r) {
+  const srcClass = ['gd', 'ps', 'bs'].includes(r.source) ? `src-${r.source}` : 'src-other';
+  const qty = r.quantity == null ? '—' : r.quantity.toLocaleString();
+  const title = r.title || '(untitled)';
+  const endStr = _fmtEndDate(r);
+  const isExpired = r.end_date && new Date(r.end_date) < new Date();
+  return `<tr class="ldb-row" data-title="${escapeAttr(title)}">
+      <td><span class="src-pill ${srcClass}">${escapeHtml(String(r.source || '').toUpperCase())}</span></td>
+      <td class="ldb-qty num">${qty}</td>
       <td class="ldb-title">
         <div class="ldb-title-main">${escapeHtml(title)}</div>
-        <div class="ldb-asset mono tiny">${escapeHtml(r.asset_id)}${r.quantity_source ? ` · qty via <em>${escapeHtml(r.quantity_source)}</em>` : ''}${r.quantity_confidence ? ` <span class="ldb-conf">${escapeHtml(r.quantity_confidence)}</span>` : ''}</div>
+        <div class="ldb-asset mono">${escapeHtml(r.asset_id)}${r.quantity_source ? ` · qty via <em>${escapeHtml(r.quantity_source)}</em>` : ''}${r.quantity_confidence ? ` <span class="ldb-conf">${escapeHtml(r.quantity_confidence)}</span>` : ''}</div>
       </td>
-      <td class="ldb-price">${escapeHtml(price)}</td>
-      <td class="ldb-loc">${escapeHtml(loc)}</td>
+      <td class="ldb-price">${escapeHtml(r.price || '—')}</td>
+      <td class="ldb-loc">${escapeHtml(r.location || '—')}</td>
       <td class="ldb-end ${isExpired ? 'expired' : ''}">${escapeHtml(endStr)}</td>
       <td class="ldb-seen">${escapeHtml(_fmtLastSeen(r.last_seen_at))}</td>
       <td class="ldb-act">
         <a href="${escapeAttr(r.link || '#')}" target="_blank" rel="noopener" class="btn btn-small" title="Open source listing">↗</a>
         ${r.source === 'gd' ? `<button type="button" class="btn btn-small btn-primary ldb-launch" data-url="${escapeAttr(r.link)}" title="Queue this lot for the pipeline">▶</button>` : ''}
       </td>
-    `;
-    const launchBtn = tr.querySelector('.ldb-launch');
-    if (launchBtn) {
-      launchBtn.addEventListener('click', async () => {
-        await withButtonLoading(launchBtn, '⏱', async () => {
-          try {
-            await queueRuns([launchBtn.dataset.url]);
-            launchBtn.textContent = '✓';
-            launchBtn.disabled = true;
-            launchBtn.classList.add('queued');
-            toast(`Queued: ${title}`, 'ok');
-          } catch (err) {
-            toast('Queue failed: ' + (err.message || err), 'err');
-          }
-        });
-      });
-    }
-    tbody.appendChild(tr);
-  }
+    </tr>`;
 }
 
-// Filter wiring — any change resets offset to 0 and re-queries.
-function _ldbReload() { _ldb.offset = 0; loadListingsDb(); }
+// ───────── actions ─────────
 
-// Debounced search
+/** Delegated: rows are re-rendered on every load, so one listener on the wrap handles every ▶ button. */
+async function onRowClick(e) {
+  const btn = e.target.closest('.ldb-launch');
+  if (!btn || !wrap().contains(btn)) return;
+  const title = btn.closest('tr')?.dataset.title || btn.dataset.url;
+  await pending(btn, '⏱', async () => {
+    try {
+      await queueRuns([btn.dataset.url]);
+      toast(`Queued: ${title}`, 'ok');
+      btn.__queued = true;
+    } catch (err) {
+      toast('Queue failed: ' + (err.message || err), 'err');
+    }
+  });
+  if (btn.__queued) { btn.textContent = '✓'; btn.disabled = true; btn.classList.add('queued'); }
+}
+
+// Filter wiring — any change resets offset to 0 and re-queries with the old rows dimmed.
+function _ldbReload() {
+  _ldb.offset = 0;
+  setParams({offset: null});
+  return loadListingsDb({keepOld: true});
+}
+
+function setSource(value) {
+  _ldb.source = SOURCES.includes(value) ? value : 'all';
+  setParams({source: _ldb.source === 'all' ? null : _ldb.source});
+  syncControls();
+  _ldbReload();
+}
+
+function setQuery(value) {
+  const q = (value || '').trim();
+  setParams({q: q || null});
+  _ldbReload();
+}
+
+function resetFilters() {
+  _ldb.source = 'all'; _ldb.status = 'all'; _ldb.offset = 0;
+  $('#ldb-q').value = '';
+  $('#ldb-min-qty').value = '0';
+  $('#ldb-max-qty').value = '99999';
+  $('#ldb-seen').value = '7';
+  $('#ldb-sort').value = 'qty_desc';
+  $('#ldb-limit').value = '50';
+  setParams({q: null, source: null, offset: null});
+  syncControls();
+  loadListingsDb({keepOld: true});
+}
+
+async function loadMore(btn) {
+  if (_ldb.shownTo >= _ldb.total) return;
+  const next = _ldb.offset + _ldb.limit;
+  await pending(btn, 'Fetching…', async () => {
+    const prev = _ldb.offset;
+    _ldb.offset = next;
+    const data = await loadListingsDb({append: true});
+    if (data) setParams({offset: next}); else _ldb.offset = prev;
+  });
+  renderMore();   // pending() restores the button's old label on settle; re-render the countdown after it
+}
+
+// ───────── mount / load ─────────
+
 let _ldbSearchTimer;
-
 let mounted = false;
 export function mount() {
   if (mounted) return;
   mounted = true;
-  $$('#ldb-source .seg-btn').forEach(b => b.addEventListener('click', () => {
-    $$('#ldb-source .seg-btn').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
-    _ldb.source = b.dataset.value;
-    _ldbReload();
-  }));
+
+  // The pane ships its skeleton twin inside data-state="loading". Until this tab is activated (shell.js →
+  // load()), nothing is actually loading — drop the state so a smoke on another tab is not blocked on a
+  // hidden pane. load() re-sets it when the tab opens.
+  const el = wrap();
+  if (el && el.closest('[data-pane]')?.hidden) { delete el.dataset.state; el.removeAttribute('aria-busy'); }
+
+  el?.addEventListener('click', onRowClick);
+
+  $$('#ldb-source .seg-btn').forEach(b => b.addEventListener('click', () => setSource(b.dataset.value)));
 
   $$('#ldb-status .seg-btn').forEach(b => b.addEventListener('click', () => {
-    $$('#ldb-status .seg-btn').forEach(x => x.classList.remove('active'));
-    b.classList.add('active');
     _ldb.status = b.dataset.value;
+    syncControls();
     _ldbReload();
   }));
 
-  $('#ldb-q')?.addEventListener('input', () => {
+  $('#ldb-q')?.addEventListener('input', (e) => {
     clearTimeout(_ldbSearchTimer);
-    _ldbSearchTimer = setTimeout(_ldbReload, 350);
+    const v = e.target.value;
+    _ldbSearchTimer = setTimeout(() => setQuery(v), Q_DEBOUNCE_MS);
   });
+  $('#ldb-q')?.addEventListener('search', (e) => { clearTimeout(_ldbSearchTimer); setQuery(e.target.value); });
 
   ['#ldb-min-qty', '#ldb-max-qty', '#ldb-seen', '#ldb-sort', '#ldb-limit']
     .forEach(sel => $(sel)?.addEventListener('change', _ldbReload));
 
   $('#ldb-refresh')?.addEventListener('click', (e) => {
-    withButtonLoading(e.currentTarget, '↻ loading…', loadListingsDb);
+    pending(e.currentTarget, '↻ reloading…', () => loadListingsDb({keepOld: true}));
   });
 
-  $('#ldb-reset')?.addEventListener('click', () => {
-    $$('#ldb-source .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.value === 'all'));
-    $$('#ldb-status .seg-btn').forEach(b => b.classList.toggle('active', b.dataset.value === 'all'));
-    _ldb.source = 'all'; _ldb.status = 'all'; _ldb.offset = 0;
-    $('#ldb-q').value = '';
-    $('#ldb-min-qty').value = '0';
-    $('#ldb-max-qty').value = '99999';
-    $('#ldb-seen').value = '7';
-    $('#ldb-sort').value = 'qty_desc';
-    $('#ldb-limit').value = '50';
-    loadListingsDb();
-  });
+  $('#ldb-reset')?.addEventListener('click', resetFilters);
 
-  $('#ldb-prev')?.addEventListener('click', () => {
-    _ldb.offset = Math.max(0, _ldb.offset - _ldb.limit);
-    loadListingsDb();
-  });
-
-  $('#ldb-next')?.addEventListener('click', () => {
-    if (_ldb.offset + _ldb.limit < _ldb.total) {
-      _ldb.offset += _ldb.limit;
-      loadListingsDb();
-    }
-  });
+  $('#ldb-more')?.addEventListener('click', (e) => loadMore(e.currentTarget));
 }
 
-export async function load() { return loadListingsDb(); }
+/** Tab activation (and popstate via the shell): resync from the URL, then fetch — dimming old rows if we have any. */
+export async function load() {
+  readParams();
+  const el = wrap();
+  return loadListingsDb({keepOld: !!el && el.dataset.state === 'ready'});
+}
