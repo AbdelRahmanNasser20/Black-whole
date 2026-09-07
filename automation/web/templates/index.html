@@ -1,62 +1,40 @@
-<!doctype html>
-<html lang="en" data-theme="dark">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>listing_automation · console</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/static/app.css?v={{ now }}">
-</head>
-<body>
+{#- automation/web/templates/index.html — the admin console on the shared shell (plan §10 E1).
+    Rail = the 10 tab links (URL state `?tab=`, owned by static/admin/shell.js); the 10 <section data-pane> panels
+    below are the pre-E1 markup verbatim — each E2–E10 tab branch migrates its own panel. -#}
+{% set nav_active = 'admin' %}
+{% set rail_title = 'Tabs' %}
+{% extends "_base.html" %}
+{% block title %}Admin console · BLACK WHOLE{% endblock %}
+{% block head %}
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="/static/app.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/admin/shell.css?v={{ asset_v }}">
+{% endblock %}
 
-<header class="topbar">
-  <div class="brand">
-    <span class="brand-mark">◣◢</span>
-    <span class="brand-name">listing<span class="brand-dot">.</span>automation</span>
-    <span class="brand-tag">local console / v0.1</span>
-  </div>
-  <nav class="tabs" role="tablist">
-    <button class="tab active" data-tab="launcher">
-      <span class="tab-num">01</span><span class="tab-label">Launcher</span>
-    </button>
-    <button class="tab" data-tab="drafts">
-      <span class="tab-num">02</span><span class="tab-label">Drafts</span>
-    </button>
-    <button class="tab" data-tab="auctions">
-      <span class="tab-num">03</span><span class="tab-label">Auctions</span>
-    </button>
-    <button class="tab" data-tab="inventory">
-      <span class="tab-num">04</span><span class="tab-label">Inventory</span>
-    </button>
-    <button class="tab" data-tab="inquiries">
-      <span class="tab-num">05</span><span class="tab-label">Inquiries</span>
-    </button>
-    <button class="tab" data-tab="listings-db">
-      <span class="tab-num">06</span><span class="tab-label">Listings DB</span>
-    </button>
-    <button class="tab" data-tab="test-scrape">
-      <span class="tab-num">07</span><span class="tab-label">Test Scrape</span>
-    </button>
-    <button class="tab" data-tab="subscribers">
-      <span class="tab-num">08</span><span class="tab-label">Subscribers</span>
-    </button>
-    <button class="tab" data-tab="deals">
-      <span class="tab-num">09</span><span class="tab-label">Deals</span>
-    </button>
-    <button class="tab" data-tab="tracking">
-      <span class="tab-num">10</span><span class="tab-label">Tracking</span>
-    </button>
-  </nav>
-  <div class="meta">
-    <span class="status-dot" id="conn-dot"></span>
-    <span class="meta-mono" id="clock">--:--:--</span>
-  </div>
-</header>
+{% block topbar_center %}
+<button class="btn btn-ghost btn-small shell-nav-btn" type="button" data-rail-open aria-label="Open tabs">☰<span class="shell-nav-label"> Tabs</span></button>
+{% endblock %}
+{% block topbar_right %}
+<span class="status-dot" id="conn-dot"></span>
+<span class="mono" id="clock">--:--:--</span>
+{% endblock %}
 
-<main>
+{% block rail %}
+<nav class="rail-nav" aria-label="Admin tabs">
+  <a class="rail-tab is-active" data-tab="launcher" href="?tab=launcher" data-rail-close aria-current="page"><span class="rail-tab-num">01</span><span class="rail-tab-label">Launcher</span></a>
+  <a class="rail-tab" data-tab="drafts" href="?tab=drafts" data-rail-close><span class="rail-tab-num">02</span><span class="rail-tab-label">Drafts</span></a>
+  <a class="rail-tab" data-tab="auctions" href="?tab=auctions" data-rail-close><span class="rail-tab-num">03</span><span class="rail-tab-label">Auctions</span></a>
+  <a class="rail-tab" data-tab="inventory" href="?tab=inventory" data-rail-close><span class="rail-tab-num">04</span><span class="rail-tab-label">Inventory</span></a>
+  <a class="rail-tab" data-tab="inquiries" href="?tab=inquiries" data-rail-close><span class="rail-tab-num">05</span><span class="rail-tab-label">Inquiries</span></a>
+  <a class="rail-tab" data-tab="listings-db" href="?tab=listings-db" data-rail-close><span class="rail-tab-num">06</span><span class="rail-tab-label">Listings DB</span></a>
+  <a class="rail-tab" data-tab="test-scrape" href="?tab=test-scrape" data-rail-close><span class="rail-tab-num">07</span><span class="rail-tab-label">Test Scrape</span></a>
+  <a class="rail-tab" data-tab="subscribers" href="?tab=subscribers" data-rail-close><span class="rail-tab-num">08</span><span class="rail-tab-label">Subscribers</span></a>
+  <a class="rail-tab" data-tab="deals" href="?tab=deals" data-rail-close><span class="rail-tab-num">09</span><span class="rail-tab-label">Deals</span></a>
+  <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close><span class="rail-tab-num">10</span><span class="rail-tab-label">Tracking</span></a>
+</nav>
+{% endblock %}
 
+{% block content %}
 <!-- ───────────── Launcher ───────────── -->
 <section class="panel" data-pane="launcher">
 
@@ -771,20 +749,31 @@
     <div class="drafts-empty">Enter a keyword and hit <strong>▶ run test scrape</strong>.</div>
   </div>
 </section>
+{% endblock %}
 
-</main>
-
-<div class="toast-container" id="toast-container" aria-live="polite" aria-atomic="false"></div>
-
+{% block footer %}
 <footer class="footstrip">
   <span>localhost:8765</span>
   <span>·</span>
-  <span class="meta-mono">~/.listing_automation</span>
+  <span class="mono">~/.listing_automation</span>
   <span>·</span>
-  <span class="meta-mono">~/Desktop/Banquet chiars Pictures</span>
+  <span class="mono">~/Desktop/Banquet chiars Pictures</span>
 </footer>
+{% endblock %}
 
+{% block scripts %}
+<script>/* show the ?tab= pane before shell.js runs so a deep link does not flash the Launcher */
+(function () { try {
+  var t = new URLSearchParams(location.search).get('tab'); if (!t) return;
+  var panes = document.querySelectorAll('[data-pane]'), hit = false;
+  panes.forEach(function (p) { if (p.dataset.pane === t) hit = true; }); if (!hit) return;
+  panes.forEach(function (p) { p.hidden = p.dataset.pane !== t; });
+  document.querySelectorAll('.rail-tab').forEach(function (a) {
+    var on = a.dataset.tab === t; a.classList.toggle('is-active', on);
+    if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
+  });
+} catch (e) {} })();
+</script>
 <script src="/static/admin_map.js?v={{ asset_v }}"></script>
-<script type="module" src="/static/admin/main.js?v={{ asset_v }}"></script>
-</body>
-</html>
+<script type="module" src="/static/admin/shell.js?v={{ asset_v }}"></script>
+{% endblock %}

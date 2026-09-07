@@ -20,8 +20,8 @@ def test_admin_has_no_compare_tab():
     html = TestClient(app).get("/admin").text
     assert 'data-tab="compare"' not in html
     assert 'data-pane="compare"' not in html
-    # 10 tab buttons after removal (regex so `class="tabs"` / `tab-num` spans don't count)
-    assert len(re.findall(r'<button class="tab(?: active)?" data-tab="', html)) == 10
+    # 10 rail tabs after removal (regex so `rail-tab-num` spans don't count) — E1 rail markup
+    assert len(re.findall(r'<a class="rail-tab(?: is-active)?" data-tab="', html)) == 10
 
 
 def test_compare_api_is_gone():

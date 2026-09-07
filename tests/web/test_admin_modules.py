@@ -1,4 +1,4 @@
-"""Workstream F contract: /admin loads ES modules under static/admin/, app.js is gone,
+"""Workstream F/E1 contract: /admin loads ES modules under static/admin/ (shell.js boots), app.js is gone,
 every tab module exports mount()/load(), tabs only import shared.js / ../ui, and every module parses."""
 import re
 import shutil
@@ -26,14 +26,16 @@ def _no_auth(monkeypatch):
 
 def test_admin_shell_loads_modules_not_app_js():
     html = TestClient(app).get("/admin").text
-    assert 'type="module" src="/static/admin/main.js' in html
+    assert 'type="module" src="/static/admin/shell.js' in html
     assert "/static/app.js" not in html
+    assert "/static/admin/main.js" not in html
     assert not Path("automation/web/static/app.js").exists()
+    assert not (ADMIN / "main.js").exists()
 
 
 def test_admin_modules_are_served():
     c = TestClient(app)
-    for name in ["main", "shared"] + TABS:
+    for name in ["shell", "shared"] + TABS:
         assert c.get(f"/static/admin/{name}.js").status_code == 200, name
 
 
@@ -45,11 +47,16 @@ def test_tab_module_exports_mount_and_load(tab):
     assert not re.search(r"from '\./(?!shared)", src), f"{tab}: tabs import only shared.js / ../ui"
 
 
-def test_main_mounts_every_tab_then_restores():
-    src = (ADMIN / "main.js").read_text()
+def test_shell_mounts_every_tab_then_activates_from_url():
+    src = (ADMIN / "shell.js").read_text()
     for tab in TABS:
         assert f"from './{tab}.js'" in src, tab
-    assert src.index("t.mount()") < src.index("restoreLastTab();\n"), "mount all tabs before restoring the saved tab"
+    assert src.index("t.mount()") < src.index("boot();\n"), "mount all tabs before activating the URL tab"
+    # E1 contract: URL-param tab state, one-time migration off localStorage, popstate → activateTab
+    for needle in ("export function getParams(", "export function setParams(", "'admin.lastTab'",
+                   "localStorage.removeItem(", "addEventListener('popstate'"):
+        assert needle in src, needle
+    assert "localStorage.setItem('admin.lastTab'" not in src
 
 
 @pytest.mark.parametrize("f", sorted(ADMIN.glob("*.js")) if ADMIN.exists() else [], ids=lambda f: f.name)

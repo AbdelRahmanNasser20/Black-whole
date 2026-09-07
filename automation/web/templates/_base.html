@@ -35,9 +35,9 @@ try { var r = localStorage.getItem('ui.rail'); if (r === 'closed' || r === 'open
 </header>
 <div class="shell">
   {% if rail|trim %}
-  <aside class="rail" id="rail" aria-label="Filters">
+  <aside class="rail" id="rail" aria-label="{{ rail_title|default('Filters') }}">
     <div class="rail-head">
-      <h2 class="rail-title">Filters</h2>
+      <h2 class="rail-title">{{ rail_title|default('Filters') }}</h2>
       <button class="rail-toggle" type="button" data-rail-toggle aria-label="Collapse filters" title="Collapse filters">‹</button>
     </div>
     <div class="rail-body">{{ rail }}</div>
