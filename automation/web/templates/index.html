@@ -380,6 +380,12 @@
 
 <!-- ───────────── Subscribers ───────────── -->
 <section class="panel" data-pane="subscribers" hidden>
+  {#- E-subscribers: this pane's CSS lives in static/admin/subscribers.css; the shared .controls/.seg/.card/.badge
+      come from static/ui/components.css. sub_skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% macro sub_skeleton_rows(n) -%}
+  {% for _ in range(n) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}
+  {%- endmacro %}
+  <link rel="stylesheet" href="/static/admin/subscribers.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">INBOX / ALERT SIGNUPS</div>
     <h1 class="hero-title">Buyers waiting on the next truck.</h1>
@@ -390,24 +396,26 @@
     </p>
   </div>
 
-  <div class="inv-controls">
-    <div class="ac-group">
-      <span class="ac-label">STATUS</span>
-      <div class="seg" id="sub-status-filter">
-        <button type="button" class="seg-btn active" data-value="">all</button>
+  <div class="controls sub-toolbar">
+    <div class="sub-group">
+      <span class="sub-label">STATUS</span>
+      <div class="seg" id="sub-status-filter" role="group" aria-label="Filter by status">
+        <button type="button" class="seg-btn is-active" data-value="">all</button>
         <button type="button" class="seg-btn" data-value="new">new</button>
         <button type="button" class="seg-btn" data-value="contacted">contacted</button>
         <button type="button" class="seg-btn" data-value="matched">matched</button>
         <button type="button" class="seg-btn" data-value="unsubscribed">unsubscribed</button>
       </div>
     </div>
-    <div class="ac-actions">
+    <span class="result-count" id="sub-count" aria-live="polite"></span>
+    <div class="sub-actions">
       <button type="button" class="btn btn-small" id="sub-refresh">↻ refresh</button>
+      <a class="btn btn-small btn-ghost" href="/listings#alerts" target="_blank" rel="noopener">open the signup form ↗</a>
     </div>
   </div>
 
-  <div class="inq-list" id="sub-list">
-    <div class="drafts-empty">Loading subscribers…</div>
+  <div class="sub-list" id="sub-list" data-state="loading" aria-busy="true">
+    {{ sub_skeleton_rows(5) }}
   </div>
 </section>
 
