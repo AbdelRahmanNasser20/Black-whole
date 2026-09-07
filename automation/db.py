@@ -50,7 +50,14 @@ def connect(*, autocommit: bool = False) -> psycopg.Connection:
     surface (workspace CLAUDE.md §14) but missing here until 2026-08-28, so
     `connect(autocommit=True)` raised TypeError in this repo only.
     """
-    return psycopg.connect(_dsn(), row_factory=dict_row, autocommit=autocommit)
+    # connect_timeout caps a black-holed TCP handshake to the pooler (seen as a
+    # socket stuck in SYN_SENT for minutes over the Egypt/Tailscale path).
+    # Without it libpq waits for the OS TCP timeout, and whoever called us —
+    # a worker thread, or worse the event loop — is frozen for that long.
+    return psycopg.connect(
+        _dsn(), row_factory=dict_row, autocommit=autocommit,
+        connect_timeout=int(os.getenv("BLACKWHOLE_DB_CONNECT_TIMEOUT", "10")),
+    )
 
 
 def fetch_one(sql: str, params: Sequence[Any] | None = None) -> dict | None:

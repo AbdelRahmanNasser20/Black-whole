@@ -555,7 +555,9 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
     """Archived-lot viewer. Public visitors get text only (no source photos —
     copyright) and never see a seating/operator lot (chair-buyer isolation);
     an operator session sees everything."""
-    row = db.fetch_one("""SELECT * FROM deal_lots
+    row = await asyncio.to_thread(
+        db.fetch_one,
+        """SELECT * FROM deal_lots
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
         (asset_id, account_id, auction_id))
     if not row:
@@ -567,7 +569,7 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
     ):
         raise HTTPException(status_code=404, detail="lot not archived")
     from deals import tracking, tracking_store
-    history = tracking_store.history(asset_id, account_id)
+    history = await asyncio.to_thread(tracking_store.history, asset_id, account_id)
     return templates.TemplateResponse(request, "deal_listing.html", {
         "lot": row, "history": history, "bidders": tracking.bidder_summary(history),
         "show_images": operator})
@@ -2320,7 +2322,7 @@ async def list_favorites():
     """All starred auctions, newest first. Each item carries a derived
     ``seconds_until_end`` and a ``sent_intervals`` list so the UI can render
     a checklist of which alerts have already fired."""
-    favs = favorites.list_all()
+    favs = await asyncio.to_thread(favorites.list_all)
     return {
         "items": [f.to_dict() for f in favs],
         "intervals": [label for label, _ in favorites.ALERT_INTERVALS],
@@ -2404,63 +2406,71 @@ def _format_alert(fav_dict: dict, label: str) -> str:
     ).strip()
 
 
+def _alerts_collect_due() -> list:
+    """Blocking half of the scheduler tick: every favorites.* call opens a
+    fresh Supabase pooler connection (sync psycopg), so this must run in a
+    worker thread, never on the event loop — one stalled handshake would
+    freeze every request (including /api/health) for the whole TCP timeout."""
+    favs = favorites.list_all()
+    if not favs:
+        return []
+
+    # Re-sync end_date from auction_extractors cache so we catch relists.
+    # Cheap: one indexed lookup per favorite. If listings.db is gone we
+    # silently skip the sync — alerts still fire off the snapshot.
+    try:
+        import sqlite3
+        db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
+        if db_path.exists():
+            conn = sqlite3.connect(str(db_path))
+            conn.row_factory = sqlite3.Row
+            try:
+                for f in favs:
+                    row = conn.execute(
+                        "SELECT end_date, time_left, image_url, title, "
+                        "quantity, location FROM listings WHERE asset_id = ?",
+                        (f.asset_id,),
+                    ).fetchone()
+                    if row is None:
+                        continue
+                    # ONLY the absolute end_date — never time_left. A
+                    # relative "2 days left" string re-parses to a new
+                    # instant every tick, which re-armed alerts endlessly
+                    # (the alert flood). No absolute date → keep snapshot.
+                    fresh_end = (row["end_date"] or "").strip()
+                    if not fresh_end:
+                        continue
+                    fresh_dt = favorites._parse_end_date(fresh_end)
+                    if fresh_dt is None:
+                        continue
+                    # Compare PARSED times, not raw strings: formatting
+                    # drift must not trigger a needless re-sync/re-arm.
+                    if f.end_dt and abs((fresh_dt - f.end_dt).total_seconds()) <= 120:
+                        continue
+                    favorites.upsert(
+                        asset_id=f.asset_id,
+                        link=f.link,
+                        title=row["title"] or f.title,
+                        quantity=row["quantity"] or f.quantity,
+                        end_date_raw=fresh_end or f.end_date_raw,
+                        image_url=row["image_url"] or f.image_url,
+                        location=row["location"] or f.location,
+                    )
+            finally:
+                conn.close()
+    except Exception as e:
+        print(f"[favorites] sync from listings.db failed: {e!r}")
+
+    # Re-read after sync.
+    favs = favorites.list_all()
+    return favorites.due_alerts(favs)
+
+
 async def _alerts_tick() -> None:
     """One scheduler pass. Re-syncs end_date from listings.db where possible
     (catches relists with fresh end_date), then ships any due alerts."""
     try:
-        favs = favorites.list_all()
-        if not favs:
-            return
-
-        # Re-sync end_date from auction_extractors cache so we catch relists.
-        # Cheap: one indexed lookup per favorite. If listings.db is gone we
-        # silently skip the sync — alerts still fire off the snapshot.
-        try:
-            import sqlite3
-            db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
-            if db_path.exists():
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                try:
-                    for f in favs:
-                        row = conn.execute(
-                            "SELECT end_date, time_left, image_url, title, "
-                            "quantity, location FROM listings WHERE asset_id = ?",
-                            (f.asset_id,),
-                        ).fetchone()
-                        if row is None:
-                            continue
-                        # ONLY the absolute end_date — never time_left. A
-                        # relative "2 days left" string re-parses to a new
-                        # instant every tick, which re-armed alerts endlessly
-                        # (the alert flood). No absolute date → keep snapshot.
-                        fresh_end = (row["end_date"] or "").strip()
-                        if not fresh_end:
-                            continue
-                        fresh_dt = favorites._parse_end_date(fresh_end)
-                        if fresh_dt is None:
-                            continue
-                        # Compare PARSED times, not raw strings: formatting
-                        # drift must not trigger a needless re-sync/re-arm.
-                        if f.end_dt and abs((fresh_dt - f.end_dt).total_seconds()) <= 120:
-                            continue
-                        favorites.upsert(
-                            asset_id=f.asset_id,
-                            link=f.link,
-                            title=row["title"] or f.title,
-                            quantity=row["quantity"] or f.quantity,
-                            end_date_raw=fresh_end or f.end_date_raw,
-                            image_url=row["image_url"] or f.image_url,
-                            location=row["location"] or f.location,
-                        )
-                finally:
-                    conn.close()
-        except Exception as e:
-            print(f"[favorites] sync from listings.db failed: {e!r}")
-
-        # Re-read after sync.
-        favs = favorites.list_all()
-        due = favorites.due_alerts(favs)
+        due = await asyncio.to_thread(_alerts_collect_due)
         if not due:
             return
         if not telegram_alerts.is_configured():
@@ -2475,7 +2485,7 @@ async def _alerts_tick() -> None:
             text = _format_alert(fav.to_dict(), label)
             ok, err = await telegram_alerts.send_message(text, topic="deals")
             if ok:
-                favorites.mark_sent(fav.asset_id, label)
+                await asyncio.to_thread(favorites.mark_sent, fav.asset_id, label)
                 print(f"[favorites] alert sent: {fav.asset_id} {label}")
             else:
                 print(f"[favorites] alert FAILED: {fav.asset_id} {label}: {err}")
