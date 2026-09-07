@@ -1,0 +1,60 @@
+/* static/deals/detail.css — lot detail page (two-column + sticky bid rail) and the /sources article column.
+   Colours come from tokens.css only; radius is var(--radius) (0). */
+
+/* ── shared: page chrome ─────────────────────────────────────── */
+.crumbs { margin: 0 0 var(--gap); font-size: var(--fs-sm); color: var(--muted); letter-spacing: .02em; }
+.crumb-src { color: var(--text); }
+.data-line { font-size: var(--fs-xs); color: var(--dim); margin: 10px 0 0; }
+.section-link { font-size: var(--fs-xs); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); text-decoration: none; }
+.section-link:hover { color: var(--text); }
+.facts { display: grid; grid-template-columns: max-content 1fr; gap: 8px 20px; margin: 0; font-size: var(--fs-sm); }
+.facts dt { color: var(--muted); font: 500 var(--fs-xs)/1.5 var(--mono); letter-spacing: .08em; text-transform: uppercase; }
+.facts dd { margin: 0; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.desc { white-space: pre-wrap; margin: 0; font: inherit; color: var(--text); max-width: 72ch; overflow-wrap: anywhere; }
+.desc.history { font: 400 var(--fs-sm)/1.6 var(--mono); color: var(--muted); overflow-x: auto; }
+.bidders { list-style: none; margin: 0 0 12px; padding: 0; font-size: var(--fs-sm); color: var(--muted); }
+.bidders li { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.bidders li:last-child { border-bottom: 0; }
+.photo-note { margin: 0 0 var(--gap); font-size: var(--fs-sm); }
+
+/* ── detail grid ─────────────────────────────────────────────── */
+.detail { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--gap); align-items: start; }
+.detail-main { min-width: 0; }
+.detail-rail { min-width: 0; position: sticky; top: calc(var(--topbar-h) + var(--pad)); }
+.detail-rail .rail-card { position: static; }
+.rail-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.rail-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.rail-card .big { font-size: 32px; }
+.rail-actions { display: grid; gap: 8px; margin-top: var(--gap); }
+.rail-actions .btn { justify-content: center; }
+/* Similar lots live in a ~900 px column: 2-up reads better than the 4-up feed grid */
+.detail-main .grid { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px) { .detail-main .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.detail-main .grid[data-state="empty"], .detail-main .grid[data-state="error"] { grid-template-columns: 1fr; }
+@media (max-width: 1023px) {
+  .detail { grid-template-columns: 1fr; }
+  .detail-rail { order: -1; position: static; }     /* bid card first on narrow screens */
+}
+
+/* ── operator gallery ─────────────────────────────────────────── */
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; }
+.gallery a { display: block; border: 1px solid var(--border); background: var(--surface-2); overflow: hidden; }
+.gallery img { width: 100%; height: 160px; object-fit: cover; display: block; }
+.gallery a:first-child { grid-column: 1 / -1; }
+.gallery a:first-child img { height: 380px; object-fit: contain; background: var(--bg); }
+
+/* ── /sources article ─────────────────────────────────────────── */
+.article { max-width: 640px; margin: 0 auto; }
+.article > p { margin: 0 0 14px; max-width: 64ch; }
+.article a { color: var(--text); text-decoration-color: var(--border-strong); text-underline-offset: 3px; }
+.article a:hover { text-decoration-color: var(--accent); }
+.article .section { margin-top: var(--gap); }
+.eyebrow { margin: 0 0 10px; font: 500 var(--fs-xs)/1.4 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.source-live { color: var(--accent); font-size: var(--fs-sm); }
+.source-links { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0 0; font: 500 var(--fs-sm)/1 var(--mono); }
+.source-links a { text-decoration: none; color: var(--muted); }
+.source-links a:hover { color: var(--text); }
+.table tr.total td { border-top: 1px solid var(--border-strong); }
+.table td a { text-decoration: none; }
+.how { margin: 0; padding-left: 18px; }
+.how li { margin: 0 0 6px; }

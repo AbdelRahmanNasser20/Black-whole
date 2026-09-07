@@ -573,9 +573,11 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
         raise HTTPException(status_code=404, detail="lot not archived")
     from deals import tracking, tracking_store
     history = await asyncio.to_thread(tracking_store.history, asset_id, account_id)
+    fees = fee_model_from_env()
+    lot = deals_query.enrich(dict(row), fees)
     return templates.TemplateResponse(request, "deal_listing.html", {
-        "lot": row, "history": history, "bidders": tracking.bidder_summary(history),
-        "show_images": operator})
+        "lot": lot, "history": history, "bidders": tracking.bidder_summary(history),
+        "show_images": operator, "premium_pct": fees.buyer_premium_pct})
 
 
 # ── Deals dashboard API (BLACKWHOLE-12) ─────────────────────────────────────
@@ -869,6 +871,19 @@ async def public_deals_facets():
         return await asyncio.to_thread(public_deals.fetch_facets)
     except Exception as e:
         raise HTTPException(503, f"facets query failed: {e!r}")
+
+
+@app.get("/sources", response_class=HTMLResponse)
+async def sources_page(request: Request):
+    """Public "Where the lots come from" page — server-rendered from the
+    (5-min cached) public facets; no photos, no client fetch."""
+    try:
+        facets = await asyncio.to_thread(public_deals.fetch_facets)
+    except Exception as e:
+        raise HTTPException(503, f"facets query failed: {e!r}")
+    return templates.TemplateResponse(request, "sources.html", {
+        "facets": facets, "premium_pct": fee_model_from_env().buyer_premium_pct,
+        "base_url": PUBLIC_BASE_URL})
 
 
 @app.get("/api/deals/tree")

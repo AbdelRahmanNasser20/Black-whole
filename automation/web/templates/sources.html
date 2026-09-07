@@ -1,0 +1,83 @@
+{#- templates/sources.html — "Where the lots come from". Public, fully server-rendered (no client fetch,
+    no images, no private fields). Context: facets (public_deals.fetch_facets), premium_pct, base_url. -#}
+{% extends "_base.html" %}
+{% from "_ui/macros.html" import section %}
+{% set nav_active = 'sources' %}
+{% set stats = facets.stats or {} %}
+{% set active = stats.active or 0 %}
+{% block title %}Sources · Surplus Radar{% endblock %}
+{% block head %}
+<meta name="robots" content="noindex">
+<link rel="stylesheet" href="/static/deals/detail.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<article class="article">
+  <a class="back-link" href="/deals">← Back</a>
+  <h1 class="page-title">Where the lots come from</h1>
+  <p class="page-sub">One source today. Titles, bids and close times only — the photos stay on the auction site.</p>
+
+  <p>Every lot on <a href="/deals">Deals</a> is a live listing on <a href="https://www.govdeals.com" target="_blank" rel="noopener">GovDeals</a>,
+    the marketplace where cities, counties, school districts, police departments and state agencies sell what they no longer need:
+    fleet vehicles, office computers, shop tools, confiscated goods, whole storerooms at a time.</p>
+  <p>We store the text of each listing — title, location, current bid, bid count, close time — and the outcome once it closes.
+    We do not republish the seller's photos or descriptions in the feed; the lot page links straight to the source so you bid there,
+    under GovDeals' own terms and buyer's premium.</p>
+  <p>You will not find chairs, benches or banquet seating here. Seating is our own trade; we don't publish the lots we bid on.</p>
+
+  {% call section('Coverage') %}
+    <p class="muted">Live lots by state, top {{ [facets.states|length, 15]|min }} of {{ stats.states or facets.states|length }}.</p>
+    <div class="table-wrap">
+      <table class="table">
+        <thead><tr><th>State</th><th class="num">Live lots</th></tr></thead>
+        <tbody>
+          {% for s in facets.states[:15] %}
+          <tr><td><a href="/deals?state={{ s.value }}">{{ s.value }}</a></td><td class="num">{{ "{:,}".format(s.count or 0) }}</td></tr>
+          {% endfor %}
+          <tr class="total"><td><strong>All states</strong></td><td class="num"><strong>{{ "{:,}".format(active) }}</strong></td></tr>
+        </tbody>
+      </table>
+    </div>
+  {% endcall %}
+
+  <section class="section source-card">
+    <div class="section-head">
+      <h2>GovDeals</h2>
+      <span class="mono source-live">{{ "{:,}".format(active) }} live</span>
+    </div>
+    <div class="section-body">
+      <p class="eyebrow">State and local government surplus · buyer's premium {{ (premium_pct * 100)|round(1) }} %</p>
+      <p>Liquidity Services' public-sector marketplace. Sellers are government agencies; most lots are pickup-only from the agency's
+        yard, with a short pickup window after the auction closes. Everything is sold as-is.</p>
+      <p class="source-links">
+        <a href="https://www.govdeals.com" target="_blank" rel="noopener">govdeals.com ↗</a>
+        <a href="/deals">View live lots →</a>
+      </p>
+      <p class="muted data-line">Titles, bids, close times and outcomes sampled every 20 min; counts cached 5 min.</p>
+    </div>
+  </section>
+
+  {% call section('How we count') %}
+    <ul class="how">
+      <li><strong>Live</strong> — not closed and the close time is still in the future.</li>
+      <li><strong>Closed with no bids</strong> — the auction ended with a bid count of zero.</li>
+      <li><strong>States</strong> — distinct pickup states across live lots.</li>
+      <li><strong>Est. all-in</strong> — current bid plus the {{ (premium_pct * 100)|round(1) }} % buyer's premium; tax, pickup and transport are on you.</li>
+    </ul>
+    <p class="muted data-line">
+      {{ "{:,}".format(stats.tracked or 0) }} lots tracked since
+      {{ stats.since.strftime('%b %Y') if stats.since else 'launch' }} ·
+      {{ "{:,}".format(stats.closed or 0) }} closed ·
+      {{ "{:,}".format(stats.no_bid or 0) }} closed with no bids.
+    </p>
+  {% endcall %}
+</article>
+{% endblock %}
+{% block footer %}
+<footer class="footer">
+  <div class="footer-cols">
+    <div><h4>Browse</h4><ul><li><a href="/deals">All live lots</a></li><li><a href="/deals?status=closed">Closed lots</a></li></ul></div>
+    <div><h4>About</h4><ul><li><a href="/sources">Sources</a></li><li><a href="/">BLACK WHOLE</a></li></ul></div>
+  </div>
+  <p class="footer-note">Not affiliated with GovDeals or any government agency. Counts are sampled, not real time.</p>
+</footer>
+{% endblock %}
