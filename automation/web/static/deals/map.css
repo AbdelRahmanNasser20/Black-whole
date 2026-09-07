@@ -1,0 +1,42 @@
+/* static/deals/map.css — /deals?view=map layout (plan §8). Colours from tokens.css only; radius 0 (§1.2).
+   map.js wraps #feed-map + #feed-map-panel in .feed-map-split so the 70/30 grid has one parent
+   regardless of where feed.js placed the two ids. Ids are written as [id="…"] because the no-hex
+   test reads "#feed" as a colour. */
+
+/* map view hides the grid + load-more (feed.css carries the same rule; kept here so the map works alone) */
+body[data-view="map"] [id="feed-grid"], body[data-view="map"] [id="feed-more"] { display: none; }
+
+.feed-map-split {
+  --map-h: max(420px, calc(100vh - var(--topbar-h) - 160px));
+  display: grid; grid-template-columns: 7fr 3fr; gap: var(--gap); align-items: start; margin: 0 0 var(--gap);
+}
+[id="feed-map"] {
+  height: var(--map-h); min-height: 420px; min-width: 0;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+[id="feed-map"].map-loading { position: relative; overflow: hidden; background: var(--sk-a); }
+[id="feed-map"].map-loading::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; transform: translateX(-100%); pointer-events: none;
+  background: linear-gradient(90deg, transparent 0, var(--sk-b) 50%, transparent 100%);
+  animation: sk-sweep 1.5s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) { [id="feed-map"].map-loading::after { animation: none; } }
+
+[id="feed-map-panel"] {
+  height: var(--map-h); min-width: 0; overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--pad); background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.map-panel-head { margin: 0 0 var(--gap); padding: 0 0 12px; border-bottom: 1px solid var(--border); }
+.map-panel-count { font: 500 var(--fs-base)/1.3 var(--sans); color: var(--muted); }
+.map-panel-count strong { font-size: var(--fs-xl); font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+.map-panel-hint { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--muted); }
+.map-panel-note { margin: 6px 0 0; font: 400 var(--fs-xs)/1.4 var(--mono); color: var(--warn); }
+.grid.grid-1 { grid-template-columns: minmax(0, 1fr); }   /* the side list is always one column */
+[id="feed-map-panel"] .ui-empty, [id="feed-map-panel"] .ui-error { padding: 32px 12px; }
+
+/* < 1024: stack — map 50 vh on top, the list below it in the page flow */
+@media (max-width: 1023px) {
+  .feed-map-split { grid-template-columns: minmax(0, 1fr); }
+  [id="feed-map"] { height: 50vh; min-height: 280px; }
+  [id="feed-map-panel"] { height: auto; max-height: none; overflow: visible; }
+}

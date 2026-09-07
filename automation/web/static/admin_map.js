@@ -3,8 +3,8 @@
  * Self-contained module in the deal_card.js style: no build step, injects its
  * own CSS, exposes one global (window.AdminMap). Leaflet + markercluster load
  * lazily from cdnjs the first time a map is mounted, so tabs that never open
- * a map pay nothing. Basemap is CARTO dark_matter (keyless) to match the
- * admin's dark theme.
+ * a map pay nothing. Basemap is Esri Dark Gray Canvas (keyless); clusters, pins and
+ * popups are painted with the page's CSS tokens (amber accent, radius 0).
  *
  * Usage:
  *   const map = await AdminMap.mount(containerEl);
@@ -20,42 +20,53 @@
   const CLUSTER_VER = '1.5.3';
   const CDN = 'https://cdnjs.cloudflare.com/ajax/libs';
 
+  // Colours come from the page's tokens (static/ui/tokens.css on the rebuilt pages; app.css legacy names on
+  // the admin until E lands) — no literal hex here. Radius is 0 everywhere (plan §1.2), map container included.
   const CSS = `
-    .admin-map-box { position: relative; }
-    .admin-map-box .leaflet-container {
-      background: #14161c; border-radius: 10px; outline: none;
+    .admin-map-box { position: relative; border-radius: var(--radius, 0); }
+    .admin-map-box.leaflet-container {   /* same element: mount() adds admin-map-box, L.map() adds leaflet-container */
+      background: var(--surface, var(--bg-elev)); border-radius: var(--radius, 0); outline: none;
       font: inherit;
     }
     .admin-map-box .leaflet-popup-content-wrapper,
     .admin-map-box .leaflet-popup-tip {
-      background: #1d2027; color: #e6e6e6;
-      box-shadow: 0 6px 24px rgba(0,0,0,.5);
+      background: var(--surface-2, var(--bg-elev-2)); color: var(--text, var(--ink));
+      border: 1px solid var(--border-strong, var(--line-bold)); border-radius: var(--radius, 0);
+      box-shadow: var(--shadow-overlay, none);
     }
-    .admin-map-box .leaflet-popup-content { margin: 10px 14px; font-size: 13px; }
-    .admin-map-box .leaflet-popup-content a { color: #7ab7ff; }
+    .admin-map-box .leaflet-popup-tip { border-top: 0; border-left: 0; }
+    .admin-map-box .leaflet-popup-content { margin: 10px 14px; font: 400 var(--fs-sm, 12px)/1.45 var(--sans, system-ui, sans-serif); }
+    .admin-map-box .leaflet-popup-content a { color: var(--info); }
+    .admin-map-box .leaflet-popup-content .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+    .admin-map-box .leaflet-popup-close-button { color: var(--muted, var(--ink-mute)); }
+    .admin-map-box .leaflet-popup-close-button:hover { color: var(--text, var(--ink)); }
+    .admin-map-box .leaflet-bar { border: 1px solid var(--border-strong, var(--line-bold)); border-radius: var(--radius, 0); box-shadow: none; }
     .admin-map-box .leaflet-bar a {
-      background: #1d2027; color: #e6e6e6; border-color: #333;
+      background: var(--surface-2, var(--bg-elev-2)); color: var(--text, var(--ink));
+      border-bottom-color: var(--border, var(--line)); border-radius: var(--radius, 0);
+      font-family: var(--mono);
     }
-    .admin-map-box .leaflet-bar a:hover { background: #2a2e37; }
+    .admin-map-box .leaflet-bar a:hover { background: var(--accent); color: var(--bg); }
     .admin-map-box .leaflet-control-attribution {
-      background: rgba(20,22,28,.7); color: #888;
+      background: var(--bg); color: var(--dim, var(--ink-dim)); font: 400 var(--fs-xs, 11px)/1.4 var(--mono);
     }
-    .admin-map-box .leaflet-control-attribution a { color: #aaa; }
-    .amap-cluster {
-      background: rgba(38,110,255,.85); color: #fff; border-radius: 50%;
+    .admin-map-box .leaflet-control-attribution a { color: var(--muted, var(--ink-mute)); }
+    .leaflet-marker-icon.amap-cluster {   /* beats leaflet.css's display:block on .leaflet-marker-icon */
       display: flex; align-items: center; justify-content: center;
-      font-weight: 600; font-size: 12px;
-      border: 2px solid rgba(255,255,255,.65);
-      box-shadow: 0 2px 8px rgba(0,0,0,.45);
+      background: linear-gradient(var(--accent-soft, color-mix(in srgb, var(--accent) 10%, transparent)),
+                                  var(--accent-soft, color-mix(in srgb, var(--accent) 10%, transparent))), var(--bg);
+      color: var(--text, var(--ink)); border: 1px solid var(--accent); border-radius: var(--radius, 0);
+      font: 500 12px/1 var(--mono); font-variant-numeric: tabular-nums; box-shadow: none;
     }
+    .amap-cluster:hover { background: var(--accent); color: var(--bg); }
     .amap-pin {
-      background: #2f7dff; border: 2px solid #fff; border-radius: 50%;
-      box-shadow: 0 1px 5px rgba(0,0,0,.5);
+      background: var(--accent); border: 1px solid var(--bg); border-radius: var(--radius, 0);
+      box-shadow: 0 0 0 1px var(--accent);
     }
-    .amap-pin.approx { background: #b98a2f; }
+    .amap-pin.approx { background: var(--surface-2, var(--bg-elev-2)); box-shadow: 0 0 0 1px var(--warn); border-color: var(--warn); }
     .amap-popup-img {
       display: block; width: 100%; max-height: 150px; object-fit: cover;
-      border-radius: 6px; margin-bottom: 6px; background: #14161c;
+      border-radius: var(--radius, 0); margin-bottom: 6px; background: var(--surface, var(--bg-elev));
     }
   `;
 
