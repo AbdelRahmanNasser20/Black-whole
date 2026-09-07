@@ -32,7 +32,7 @@ export function card(row, {compact = false} = {}) {
   if (!compact && row.landed_cost != null) chips.push(`<span class="chip chip-mono">landed ${esc(fmt.money(row.landed_cost))}</span>`);
   if (!compact && !closed && !bids) chips.push('<span class="chip chip-mono">no bids yet</span>');
   const ext = row.govdeals_url
-    ? `<a class="card-ext" href="${esc(row.govdeals_url)}" target="_blank" rel="noopener">GovDeals ↗</a>` : '';
+    ? `<a class="card-ext" href="${esc(row.govdeals_url)}" target="_blank" rel="noopener" aria-label="Open on GovDeals"><span class="card-ext-word">GovDeals</span> ↗</a>` : '';
   return `<article class="card${compact ? ' card-compact' : ''}${closed ? ' is-closed' : ''}">
   <div class="card-band"><span class="card-cat">${bandLabel(row)}</span>${ext}${timerHtml(row, nowMs)}</div>
   <div class="card-price-row"><span class="card-price">${esc(fmt.money(price))}</span>${showUnit

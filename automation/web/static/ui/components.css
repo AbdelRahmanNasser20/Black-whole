@@ -48,6 +48,12 @@ button { cursor: pointer; }
   .topbar-search { flex: 0 0 auto; }
   .topbar-search-btn { display: inline-flex; }
 }
+@media (max-width: 639px) {
+  .topbar { gap: 8px; padding: 0 12px; }
+  .brand-name { display: none; }          /* the ◣◢ mark alone at phone width */
+  .topbar-nav a { padding: 8px 6px; }
+  .topbar-right { gap: 6px; }
+}
 
 /* ── shell: rail + main ───────────────────────────────────────── */
 .shell { display: grid; grid-template-columns: var(--rail-w) 1fr; min-height: calc(100vh - var(--topbar-h)); }
@@ -72,8 +78,8 @@ html[data-rail="closed"] .rail-body, html[data-rail="closed"] .rail-title { disp
 @media (max-width: 767px) {
   .shell, html[data-rail="closed"] .shell { grid-template-columns: 1fr; }
   .rail { position: fixed; inset: var(--topbar-h) auto 0 0; z-index: 26; width: min(320px, 90vw); height: auto;
-    transform: translateX(-100%); transition: transform .18s; box-shadow: var(--shadow-overlay); }
-  .rail.is-open { transform: none; }
+    transform: translateX(-100%); visibility: hidden; transition: transform .18s, visibility 0s linear .18s; box-shadow: var(--shadow-overlay); }
+  .rail.is-open { transform: none; visibility: visible; transition: transform .18s; }
   html[data-rail="closed"] .rail-body, html[data-rail="closed"] .rail-title { display: block; }
   .rail-toggle { display: none; }
   .drawer-scrim.is-open { display: block; }
@@ -116,13 +122,16 @@ html[data-rail="closed"] .rail-body, html[data-rail="closed"] .rail-title { disp
 .clear-all:hover { color: var(--text); }
 
 /* ── grid + card (§1.4) ───────────────────────────────────────── */
-.grid { display: grid; gap: var(--gap); grid-template-columns: 1fr; }
-@media (min-width: 640px)  { .grid { grid-template-columns: repeat(2, 1fr); } }
-@media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, 1fr); } }
-@media (min-width: 1280px) { .grid { grid-template-columns: repeat(4, 1fr); } }
+/* minmax(0,1fr) + min-width:0 — otherwise a card's min-content (the clamped title) widens its column past the viewport */
+.grid { display: grid; gap: var(--gap); grid-template-columns: minmax(0, 1fr); }
+.grid > * { min-width: 0; }
+@media (min-width: 640px)  { .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1280px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 .grid[data-state="empty"], .grid[data-state="error"] { grid-template-columns: 1fr; }
-.card { position: relative; display: flex; flex-direction: column; gap: 6px; min-height: 150px; padding: 0 var(--pad) var(--pad);
+.card { position: relative; container-type: inline-size; display: flex; flex-direction: column; gap: 6px; min-height: 150px; padding: 0 var(--pad) var(--pad);
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); transition: border-color .12s; }
+@container (max-width: 279px) { .card-ext-word { display: none; } }   /* 4-col cards: keep the category readable, ext link becomes ↗ */
 .card:hover, .card:focus-within { border-color: var(--border-strong); }
 .card-band { display: flex; align-items: center; gap: 10px; height: 28px; margin: -1px -1px 8px; padding: 0 var(--pad);
   background: var(--surface-2); font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
@@ -192,13 +201,14 @@ html[data-rail="closed"] .rail-body, html[data-rail="closed"] .rail-title { disp
 /* ── drawer ───────────────────────────────────────────────────── */
 .drawer { position: fixed; top: var(--topbar-h); right: 0; bottom: 0; z-index: 27; width: min(480px, 100vw);
   display: flex; flex-direction: column; background: var(--surface); border-left: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-overlay); transform: translateX(100%); transition: transform .18s; }
-.drawer.is-open { transform: none; }
+  box-shadow: var(--shadow-overlay); transform: translateX(100%); visibility: hidden;
+  transition: transform .18s, visibility 0s linear .18s; }   /* visibility: an off-screen drawer must not widen the page or take focus */
+.drawer.is-open { transform: none; visibility: visible; transition: transform .18s; }
 .drawer-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px var(--pad);
   border-bottom: 1px solid var(--border); background: var(--surface-2); }
 .drawer-head h2 { margin: 0; font: 400 var(--fs-lg)/1.2 var(--display); }
 .drawer-body { flex: 1 1 auto; overflow-y: auto; padding: var(--pad); }
-.drawer-static { position: static; transform: none; box-shadow: none; width: auto; height: 320px; border: 1px solid var(--border-strong); }
+.drawer-static { position: static; transform: none; visibility: visible; box-shadow: none; width: auto; height: 320px; border: 1px solid var(--border-strong); }
 @media (prefers-reduced-motion: reduce) { .drawer { transition: none; } }
 
 /* ── toasts ───────────────────────────────────────────────────── */

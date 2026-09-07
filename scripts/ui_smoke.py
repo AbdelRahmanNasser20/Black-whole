@@ -27,7 +27,8 @@ with sync_playwright() as p:
                 failures.append(f"{url}@{w}: aria-busy left behind")
             if errors:
                 failures.append(f"{url}@{w}: console errors: {errors[:3]}")
-            pg.screenshot(path=str(out / (url.strip('/').replace('/', '_').replace('?', '_') or 'root') + f"_{w}.png"), full_page=True)
+            name = (url.strip('/').replace('/', '_').replace('?', '_').replace('&', '_').replace('=', '-') or 'root') + f"_{w}.png"
+            pg.screenshot(path=str(out / name), full_page=True)
             pg.close()
     b.close()
 print("\n".join(failures) or f"smoke ok → {out}"); sys.exit(1 if failures else 0)
