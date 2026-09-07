@@ -1,0 +1,74 @@
+/* static/admin/tracking.css — Tracking tab (Workstream E-tracking). Moved out of app.css "11 Tracking" section.
+   Tokens only (tokens.css), radius 0. The list uses the shared .table-wrap/.table (components.css) instead of the
+   old .inv-table/.trk-table; loading/empty/error come from skeleton.css (.sk-row / .ui-empty / .ui-error). */
+
+/* ── add-lot bar (was .auction-controls/.ac-group, owned by Auctions) ── */
+.trk-bar {
+  display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center;
+  padding: var(--pad); margin-bottom: var(--gap);
+  border: 1px solid var(--border); background: var(--surface);
+}
+.trk-field {
+  display: inline-flex; align-items: center; gap: 10px;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
+}
+.trk-grow { flex: 1 1 320px; }
+.trk-grow input { width: 100%; }
+.trk-key { letter-spacing: 0.14em; color: var(--accent); white-space: nowrap; }
+.trk-field input {
+  height: 32px; padding: 0 10px; min-width: 160px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  font: inherit; font-size: var(--fs-sm);
+}
+.trk-field input:focus { outline: none; border-color: var(--border-strong); }
+.trk-bar-actions { display: flex; gap: 10px; margin-left: auto; }
+
+/* ── list filter row ── */
+.trk-filter { padding: 0 0 4px; }
+.trk-filter .trk-key { font-family: var(--mono); font-size: var(--fs-xs); }
+.trk-seg-count { margin-left: 6px; color: var(--dim); font-variant-numeric: tabular-nums; }
+.seg-btn.is-active .trk-seg-count { color: var(--text); }
+.trk-filter .result-count { text-transform: none; letter-spacing: 0.04em; }
+
+/* ── the table (.table from components.css + tracking modifiers) ── */
+.trk-list { margin-bottom: 40px; }
+.trk-list .table { min-width: 880px; }   /* narrow screens scroll the wrap, never squash the lot column */
+.trk-list .trk-lot { min-width: 220px; }
+.trk-list .tiny { font-size: 10px; letter-spacing: 0.06em; color: var(--muted); }
+.trk-list .trk-lot a { color: var(--text); text-decoration: none; }
+.trk-list .trk-lot a:hover { text-decoration: underline; }
+.trk-list tr.trk-closed td { color: var(--muted); }
+.trk-list tr.trk-closed td .trk-handle { color: var(--text); }
+.trk-handle { font-weight: 600; letter-spacing: 0.04em; }
+.trk-hot { color: var(--danger); }
+.trk-err { color: var(--danger); font-size: 10px; }
+.trk-label-cell {
+  width: 120px; background: transparent; border: 1px solid transparent;
+  color: var(--text); font: inherit; padding: 2px 4px;
+}
+.trk-label-cell:focus { border-color: var(--border); background: var(--surface-2); outline: none; }
+.trk-actions { white-space: nowrap; }
+.trk-actions .btn { vertical-align: middle; }
+.trk-del:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
+
+/* ── history drawer (a full-width row under the lot) ── */
+.trk-drawer td { background: var(--surface-2); padding: 12px 16px; }
+.trk-list tbody tr.trk-drawer:hover td { background: var(--surface-2); }
+.trk-drawer-body[data-state="loading"] { min-height: 120px; }
+.trk-drawer-grid { display: grid; grid-template-columns: minmax(240px, 1fr) 2fr; gap: 16px 28px; }
+.trk-h { margin: 6px 0 4px; }
+.trk-bidder, .trk-rival-lot { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 3px 0; align-items: baseline; }
+.trk-rival { margin-top: 4px; padding-left: 8px; border-left: 2px solid var(--border); }
+.trk-rival-lot a { color: var(--text); text-decoration: none; }
+.trk-obs {
+  display: grid; grid-template-columns: 112px 36px 70px 100px 90px 1fr;
+  gap: 8px; padding: 2px 4px; font-size: var(--fs-sm); align-items: baseline;
+}
+.trk-obs .num { text-align: right; }
+.trk-obs.trk-lead { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+@media (max-width: 900px) { .trk-drawer-grid { grid-template-columns: 1fr; } }
+@media (max-width: 640px) {
+  .trk-bar-actions { margin-left: 0; width: 100%; flex-wrap: wrap; }
+  .trk-field { flex: 1 1 100%; }
+  .trk-field input { min-width: 0; flex: 1; }
+}
