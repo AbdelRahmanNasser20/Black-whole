@@ -422,6 +422,8 @@
 
 <!-- ───────────── Tracking ───────────── -->
 <section class="panel" data-pane="tracking" hidden>
+  {#- E-tracking owns this block: its stylesheet rides inside it so parallel tab branches don't fight over `head` -#}
+  <link rel="stylesheet" href="/static/admin/tracking.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">TRACKING LIST / GOVDEALS BID HISTORY</div>
     <h1 class="hero-title">What it really sold for, and to whom.</h1>
@@ -433,46 +435,35 @@
     </p>
   </div>
 
-  <form class="auction-controls" id="trk-add-form" onsubmit="return false;">
-    <div class="ac-group ac-grow">
-      <span class="ac-label">LOT</span>
+  <form class="trk-bar" id="trk-add-form" onsubmit="return false;">
+    <label class="trk-field trk-grow">
+      <span class="trk-key">LOT</span>
       <input type="text" id="trk-ref" placeholder="https://www.govdeals.com/en/asset/96/27562  or  96/27562">
-    </div>
-    <div class="ac-group">
-      <span class="ac-label">LIST</span>
+    </label>
+    <label class="trk-field">
+      <span class="trk-key">LIST</span>
       <input type="text" id="trk-label" list="trk-label-options" placeholder="banquet chairs" value="banquet chairs">
       <datalist id="trk-label-options"></datalist>
-    </div>
-    <div class="ac-actions">
+    </label>
+    <div class="trk-bar-actions">
       <button type="button" class="btn btn-primary btn-small" id="trk-add">+ track</button>
       <button type="button" class="btn btn-small" id="trk-sync" title="Poll every open lot right now">⟳ poll now</button>
       <button type="button" class="btn btn-small" id="trk-refresh">↻ refresh</button>
     </div>
   </form>
 
-  <div class="inv-controls">
-    <div class="ac-group">
-      <span class="ac-label">LIST</span>
-      <div class="seg" id="trk-label-filter">
-        <button type="button" class="seg-btn active" data-value="">all</button>
-      </div>
+  <div class="controls trk-filter">
+    <span class="trk-key">LIST</span>
+    <div class="seg" id="trk-label-filter">
+      <button type="button" class="seg-btn is-active" data-value="">all</button>
     </div>
-    <div class="ac-group trk-summary" id="trk-summary"></div>
+    <span class="result-count" id="trk-summary"></span>
   </div>
 
-  <div class="inv-table-wrap">
-    <table class="inv-table trk-table">
-      <thead>
-        <tr>
-          <th>LIST</th><th>LOT</th><th>STATUS</th><th class="num">BIDS</th>
-          <th class="num">PRICE</th><th>LEADER / WINNER</th><th>LAST POLL</th><th></th>
-        </tr>
-      </thead>
-      <tbody id="trk-rows">
-        <tr><td colspan="8" class="drafts-empty">Loading tracked lots…</td></tr>
-      </tbody>
-    </table>
-  </div>
+  {#- skeleton twin ships in the HTML — byte-for-byte skeleton('row', 6) from state.js, so the first
+      UI.load in static/admin/tracking.js swaps it for the same markup (no reflow) → table / empty / error.
+      (_ui/macros.html has no skeleton_rows yet; it is A-owned, so the twin is inlined here.) -#}
+  <div class="table-wrap trk-list" id="trk-list" data-state="loading">{% for _ in range(6) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}</div>
 </section>
 
 
