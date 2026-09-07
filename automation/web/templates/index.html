@@ -706,6 +706,9 @@
 
 <!-- ───────────── Test Scrape ───────────── -->
 <section class="panel" data-pane="test-scrape" hidden>
+  {#- E-test-scrape owns this block: its stylesheet rides inside it so parallel tab branches don't fight over `head` -#}
+  {% from "_ui/macros.html" import skeleton_cards %}
+  <link rel="stylesheet" href="/static/admin/test-scrape.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">LAB / CATEGORY PROBE</div>
     <h1 class="hero-title">Test a new category <em>before</em> committing a scraper to it.</h1>
@@ -721,8 +724,8 @@
   <form class="auction-controls" id="ts-form" onsubmit="return false;">
     <div class="ac-group">
       <span class="ac-label" title="Which live site to search">SOURCE</span>
-      <div class="seg" id="ts-source">
-        <button type="button" class="seg-btn active" data-value="both">All</button>
+      <div class="seg" id="ts-source" role="group" aria-label="Which live site to search">
+        <button type="button" class="seg-btn is-active" data-value="both" aria-pressed="true">All</button>
         <button type="button" class="seg-btn" data-value="gd">GovDeals</button>
         <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
         <button type="button" class="seg-btn" data-value="bs">BidSpotter</button>
@@ -741,10 +744,10 @@
     </div>
   </form>
 
-  <div class="auction-status" id="ts-status"></div>
-  <div class="auction-grid" id="ts-grid">
-    <div class="drafts-empty">Enter a keyword and hit <strong>▶ run test scrape</strong>.</div>
-  </div>
+  <div class="auction-status" id="ts-status" aria-live="polite"></div>
+  {#- skeleton twin ships in the HTML (same markup UI.load paints during a probe); static/admin/test_scrape.js swaps it
+      for the idle prompt on boot, then cards / empty / error after the operator runs a probe -#}
+  <div class="auction-grid ts-grid" id="ts-grid" data-state="loading">{{ skeleton_cards(4) }}</div>
 </section>
 {% endblock %}
 
