@@ -284,10 +284,8 @@
 <!-- ───────────── Inventory ───────────── -->
 <section class="panel" data-pane="inventory" hidden>
   {#- E-inventory: this pane's CSS lives in static/admin/inventory.css; the shared .table/.controls/.seg come from
-      static/ui/components.css. skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
-  {% macro skeleton_rows(n) -%}
-  {% for _ in range(n) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}
-  {%- endmacro %}
+      static/ui/components.css. skeleton_rows(n) (_ui/macros.html) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
   <link rel="stylesheet" href="/static/admin/inventory.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">LEDGER / INVENTORY</div>
@@ -398,10 +396,8 @@
 <!-- ───────────── Subscribers ───────────── -->
 <section class="panel" data-pane="subscribers" hidden>
   {#- E-subscribers: this pane's CSS lives in static/admin/subscribers.css; the shared .controls/.seg/.card/.badge
-      come from static/ui/components.css. sub_skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
-  {% macro sub_skeleton_rows(n) -%}
-  {% for _ in range(n) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}
-  {%- endmacro %}
+      come from static/ui/components.css. skeleton_rows(n) (_ui/macros.html) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
   <link rel="stylesheet" href="/static/admin/subscribers.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">INBOX / ALERT SIGNUPS</div>
@@ -432,7 +428,7 @@
   </div>
 
   <div class="sub-list" id="sub-list" data-state="loading" aria-busy="true">
-    {{ sub_skeleton_rows(5) }}
+    {{ skeleton_rows(5) }}
   </div>
 </section>
 
@@ -477,10 +473,10 @@
     <span class="result-count" id="trk-summary"></span>
   </div>
 
-  {#- skeleton twin ships in the HTML — byte-for-byte skeleton('row', 6) from state.js, so the first
-      UI.load in static/admin/tracking.js swaps it for the same markup (no reflow) → table / empty / error.
-      (_ui/macros.html has no skeleton_rows yet; it is A-owned, so the twin is inlined here.) -#}
-  <div class="table-wrap trk-list" id="trk-list" data-state="loading">{% for _ in range(6) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}</div>
+  {#- skeleton twin ships in the HTML — skeleton_rows(6) (_ui/macros.html) is byte-for-byte skeleton('row', 6) from
+      state.js, so the first UI.load in static/admin/tracking.js swaps it for the same markup (no reflow) → table / empty / error. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
+  <div class="table-wrap trk-list" id="trk-list" data-state="loading">{{ skeleton_rows(6) }}</div>
 </section>
 
 
@@ -630,10 +626,8 @@
 <!-- ───────────── Listings DB ───────────── -->
 <section class="panel" data-pane="listings-db" hidden>
   {#- E-listings-db: this pane's CSS lives in static/admin/listings-db.css; the table/pager are the shared .table /
-      .load-more from static/ui/components.css. ldb_skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
-  {% macro ldb_skeleton_rows(n) -%}
-  {% for _ in range(n) %}<div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div>{% endfor %}
-  {%- endmacro %}
+      .load-more from static/ui/components.css. skeleton_rows(n) (_ui/macros.html) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
   <link rel="stylesheet" href="/static/admin/listings-db.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">RAW / LISTINGS DB</div>
@@ -713,7 +707,7 @@
   <div class="auction-status" id="ldb-status-bar" aria-live="polite"></div>
 
   <div class="ldb-wrap" id="ldb-wrap" data-state="loading" aria-busy="true">
-    {{ ldb_skeleton_rows(10) }}
+    {{ skeleton_rows(10) }}
   </div>
 
   <div class="pager load-more" id="ldb-pager">
