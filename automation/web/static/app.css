@@ -352,26 +352,6 @@ main {
   font-family: var(--mono); font-size: 10px; color: var(--ink);
   letter-spacing: 0.04em;
 }
-.inv-contact {
-  color: var(--ink); opacity: 0.85;
-}
-.inv-locs { margin-top: 4px; }
-.inv-loc-input {
-  width: 100%;
-  background: transparent;
-  border: 1px dashed var(--line);
-  color: inherit;
-  padding: 2px 5px;
-}
-.inv-loc-input:focus { border-style: solid; outline: none; }
-.inv-extras {
-  display: flex; flex-wrap: wrap; gap: 4px;
-  margin-top: 4px;
-}
-.inv-extras .btn { font-size: 10px; padding: 2px 6px; }
-.inv-acct { font-family: var(--mono); }
-.inv-cert-link { text-decoration: none; }
-
 /* ── Star button (overlay on auction-img / fav-card-img) ── */
 .auction-img, .fav-card-img { position: relative; }
 .auction-star {
@@ -517,50 +497,14 @@ main {
 }
 
 
-/* ═══════════════ Inventory tab ═══════════════ */
+/* ═══════════════ Inventory tab — LEGACY SHIMS ONLY ═══════════════
+   The Inventory pane itself is styled by static/admin/inventory.css (E-inventory). What is left here is still
+   consumed by the not-yet-migrated inquiries / subscribers / tracking / deals panes (.inv-controls,
+   .inv-table-wrap, .inv-table, .inv-danger). Each of those tabs deletes its dependency as it migrates. */
 .inv-controls {
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 12px var(--pad);
   border-bottom: 1px solid var(--line);
-}
-.inv-add-form {
-  padding: 16px var(--pad);
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-elev);
-}
-.inv-add-grid {
-  display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;
-}
-.inv-add-grid label { display: flex; flex-direction: column; gap: 4px; }
-.inv-add-grid label > span {
-  font-size: 10px; letter-spacing: 0.14em; color: var(--muted);
-}
-.inv-add-grid input, .inv-add-grid textarea {
-  background: var(--bg); color: var(--ink);
-  border: 1px solid var(--line); border-radius: 4px; padding: 7px 9px;
-  font: inherit; font-size: 13px;
-}
-.inv-add-grid .inv-add-wide { grid-column: 1 / -1; }
-.inv-add-actions { display: flex; gap: 10px; margin-top: 14px; }
-@media (max-width: 760px) { .inv-add-grid { grid-template-columns: repeat(2, 1fr); } }
-.inv-strip {
-  display: grid; grid-template-columns: repeat(3, 1fr);
-  border-bottom: 1px solid var(--line);
-  background: var(--bg-elev);
-}
-.strip-cell {
-  padding: 18px 24px;
-  border-right: 1px solid var(--line);
-  display: flex; flex-direction: column; gap: 4px;
-}
-.strip-cell:last-child { border-right: none; }
-.strip-num {
-  font-family: var(--display); font-size: 40px; line-height: 1;
-  color: var(--accent); font-variant-numeric: tabular-nums;
-}
-.strip-lab {
-  font-family: var(--mono); font-size: 10px; letter-spacing: 0.18em;
-  color: var(--ink-mute); text-transform: uppercase;
 }
 
 .inv-table-wrap { padding: 16px var(--pad) 40px var(--pad); overflow-x: auto; }
@@ -582,23 +526,9 @@ main {
   vertical-align: top;
 }
 .inv-table tbody tr:hover { background: var(--bg-elev); }
-.inv-table tbody tr.flash-ok { animation: flashOk .6s ease; }
-.inv-table tbody tr.flash-err { animation: flashErr .6s ease; }
-@keyframes flashOk { from { background: rgba(108, 212, 126, 0.24); } }
-@keyframes flashErr { from { background: rgba(255, 108, 77, 0.24); } }
 
 .inv-table .mono { font-family: var(--mono); }
 .inv-table .tiny { font-size: 10px; letter-spacing: 0.14em; color: var(--ink-mute); }
-.inv-title { font-weight: 500; color: var(--ink); max-width: 280px; }
-.inv-sub { margin-top: 3px; }
-.inv-hero {
-  width: 72px; height: 54px; padding: 0; background: var(--bg);
-}
-.inv-hero img { width: 72px; height: 54px; object-fit: cover; display: block; }
-.inv-hero-fallback {
-  width: 72px; height: 54px; display: flex; align-items: center; justify-content: center;
-  color: var(--ink-dim); font-family: var(--display); font-size: 22px;
-}
 .inv-table input[type="number"],
 .inv-table select {
   background: var(--bg); color: var(--ink);
@@ -611,27 +541,7 @@ main {
 .inv-table input[type="number"]:focus,
 .inv-table select:focus { border-color: var(--accent); }
 .inv-table select { width: 102px; }
-.inv-table input.inv-qty-orig {
-  width: 52px; padding: 2px 4px; font-size: 11px;
-  color: var(--ink-mute); margin-left: 2px;
-}
 
-.plat-ok {
-  display: inline-flex; align-items: center; gap: 8px;
-  font-family: var(--mono); font-size: 11px; color: var(--ok);
-}
-.plat-ok a { color: var(--ok); text-decoration: underline; }
-.plat-ok a:hover { color: var(--accent); }
-.plat-ok .tiny { color: var(--ink-dim); }
-.plat-clear {
-  background: transparent; border: 1px solid var(--line);
-  color: var(--ink-dim); cursor: pointer; padding: 2px 6px;
-  font-family: var(--mono); font-size: 10px;
-}
-.plat-clear:hover { color: var(--err); border-color: var(--err); }
-.plat-set { white-space: nowrap; }
-
-.inv-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .inv-danger { color: var(--err); border-color: var(--err); }
 .inv-danger:hover { background: var(--err); color: var(--bg); }
 
