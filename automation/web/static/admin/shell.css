@@ -1,0 +1,39 @@
+/* static/admin/shell.css — admin shell on _base.html (Workstream E1).
+   The horizontal `.tabs/.tab` strip (app.css 59-130) became a vertical rail nav. Colours come from tokens.css only;
+   radius 0 (§1.2). Tab panels keep their app.css component rules — this file owns the chrome around them. */
+
+/* ── rail nav ─────────────────────────────────────────────────── */
+.rail-nav { display: flex; flex-direction: column; margin: 0 calc(-1 * var(--pad)); }
+.rail-tab {
+  display: flex; align-items: center; gap: 10px;
+  padding: 9px var(--pad); color: var(--muted); text-decoration: none;
+  border-left: 2px solid transparent;
+  transition: color .15s, background .15s;
+}
+.rail-tab:hover { color: var(--text); background: var(--surface-2); }
+.rail-tab.is-active { color: var(--text); background: var(--surface-2); border-left-color: var(--accent); }
+.rail-tab-num { font: 500 10px/1 var(--mono); color: var(--dim); font-variant-numeric: tabular-nums; min-width: 16px; }
+.rail-tab.is-active .rail-tab-num { color: var(--accent); }
+.rail-tab-label { font-size: 13px; letter-spacing: .01em; white-space: nowrap; }
+
+/* collapsed (56 px) rail keeps the nav as a numbered icon rail instead of hiding it like a filter rail */
+html[data-rail="closed"] .rail-body:has(.rail-nav) { display: block; margin: 0 -12px; }
+html[data-rail="closed"] .rail-nav { margin: 0; }
+html[data-rail="closed"] .rail-tab { justify-content: center; padding: 9px 0; }
+html[data-rail="closed"] .rail-tab-label { display: none; }
+
+/* ── topbar ───────────────────────────────────────────────────── */
+.shell-nav-btn { display: none; }
+.topbar-right .mono { font-variant-numeric: tabular-nums; }
+
+/* ── main ─────────────────────────────────────────────────────── */
+.main { padding: 32px var(--pad) 80px; }   /* bottom room for the fixed .footstrip */
+
+/* ── < 768: rail becomes the drawer _base.html owns; the topbar button opens it ── */
+@media (max-width: 767px) {
+  .shell-nav-btn { display: inline-flex; }
+  html[data-rail="closed"] .rail-body:has(.rail-nav) { margin: 0 calc(-1 * var(--pad)); }
+  html[data-rail="closed"] .rail-tab { justify-content: flex-start; padding: 9px var(--pad); }
+  html[data-rail="closed"] .rail-tab-label { display: inline; }
+}
+@media (prefers-reduced-motion: reduce) { .rail-tab { transition: none; } }
