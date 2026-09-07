@@ -2983,7 +2983,8 @@ async def inv_backfill():
 
 @app.get("/api/inquiries")
 async def inq_list(status: str | None = None):
-    return {"items": inventory.list_inquiries(status=status)}
+    # sync psycopg off the event loop (same shape as /api/inventory)
+    return {"items": await asyncio.to_thread(inventory.list_inquiries, status)}
 
 
 @app.patch("/api/inquiries/{inquiry_id}")
@@ -3018,7 +3019,8 @@ async def inq_delete(inquiry_id: int):
 
 @app.get("/api/subscribers")
 async def sub_list(status: str | None = None):
-    return {"items": inventory.list_subscribers(status=status)}
+    # sync psycopg off the event loop (same shape as /api/inventory)
+    return {"items": await asyncio.to_thread(inventory.list_subscribers, status)}
 
 
 @app.patch("/api/subscribers/{subscriber_id}")
