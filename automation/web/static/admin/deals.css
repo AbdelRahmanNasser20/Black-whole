@@ -1,0 +1,149 @@
+/* static/admin/deals.css — admin Deals tab (plan §10 E-deals). Moved out of app.css ("Deals tab" + "Deal browser"
+   + category pills + active-filter chips + popover hint). Shared primitives (.table/.table-wrap/.chip/.filter-chip/
+   .active-filters/.section/.drawer/.badge/.seg-btn.is-active) come from static/ui/components.css; only the
+   deals-specific shapes live here. Colours from tokens.css only; radius is var(--radius) (0). */
+
+/* ── controls row ─────────────────────────────────────────────── */
+.deal-controls input[type=text], .deal-controls select {
+  padding: 4px 6px; background: var(--bg);
+  border: 1px solid var(--border); color: var(--text); font: inherit;
+}
+.deal-controls input[type=text] { width: 200px; }
+.deal-topbar .ac-grow { flex: 1 1 320px; }
+.deal-topbar .ac-grow input[type=text] { width: 100%; }
+.deal-num { width: 64px; padding: 4px 6px; background: var(--bg);
+            border: 1px solid var(--border); color: var(--text); font: inherit; }
+
+/* saved-search strip + category chips reuse .chips/.chip; the strip only adds its own spacing */
+.deal-searches, .deal-cat-chips { margin-bottom: 12px; }
+.chip .filter-chip-x { width: 16px; height: 16px; margin-right: -4px; }
+.deal-searches .chip { cursor: pointer; }
+/* pending on a non-.btn actor (heart, chip ×, tag +): UI.pending adds .is-pending + disabled */
+[data-pane="deals"] .is-pending:not(.btn) { opacity: .5; cursor: progress; }
+#deal-map-wrap { position: relative; }   /* anchors the "map stale" badge */
+
+/* PAST-results strip (profile outcomes) shares .cache-header with Auctions; skeleton lines need a block host */
+#deal-outcomes[data-state="loading"], #deal-outcomes[data-state="error"] { display: block; }
+#deal-outcomes .deal-outcomes-comps { margin-top: 6px; color: var(--muted); }
+
+/* ── layout: sticky filter side + table ───────────────────────── */
+.deal-layout { display: flex; gap: 16px; align-items: flex-start; }
+.deal-main { flex: 1; min-width: 0; }
+.deal-side { flex: 0 0 280px; position: sticky; top: calc(var(--topbar-h) + 12px); max-height: calc(100vh - var(--topbar-h) - 24px);
+  overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.deal-side-box { margin: 0; font-family: var(--mono); font-size: 11px; }
+.deal-side-box .section-head { padding: 8px 10px; }
+.deal-side-box .section-head h2 { font-size: 10px; }
+.deal-tree-legend { color: var(--dim); letter-spacing: 0; font-size: 10px; white-space: nowrap; }
+.deal-tree { max-height: 42vh; overflow-y: auto; }
+.deal-tree[data-state="loading"] { padding: 8px 10px; }
+.deal-side-filters { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+.deal-side-filters select, .deal-side-filters .deal-num { width: 100%; }
+.deal-side-row { display: flex; gap: 6px; }
+.deal-side-row .deal-num { width: 50%; flex: 1 1 auto; }
+.deal-side-row .btn { flex: 0 0 auto; }
+@media (max-width: 900px) {
+  /* column flex: align-items must go back to stretch or .deal-main sizes to the table's max-content and widens the page */
+  .deal-layout { flex-direction: column; align-items: stretch; }
+  .deal-side { position: static; flex: none; width: 100%; max-height: none; }
+  .deal-main { flex: none; width: 100%; }
+}
+
+/* category tree explorer: branch = canonical bucket, twig = native category */
+.dt-node {
+  display: flex; align-items: baseline; gap: 6px; padding: 5px 10px;
+  color: var(--muted); cursor: pointer; user-select: none;
+  border-left: 2px solid transparent;
+}
+.dt-node:hover { color: var(--text); background: var(--surface-2); }
+.dt-node.active { color: var(--accent); border-left-color: var(--accent); background: var(--surface-2); }
+.dt-root { border-bottom: 1px solid var(--border); }
+.dt-counts { margin-left: auto; color: var(--dim); white-space: nowrap; }
+.dt-node.active .dt-counts { color: var(--accent); opacity: .8; }
+.dt-arrow {
+  background: none; border: none; color: var(--dim); cursor: pointer;
+  font: inherit; padding: 0 2px; transition: transform .12s;
+}
+.dt-arrow.open { transform: rotate(90deg); }
+.dt-twigs .dt-node { padding-left: 30px; }
+@media (prefers-reduced-motion: reduce) { .dt-arrow { transition: none; } }
+
+/* ── pager (page N / M · total · prev/next/jump/size) ─────────── */
+.pager { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 0;
+         font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.pager .pager-total { flex: 1; }
+.pager .pager-total strong { color: var(--text); font-weight: 500; }
+.pager select { padding: 3px 6px; background: var(--bg); border: 1px solid var(--border); color: var(--text); font: inherit; }
+
+/* ── table cells ──────────────────────────────────────────────── */
+#deal-table th.sortable { cursor: pointer; user-select: none; }
+#deal-table th.sortable:hover { color: var(--text); }
+#deal-table th.sortable[aria-sort] { color: var(--text); box-shadow: inset 0 -2px 0 var(--accent); }
+#deal-table td { vertical-align: middle; }
+#deal-table thead th { position: sticky; top: 0; z-index: 1; }
+#deal-rows > .ui-empty, #deal-rows > .ui-error { margin: 16px; }
+.deal-thumb { width: 44px; height: 33px; object-fit: cover; border-radius: var(--radius);
+              display: inline-block; background: var(--surface); }
+.deal-thumb-empty { text-align: center; line-height: 33px; font-size: 16px; }
+.deal-ends-red { color: var(--danger); font-weight: 600; }
+.deal-ends-yellow { color: var(--warn); }
+.deal-viewer-link { margin-left: 6px; opacity: .55; text-decoration: none; }
+.deal-viewer-link:hover { opacity: 1; }
+.deal-qty-src { color: var(--dim); margin-left: 2px; }
+
+/* margin % is the loudest element of the row */
+.deal-margin { font-family: var(--mono); font-weight: 700; font-size: 14px; white-space: nowrap; }
+.deal-margin.m-hot  { color: var(--success); }
+.deal-margin.m-good { color: var(--accent); }
+.deal-margin.m-flat { color: var(--muted); }
+.deal-margin.m-neg  { color: var(--danger); }
+.deal-conf { font-family: var(--mono); font-size: 10px; letter-spacing: .04em;
+             padding: 1px 5px; border-radius: var(--radius); border: 1px solid var(--border);
+             color: var(--dim); white-space: nowrap; }
+.deal-conf-high   { border-color: var(--success); color: var(--success); }
+.deal-conf-medium { border-color: var(--warn); color: var(--warn); }
+.deal-comps-link { font-family: var(--mono); text-decoration: underline dotted; }
+
+.deal-heart { background: none; border: none; cursor: pointer; font-size: 15px;
+              color: var(--dim); padding: 2px 4px; line-height: 1; }
+.deal-heart:hover { color: var(--text); }
+.deal-heart.on { color: var(--danger); }
+
+/* per-lot tag chips inside the title cell: .chip.chip-mono + the shared × */
+.deal-tags { display: inline-flex; gap: 4px; margin-left: 8px; vertical-align: middle; flex-wrap: wrap; }
+.deal-tags .chip { height: 20px; padding: 0 4px 0 6px; font-size: 10px; }
+.deal-tag-add { font-family: var(--mono); font-size: 11px; background: none; cursor: pointer; color: var(--dim);
+                border: 1px dashed var(--border-strong); border-radius: var(--radius);
+                padding: 0 5px; line-height: 18px; opacity: 0; transition: opacity .12s; }
+#deal-rows tr:hover .deal-tag-add, .deal-tag-add:focus-visible { opacity: .8; }
+.deal-tag-add:hover { color: var(--accent); border-color: var(--accent); opacity: 1; }
+
+/* ── floating popover (list-save + save-search) ───────────────── */
+.deal-pop {
+  position: fixed; z-index: 60; min-width: 220px; max-width: 280px;
+  background: var(--surface); border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-overlay);
+  font-family: var(--mono); font-size: 11px; padding-bottom: 6px;
+}
+.deal-pop-head { padding: 7px 10px; color: var(--dim); letter-spacing: .08em; border-bottom: 1px solid var(--border); }
+.deal-pop-row { display: flex; align-items: center; gap: 7px; padding: 5px 10px; color: var(--muted); cursor: pointer; }
+.deal-pop-row:hover { color: var(--text); background: var(--surface-2); }
+.deal-pop-count { margin-left: auto; color: var(--dim); }
+.deal-pop-empty { padding: 8px 10px; color: var(--dim); }
+.deal-pop-new { display: flex; gap: 6px; padding: 6px 10px 2px; }
+.deal-pop-new input[type=text] {
+  flex: 1; min-width: 0; padding: 3px 6px; background: var(--bg);
+  border: 1px solid var(--border); color: var(--text); font: inherit;
+}
+.deal-pop-hint { padding: 2px 10px 4px; color: var(--dim); font-size: 10px; }
+
+/* ── comps drawer: shared .drawer, narrower ───────────────────── */
+#deal-drawer { width: min(400px, 90vw); z-index: 55; }
+.deal-drawer-title { font-weight: 600; margin-bottom: 6px; }
+.deal-drawer-meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-bottom: 14px; }
+.deal-drawer-meta b { color: var(--accent); }
+.deal-drawer-comp { display: flex; justify-content: space-between; gap: 10px;
+  padding: 7px 0; border-top: 1px solid var(--border); font-size: 12px; }
+.deal-drawer-comp a { color: var(--muted); }
+.deal-drawer-comp a:hover { color: var(--text); }
+.deal-drawer-price { font-family: var(--mono); color: var(--success); white-space: nowrap; }
