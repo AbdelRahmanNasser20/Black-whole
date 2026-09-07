@@ -229,7 +229,7 @@ $('#feed-more').addEventListener('click', e => pending(e.currentTarget, 'Loading
   st.page = String((Number(st.page) || 1) + 1);
   pushUrl();
   return loadLots({append: true});
-}));
+}).then(renderMore));   // pending() restores the button's old label on settle; re-render the countdown after it
 $('#feed-view-toggle').addEventListener('click', () => {
   st.view = st.view === 'map' ? 'list' : 'map';
   pushUrl(); applyView();
