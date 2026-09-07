@@ -1,7 +1,7 @@
 """E-auctions contract (plan §10 E2–E10, tab = auctions): the pane ships a server-side skeleton twin inside
 data-state="loading" (no "Loading…" text), its CSS lives in static/admin/auctions.css (no hex), every read in
 auctions.js goes through UI.load / UI.api and every mutation through UI.pending, and filter state lives in the
-URL (source, q, profile, map) via shell.js — no localStorage toggle."""
+URL (source, q, profile, map) with shell.js's param semantics — no localStorage toggle."""
 import re
 import subprocess
 from pathlib import Path
@@ -69,7 +69,9 @@ def test_js_uses_ui_primitives_and_url_params():
     assert "withButtonLoading" not in src, "mutations go through UI.pending"
     assert re.search(r"import \{[^}]*\bload\b[^}]*\} from '\.\./ui/state\.js'", src)
     assert re.search(r"import \{[^}]*\bpending\b[^}]*\} from '\.\./ui/state\.js'", src)
-    assert "import {getParams, setParams} from './shell.js'" in src
+    # shell.js is loaded as shell.js?v=<asset_v>; importing './shell.js' would boot a second shell (see auctions.js)
+    assert "from './shell.js'" not in src
+    assert "function getParams()" in src and "function setParams(" in src
     assert "markStale(" in src and "clearStale(" in src
     assert "localStorage.setItem" not in src, "?map= replaces localStorage.admin.aucMapOn"
     assert "'admin.aucMapOn'" in src and "localStorage.removeItem(" in src, "one-time migration of the old key"

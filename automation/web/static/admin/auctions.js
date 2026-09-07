@@ -1,10 +1,30 @@
 // static/admin/auctions.js — Auctions tab (plan §10 E-auctions).
 // Reads go through UI.load (skeleton → ready|empty|error, Retry re-runs the same fetcher), mutations through
 // UI.pending, the 30 s favorites poll keeps old content and marks it stale on failure, the scrape SSE marks the
-// strip stale on `error` and clears on `open`. Filter state lives in the URL (source, q, profile, map) via shell.js.
+// strip stale on `error` and clears on `open`. Filter state lives in the URL (source, q, profile, map) — shell.js param semantics.
 import {$, $$, toast, esc, SOURCE_NAMES, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks} from './shared.js';
 import {api, load as uiLoad, pending, markStale, clearStale, renderEmpty} from '../ui/state.js';
-import {getParams, setParams} from './shell.js';
+
+// URL params — same semantics as shell.js getParams()/setParams(). Not an import of shell.js: index.html loads
+// the shell as `shell.js?v=<asset_v>`, so a query-less import would instantiate a SECOND shell (double boot, and
+// mount() runs inside the import cycle → TDZ error). Swap for a hooks-published shell export when E1 exposes one.
+function getParams() {
+  const out = {};
+  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
+  return out;
+}
+function setParams(patch, {replace = true} = {}) {
+  const sp = new URLSearchParams(location.search);
+  for (const [k, v] of Object.entries(patch || {})) {
+    if (v === null || v === undefined || v === '') sp.delete(k);
+    else sp.set(k, String(v));
+  }
+  const qs = sp.toString();
+  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
+  const cur = location.pathname + location.search + location.hash;
+  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
+  return getParams();
+}
 
 let scrapeES;
 
@@ -287,13 +307,13 @@ function _titleOf(it) { return (it.title || it.raw_title || ''); }
 
 // What the grid shows: the fetched lots, narrowed by the title search and (map on) the viewport.
 // Unmapped lots always stay visible — a missing zip must never hide a good lot.
-function visibleItems() {
+function visibleItems(useMap = true) {
   let items = auc.items;
   if (auc.q) {
     const needle = auc.q.toLowerCase();
     items = items.filter(it => _titleOf(it).toLowerCase().includes(needle));
   }
-  if (auc.mapOn && auc.map) items = items.filter(it => it.lat == null || auc.map.inBounds(it));
+  if (useMap && auc.mapOn && auc.map) items = items.filter(it => it.lat == null || auc.map.inBounds(it));
   return items;
 }
 
@@ -353,7 +373,7 @@ async function loadAuctions() {
   const summary = $('#auction-filter-summary');
   const useCond = $('#auc-condition').checked;
   const maxStaleDays = _maxStaleDays();
-  status.textContent = useCond ? 'condition scoring adds 3–10 s' : '';
+  status.textContent = useCond ? 'querying the cache — condition scoring adds 3–10 s per lot' : 'querying the cache — a new filter combination can take 1–2 min';
   if (summary) summary.hidden = true;
 
   if (!auc.profiles.length) await loadProfiles();
@@ -367,7 +387,8 @@ async function loadAuctions() {
     profile: auc.profile || auc.defaultProfile,
   });
 
-  await fetchCacheStats();   // cheap count; the empty-state copy below needs it
+  // All three in parallel so the grid goes to `loading` the instant a filter changes. The empty-state copy is
+  // provisional (last known cache stats) and re-rendered once cache-stats settles.
   const [body] = await Promise.all([
     uiLoad(grid, async ({signal}) => {
       const body = await api('/api/auctions?' + qs.toString(), {signal});
@@ -375,19 +396,22 @@ async function loadAuctions() {
       return body;
     }, {
       skeleton: 'card', count: 8, keepOld: auc.items.length > 0,
-      timeoutMs: useCond ? 60000 : 20000,
+      timeoutMs: useCond ? 300000 : 180000,   // a new filter combination is a cold server cache key: get_top_lots + geo runs 25–105 s
       isEmpty: (body) => !(body.items || []).length,
       empty: cacheEmptyArgs(maxStaleDays),
-      render: () => { const items = visibleItems(); return items.length ? gridFragment(items) : ''; },
+      // map filter waits for syncAuctionMap(fit) below — the old viewport must not hide the new result set
+      render: () => { const items = visibleItems(false); return items.length ? gridFragment(items) : ''; },
       errorMessage: (err) => `Couldn't load lots from the cache. ${err.status ? `The server said ${err.status}: ${err.message}.` : (err.message || 'No answer.')}`,
     }),
+    fetchCacheStats(),
     loadFavorites(),
   ]);
   if (!body) { status.textContent = ''; return; }   // error box + Retry are in the grid; toast would be noise
   status.textContent = `${auc.items.length} shown · ${body.cached ? `cached ${body.age}s ago` : 'fresh'}`;
   renderFilterSummary(auc.items.length, maxStaleDays);
-  if (auc.items.length && !visibleItems().length) renderEmpty(grid, narrowedEmptyArgs());
-  syncAuctionMap();
+  if (!auc.items.length) { renderEmpty(grid, cacheEmptyArgs(maxStaleDays)); syncAuctionMap(); return; }   // map drops the old pins
+  if (!visibleItems(false).length) renderEmpty(grid, narrowedEmptyArgs());
+  syncAuctionMap(true);   // new result set → refit, then the viewport filter applies
 }
 
 function renderFilterSummary(shownCount, maxStaleDays) {
@@ -408,6 +432,7 @@ function renderFilterSummary(shownCount, maxStaleDays) {
 // Re-paint the grid from state (star flips, search, map viewport) — no fetch.
 function renderAuctions() {
   const grid = $('#auction-grid');
+  if (grid.dataset.state === 'loading') return;   // a late map moveend must not paint over an in-flight load
   if (!auc.items.length) { renderEmpty(grid, cacheEmptyArgs(_maxStaleDays())); return; }
   const items = visibleItems();
   if (!items.length) { renderEmpty(grid, narrowedEmptyArgs()); return; }
@@ -463,7 +488,7 @@ function syncAuctionMap(fit = false) {
     approx: it.geo_precision === 'state',
     popup: auctionMapPopup(it),
   })));
-  if (fit) auc.map.fit();
+  if (fit && auc.items.some(it => it.lat != null)) auc.map.fit();
   applyAuctionViewport();
 }
 

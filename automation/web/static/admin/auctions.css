@@ -60,9 +60,10 @@
 .staleness-banner .sb-message strong { color: var(--warn); }
 .staleness-banner .btn-primary { margin-left: auto; white-space: nowrap; }
 
-/* ── cache header skeleton twin ───────────────────────────────── */
+/* ── cache header as a UI.load host (skeleton twin / error box fill the strip) ── */
 .cache-header[data-state="loading"] { display: block; }
 .cache-header[data-state="loading"] .sk-line { margin: 4px 0; }
+.cache-header > .ui-error, .cache-header > .ui-empty { flex: 1; padding: 12px 16px; gap: 4px; }
 
 /* ── auction card = .card + modifier (photo on top, price block, actions) ── */
 .card.card-auction, .auction-card { padding: 0; gap: 0; min-height: 0; display: flex; flex-direction: column;
@@ -139,6 +140,7 @@
 .grid-auction[data-state="empty"] .ui-empty, .grid-auction[data-state="error"] .ui-error { grid-column: 1 / -1; }
 
 @media (max-width: 639px) {
+  [data-pane="auctions"] .ac-group, #auc-profile { flex-wrap: wrap; max-width: 100%; }   /* PROFILE row (seg + 2 buttons) was 399 px wide at 390 */
   .auction-controls .auc-q { width: 100%; }
   .fav-strip-grid { grid-template-columns: 1fr; }
   .staleness-banner { flex-wrap: wrap; }
