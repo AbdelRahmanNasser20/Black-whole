@@ -140,13 +140,15 @@
 
 <!-- ───────────── Drafts ───────────── -->
 <section class="panel" data-pane="drafts" hidden>
+  {#- E-drafts owns this block: its stylesheet rides inside it so parallel tab branches don't fight over `head` -#}
+  {% from "_ui/macros.html" import skeleton_cards %}
+  <link rel="stylesheet" href="/static/admin/drafts.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">REVIEW / DRAFTS</div>
     <h1 class="hero-title">Listing folders ready for the publish click.</h1>
   </div>
-  <div class="drafts-grid" id="drafts-grid">
-    <div class="drafts-empty">Loading drafts…</div>
-  </div>
+  {#- skeleton twin ships in the HTML; static/admin/drafts.js (UI.load) swaps it for cards / empty / error -#}
+  <div class="drafts-grid" id="drafts-grid" data-state="loading">{{ skeleton_cards(6) }}</div>
 </section>
 
 
