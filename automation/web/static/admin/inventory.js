@@ -445,6 +445,12 @@ let mounted = false;
 export function mount() {
   if (mounted) return;
   mounted = true;
+  // The pane ships its skeleton twin inside data-state="loading". Until this tab is activated (shell.js →
+  // load()), nothing is actually loading — drop the state so a smoke on another tab is not blocked on a
+  // hidden pane. load() re-sets it when the tab opens.
+  const el = wrap();
+  const pane = el?.closest('[data-pane]');
+  if (el && pane?.hidden) { delete el.dataset.state; el.removeAttribute('aria-busy'); }
 
   // one delegated listener each — rows are re-rendered on every load
   wrap()?.addEventListener('change', onFieldChange);
