@@ -1,0 +1,36 @@
+/* static/admin/test-scrape.css — Test Scrape tab (Workstream E-test-scrape). Moved out of app.css "test scrape (08)".
+   States only, no redesign (plan §12): the cards keep the auctions tab's `.auction-card` / `.auction-grid` /
+   `.auction-controls` rules (app.css, owned by E-auctions); this file holds the `.ts-*` accents plus the skeleton /
+   empty / error fit for the grid. Tokens only (tokens.css), radius 0. Loading/empty/error come from skeleton.css. */
+
+/* ── controls ────────────────────────────────────────────────── */
+.ts-keyword-group { flex: 1; min-width: 220px; }
+.ts-input {
+  width: 100%; max-width: 360px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 6px 10px; font-family: var(--mono); font-size: 13px;
+}
+.ts-input:focus { outline: none; border-color: var(--accent); }
+
+/* ── grid states ─────────────────────────────────────────────── */
+/* .auction-grid is auto-fill columns; the idle/empty/error block spans them, the skeleton twin fills a card slot. */
+.ts-grid > .ui-empty, .ts-grid > .ui-error { grid-column: 1 / -1; }
+.ts-grid > .sk-card { min-height: 260px; }   /* twin of an .auction-card: 4:3 image block + title + meta + link */
+.ts-grid > .ui-stale-badge { grid-column: 1 / -1; justify-self: end; position: static; }
+
+/* ── card accents ────────────────────────────────────────────── */
+.ts-source-pill {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .06em;
+  padding: 2px 6px; border-radius: var(--radius); border: 1px solid var(--border);
+  color: var(--muted);
+}
+.ts-source-pill[data-source="gd"] { border-color: var(--accent); color: var(--accent); }
+.ts-source-pill[data-source="bs"] { border-color: var(--accent-2); color: var(--accent-2); }
+
+.ts-miss { outline: 1px dashed var(--danger); outline-offset: -1px; opacity: .85; }
+.ts-miss-pill {
+  font-family: var(--mono); font-size: 10px;
+  padding: 2px 6px; border-radius: var(--radius);
+  color: var(--danger); border: 1px solid var(--danger);
+}
