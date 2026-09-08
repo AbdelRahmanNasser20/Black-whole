@@ -118,7 +118,7 @@ flowchart TB
     subgraph web_pkg["automation/web/ — FastAPI app"]
         app["app.py<br/>routes + run queue"]
         templates_dir["templates/<br/>landing, index, listings, ..."]
-        static["static/<br/>app.css (admin)<br/>public.css (public)<br/>app.js / public.js"]
+        static["static/<br/>app.css (admin)<br/>site/site.css (public)<br/>app.js / site/site.js"]
     end
 
     subgraph sibling["auction_extractors/ — sibling package"]

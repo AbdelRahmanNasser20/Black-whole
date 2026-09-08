@@ -24,7 +24,7 @@
     - `default_extractors()` picks: Gemini primary if key, else OpenAI primary if key, else DomFallback. Secondary = OpenAI when Gemini is primary. Override with `LISTING_LLM_MODE=gemini|openai|claude_code|ollama|dom`.
   - `progress.py` — emits `<<<EVENT>>>{json}` lines parsed by the dashboard.
   - `web/` — FastAPI app (`python -m automation.web` → http://127.0.0.1:8765). Serves **two surfaces off one process**:
-    - **Public site** (brutalist-industrial theme, `public.css` / `public.js`, separate from the admin theme):
+    - **Public site** (brutalist-industrial theme, `static/site/site.css` / `static/site/site.js` on `_public_base.html` → `_base.html` with `<html data-theme="light">` (tokens.css light block), separate from the admin theme):
       - `GET  /` — landing (`landing.html`) with live stat tiles from `inventory.stats()` and a featured strip from `list_public()`
       - `GET  /listings` — card grid with client-side filters (type, city, min qty, search)
       - `GET  /listings/{lot_id}` — gallery + spec sheet + inquiry form

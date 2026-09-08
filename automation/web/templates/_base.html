@@ -1,24 +1,29 @@
 {#- templates/_base.html — the one layout skeleton every rebuilt page mounts on (plan §5).
     Blocks: title · head · topbar_center · topbar_nav · topbar_right · rail · content · footer · scripts.
+    Theme hooks (plan §11): html_attrs (e.g. data-theme="light") · styles (font + stylesheet links) · body_class · body
+    (the whole topbar/shell chrome — _public_base.html swaps in the storefront header/main/footer).
     Body gets class "has-rail" when the rail block renders non-empty. -#}
 {%- set rail %}{% block rail %}{% endblock %}{% endset -%}
 <!doctype html>
-<html lang="en" data-rail="open">
+<html lang="en" data-rail="open"{% block html_attrs %}{% endblock %}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{% block title %}BLACK WHOLE{% endblock %}</title>
 <script>/* apply the persisted rail state before first paint so the shell does not jump */
 try { var r = localStorage.getItem('ui.rail'); if (r === 'closed' || r === 'open') document.documentElement.dataset.rail = r; } catch (e) {}</script>
+{% block styles %}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/ui/tokens.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/ui/components.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
+{% endblock %}
 {% block head %}{% endblock %}
 </head>
-<body class="{% if rail|trim %}has-rail{% endif %}">
+<body class="{% if rail|trim %}has-rail{% endif %}{% block body_class %}{% endblock %}">
+{% block body %}
 <header class="topbar">
   <a class="brand" href="{{ brand_href|default('/deals') }}" aria-label="BLACK WHOLE home">
     <span class="brand-mark">◣◢</span><span class="brand-name">BLACK WHOLE</span>
@@ -49,6 +54,7 @@ try { var r = localStorage.getItem('ui.rail'); if (r === 'closed' || r === 'open
   </main>
 </div>
 {% block footer %}{% endblock %}
+{% endblock %}
 <script type="module" src="/static/ui/state.js?v={{ asset_v }}"></script>
 <script type="module">
 /* rail: ≥768 collapse/expand persisted in localStorage.ui.rail → html[data-rail]; <768 it is a drawer

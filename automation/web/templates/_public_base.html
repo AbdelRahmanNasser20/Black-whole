@@ -1,9 +1,19 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{% block title %}Black Whole Liquidation{% endblock %}</title>
+{#- templates/_public_base.html — the storefront (/ /listings /listings/{id} /sell) on _base.html (plan §11).
+    <html data-theme="light"> flips tokens.css to the storefront's own palette; static/site/site.css is the old
+    public.css with tokens in place of hex. The `styles` and `body` blocks are overridden so the page keeps its
+    own header / main / footer markup and only tokens.css + site.css load (components.css would restyle .brand*).
+    inventory.storage_note never renders here. -#}
+{% extends "_base.html" %}
+{% block html_attrs %} data-theme="light"{% endblock %}
+{% block title %}Black Whole Liquidation{% endblock %}
+{% block styles %}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/ui/tokens.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/site/site.css?v={{ now }}">
+{% endblock %}
+{% block head %}
   <meta name="description" content="{% block meta_description %}Bulk banquet and stacking chairs for sale — wholesale lots from Black Whole Liquidation. Local pickup and nationwide freight.{% endblock %}">
   <link rel="canonical" href="{{ base_url }}{{ request.url.path }}">
   {% if google_site_verification %}<meta name="google-site-verification" content="{{ google_site_verification }}">{% endif %}
@@ -23,10 +33,6 @@
   }
   </script>
   {% block head_extra %}{% endblock %}
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/public.css?v={{ now }}">
   <script>
     // Apollo.io website-visitor tracking (public pages only — admin excluded).
     function initApollo() {
@@ -42,8 +48,8 @@
     }
     initApollo();
   </script>
-</head>
-<body class="{% block body_class %}{% endblock %}">
+{% endblock %}
+{% block body %}
   <div class="grain" aria-hidden="true"></div>
 
   <header class="site-header">
@@ -96,7 +102,4 @@
       <span class="mono">EST. MMXXV</span>
     </div>
   </footer>
-
-  {% block scripts %}{% endblock %}
-</body>
-</html>
+{% endblock %}
