@@ -1,4 +1,6 @@
-/* Black Whole Liquidation — public site */
+/* Black Whole Liquidation — public site (static/site/site.js, was static/public.js).
+   ES module: the one network write (POST /subscribe | /contact) goes through UI.pending + UI.api (plan §2 #68). */
+import {api, pending} from '../ui/state.js';
 
 // ─── capture form submission (contact + alerts signup) ─────────────────
 function bindCaptureForm(form) {
@@ -27,17 +29,13 @@ function bindCaptureForm(form) {
     }
 
     const btn = form.querySelector('button[type="submit"]');
-    const btnText = btn.textContent;
-    btn.disabled = true; btn.textContent = 'FILING…';
-
     try {
-      const r = await fetch(endpoint, {
+      // UI.pending: disables + relabels the button for the life of the request, restores after.
+      const data = await pending(btn, 'FILING…', () => api(endpoint, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
-      });
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok) throw new Error(data.detail || 'Request failed');
+      })) || {};
       result.textContent = form.dataset.success ||
         ('◉ INQUIRY #' + data.id + ' FILED. WE\u2019LL BE IN TOUCH WITHIN 1 BUSINESS DAY.');
       result.classList.add('mf-result--ok');
@@ -47,8 +45,6 @@ function bindCaptureForm(form) {
       result.textContent = '✗ ' + (err.message || 'Something broke. Please try again or email us.');
       result.classList.add('mf-result--err');
       result.hidden = false;
-    } finally {
-      btn.disabled = false; btn.textContent = btnText;
     }
   });
 }
