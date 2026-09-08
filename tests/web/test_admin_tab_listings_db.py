@@ -79,7 +79,9 @@ def test_listings_db_js_uses_primitives_and_url_params():
     assert re.search(r"import \{[^}]*\bpending\b[^}]*\} from '\.\./ui/state\.js'", src)
     # URL state has shell.js semantics but must NOT import shell.js (second module instance → TDZ crash)
     assert "from './shell.js'" not in src
-    assert "getParams(" in src and "setParams(" in src and "history[replace ? 'replaceState' : 'pushState']" in src
+    # E-polish: getParams/setParams come from shared.js (no per-tab mirror)
+    assert re.search(r"import \{[^}]*\bgetParams\b[^}]*\bsetParams\b[^}]*\} from '\./shared\.js'", src)
+    assert "history[replace ? 'replaceState' : 'pushState']" not in src, "no local mirror of setParams"
     for key in ("q", "source", "offset"):
         assert f"setParams({{{key}:" in src, key
     assert "withButtonLoading" not in src

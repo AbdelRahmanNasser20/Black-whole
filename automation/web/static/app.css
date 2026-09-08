@@ -293,10 +293,6 @@ main {
 .inv-danger:hover { background: var(--err); color: var(--bg); }
 
 
-/* Inquiries tab — MOVED to static/admin/inquiries.css (E-inquiries); the legacy .inq-* rules it left behind for
-   subscribers.js went to static/admin/subscribers.css as .card-sub (E-subscribers). Nothing uses .inq-* anymore. */
-
-
 /* ───────────── toast container + feedback primitives ───────────── */
 
 .toast-container {
@@ -346,14 +342,6 @@ main {
 /* staleness banner, filter summary, .ac-unit → static/admin/auctions.css (E-auctions) */
 
 
-
-/* test scrape (08): .ts-* moved to static/admin/test-scrape.css (E-test-scrape). */
-
-/* ── Deals tab: moved to static/admin/deals.css (E-deals) ── */
-
-/* ───────── 11 Tracking ───────── */
-/* .trk-* and the generic .ac-grow moved to static/admin/tracking.css (E-tracking); the deals-topbar
-   variant lives in static/admin/deals.css. */
 
 /* ── Map view (auctions + deals) ── */
 .admin-map-wrap { margin-bottom: 20px; }

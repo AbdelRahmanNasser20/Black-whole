@@ -45,6 +45,9 @@ def test_tab_module_exports_mount_and_load(tab):
     assert re.search(r"export (async )?function mount\(", src), tab
     assert re.search(r"export (async )?function load\(", src), tab
     assert not re.search(r"from '\./(?!shared)", src), f"{tab}: tabs import only shared.js / ../ui"
+    assert not re.search(r"import\('\./", src), f"{tab}: no dynamic imports of sibling modules either (shell.js double-boots)"
+    # E-polish: URL params come from shared.js — no per-tab mirror of getParams/setParams
+    assert not re.search(r"function _?(get|set)Params\(", src), f"{tab}: use shared.js getParams/setParams"
 
 
 def test_shell_mounts_every_tab_then_activates_from_url():
@@ -53,10 +56,16 @@ def test_shell_mounts_every_tab_then_activates_from_url():
         assert f"from './{tab}.js'" in src, tab
     assert src.index("t.mount()") < src.index("boot();\n"), "mount all tabs before activating the URL tab"
     # E1 contract: URL-param tab state, one-time migration off localStorage, popstate → activateTab
-    for needle in ("export function getParams(", "export function setParams(", "'admin.lastTab'",
+    for needle in ("export {getParams, setParams} from './shared.js'", "'admin.lastTab'",
                    "localStorage.removeItem(", "addEventListener('popstate'"):
         assert needle in src, needle
     assert "localStorage.setItem('admin.lastTab'" not in src
+
+
+def test_shared_owns_url_params():
+    src = (ADMIN / "shared.js").read_text()
+    assert "export function getParams(" in src
+    assert "export function setParams(" in src
 
 
 @pytest.mark.parametrize("f", sorted(ADMIN.glob("*.js")) if ADMIN.exists() else [], ids=lambda f: f.name)

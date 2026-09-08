@@ -1,7 +1,7 @@
 // static/admin/shell.js — admin shell boot (Workstream E1, replaces main.js).
 // Owns: the rail tab nav, URL-param tab state (`?tab=`), the clock, mounting every tab, the launcher/scrape boot.
-// Per-tab modules own their own URL keys through getParams()/setParams(); the shell owns only `tab`.
-import {$, $$, apiFetch} from './shared.js';
+// Per-tab modules own their own URL keys through shared.js getParams()/setParams(); the shell owns only `tab`.
+import {$, $$, apiFetch, getParams, setParams} from './shared.js';
 import * as launcher from './launcher.js';
 import * as drafts from './drafts.js';
 import * as auctions from './auctions.js';
@@ -19,29 +19,8 @@ const TABS = {launcher, drafts, auctions, inventory, inquiries, subscribers, 'li
 const DEFAULT_TAB = 'launcher';
 const LEGACY_TAB_KEY = 'admin.lastTab';   // pre-E1 localStorage key — read once, moved into the URL, deleted
 
-// ───────── URL params (the one place admin URL state is read/written) ─────────
-
-/** Current query string as a plain object. */
-export function getParams() {
-  const out = {};
-  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
-  return out;
-}
-
-/** Merge `patch` into the query string. null/undefined/'' deletes a key. replace=true keeps history flat;
- *  replace=false pushes an entry (used for tab switches so Back works). Returns the new params. */
-export function setParams(patch, {replace = true} = {}) {
-  const sp = new URLSearchParams(location.search);
-  for (const [k, v] of Object.entries(patch || {})) {
-    if (v === null || v === undefined || v === '') sp.delete(k);
-    else sp.set(k, String(v));
-  }
-  const qs = sp.toString();
-  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
-  const cur = location.pathname + location.search + location.hash;
-  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
-  return getParams();
-}
+// URL params live in shared.js (getParams/setParams); re-exported here so shell stays the E1 entry point.
+export {getParams, setParams} from './shared.js';
 
 // ───────── tabs ─────────
 

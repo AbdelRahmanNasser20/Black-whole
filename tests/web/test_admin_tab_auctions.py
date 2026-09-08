@@ -71,7 +71,9 @@ def test_js_uses_ui_primitives_and_url_params():
     assert re.search(r"import \{[^}]*\bpending\b[^}]*\} from '\.\./ui/state\.js'", src)
     # shell.js is loaded as shell.js?v=<asset_v>; importing './shell.js' would boot a second shell (see auctions.js)
     assert "from './shell.js'" not in src
-    assert "function getParams()" in src and "function setParams(" in src
+    # E-polish: URL params come from shared.js — no local mirror
+    assert re.search(r"import \{[^}]*\bgetParams\b[^}]*\bsetParams\b[^}]*\} from '\./shared\.js'", src)
+    assert not re.search(r"function _?(get|set)Params\(", src)
     assert "markStale(" in src and "clearStale(" in src
     assert "localStorage.setItem" not in src, "?map= replaces localStorage.admin.aucMapOn"
     assert "'admin.aucMapOn'" in src and "localStorage.removeItem(" in src, "one-time migration of the old key"

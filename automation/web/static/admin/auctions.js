@@ -2,29 +2,8 @@
 // Reads go through UI.load (skeleton → ready|empty|error, Retry re-runs the same fetcher), mutations through
 // UI.pending, the 30 s favorites poll keeps old content and marks it stale on failure, the scrape SSE marks the
 // strip stale on `error` and clears on `open`. Filter state lives in the URL (source, q, profile, map) — shell.js param semantics.
-import {$, $$, toast, esc, SOURCE_NAMES, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks} from './shared.js';
+import {$, $$, toast, esc, SOURCE_NAMES, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks, getParams, setParams} from './shared.js';
 import {api, load as uiLoad, pending, markStale, clearStale, renderEmpty} from '../ui/state.js';
-
-// URL params — same semantics as shell.js getParams()/setParams(). Not an import of shell.js: index.html loads
-// the shell as `shell.js?v=<asset_v>`, so a query-less import would instantiate a SECOND shell (double boot, and
-// mount() runs inside the import cycle → TDZ error). Swap for a hooks-published shell export when E1 exposes one.
-function getParams() {
-  const out = {};
-  for (const [k, v] of new URLSearchParams(location.search)) out[k] = v;
-  return out;
-}
-function setParams(patch, {replace = true} = {}) {
-  const sp = new URLSearchParams(location.search);
-  for (const [k, v] of Object.entries(patch || {})) {
-    if (v === null || v === undefined || v === '') sp.delete(k);
-    else sp.set(k, String(v));
-  }
-  const qs = sp.toString();
-  const url = location.pathname + (qs ? '?' + qs : '') + location.hash;
-  const cur = location.pathname + location.search + location.hash;
-  if (url !== cur) history[replace ? 'replaceState' : 'pushState'](history.state, '', url);
-  return getParams();
-}
 
 let scrapeES;
 
@@ -745,6 +724,13 @@ let mounted = false;
 export function mount() {
   if (mounted) return;
   mounted = true;
+  // The pane ships its skeleton twins inside data-state="loading". Until this tab is activated (shell.js →
+  // load()), nothing is actually loading — drop the state so a smoke on another tab is not blocked on a
+  // hidden pane. UI.load re-sets it per host when the tab opens.
+  const pane = $('[data-pane="auctions"]');
+  if (pane?.hidden) {
+    for (const el of $$('[data-state="loading"]', pane)) { delete el.dataset.state; el.removeAttribute('aria-busy'); }
+  }
 
   // One-time migration: the old localStorage map toggle becomes ?map=0 (only "off" was ever remembered).
   try {

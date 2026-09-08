@@ -1,5 +1,5 @@
 {#- templates/_ui/macros.html — server-side twins of the components.css / state.js primitives.
-    {% from "_ui/macros.html" import chip, section, empty, skeleton_cards %} -#}
+    {% from "_ui/macros.html" import chip, section, empty, skeleton_cards, skeleton_rows %} -#}
 
 {% macro chip(label, href, active=False, count=None) -%}
 <a class="chip{% if active %} is-active{% endif %}" href="{{ href }}"{% if active %} aria-current="true"{% endif %}>{{ label }}{% if count is not none %} <span class="chip-count">{{ "{:,}".format(count) }}</span>{% endif %}</a>
@@ -20,4 +20,10 @@
     HTML and the JS swap does not reflow. -#}
 {% macro skeleton_cards(n) -%}
 {% for _ in range(n) %}<div class="sk-card" aria-hidden="true"><div class="sk sk-band"></div><div class="sk sk-line" style="--w:40%"></div><div class="sk sk-line"></div><div class="sk sk-line" style="--w:70%"></div><div class="sk sk-line" style="--w:50%"></div></div>{% endfor %}
+{%- endmacro %}
+
+{#- Byte-for-byte the same markup as skeleton('row', n) in state.js (five .sk-cell per row by default), for the
+    table-shaped panes (inventory, subscribers, listings-db, tracking). -#}
+{% macro skeleton_rows(n, cols=5) -%}
+{% for _ in range(n) %}<div class="sk-row" aria-hidden="true">{% for _ in range(cols) %}<div class="sk sk-cell"></div>{% endfor %}</div>{% endfor %}
 {%- endmacro %}

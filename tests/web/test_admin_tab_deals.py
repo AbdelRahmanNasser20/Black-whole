@@ -63,7 +63,9 @@ def test_deals_js_uses_the_loading_primitives_and_url_state():
     # shell.js's getParams/setParams contract — but never `import './shell.js'` (the `?v=` script URL makes that a
     # second shell instance that boots the admin twice); the helpers are used by name so shared.js can own them later
     assert "from './shell.js'" not in src
-    assert "getParams" in src and "setParams" in src and "replaceState" in src
+    # E-polish: getParams/setParams are destructured from shared.js (no local mirror)
+    assert re.search(r"const \{[^}]*\bgetParams\b[^}]*\bsetParams\b[^}]*\} = shared", src)
+    assert "replaceState" not in src, "no local mirror of setParams"
     assert "from '../ui/state.js'" in src
     for name in ("load(", "pending(", "markStale("):
         assert name in src, name

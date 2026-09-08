@@ -70,7 +70,9 @@ def test_inventory_js_uses_primitives_and_url_params():
     # URL state has shell.js semantics but must NOT import shell.js: the entry is `shell.js?v=…`, so `./shell.js`
     # is a second module instance that re-boots every tab mid-evaluation (TDZ crash seen in the smoke).
     assert "from './shell.js'" not in src
-    assert "getParams(" in src and "setParams(" in src and "history[replace ? 'replaceState' : 'pushState']" in src
+    # E-polish: getParams/setParams come from shared.js (no per-tab mirror)
+    assert re.search(r"import \{[^}]*\bgetParams\b[^}]*\bsetParams\b[^}]*\} from '\./shared\.js'", src)
+    assert "history[replace ? 'replaceState' : 'pushState']" not in src, "no local mirror of setParams"
     assert "setParams({status:" in src and "setParams({q:" in src
     assert "withButtonLoading" not in src
     assert "'is-pending'" in src, "inline edits mark the <tr> is-pending"

@@ -2,15 +2,10 @@
 // Reads: GET /api/tracking → UI.load on #trk-list (skeleton 'row' twin shipped in index.html; refetches keepOld);
 //        GET /api/tracking/{key}/history → UI.load inside the lot's drawer row (skeleton 'line' ×8).
 // Mutations: POST /api/tracking, PATCH/DELETE /api/tracking/{key}, POST /api/tracking/sync → UI.pending.
-// URL state: `?label=` (the list filter) through shell.js getParams/setParams — the shell owns only `tab`.
+// URL state: `?label=` (the list filter) through shared.js getParams/setParams — the shell owns only `tab`.
 // The server polls on its own scheduler tick (_tracking_loop stays in the web process); this tab is read-mostly.
-import {$, esc, _fmtRemaining} from './shared.js';
+import {$, esc, _fmtRemaining, getParams, setParams} from './shared.js';
 import {api, toast, load as uiLoad, pending} from '../ui/state.js';
-// shell.js owns URL state (E1 contract: tabs use its getParams/setParams for their own keys; the shell owns `tab`).
-// tests/web/test_admin_modules.py forbids a static import of ./shell.js (its regex predates E1 — the rule is that tabs
-// never import *tabs*), so the same module instance is pulled through a dynamic import; swap for a static import
-// once that regex admits shell.js.
-const shell = () => import('./shell.js');
 
 const trk = {
   items: [], labels: [], labelFilter: '',
@@ -46,7 +41,6 @@ function goToAuctions() {
 
 async function setLabelFilter(label) {
   trk.labelFilter = label || '';
-  const {setParams} = await shell();
   setParams({label: trk.labelFilter});
   loadTracking();
 }
@@ -56,7 +50,6 @@ async function setLabelFilter(label) {
 async function loadTracking() {
   const list = $('#trk-list');
   if (!list) return;
-  const {getParams} = await shell();
   trk.labelFilter = getParams().label || '';
   const url = '/api/tracking' + (trk.labelFilter ? `?label=${encodeURIComponent(trk.labelFilter)}` : '');
   const filter = trk.labelFilter;

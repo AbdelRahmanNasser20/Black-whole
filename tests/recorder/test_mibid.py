@@ -253,10 +253,18 @@ def test_poll_active_lot_derives_status_from_end_date_not_hardcoded(monkeypatch,
         return _FakeResponse(text=detail_active_html, url="https://mibid.michigan.gov/AuctionBid/Index/4ac9b7c8-8887-f111-925a-005056936aaa")
 
     monkeypatch.setattr(mibid, "polite_get", fake_get)
+
+    # Freeze "now" before the fixture's 8/3/2026 end date — the fixture is static, the clock is not.
+    class _Frozen(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 7, 1, 12, 0, 0, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 7, 1, 12, 0, 0)
+    monkeypatch.setattr(mibid, "datetime", _Frozen)
+
     obs = mibid.MiBidSource().poll([{"source_lot_id": "4ac9b7c8-8887-f111-925a-005056936aaa"}])
     assert len(obs) == 1
     o = obs[0]
-    assert o.status == "active"  # end_date (8/3/2026) is in the future relative to "now"
+    assert o.status == "active"  # end_date (8/3/2026) is in the future relative to the frozen "now"
     assert o.end_date == datetime(2026, 8, 3, 14, 0, 0, tzinfo=timezone.utc)  # 10:00 AM EDT (UTC-4)
     assert o.current_bid == Decimal("520.00")
     assert o.bid_count == 3
