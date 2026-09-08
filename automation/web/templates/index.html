@@ -158,8 +158,9 @@
 <!-- ───────────── Auctions ───────────── -->
 <section class="panel" data-pane="auctions" hidden>
   {#- E-auctions: pane-scoped stylesheet (body-ok <link>) so parallel tab branches never touch the shared head block.
-      Reads render into [data-state] hosts that ship their skeleton twin; static/admin/auctions.js swaps them in place. -#}
-  {% from "_ui/macros.html" import skeleton_cards %}
+      Reads render into [data-state] hosts that ship their skeleton twin; static/admin/auctions.js swaps them in place.
+      skeleton_rows(n) (_ui/macros.html) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_cards, skeleton_rows %}
   <link rel="stylesheet" href="/static/admin/auctions.css?v={{ asset_v }}">
   <div class="hero hero-compact">
     <div class="hero-eyebrow">FEED / AUCTION CANDIDATES</div>
@@ -272,7 +273,7 @@
         <button class="btn btn-small fav-test-tg" id="auction-favorites-test" type="button">test ping</button>
       </div>
     </header>
-    <div class="fav-strip-grid" id="auction-favorites-grid" data-state="loading" aria-busy="true"><div class="sk-row" aria-hidden="true"><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div><div class="sk sk-cell"></div></div></div>
+    <div class="fav-strip-grid" id="auction-favorites-grid" data-state="loading" aria-busy="true">{{ skeleton_rows(1) }}</div>
   </section>
 
   <div class="auction-status" id="auction-status"></div>
