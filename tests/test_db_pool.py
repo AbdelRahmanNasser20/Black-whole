@@ -196,3 +196,11 @@ def test_pool_is_rebuilt_when_dsn_changes(monkeypatch):
     assert db.fetch_one("select")["n"] == 2
     assert db.fetch_one("select")["n"] == 2
     assert built == [1, 1]
+
+
+def test_pool_connections_get_a_longer_handshake_budget(monkeypatch):
+    monkeypatch.delenv("BLACKWHOLE_DB_POOL_CONNECT_TIMEOUT", raising=False)
+    monkeypatch.delenv("BLACKWHOLE_DB_CONNECT_TIMEOUT", raising=False)
+    assert db._conn_kwargs()["connect_timeout"] == 10
+    assert db._conn_kwargs(for_pool=True)["connect_timeout"] == 30
+    assert db._conn_kwargs(for_pool=True)["keepalives"] == 1

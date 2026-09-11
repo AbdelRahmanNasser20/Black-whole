@@ -44,7 +44,7 @@ def _dsn() -> str:
     return dsn
 
 
-def _conn_kwargs(*, autocommit: bool = False) -> dict:
+def _conn_kwargs(*, autocommit: bool = False, for_pool: bool = False) -> dict:
     # connect_timeout caps a black-holed TCP handshake to the pooler (seen as a
     # socket stuck in SYN_SENT for minutes over the Egypt/Tailscale path).
     # Without it libpq waits for the OS TCP timeout, and whoever called us —
@@ -52,10 +52,18 @@ def _conn_kwargs(*, autocommit: bool = False) -> dict:
     # TCP keepalives stop a NAT / the pooler from silently dropping an idle
     # pooled socket, which would otherwise surface as a stale-connection error
     # on the next request after a quiet spell.
+    # A POOLED connection is opened rarely and by a background worker, so it can
+    # afford a longer handshake budget (the operator's Egypt link has been
+    # measured at 20-28 s per handshake on bad days); a per-call connection
+    # keeps the short cap because the caller is waiting on it.
+    if for_pool:
+        connect_timeout = int(os.getenv("BLACKWHOLE_DB_POOL_CONNECT_TIMEOUT", "30"))
+    else:
+        connect_timeout = int(os.getenv("BLACKWHOLE_DB_CONNECT_TIMEOUT", "10"))
     return dict(
         row_factory=dict_row,
         autocommit=autocommit,
-        connect_timeout=int(os.getenv("BLACKWHOLE_DB_CONNECT_TIMEOUT", "10")),
+        connect_timeout=connect_timeout,
         keepalives=1,
         keepalives_idle=60,
         keepalives_interval=15,
@@ -81,14 +89,16 @@ def _make_pool():
 
     return ConnectionPool(
         _dsn(),
-        kwargs=_conn_kwargs(),
+        kwargs=_conn_kwargs(for_pool=True),
         min_size=int(os.getenv("BLACKWHOLE_DB_POOL_MIN", "1")),
         max_size=int(os.getenv("BLACKWHOLE_DB_POOL_MAX", "4")),
         # Close connections idle > 10 min so a quiet dashboard doesn't pin
         # pooler slots overnight; the next request just reconnects once.
         max_idle=float(os.getenv("BLACKWHOLE_DB_POOL_MAX_IDLE", "600")),
         max_lifetime=float(os.getenv("BLACKWHOLE_DB_POOL_MAX_LIFETIME", "3600")),
-        timeout=float(os.getenv("BLACKWHOLE_DB_POOL_WAIT", "30")),
+        # Waiters give up after this; keep it above the pool connect_timeout so
+        # a slow-but-succeeding first handshake can still serve the request.
+        timeout=float(os.getenv("BLACKWHOLE_DB_POOL_WAIT", "45")),
         open=True,
         name="blackwhole",
     )
