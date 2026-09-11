@@ -191,7 +191,7 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
     # opens. `pg_try_advisory_lock` never blocks: it returns False instantly
     # if another `run` already holds the lock, so an overrunning previous
     # invocation just makes this one a clean no-op exit(0), never a pile-up.
-    conn = db.connect()
+    conn = db.connect(pooled=False)
     try:
         locked = conn.execute(
             "SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (_RUN_LOCK_KEY,)

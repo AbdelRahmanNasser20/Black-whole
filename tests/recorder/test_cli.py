@@ -88,7 +88,11 @@ def _patch_lock(monkeypatch, locked=True):
     calls + close()."""
     conns = []
 
-    def fake_connect():
+    def fake_connect(*, pooled=None, autocommit=False):
+        # The lock connection must be a PRIVATE one (db.connect(pooled=False)):
+        # a pooled checkout is only valid inside a `with` block, and a session
+        # advisory lock held on a shared connection would leak to other callers.
+        assert pooled is False
         conn = _FakeLockConn(locked=locked)
         conns.append(conn)
         return conn

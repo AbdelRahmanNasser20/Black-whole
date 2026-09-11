@@ -72,7 +72,9 @@ services:
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: starter            # always-on; bump if needed
-    healthCheckPath: /
+    # /api/health is a constant string. `/` ran the landing page's DB reads on
+    # every probe (1.7 M inventory-stats calls by 2026-09-11).
+    healthCheckPath: /api/health
     autoDeploy: true
     envVars:
       - fromGroup: blackwhole-secrets
@@ -80,6 +82,13 @@ services:
         value: 0.0.0.0
       - key: LISTING_WEB_RELOAD
         value: "0"
+      # DB pool (automation/db.py): keep 2 warm pooler connections so a tab
+      # open never pays the TLS+SCRAM handshake; cap at 4 so this service plus
+      # every cron stays under the free-tier pooler's client limit.
+      - key: BLACKWHOLE_DB_POOL_MIN
+        value: "2"
+      - key: BLACKWHOLE_DB_POOL_MAX
+        value: "4"
       # PORT is injected by Render; the Docker CMD maps it to LISTING_WEB_PORT.
       # ── "auth once" 365-day dashboard login (BLACKWHOLE-14) ──
       # UNSET = auth disabled (admin surface stays open, pre-feature behavior).
