@@ -56,6 +56,7 @@ from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
 from . import auth as auth_svc
+from . import visits
 from deals import profiles
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -487,6 +488,7 @@ def _gallery_srcs(row: dict) -> list[str]:
 
 @app.get("/", response_class=HTMLResponse)
 async def public_landing(request: Request):
+    visits.track(request)
     try:
         counts = inventory.stats()
         # Featured carousel: Idaho lots lead (the Boise nationwide-ships
@@ -519,6 +521,7 @@ def _decorate(row: dict) -> dict:
 
 @app.get("/listings", response_class=HTMLResponse)
 async def public_listings(request: Request):
+    visits.track(request)
     items = [_decorate(r) for r in inventory.list_public()]
     # Sold lots are shown too (BLACKWHOLE-29) — a buyer who sees 4,000 chairs
     # already moved trusts the 200 on the floor. They render in their own
@@ -536,6 +539,7 @@ async def public_listings(request: Request):
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)
 async def public_listing_detail(request: Request, lot_id: str):
+    visits.track(request)
     row = inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
         raise HTTPException(404, "listing not found")
@@ -551,6 +555,14 @@ async def public_listing_detail(request: Request, lot_id: str):
             **_detail_seo(row, hero, images),
         }),
     )
+
+
+@app.get("/api/visits/summary")
+async def api_visits_summary(days: int = Query(30, ge=1, le=365)):
+    """Admin-only (session middleware gates /api/*): storefront views by
+    campaign / day / lot for the last N days. Answers "did the Apollo church
+    emails bring anyone to the site?" — see automation/web/visits.py."""
+    return await asyncio.to_thread(visits.summary, days)
 
 
 @app.get("/deals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
