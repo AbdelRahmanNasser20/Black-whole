@@ -37,6 +37,9 @@ Detail: `docs/claude-reference/` (index at bottom).
 - **The FB catalog feed and CRM recommendations are status-gated** (`CATALOG_FEED_STATUSES` / `ROUTABLE_STATUSES`), so an archived lot can never be offered as stock. Keep it that way.
 
 **DB:**
+- **Connections are pooled** (`automation/db.py`, psycopg_pool, lazy, max 4). The pooler TLS+SCRAM handshake is ~0.4-1.4 s and the queries are <1 ms, so **never open `psycopg.connect(...)` per call again**, and never run `db.*`/`inventory.*` on the event loop — route handlers that touch the DB are plain `def` (FastAPI threadpool) or wrap the call in `asyncio.to_thread`. `tests/web/test_event_loop_hygiene.py` enforces it. Hold a connection outside a `with` only via `db.connect(pooled=False)`.
+- Read-only admin JSON handlers are memoised for `ADMIN_READ_CACHE_TTL` (15 s) via `automation/web/readcache.py`; every successful write through the API drops the memo. Decorate new read endpoints with `@readcache.cached()`; don't add a second cache layer.
+- Render's `healthCheckPath` is `/api/health` (a constant). Don't point it at `/` — that route reads the DB.
 - All DB code goes through vendored `automation/db.py` (psycopg over Supabase). Schema lives in Supabase (managed via migrations), not created at runtime. RLS is **disabled** on all tables — enabling it is a still-open task.
 - `auction_extractors/state/listings.db` stays SQLite-only and read-only to this repo.
 - **Supabase free tier goes READ-ONLY at 500 MB** (hit 2026-08-28). **The rule going forward:** any new column that stores a provider response, a description, or any other unbounded blob needs an archival path *before* it ships, not after it fills the disk.

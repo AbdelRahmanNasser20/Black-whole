@@ -14,6 +14,16 @@ from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute
 
 `auction_extractors/state/listings.db` stays SQLite-only and read-only to this repo (upstream scrape cache).
 
+## Connection pool (2026-09-11)
+
+`db.connect()` hands out connections from a lazy, process-wide `psycopg_pool.ConnectionPool` (`psycopg[pool]` extra). Diagnosis that motivated it: every admin query averaged <1 ms in Postgres, but each `fetch_*` opened a fresh TLS + SCRAM handshake to the Supabase session pooler — ~1.4 s from the operator's laptop, ~0.4 s from Render — and several handlers ran that on the asyncio event loop, freezing the whole server. `/api/inventory-stats` (one row) took 8-22 s; `/api/drafts` 56 s.
+
+- `with db.connect() as conn:` — pooled checkout; commits on clean exit, returns the connection to the pool. Same lifecycle as before, minus the handshake.
+- `db.connect(pooled=False)` / `db.connect(autocommit=True)` — private connection, exactly the old behaviour (advisory locks, LISTEN/NOTIFY, VACUUM, long backfills).
+- Reads (`fetch_one`/`fetch_all`) retry once on `OperationalError` (a stale pooled socket); writes never retry.
+- Env: `BLACKWHOLE_DB_POOL=0` (kill switch), `BLACKWHOLE_DB_POOL_MIN`/`_MAX` (1/4), `_MAX_IDLE` (600 s), `_MAX_LIFETIME` (3600 s), `_WAIT` (30 s). Keep `_MAX` small: the free-tier pooler slot count is shared with every Render cron.
+- The pool is keyed on the DSN and rebuilt if `BLACKWHOLE_DB_URL` changes; `db.reset_pool()` closes it (tests, app shutdown).
+
 ## Key environment
 - macOS only paths assumed (`~/Desktop/Banquet chiars Pictures/`).
 - `.env` carries `DEWATERMARK_API_KEY` and (optional) `GEMINI_API_KEY`. Already gitignored.

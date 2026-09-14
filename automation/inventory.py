@@ -279,34 +279,34 @@ def list_sold_showcase(limit: int | None = None) -> list[dict]:
 
 
 def _stats_on(conn) -> dict:
-    """Headline counts for the landing page (same visible set as list_public)."""
+    """Headline counts for the landing page (same visible set as list_public).
+
+    ONE statement (FILTER aggregates), not four: on the pooler link every
+    round trip costs ~0.3-1 s, and this runs on every landing-page hit and
+    every Inventory-tab open (2026-09-11 diagnosis)."""
     statuses = list(PUBLIC_STATUSES)
-    total = conn.execute(
-        "SELECT COUNT(*) AS n FROM inventory WHERE status = ANY(%s) "
-        "AND (quantity_remaining IS NULL OR quantity_remaining > 0)",
-        (statuses,),
-    ).fetchone()["n"]
-    chairs = conn.execute(
-        "SELECT COALESCE(SUM(quantity_remaining), 0) AS n FROM inventory "
-        "WHERE status = ANY(%s)",
-        (statuses,),
-    ).fetchone()["n"]
-    cities = conn.execute(
-        "SELECT COUNT(DISTINCT city) AS n FROM inventory "
-        "WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)",
-        (statuses,),
-    ).fetchone()["n"]
-    # Chairs already moved — the landing page's credibility number.
-    moved = conn.execute(
-        f"SELECT COALESCE(SUM(quantity_original), 0) AS n FROM inventory "
-        f"WHERE {_SOLD_SHOWCASE_WHERE}",
-        (list(SOLD_STATUSES),),
-    ).fetchone()["n"]
+    row = conn.execute(
+        f"""
+        SELECT
+          COUNT(*) FILTER (
+            WHERE status = ANY(%s)
+              AND (quantity_remaining IS NULL OR quantity_remaining > 0)
+          ) AS lots,
+          COALESCE(SUM(quantity_remaining) FILTER (WHERE status = ANY(%s)), 0) AS chairs,
+          COUNT(DISTINCT city) FILTER (
+            WHERE city IS NOT NULL AND city != '' AND status = ANY(%s)
+          ) AS cities,
+          -- Chairs already moved — the landing page's credibility number.
+          COALESCE(SUM(quantity_original) FILTER (WHERE {_SOLD_SHOWCASE_WHERE}), 0) AS moved
+        FROM inventory
+        """,
+        (statuses, statuses, statuses, list(SOLD_STATUSES)),
+    ).fetchone() or {}
     return {
-        "lots": int(total),
-        "chairs": int(chairs or 0),
-        "cities": int(cities),
-        "moved": int(moved or 0),
+        "lots": int(row.get("lots") or 0),
+        "chairs": int(row.get("chairs") or 0),
+        "cities": int(row.get("cities") or 0),
+        "moved": int(row.get("moved") or 0),
     }
 
 

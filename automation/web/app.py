@@ -56,6 +56,7 @@ from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
 from . import auth as auth_svc
+from . import readcache
 from . import visits
 from deals import profiles
 from deals.fees import fee_model_from_env
@@ -91,6 +92,25 @@ app.include_router(_ui_preview_router)
 # storefront stays open. Cookie/signing mechanics + the env-var contract live
 # in automation/web/auth.py.
 app.middleware("http")(auth_svc.session_auth_middleware)
+# Any successful write through the API drops the admin read memo (readcache.py).
+app.middleware("http")(readcache.invalidate_on_write_middleware)
+
+
+@app.middleware("http")
+async def _response_headers_middleware(request: Request, call_next):
+    """Server-Timing on every response (so a slow load is diagnosable from the
+    browser's Network tab), and long-lived caching for versioned static assets:
+    `?v=<asset_v>` changes per process start, so a URL's bytes never change —
+    the browser keeps them for a year instead of re-fetching every tab open."""
+    t0 = time.perf_counter()
+    response = await call_next(request)
+    response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - t0) * 1000:.1f}"
+    if request.url.path.startswith("/static/") and response.status_code == 200:
+        if "v" in request.query_params:
+            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        else:
+            response.headers["Cache-Control"] = "public, max-age=300"
+    return response
 
 
 # ───────────────────────────── run state ─────────────────────────────
@@ -200,6 +220,7 @@ async def _apply_event(ev: dict) -> None:
             state.run_status = "running"
         elif st == "finished":
             state.run_status = "finished"
+            readcache.invalidate_all()   # the run/scrape wrote rows the admin memo may hold
     elif kind == "price":
         state.suggested_price = ev.get("suggested")
         state.confirmed_price = ev.get("confirmed")
@@ -262,6 +283,7 @@ async def _run_subprocess(url: str, extra_args: list[str], mode: str = "pipeline
     state.return_code = rc
     state.finished_at = time.time()
     state.run_status = "finished" if rc == 0 else "error"
+    readcache.invalidate_all()   # the run/scrape wrote rows the admin memo may hold
     await state.broadcast({"t": time.time(), "stream": "system",
                           "data": f"[exit {rc}]"})
     # Drain the next queued URL if any.
@@ -486,20 +508,30 @@ def _gallery_srcs(row: dict) -> list[str]:
     return lot_images.gallery_srcs(row)
 
 
+@readcache.cached(ttl=60)
+def _landing_data() -> dict:
+    """Counts + featured carousel for `/`. Memoised: this is the most-hit
+    route on the site (every visitor, every bot) and the numbers change a
+    few times a week."""
+    counts = inventory.stats()
+    # Featured carousel: Idaho lots lead (the Boise nationwide-ships
+    # campaign), then the rest in ledger order.
+    def _idaho_first(r: dict) -> int:
+        state = (r.get("state") or "").strip().upper()
+        city = (r.get("city") or "").strip().lower()
+        return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
+    featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
+    for r in featured:
+        r["hero_src"] = _hero_src(r)
+    return {"counts": counts, "featured": featured}
+
+
 @app.get("/", response_class=HTMLResponse)
-async def public_landing(request: Request):
+def public_landing(request: Request):
     visits.track(request)
     try:
-        counts = inventory.stats()
-        # Featured carousel: Idaho lots lead (the Boise nationwide-ships
-        # campaign), then the rest in ledger order.
-        def _idaho_first(r: dict) -> int:
-            state = (r.get("state") or "").strip().upper()
-            city = (r.get("city") or "").strip().lower()
-            return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
-        featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
-        for r in featured:
-            r["hero_src"] = _hero_src(r)
+        data = _landing_data()
+        counts, featured = data["counts"], data["featured"]
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
@@ -520,7 +552,7 @@ def _decorate(row: dict) -> dict:
 
 
 @app.get("/listings", response_class=HTMLResponse)
-async def public_listings(request: Request):
+def public_listings(request: Request):
     visits.track(request)
     items = [_decorate(r) for r in inventory.list_public()]
     # Sold lots are shown too (BLACKWHOLE-29) — a buyer who sees 4,000 chairs
@@ -538,7 +570,7 @@ async def public_listings(request: Request):
 
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)
-async def public_listing_detail(request: Request, lot_id: str):
+def public_listing_detail(request: Request, lot_id: str):
     visits.track(request)
     row = inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
@@ -951,7 +983,8 @@ async def deals_tree(status: str = "active", profile: str | None = None):
 
 
 @app.get("/api/deals/lists")
-async def deals_lists():
+@readcache.cached(ttl=30)
+def deals_lists():
     return db.fetch_all(
         "SELECT dl.id, dl.name, count(li.list_id) AS count "
         "FROM deal_lists dl LEFT JOIN deal_list_items li ON li.list_id = dl.id "
@@ -960,7 +993,7 @@ async def deals_lists():
 
 
 @app.post("/api/deals/lists")
-async def deals_list_create(payload: dict):
+def deals_list_create(payload: dict):
     name = ((payload or {}).get("name") or "").strip()
     if not name:
         raise HTTPException(400, "name required")
@@ -973,7 +1006,7 @@ async def deals_list_create(payload: dict):
 
 
 @app.delete("/api/deals/lists/{list_id}")
-async def deals_list_delete(list_id: int):
+def deals_list_delete(list_id: int):
     n = db.execute("DELETE FROM deal_lists WHERE id=%s", (list_id,))
     if not n:
         raise HTTPException(404, "list not found")
@@ -981,7 +1014,7 @@ async def deals_list_delete(list_id: int):
 
 
 @app.put("/api/deals/lists/{list_id}/items/{asset_id}/{account_id}/{auction_id}")
-async def deals_list_item_add(list_id: int, asset_id: int, account_id: int,
+def deals_list_item_add(list_id: int, asset_id: int, account_id: int,
                               auction_id: int):
     db.execute(
         "INSERT INTO deal_list_items (list_id, asset_id, account_id, auction_id) "
@@ -992,7 +1025,7 @@ async def deals_list_item_add(list_id: int, asset_id: int, account_id: int,
 
 
 @app.delete("/api/deals/lists/{list_id}/items/{asset_id}/{account_id}/{auction_id}")
-async def deals_list_item_remove(list_id: int, asset_id: int, account_id: int,
+def deals_list_item_remove(list_id: int, asset_id: int, account_id: int,
                                  auction_id: int):
     n = db.execute(
         "DELETE FROM deal_list_items WHERE list_id=%s AND asset_id=%s "
@@ -1005,7 +1038,8 @@ async def deals_list_item_remove(list_id: int, asset_id: int, account_id: int,
 
 
 @app.get("/api/deals/tags")
-async def deals_tags():
+@readcache.cached(ttl=30)
+def deals_tags():
     return db.fetch_all(
         "SELECT tag, count(*) AS count FROM deal_lot_tags "
         "GROUP BY tag ORDER BY count DESC, tag"
@@ -1013,7 +1047,7 @@ async def deals_tags():
 
 
 @app.put("/api/deals/tags/{asset_id}/{account_id}/{auction_id}/{tag}")
-async def deals_tag_add(asset_id: int, account_id: int, auction_id: int, tag: str):
+def deals_tag_add(asset_id: int, account_id: int, auction_id: int, tag: str):
     tag = tag.strip()
     if not tag:
         raise HTTPException(400, "tag required")
@@ -1026,7 +1060,7 @@ async def deals_tag_add(asset_id: int, account_id: int, auction_id: int, tag: st
 
 
 @app.delete("/api/deals/tags/{asset_id}/{account_id}/{auction_id}/{tag}")
-async def deals_tag_remove(asset_id: int, account_id: int, auction_id: int, tag: str):
+def deals_tag_remove(asset_id: int, account_id: int, auction_id: int, tag: str):
     n = db.execute(
         "DELETE FROM deal_lot_tags WHERE asset_id=%s AND account_id=%s "
         "AND auction_id=%s AND tag=%s",
@@ -1038,7 +1072,8 @@ async def deals_tag_remove(asset_id: int, account_id: int, auction_id: int, tag:
 
 
 @app.get("/api/deals/searches")
-async def deals_searches():
+@readcache.cached(ttl=30)
+def deals_searches():
     return db.fetch_all(
         "SELECT id, name, params, alert, created_at, last_run_at "
         "FROM saved_searches ORDER BY name"
@@ -1046,7 +1081,7 @@ async def deals_searches():
 
 
 @app.post("/api/deals/searches")
-async def deals_search_create(payload: dict):
+def deals_search_create(payload: dict):
     payload = payload or {}
     name = (payload.get("name") or "").strip()
     if not name:
@@ -1064,7 +1099,7 @@ async def deals_search_create(payload: dict):
 
 
 @app.delete("/api/deals/searches/{search_id}")
-async def deals_search_delete(search_id: int):
+def deals_search_delete(search_id: int):
     n = db.execute("DELETE FROM saved_searches WHERE id=%s", (search_id,))
     if not n:
         raise HTTPException(404, "search not found")
@@ -1074,8 +1109,9 @@ async def deals_search_delete(search_id: int):
 # ── Research profiles: what we're hunting for (deals/profiles.py) ────────────
 
 @app.get("/api/profiles")
-async def profiles_list():
-    rows = await asyncio.to_thread(profiles.list_all, True)
+@readcache.cached(ttl=60)
+def profiles_list():
+    rows = profiles.list_all(True)
     default = next((p.slug for p in rows if p.is_default), "chairs")
     return {"profiles": [p.to_row() for p in rows], "default": default}
 
@@ -1093,6 +1129,7 @@ async def profiles_create(payload: dict):
     except profiles.ProfilesUnavailable as e:
         raise HTTPException(503, str(e))
     _AUCTIONS_CACHE.clear()
+    readcache.invalidate_all()
     return saved.to_row()
 
 
@@ -1107,6 +1144,7 @@ async def profiles_delete(slug: str):
     if not ok:
         raise HTTPException(404, "profile not found")
     _AUCTIONS_CACHE.clear()
+    readcache.invalidate_all()
     return {"ok": True}
 
 
@@ -1175,7 +1213,8 @@ def _govdeals_adapter():
 
 
 @app.get("/api/tracking")
-async def tracking_list(label: str | None = None):
+@readcache.cached()
+def tracking_list(label: str | None = None):
     from deals import tracking_store
     return {"items": tracking_store.list_all(label or None),
             "labels": tracking_store.labels()}
@@ -1199,7 +1238,7 @@ async def tracking_add(payload: dict):
 
 
 @app.patch("/api/tracking/{asset_id}/{account_id}")
-async def tracking_patch(asset_id: int, account_id: int, payload: dict):
+def tracking_patch(asset_id: int, account_id: int, payload: dict):
     from deals import tracking_store
     payload = payload or {}
     label = payload.get("label")
@@ -1212,7 +1251,7 @@ async def tracking_patch(asset_id: int, account_id: int, payload: dict):
 
 
 @app.delete("/api/tracking/{asset_id}/{account_id}")
-async def tracking_remove(asset_id: int, account_id: int):
+def tracking_remove(asset_id: int, account_id: int):
     from deals import tracking_store
     if not tracking_store.delete(asset_id, account_id):
         raise HTTPException(404, "not tracked")
@@ -1220,7 +1259,7 @@ async def tracking_remove(asset_id: int, account_id: int):
 
 
 @app.get("/api/tracking/{asset_id}/{account_id}/history")
-async def tracking_history(asset_id: int, account_id: int):
+def tracking_history(asset_id: int, account_id: int):
     """Bid timeline (every observed change), the bidders collapsed by id, and
     the other lots those same bidders have been seen leading."""
     from deals import tracking, tracking_store
@@ -1239,7 +1278,7 @@ async def tracking_sync_now():
     adapter = _govdeals_adapter()
     adopted = await asyncio.to_thread(tracking.adopt_favorites, adapter)
     # Force everything due, then run the normal pass.
-    db.execute("UPDATE tracked_lots SET next_poll_at = now() WHERE closed_at IS NULL")
+    await asyncio.to_thread(db.execute, "UPDATE tracked_lots SET next_poll_at = now() WHERE closed_at IS NULL")
     report = await asyncio.to_thread(tracking.sync_tracked, adapter)
     return {"adopted_favorites": adopted, **report}
 
@@ -1253,7 +1292,7 @@ def _deal_images(row: dict) -> list[str]:
 
 
 @app.get("/api/deals/{asset_id}/{account_id}/{auction_id}")
-async def deal_lot_json(asset_id: int, account_id: int, auction_id: int):
+def deal_lot_json(asset_id: int, account_id: int, auction_id: int):
     """Lot detail for the DealCard component (static/deal_card.js)."""
     row = db.fetch_one("""SELECT asset_id, account_id, auction_id, title, description,
         native_category_name, canonical_category, city, state, seller,
@@ -1299,7 +1338,7 @@ def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
 
 
 @app.get("/sitemap.xml")
-async def sitemap_xml():
+def sitemap_xml():
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     for path in ("/", "/listings", "/sell"):
@@ -1318,7 +1357,7 @@ async def sitemap_xml():
 
 
 @app.get("/catalog/facebook.csv")
-async def facebook_catalog_feed():
+def facebook_catalog_feed():
     """Facebook Business product-catalog feed (BLACKWHOLE-7).
 
     Public, read-only, no secrets — Commerce Manager pulls this URL on a
@@ -1360,7 +1399,7 @@ async def _notify_new_inquiry(row: dict) -> None:
 async def public_contact(payload: dict):
     payload = payload or {}
     try:
-        row = inventory.create_inquiry(
+        row = await asyncio.to_thread(lambda: inventory.create_inquiry(
             kind=(payload.get("kind") or "buy").strip(),
             name=(payload.get("name") or "").strip(),
             email=(payload.get("email") or "").strip() or None,
@@ -1372,7 +1411,7 @@ async def public_contact(payload: dict):
                 if payload.get("quantity_interested")
                 else None
             ),
-        )
+        ))
     except ValueError as e:
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_inquiry(row))
@@ -1408,7 +1447,7 @@ async def _notify_new_subscriber(row: dict) -> None:
 async def public_subscribe(payload: dict):
     payload = payload or {}
     try:
-        row = inventory.create_subscriber(
+        row = await asyncio.to_thread(lambda: inventory.create_subscriber(
             name=(payload.get("name") or "").strip() or None,
             email=(payload.get("email") or "").strip() or None,
             phone=(payload.get("phone") or "").strip() or None,
@@ -1427,7 +1466,7 @@ async def public_subscribe(payload: dict):
             delivery=(payload.get("delivery") or "").strip() or None,
             notes=(payload.get("notes") or "").strip() or None,
             source=(payload.get("source") or "site_listings").strip(),
-        )
+        ))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_subscriber(row))
@@ -1575,7 +1614,7 @@ async def remove_lot_everywhere(lot_id: str, payload: dict | None = None):
     """Take a lot off site + FB Business catalog + Marketplace as "moved"
     (fake sold-out + Mark as sold). Streams through the Launcher console."""
     payload = payload or {}
-    if not inventory.get(lot_id):
+    if not await asyncio.to_thread(inventory.get, lot_id):
         raise HTTPException(404, f"no lot {lot_id}")
     extra: list[str] = []
     channels = payload.get("channels")
@@ -1585,7 +1624,7 @@ async def remove_lot_everywhere(lot_id: str, payload: dict | None = None):
 
 
 @app.get("/api/lots/status")
-async def lots_channel_status(lot_id: str | None = None):
+def lots_channel_status(lot_id: str | None = None):
     """Per-lot channel matrix: site / business feed / Marketplace."""
     return {"items": lot_channels.channel_matrix([lot_id] if lot_id else None)}
 
@@ -1708,7 +1747,8 @@ def _latest_compare_for_folder(folder_name: str, rows: list[dict]) -> dict | Non
 
 
 @app.get("/api/drafts")
-async def list_drafts():
+@readcache.cached()
+def list_drafts():
     inv_by_folder = {
         r["folder_name"]: r for r in inventory.list_all() if r.get("folder_name")
     }
@@ -2037,10 +2077,12 @@ async def _run_scraper(source: str, test_mode: bool, profile_slug: str | None = 
     # Treat cancelled run as cancelled, not error.
     if scrape_state.status != "cancelled":
         scrape_state.status = "finished" if overall_rc == 0 else "error"
+        readcache.invalidate_all()   # the run/scrape wrote rows the admin memo may hold
 
     # Fresh rows are in Supabase now — bust the read-side cache so the next
     # /api/auctions call returns the updated set.
     _AUCTIONS_CACHE.clear()
+    readcache.invalidate_all()
 
     await scrape_state.broadcast({
         "t": time.time(), "stream": "event",
@@ -2235,6 +2277,7 @@ async def list_auctions(
 @app.post("/api/auctions/refresh")
 async def refresh_auctions_cache():
     _AUCTIONS_CACHE.clear()
+    readcache.invalidate_all()
     return {"ok": True}
 
 
@@ -2361,7 +2404,7 @@ async def list_favorites():
 
 
 @app.post("/api/auctions/favorites")
-async def star_favorite(payload: dict):
+def star_favorite(payload: dict):
     """Star (or refresh) an auction by URL. Body: ``{link, title?, quantity?,
     end_date?, image_url?, location?, asset_id?}``. ``asset_id`` is derived
     from the link if not provided."""
@@ -2386,7 +2429,7 @@ async def star_favorite(payload: dict):
 
 
 @app.delete("/api/auctions/favorites/{asset_id:path}")
-async def unstar_favorite(asset_id: str):
+def unstar_favorite(asset_id: str):
     ok = favorites.delete(asset_id)
     if not ok:
         raise HTTPException(404, "not favorited")
@@ -2566,6 +2609,14 @@ async def _tracking_loop() -> None:
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
     global _alerts_task, _tracking_task
+    # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
+    # min_size in worker threads), so the first admin open after a boot doesn't
+    # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
+    if os.getenv("BLACKWHOLE_DB_URL"):
+        try:
+            await asyncio.to_thread(db.get_pool)
+        except Exception as e:  # never block startup on the pool
+            print(f"[db] pool pre-warm skipped: {e!r}")
     if _tracking_task is None or _tracking_task.done():
         _tracking_task = asyncio.create_task(_tracking_loop())
         print(f"[tracking] bid-history poller started (tick={_SCHEDULER_TICK_SEC:.0f}s)")
@@ -2581,6 +2632,7 @@ async def _start_alerts_loop() -> None:
 @app.on_event("shutdown")
 async def _stop_alerts_loop() -> None:
     global _alerts_task
+    await asyncio.to_thread(db.reset_pool)   # close pooled sockets off-loop
     if _alerts_task and not _alerts_task.done():
         _alerts_task.cancel()
         try:
@@ -2590,12 +2642,13 @@ async def _stop_alerts_loop() -> None:
 
 
 @app.get("/api/auctions/cache-stats")
-async def auctions_cache_stats():
+@readcache.cached(ttl=60)
+def auctions_cache_stats():
     """Cheap roll-up over the Supabase `auction_listings` table — powers the
     'N lots in cache · newest scraped X days ago' header on the Auctions tab."""
     if _auctions_cache_stats is None:
         return {"total": 0, "newest_seen_at": None, "oldest_seen_at": None, "by_source": {}}
-    return await asyncio.to_thread(_auctions_cache_stats)
+    return _auctions_cache_stats()
 
 
 @app.get("/api/listings")
@@ -2733,11 +2786,12 @@ def _inventory_to_public(row: dict) -> dict:
 
 
 @app.get("/api/inventory")
-async def inv_list(status: str | None = None, with_stats: int = 0):
+@readcache.cached()
+def inv_list(status: str | None = None, with_stats: int = 0):
     """`with_stats=1` returns rows + headline counts from ONE connection —
     the admin tab uses it so a tab open costs one pooler handshake, not two."""
     if with_stats:
-        data = await asyncio.to_thread(inventory.list_with_stats, status)
+        data = inventory.list_with_stats(status)
         return {"items": [_inventory_to_public(r) for r in data["items"]],
                 "stats": data["stats"]}
     rows = inventory.list_all(status=status)
@@ -2745,7 +2799,7 @@ async def inv_list(status: str | None = None, with_stats: int = 0):
 
 
 @app.get("/api/inventory/{lot_id}")
-async def inv_get(lot_id: str):
+def inv_get(lot_id: str):
     row = inventory.get(lot_id)
     if not row:
         raise HTTPException(404, "not found")
@@ -2753,7 +2807,7 @@ async def inv_get(lot_id: str):
 
 
 @app.patch("/api/inventory/{lot_id}")
-async def inv_update(lot_id: str, payload: dict):
+def inv_update(lot_id: str, payload: dict):
     payload = dict(payload or {})
     if "locations_text" in payload:
         payload["locations"] = payload.pop("locations_text")
@@ -2767,7 +2821,7 @@ async def inv_update(lot_id: str, payload: dict):
 
 
 @app.post("/api/inventory")
-async def inv_create(payload: dict):
+def inv_create(payload: dict):
     payload = payload or {}
     try:
         row = inventory.insert_manual(
@@ -2794,7 +2848,7 @@ async def inv_create(payload: dict):
 
 
 @app.delete("/api/inventory/{lot_id}")
-async def inv_delete(lot_id: str):
+def inv_delete(lot_id: str):
     ok = inventory.delete(lot_id)
     if not ok:
         raise HTTPException(404, "not found")
@@ -2805,7 +2859,7 @@ _ALLOWED_LINK_PLATFORMS = ("facebook", "ebay", "fb_business", "ad")
 
 
 @app.post("/api/inventory/{lot_id}/platform")
-async def inv_set_platform(lot_id: str, payload: dict):
+def inv_set_platform(lot_id: str, payload: dict):
     """Backfill a platform URL for a lot that was listed/posted manually.
 
     Platforms: facebook, ebay, fb_business (FB page post), ad (paid placement).
@@ -2840,14 +2894,14 @@ async def inv_attach_buyer_cert(lot_id: str, file: UploadFile = File(...)):
         raise HTTPException(400, "empty upload")
     if len(data) > _MAX_CERT_BYTES:
         raise HTTPException(413, f"file exceeds {_MAX_CERT_BYTES // (1024*1024)} MB")
-    row = inventory.attach_buyer_cert(lot_id, file.filename or "buyer_cert", data)
+    row = await asyncio.to_thread(inventory.attach_buyer_cert, lot_id, file.filename or "buyer_cert", data)
     if not row:
         raise HTTPException(404, "lot not found")
     return _inventory_to_public(row)
 
 
 @app.get("/api/inventory/{lot_id}/buyer-cert")
-async def inv_get_buyer_cert(lot_id: str):
+def inv_get_buyer_cert(lot_id: str):
     row = inventory.get(lot_id)
     if not row:
         raise HTTPException(404, "lot not found")
@@ -2861,7 +2915,7 @@ async def inv_get_buyer_cert(lot_id: str):
 
 
 @app.delete("/api/inventory/{lot_id}/buyer-cert")
-async def inv_delete_buyer_cert(lot_id: str):
+def inv_delete_buyer_cert(lot_id: str):
     row = inventory.delete_buyer_cert(lot_id)
     if not row:
         raise HTTPException(404, "lot not found")
@@ -2869,7 +2923,8 @@ async def inv_delete_buyer_cert(lot_id: str):
 
 
 @app.get("/api/inventory-stats")
-async def inv_stats():
+@readcache.cached()
+def inv_stats():
     return inventory.stats()
 
 
@@ -2879,7 +2934,7 @@ async def site_config():
 
 
 @app.post("/api/inventory/seed-snapshot")
-async def inv_seed_snapshot(payload: dict):
+def inv_seed_snapshot(payload: dict):
     """Idempotent bulk-upsert for an admin-curated inventory snapshot.
 
     Body: {"rows": [{"lot_id": "...", "title": "...", "quantity": N,
@@ -2924,7 +2979,7 @@ async def inv_seed_snapshot(payload: dict):
 
 
 @app.post("/api/inventory/backfill")
-async def inv_backfill():
+def inv_backfill():
     """Walk DOWNLOAD_ROOT, add a draft row for any folder not in the table.
 
     Best-effort: pulls title/qty/city/chair_type from the same
@@ -2994,13 +3049,14 @@ async def inv_backfill():
 # ───────────────────────────── inquiries API ─────────────────────────────
 
 @app.get("/api/inquiries")
-async def inq_list(status: str | None = None):
-    # sync psycopg off the event loop (same shape as /api/inventory)
-    return {"items": await asyncio.to_thread(inventory.list_inquiries, status)}
+@readcache.cached()
+def inq_list(status: str | None = None):
+    # sync handler → FastAPI threadpool; memoised (readcache.py)
+    return {"items": inventory.list_inquiries(status)}
 
 
 @app.patch("/api/inquiries/{inquiry_id}")
-async def inq_update(inquiry_id: int, payload: dict):
+def inq_update(inquiry_id: int, payload: dict):
     payload = payload or {}
     row: dict | None = None
     if "status" in payload:
@@ -3018,7 +3074,7 @@ async def inq_update(inquiry_id: int, payload: dict):
 
 
 @app.delete("/api/inquiries/{inquiry_id}")
-async def inq_delete(inquiry_id: int):
+def inq_delete(inquiry_id: int):
     ok = inventory.delete_inquiry(inquiry_id)
     if not ok:
         raise HTTPException(404, "not found")
@@ -3030,13 +3086,14 @@ async def inq_delete(inquiry_id: int):
 # updates — subscribers aren't lot-scoped, so there is no link step.
 
 @app.get("/api/subscribers")
-async def sub_list(status: str | None = None):
-    # sync psycopg off the event loop (same shape as /api/inventory)
-    return {"items": await asyncio.to_thread(inventory.list_subscribers, status)}
+@readcache.cached()
+def sub_list(status: str | None = None):
+    # sync handler → FastAPI threadpool; memoised (readcache.py)
+    return {"items": inventory.list_subscribers(status)}
 
 
 @app.patch("/api/subscribers/{subscriber_id}")
-async def sub_update(subscriber_id: int, payload: dict):
+def sub_update(subscriber_id: int, payload: dict):
     payload = payload or {}
     row: dict | None = None
     if "status" in payload:
@@ -3052,7 +3109,7 @@ async def sub_update(subscriber_id: int, payload: dict):
 
 
 @app.delete("/api/subscribers/{subscriber_id}")
-async def sub_delete(subscriber_id: int):
+def sub_delete(subscriber_id: int):
     ok = inventory.delete_subscriber(subscriber_id)
     if not ok:
         raise HTTPException(404, "not found")

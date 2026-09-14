@@ -9,7 +9,8 @@ class _Cur:
     def fetchall(self):
         return [{"lot_id": "1", "status": "listed"}] if "FROM inventory ORDER BY" in self.sql else []
     def fetchone(self):
-        return {"n": 3}
+        # _stats_on is one FILTER-aggregate statement returning all four counts
+        return {"lots": 3, "chairs": 3, "cities": 3, "moved": 3}
 
 
 class _Conn:
