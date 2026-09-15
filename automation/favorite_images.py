@@ -10,14 +10,43 @@ Never reads the favorite's raw CDN photo column — that file is watermarked, an
 """
 from __future__ import annotations
 
+import functools
 import hashlib
+import logging
 import os
 import re
 
-from automation import favorites, lot_channels
+from automation import db, favorites, lot_channels, r2_images
 
 FAVORITE_PHOTO_LIMIT = 6   # hero + 5: enough for a pin popup, ~6 dewatermark calls per lot
 _GD_KEY = re.compile(r"^(\d+)/(\d+)$")
+
+logger = logging.getLogger(__name__)
+
+
+@functools.lru_cache(maxsize=1)
+def _clean_columns_present() -> bool:
+    """True once migration 010 is confirmed applied. Cached only on success."""
+    row = db.fetch_one(
+        "SELECT 1 AS ok FROM information_schema.columns "
+        "WHERE table_name = %s AND column_name = %s",
+        ("auction_favorites", "clean_hero_url"))
+    return bool(row)
+
+
+def clean_columns_available() -> bool:
+    """Is `auction_favorites.clean_*` there to write into?
+
+    The whole mirror is dewatermark.ai spend that ends in `set_clean_images`. If
+    migration 010 has not been applied that write raises *after* the money is
+    gone, so every caller checks first. A DB error is never cached — it answers
+    False for this attempt only.
+    """
+    try:
+        return _clean_columns_present()
+    except Exception as e:  # noqa: BLE001 — a lookup failure is not a schema answer
+        logger.warning("could not check auction_favorites.clean_* columns: %r", e)
+        return False
 
 
 def r2_key(asset_id: str | None) -> str | None:
@@ -38,11 +67,21 @@ def mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> 
     if key is None:
         log(f"  - {asset_id}: not a GovDeals favorite, skipped")
         return None
+    if not clean_columns_available():
+        # Before `fetch_detail`, before a single download: without the columns
+        # the stamp at the end fails and the API spend buys nothing.
+        log(f"  ! {asset_id}: migration 010 not applied — skipping (no API spend)")
+        return None
     if not force:
         fav = favorites.get(asset_id)
         if fav is not None and fav.clean_hero_url:
             log(f"  = {asset_id}: already has clean photos")
             return {"hero_image_url": fav.clean_hero_url, "image_urls": fav.clean_image_urls}
+    if not r2_images.is_configured():
+        # Supabase Storage is dead (402). A fallback here would stamp a URL that
+        # 402s for every visitor, so this fails loud instead.
+        raise RuntimeError(
+            "R2 not configured — refusing to write a Supabase Storage URL into auction_favorites")
     asset, account = (int(x) for x in asset_id.split("/"))
     try:
         detail = lot_channels.fetch_detail(asset, account)
@@ -64,6 +103,20 @@ def mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> 
     favorites.set_clean_images(asset_id, result["hero_image_url"], result["image_urls"])
     log(f"  ✓ {asset_id}: {len(result['image_urls'])} clean photos on R2")
     return result
+
+
+def mirror_favorite_photos_safely(asset_id: str) -> dict | None:
+    """`mirror_favorite_photos` that can never raise — for background tasks.
+
+    The star route schedules this. An exception in a FastAPI BackgroundTask is
+    raised inside the ASGI stack after the response, which noisily kills the
+    request's task group for a photo the operator did not ask for.
+    """
+    try:
+        return mirror_favorite_photos(asset_id)
+    except Exception as e:  # noqa: BLE001 — a background photo is never worth a 500
+        logger.warning("favorite photo mirror failed for %s: %r", asset_id, e)
+        return None
 
 
 def on_star_enabled() -> bool:

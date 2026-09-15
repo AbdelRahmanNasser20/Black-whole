@@ -621,12 +621,15 @@ def public_map_points(status: str | None = None, near: str | None = None,
     if not wanted <= set(public_map.BUCKETS):
         raise HTTPException(400, f"status must be a comma list of {','.join(public_map.BUCKETS)}")
     try:
-        return public_map.fetch_points(statuses=wanted, near=near, radius_mi=radius)
+        data = public_map.fetch_points(statuses=wanted, near=near, radius_mi=radius)
     except Exception as e:  # noqa: BLE001
         # The repr carries the DSN and local paths, and this route is public +
         # unauthenticated — the detail goes to the server log, never the body.
         log.warning("map points query failed: %r", e)
         raise HTTPException(503, "map temporarily unavailable")
+    # Public, identical for everyone, and already memoised server-side for
+    # CACHE_TTL — let the browser and any CDN in front of us hold it too.
+    return JSONResponse(data, headers={"Cache-Control": "public, max-age=120"})
 
 
 @app.get("/api/visits/summary")
@@ -2469,8 +2472,9 @@ def star_favorite(payload: dict, background: BackgroundTasks):
         # Clean photos for the public map's "incoming" pin. Runs after the
         # response, so the star never waits on dewatermark.ai; budget caps
         # apply, and a failure (migration 010 unapplied, closed lot) surfaces
-        # in the server log, never in the star response.
-        background.add_task(favorite_images.mirror_favorite_photos, fav.asset_id)
+        # in the server log, never in the star response. `_safely` because a
+        # background task that raises tears down the request's task group.
+        background.add_task(favorite_images.mirror_favorite_photos_safely, fav.asset_id)
     return fav.to_dict() if fav else {}
 
 
@@ -2663,6 +2667,14 @@ async def _start_alerts_loop() -> None:
             await asyncio.to_thread(db.get_pool)
         except Exception as e:  # never block startup on the pool
             print(f"[db] pool pre-warm skipped: {e!r}")
+    # Pre-warm pgeocode: constructing Nominatim("us") downloads the GeoNames US
+    # dataset to ~/.cache/pgeocode the first time, which is seconds of blocking
+    # work no map request should pay for. Off-loop, and never fatal.
+    try:
+        from ..alerts import geo as _geo
+        await asyncio.to_thread(_geo._pgeocode_us)
+    except Exception as e:  # never block startup on the geocoder
+        print(f"[geo] pgeocode pre-warm skipped: {e!r}")
     if _tracking_task is None or _tracking_task.done():
         _tracking_task = asyncio.create_task(_tracking_loop())
         print(f"[tracking] bid-history poller started (tick={_SCHEDULER_TICK_SEC:.0f}s)")

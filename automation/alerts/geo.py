@@ -17,14 +17,21 @@ but every call stays guarded: if it is missing we fall back to a built-in state
 centroid table, so matching still works at state precision. The matcher degrades
 honestly when precision is coarse (see `matcher.match_lot`).
 
-Nothing here touches the network at import time. `pgeocode` (if present) reads a
-bundled offline dataset.
+Nothing here touches the network at import time. `pgeocode` is NOT bundled with
+its data: constructing `Nominatim("us")` downloads the GeoNames US dataset into
+`~/.cache/pgeocode` on first use (one network fetch per container/machine), then
+reads it offline forever after. That first call is why the web app pre-warms
+`_pgeocode_us()` on startup instead of paying for it inside a request.
 """
 from __future__ import annotations
 
+import logging
 import math
 import re
+import time
 from functools import lru_cache
+
+log = logging.getLogger(__name__)
 
 # ── state centroids (approx geographic center, WGS84) ───────────────────────
 # Enough for a state-precision fallback when a zip can't be resolved. Values are
@@ -90,21 +97,36 @@ def _norm_state(state: str | None) -> str | None:
     return code if code in STATE_CENTROIDS else None
 
 
-@lru_cache(maxsize=1)
-def _pgeocode_us():
-    """Return a cached pgeocode US nominatim, or None if pgeocode is absent.
+# Only a *successful* Nominatim is cached. `lru_cache` used to memoise the None
+# too, so one flaky first call (the GeoNames download failing on a cold Render
+# boot) pinned every pin in the process to a state centroid until a redeploy.
+_NOMI = None
+_NOMI_FAILED_AT: float = 0.0
+_NOMI_RETRY_SEC = 60.0
 
-    Import is lazy + guarded: the package is optional. Absent => zip precision
-    is simply unavailable and callers fall back to the state centroid.
+
+def _pgeocode_us():
+    """Return the cached pgeocode US nominatim, or None if it is unavailable.
+
+    Import + construction are lazy and guarded: the package is optional and its
+    dataset download can fail. A failure is NOT memoised — it is retried, at
+    most once every `_NOMI_RETRY_SEC`, so a transient outage costs coarse pins
+    for a minute rather than for the life of the process.
     """
+    global _NOMI, _NOMI_FAILED_AT
+    if _NOMI is not None:
+        return _NOMI
+    if _NOMI_FAILED_AT and (time.monotonic() - _NOMI_FAILED_AT) < _NOMI_RETRY_SEC:
+        return None
     try:
         import pgeocode  # type: ignore
-    except Exception:
+        _NOMI = pgeocode.Nominatim("us")
+    except Exception as e:  # noqa: BLE001 — absent package or a failed download
+        _NOMI_FAILED_AT = time.monotonic()
+        log.warning("pgeocode unavailable: %r — pins fall back to state centroids", e)
         return None
-    try:
-        return pgeocode.Nominatim("us")
-    except Exception:
-        return None
+    _NOMI_FAILED_AT = 0.0
+    return _NOMI
 
 
 def _zip_latlon(zip_code: str | None) -> tuple[float, float] | None:
@@ -170,7 +192,8 @@ def city_latlon(city: str | None, state: str | None) -> tuple[float, float] | No
         # the state we want past a small cap, costing the pin; 200 is wide enough
         # and costs nothing — the exact state+name filter below does the real work.
         df = nomi.query_location(name, top_k=200)
-    except Exception:  # noqa: BLE001 — pgeocode raises on odd input; treat as miss
+    except Exception as e:  # noqa: BLE001 — pgeocode raises on odd input; treat as miss
+        log.debug("pgeocode query_location(%r) failed: %r", name, e)
         return None
     if df is None or df.empty:
         return None

@@ -4,6 +4,10 @@ import pytest
 
 from automation.alerts import geo
 
+# Captured before the autouse fixture swaps `_pgeocode_us` for a stub — the
+# retry test exercises the real constructor-cache.
+_REAL_PGEOCODE = geo._pgeocode_us
+
 
 class _FakeNominatim:
     def query_location(self, name, top_k=10):
@@ -116,3 +120,45 @@ def test_shared_city_name_looks_past_the_first_25_candidates():
     lat, lng, prec = geo.resolve_place("Charleston", "WV", None)
     assert prec == "city"
     assert (round(lat, 2), round(lng, 2)) == (38.35, -81.63)
+
+
+# ─── pgeocode construction cache (never memoise a failure) ───
+
+class _FakeModule:
+    """Stands in for `import pgeocode`: raises `fail_times` times, then works."""
+
+    def __init__(self, fail_times):
+        self.left, self.instance, self.calls = fail_times, _FakeNominatim(), 0
+
+    def Nominatim(self, country):
+        self.calls += 1
+        if self.left > 0:
+            self.left -= 1
+            raise RuntimeError("GeoNames download failed")
+        return self.instance
+
+
+@pytest.fixture
+def _real_pgeocode(monkeypatch):
+    """Point the module at a fake `pgeocode` with a clean construction cache."""
+    import sys
+    fake = _FakeModule(fail_times=1)
+    monkeypatch.setitem(sys.modules, "pgeocode", fake)
+    monkeypatch.setattr(geo, "_NOMI", None)
+    monkeypatch.setattr(geo, "_NOMI_FAILED_AT", 0.0)
+    return fake
+
+
+def test_pgeocode_failure_is_retried_not_memoised(_real_pgeocode, monkeypatch, caplog):
+    """One flaky first call must not pin the whole process to state centroids."""
+    with caplog.at_level("WARNING"):
+        assert _REAL_PGEOCODE() is None
+    assert "pgeocode unavailable" in caplog.text and "state centroids" in caplog.text
+    # Inside the retry window the failure is not re-attempted (no hammering).
+    assert _REAL_PGEOCODE() is None
+    assert _real_pgeocode.calls == 1
+    # Past it, the retry succeeds and the instance is cached from then on.
+    monkeypatch.setattr(geo, "_NOMI_RETRY_SEC", 0.0)
+    assert _REAL_PGEOCODE() is _real_pgeocode.instance
+    assert _REAL_PGEOCODE() is _real_pgeocode.instance
+    assert _real_pgeocode.calls == 2

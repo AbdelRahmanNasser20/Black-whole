@@ -3,7 +3,17 @@
 Never calls dewatermark.ai or R2: `clean_and_upload`, `fetch_detail`,
 `gallery_urls` and the DB writer are all monkeypatched.
 """
+import pytest
+
 from automation import favorite_images as fi
+
+
+@pytest.fixture(autouse=True)
+def _schema_and_r2_ok(monkeypatch):
+    """Migration 010 applied and R2 configured — the happy path every other
+    test assumes. No test in this file may touch the DB or R2."""
+    monkeypatch.setattr(fi, "clean_columns_available", lambda: True)
+    monkeypatch.setattr(fi.r2_images, "is_configured", lambda: True)
 
 
 def test_r2_key():
@@ -73,6 +83,56 @@ def test_mirror_skips_non_govdeals_favorite(monkeypatch):
     assert fi.mirror_favorite_photos("ps:123", log=lambda *a: None) is None
 
 
+def test_mirror_refuses_before_migration_010(monkeypatch):
+    """The columns are the only place the spend lands. No columns, no spend."""
+    monkeypatch.setattr(fi, "clean_columns_available", lambda: False)
+    monkeypatch.setattr(fi.lot_channels, "fetch_detail",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("must not fetch")))
+    monkeypatch.setattr(fi.favorites, "get",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("must not read")))
+    lines = []
+    assert fi.mirror_favorite_photos("9685/56", log=lines.append, force=True) is None
+    assert "migration 010 not applied" in " ".join(lines)
+
+
+def test_clean_columns_available_never_caches_a_db_error(monkeypatch, caplog):
+    monkeypatch.undo()                      # drop the autouse stub for the real fn
+    calls = []
+
+    def boom(sql, params=None):
+        calls.append(params)
+        raise RuntimeError("pooler down")
+
+    monkeypatch.setattr(fi.db, "fetch_one", boom)
+    fi._clean_columns_present.cache_clear()
+    with caplog.at_level("WARNING"):
+        assert fi.clean_columns_available() is False
+    assert fi.clean_columns_available() is False
+    assert len(calls) == 2, "a failed lookup is retried, never memoised as False"
+    assert calls[0] == ("auction_favorites", "clean_hero_url")   # %s params, no f-string
+    assert "clean_*" in caplog.text
+    fi._clean_columns_present.cache_clear()
+
+
+def test_mirror_refuses_to_run_without_r2(monkeypatch):
+    """Supabase Storage is dead (402) — a fallback URL would 402 for every visitor."""
+    monkeypatch.setattr(fi.r2_images, "is_configured", lambda: False)
+    monkeypatch.setattr(fi.lot_channels, "fetch_detail",
+                        lambda *a: (_ for _ in ()).throw(AssertionError("must not fetch")))
+    with pytest.raises(RuntimeError, match="R2 not configured"):
+        fi.mirror_favorite_photos("9685/56", log=lambda *a: None, force=True)
+
+
+def test_mirror_safely_swallows_and_logs(monkeypatch, caplog):
+    """A BackgroundTask that raises tears down the request's task group."""
+    monkeypatch.setattr(fi, "mirror_favorite_photos",
+                        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("R2 not configured")))
+    with caplog.at_level("WARNING"):
+        assert fi.mirror_favorite_photos_safely("9685/56") is None
+    assert "favorite photo mirror failed for 9685/56" in caplog.text
+    assert "R2 not configured" in caplog.text
+
+
 def test_on_star_enabled_defaults_on_and_respects_env(monkeypatch):
     monkeypatch.delenv("FAVORITE_PHOTOS_ON_STAR", raising=False)
     assert fi.on_star_enabled() is True
@@ -95,6 +155,7 @@ def _cli(monkeypatch, argv, favs, results):
     """Run the CLI with fake favorites; `results` maps asset_id -> mirror return."""
     import sys
     from scripts import favorite_photos as cli
+    monkeypatch.setattr(cli.favorite_images, "clean_columns_available", lambda: True)
     monkeypatch.setattr(cli.favorites, "list_all", lambda: favs)
     monkeypatch.setattr(cli.favorite_images, "mirror_favorite_photos",
                         lambda asset_id, force=False: results.get(asset_id))
@@ -132,3 +193,25 @@ def test_cli_summary_counts_and_exit_codes(monkeypatch, capsys):
 
 def test_cli_empty_sweep_is_success(monkeypatch, capsys):
     assert _cli(monkeypatch, ["--all"], [], {}) == 0
+
+
+def test_cli_stops_before_the_sweep_when_migration_010_is_missing(monkeypatch, capsys):
+    import sys
+    from scripts import favorite_photos as cli
+    monkeypatch.setattr(cli.favorite_images, "clean_columns_available", lambda: False)
+    monkeypatch.setattr(cli.favorites, "list_all",
+                        lambda: (_ for _ in ()).throw(AssertionError("must not sweep")))
+    monkeypatch.setattr(sys, "argv", ["favorite_photos.py", "--all"])
+    assert cli.main() == 2
+    assert "migration 010 not applied" in capsys.readouterr().out
+
+
+def test_cli_dry_run_only_warns_when_migration_010_is_missing(monkeypatch, capsys):
+    import sys
+    from scripts import favorite_photos as cli
+    monkeypatch.setattr(cli.favorite_images, "clean_columns_available", lambda: False)
+    monkeypatch.setattr(cli.favorites, "list_all", lambda: [_Fav("1/2")])
+    monkeypatch.setattr(sys, "argv", ["favorite_photos.py", "--all", "--dry-run"])
+    assert cli.main() == 0
+    out = capsys.readouterr().out
+    assert "WARNING" in out and "migration 010 not applied" in out and "would mirror 1/2" in out

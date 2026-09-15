@@ -10,7 +10,7 @@
 Budget: each favorite is its own dewatermark run, so MAX_API_CALLS_PER_RUN (50)
 does NOT bound a sweep — only MAX_API_CALLS_PER_DAY (250) does, at up to 6 calls
 per favorite. Use --max-lots to bound a sweep yourself. Exit 2 if every attempted
-favorite failed.
+favorite failed, or 2 immediately if migration 010 has not been applied.
 """
 from __future__ import annotations
 
@@ -35,6 +35,16 @@ def main() -> int:
     ap.add_argument("--max-lots", type=int, default=None,
                     help="stop after N favorites (bounds the daily API spend)")
     a = ap.parse_args()
+    # The sweep ends in `set_clean_images`. Without migration 010 that write
+    # fails after every dewatermark call is already paid for, so check first —
+    # and exit non-zero so the operator (or a cron) actually sees why.
+    if not favorite_images.clean_columns_available():
+        msg = ("auction_favorites.clean_* missing — migration 010 not applied "
+               "(scripts/sql/010_favorites_clean_images.sql)")
+        if not a.dry_run:
+            print(msg)
+            return 2
+        print(f"WARNING: {msg}")
     targets = [a.asset] if a.asset else [
         f.asset_id for f in favorites.list_all()
         if favorite_images.r2_key(f.asset_id) and (a.force or not f.clean_hero_url)]

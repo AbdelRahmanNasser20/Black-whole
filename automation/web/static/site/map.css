@@ -34,6 +34,9 @@
 .map-empty { padding: var(--pad); border: 1px dashed var(--border); color: var(--muted); }
 .map-status { min-height: 1em; color: var(--muted); }
 .map-status[data-state="ready"] { display: none; }
+.map-status:has(.map-notice) { display: block; }   /* a notice outranks the "ready" hide */
+.map-notice { padding: 8px var(--pad); margin-bottom: 8px; color: var(--text);
+  border: 1px solid var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
 
 .map-pop img { width: 100%; height: 120px; object-fit: cover; display: block; margin-bottom: 6px; }
 .map-pop-title { font-weight: 600; margin-bottom: 2px; }

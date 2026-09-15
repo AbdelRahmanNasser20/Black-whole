@@ -63,7 +63,7 @@ export async function mountSiteMap(el, opts = {}) {
     status: new Set(opts.status || readStatus(el)),
     near: opts.near ?? el.dataset.near ?? '',
     radius: opts.radius ?? el.dataset.radius ?? '',
-    points: [], all: [],
+    points: [], all: [], notice: '',
   };
   // Only needed when there is no side list — it is load()'s target then. Never create
   // one beside a list: on /map the map and the list are siblings in a 2-column grid and
@@ -74,6 +74,10 @@ export async function mountSiteMap(el, opts = {}) {
   const map = await AdminMap.mount(el, { tiles: el.dataset.tiles || 'light' });
   el.classList.remove('map-loading');
 
+  // A `near` the server could not place: say so. Silently showing every lot
+  // reads as "there is nothing near you", which is the opposite of the truth.
+  const noticeHtml = () => (state.notice ? `<div class="map-notice mono tiny">${state.notice}</div>` : '');
+
   const render = () => {
     const pts = state.all.filter(p => state.status.has(p.bucket));
     state.points = pts;
@@ -82,8 +86,8 @@ export async function mountSiteMap(el, opts = {}) {
     if (countEl) countEl.textContent = `${pts.length} lot${pts.length === 1 ? '' : 's'}`;
     if (listEl) {
       listEl.dataset.state = pts.length ? 'ready' : 'empty';
-      listEl.innerHTML = pts.length ? pts.map(listItemHtml).join('')
-        : '<div class="map-empty"><div class="display">Nothing here yet</div><p>Widen the radius or turn on Sold.</p></div>';
+      listEl.innerHTML = noticeHtml() + (pts.length ? pts.map(listItemHtml).join('')
+        : '<div class="map-empty"><div class="display">Nothing here yet</div><p>Widen the radius or turn on Sold.</p></div>');
     }
   };
 
@@ -99,11 +103,15 @@ export async function mountSiteMap(el, opts = {}) {
     return load(target, ({ signal }) => api(url, { signal }), {
       skeleton: listEl ? 'card' : 'line', count: listEl ? 3 : 1, keepOld: !!listEl,
       render: (d) => {
+        const unresolved = !!(d.near && d.near.resolved === false);
+        state.notice = unresolved
+          ? `We couldn't find "${esc(d.near.label)}" — showing every lot.` : '';
         state.all = d.points || []; render();
-        if (d.near) map.leaflet.setView([d.near.lat, d.near.lng], state.radius ? 6 : 5);
+        // Never re-centre on a place we could not find — there is nowhere to go.
+        if (d.near && !unresolved) map.leaflet.setView([d.near.lat, d.near.lng], state.radius ? 6 : 5);
         else if (!el.dataset.focusLat) map.fit();
         if (opts.onOrigin) opts.onOrigin(d.near);
-        return listEl ? undefined : '';          // clear the status skeleton; the list rendered itself
+        return listEl ? undefined : noticeHtml();   // the list rendered itself
       },
       isEmpty: () => false,
     });

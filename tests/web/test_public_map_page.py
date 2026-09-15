@@ -53,6 +53,12 @@ def test_points_default_statuses_and_params(client):
     assert client.seen == {"statuses": {"available", "sold"}, "near": "Boise, ID", "radius_mi": 200.0}
 
 
+def test_points_are_cacheable(client):
+    """Public, identical for everyone, already memoised server-side — let the
+    browser and any CDN hold it instead of re-asking on every page."""
+    assert client.get("/map/api/points").headers["cache-control"] == "public, max-age=120"
+
+
 def test_points_rejects_unknown_bucket(client):
     assert client.get("/map/api/points?status=secret").status_code == 400
 
@@ -103,3 +109,29 @@ def test_listing_detail_shows_nearby(monkeypatch):
     assert 'id="lot-map"' in html and 'data-focus-lat="43.6"' in html
     assert "1 other lot within 200 mi" in html and 'href="/listings/gd-3-4"' in html
     assert "gate 4321" not in html and "storage_note" not in html
+
+
+def test_listing_detail_isolated_lot_keeps_the_map_without_the_label(monkeypatch):
+    """"0 other lots within 200 mi" reads as a dead region — show only the map."""
+    row = {"lot_id": "gd-1-2", "title": "500 chairs", "status": "owned", "quantity_remaining": 500,
+           "city": "Boise", "state": "ID", "hero_image_url": None, "image_urls": [], "locations": None,
+           "price_per_chair": 25, "storage_note": "gate 4321"}
+    monkeypatch.setattr(app_mod.inventory, "get", lambda lot_id: dict(row))
+    monkeypatch.setattr(app_mod.public_map, "nearby", lambda lot_id, **k: {
+        "origin": {"lat": 43.6, "lng": -116.2, "precision": "city"}, "items": []})
+    html = TestClient(app).get("/listings/gd-1-2").text
+    assert 'id="lot-map"' in html and 'data-focus-lat="43.6"' in html
+    assert "within 200 mi" not in html
+
+
+def test_listing_detail_single_unit_is_not_pluralised(monkeypatch):
+    row = {"lot_id": "gd-1-2", "title": "500 chairs", "status": "owned", "quantity_remaining": 500,
+           "city": "Boise", "state": "ID", "hero_image_url": None, "image_urls": [], "locations": None,
+           "price_per_chair": 25}
+    monkeypatch.setattr(app_mod.inventory, "get", lambda lot_id: dict(row))
+    monkeypatch.setattr(app_mod.public_map, "nearby", lambda lot_id, **k: {
+        "origin": {"lat": 43.6, "lng": -116.2, "precision": "city"},
+        "items": [{**POINT, "lot_id": "gd-3-4", "url": "/listings/gd-3-4", "quantity": 1,
+                   "title": "1 chair", "distance_mi": 42.0}]})
+    html = TestClient(app).get("/listings/gd-1-2").text
+    assert "1 CHAIR" in html and "1 CHAIRS" not in html

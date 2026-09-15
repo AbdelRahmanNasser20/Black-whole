@@ -17,7 +17,7 @@ APP = Path(__file__).resolve().parents[2] / "automation" / "web" / "app.py"
 # Names whose attribute-calls do synchronous I/O (psycopg or filesystem).
 _SYNC_IO = re.compile(
     r"^(inventory|db|tracking_store|favorites|profiles|lot_channels|catalog_feed|"
-    r"public_deals|_auctions_cache_stats)\.\w+\($|"
+    r"public_deals|public_map|_auctions_cache_stats)\.\w+\($|"
     r"^(_all_compare_rows|_list_listing_folders|_folder_images|_tracking_pass|"
     r"_alerts_collect_due|_deals_facets_and_stats|get_top_lots|_folder_meta)\($"
 )

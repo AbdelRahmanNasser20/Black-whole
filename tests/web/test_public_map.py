@@ -82,9 +82,29 @@ def test_unresolvable_place_is_dropped():
     assert pm.points_from_inventory([_row(city="Nowhere", state=None)]) == []
 
 
+def test_unresolvable_lot_is_logged_and_counted(monkeypatch, caplog):
+    """A pin that silently vanishes is a lot nobody can find and nothing to grep."""
+    pm.readcache.invalidate_all()
+    monkeypatch.setattr(pm.inventory, "list_public",
+                        lambda: [_row(city="Nowhere", state=None)])
+    monkeypatch.setattr(pm.inventory, "list_sold_showcase", lambda: [])
+    monkeypatch.setattr(pm.favorites_mod, "list_all", lambda: [])
+    with caplog.at_level("WARNING"):
+        out = pm.fetch_points()
+    assert out["points"] == [] and out["unmapped"] == 1
+    assert "no coordinates for gd-1-2" in caplog.text
+    pm.readcache.invalidate_all()
+
+
+def test_unresolvable_favorite_logs_the_hashed_id_not_the_asset_id(caplog):
+    with caplog.at_level("WARNING"):
+        assert pm.points_from_favorites([_fav(location="Nowhere")]) == []
+    assert f"fav-{FAV_KEY}" in caplog.text and "9685/56" not in caplog.text
+
+
 def _fav(**kw):
     base = dict(asset_id="9685/56", link="https://www.govdeals.com/en/asset/9685/56",
-                title="Lot of 2,500 banquet chairs", quantity=2500, end_date_iso="2099-01-01T00:00:00+00:00",
+                title="LOT of ~2500 Wire Frame Linkable CHAIRS", quantity=2500, end_date_iso="2099-01-01T00:00:00+00:00",
                 end_date_raw=None, image_url="https://cdn.govdeals.com/raw.jpg", location="Pittsburgh, PA",
                 starred_at="2026-09-14", last_synced_at="2026-09-14", notes=None, sent_intervals=[],
                 clean_hero_url=FAV_HERO, clean_image_urls=[])
@@ -93,17 +113,30 @@ def _fav(**kw):
 
 
 def test_favorite_is_redacted_incoming():
-    p = pm.points_from_favorites([_fav()])[0]
+    fav = _fav()
+    p = pm.points_from_favorites([fav])[0]
     assert set(p) <= pm.POINT_KEYS
     assert p["kind"] == "favorite" and p["bucket"] == "incoming"
     assert p["hero"] == FAV_HERO and p["url"] == "/#contact"
+    # The auction's own title is a GovDeals search query: pasting it finds the
+    # lot we are still bidding on. The pin carries a synthesised one.
+    assert p["title"] != fav.title
+    assert "Wire Frame" not in p["title"]
+    assert p["title"] == "~2,500 chairs — incoming"
+    assert p["unit"] == "CHAIR"
     flat = " ".join(str(v) for v in p.values())
     assert "govdeals" not in flat.lower() and "raw.jpg" not in flat
     # Nothing the public sees spells the asset id — not the pin id, not the
-    # photo URL — or the GovDeals listing is reconstructable from the map.
+    # photo URL, and (since the title is synthesised) no auction word either —
+    # or the GovDeals listing is reconstructable from the map.
     assert p["id"] == f"fav-{FAV_KEY}" and len(p["id"]) == 16
     for token in ("9685", "56"):
         assert not re.search(rf"(?<![0-9a-f]){token}(?![0-9a-f])", flat), token
+
+
+def test_favorite_without_quantity_still_gets_a_synthetic_title():
+    p = pm.points_from_favorites([_fav(quantity=None, title="Pallet of TABLES")])[0]
+    assert p["title"] == "Table lot — incoming" and p["unit"] == "TABLE"
 
 
 def test_favorite_without_clean_photo_has_no_hero():
@@ -148,6 +181,24 @@ def test_fetch_points_filters_and_near(monkeypatch):
     assert [p["lot_id"] for p in far["points"]] == ["gd-1-2"]
     # The legend counts what is inside the radius, not what the checkboxes let through.
     assert far["counts"] == {"available": 1, "incoming": 0, "sold": 0}
+
+
+def test_unresolved_near_is_reported_not_swallowed(monkeypatch):
+    """An unfindable town must not read as "we have no lots near you"."""
+    rows = [_row(), _row(lot_id="gd-3-4", city="Atlanta", state="GA")]
+    monkeypatch.setattr(pm, "all_points", lambda: pm.points_from_inventory(rows))
+    monkeypatch.setattr(pm.geo, "parse_place", lambda t: (None, None, None))
+    out = pm.fetch_points(statuses=None, near="Nowhereville", radius_mi=50)
+    assert out["near"] == {"label": "Nowhereville", "resolved": False,
+                           "lat": None, "lng": None}
+    assert len(out["points"]) == 2                       # radius never applied
+    assert all("distance_mi" not in p for p in out["points"])
+
+
+def test_resolved_near_says_so(monkeypatch):
+    monkeypatch.setattr(pm, "all_points", lambda: pm.points_from_inventory([_row()]))
+    monkeypatch.setattr(pm.geo, "parse_place", lambda t: ("Boise", "ID", None))
+    assert pm.fetch_points(near="Boise, ID")["near"]["resolved"] is True
 
 
 def test_nearby_excludes_self_and_sold(monkeypatch):
