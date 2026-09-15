@@ -22,7 +22,22 @@ class _FakeNominatim:
                 "latitude": [43.60, 43.63],
                 "longitude": [-116.27, -116.20],
             })
+        if name.lower() == "charleston":
+            # A name shared by many states: pgeocode ranks 30 other Charlestons
+            # above the West Virginia one, which is the row we actually want.
+            others = ["SC", "IL", "MO", "AR", "MS", "OH", "ME"] * 5
+            return self._truncate(pd.DataFrame({
+                "place_name": ["Charleston"] * 31,
+                "state_code": others[:30] + ["WV"],
+                "latitude": [32.0] * 30 + [38.35],
+                "longitude": [-79.9] * 30 + [-81.63],
+            }), top_k)
         return pd.DataFrame(columns=["place_name", "state_code", "latitude", "longitude"])
+
+    @staticmethod
+    def _truncate(df, top_k):
+        """Real pgeocode returns at most top_k rows, best fuzzy score first."""
+        return df.head(top_k)
 
     def query_postal_code(self, code):
         return pd.Series({"latitude": 43.6322, "longitude": -116.2052}) if code == "83702" \
@@ -94,3 +109,10 @@ def test_full_state_name_still_pins_the_city():
 
 def test_full_state_name_falls_back_to_state_centroid():
     assert geo.resolve_latlon(None, "Pennsylvania")[2] == "state"
+
+
+def test_shared_city_name_looks_past_the_first_25_candidates():
+    """Charleston exists in a dozen states; WV must not fall off the candidate list."""
+    lat, lng, prec = geo.resolve_place("Charleston", "WV", None)
+    assert prec == "city"
+    assert (round(lat, 2), round(lng, 2)) == (38.35, -81.63)

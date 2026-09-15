@@ -165,7 +165,11 @@ def city_latlon(city: str | None, state: str | None) -> tuple[float, float] | No
     if nomi is None:
         return None
     try:
-        df = nomi.query_location(name, top_k=25)
+        # top_k is a hard cap on candidates, ranked by pgeocode's fuzzy score.
+        # A name shared across many states ("Charleston", "Springfield") can push
+        # the state we want past a small cap, costing the pin; 200 is wide enough
+        # and costs nothing — the exact state+name filter below does the real work.
+        df = nomi.query_location(name, top_k=200)
     except Exception:  # noqa: BLE001 — pgeocode raises on odd input; treat as miss
         return None
     if df is None or df.empty:
