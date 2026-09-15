@@ -76,11 +76,59 @@ def test_mirror_skips_non_govdeals_favorite(monkeypatch):
 def test_on_star_enabled_defaults_on_and_respects_env(monkeypatch):
     monkeypatch.delenv("FAVORITE_PHOTOS_ON_STAR", raising=False)
     assert fi.on_star_enabled() is True
-    monkeypatch.setenv("FAVORITE_PHOTOS_ON_STAR", "0")
-    assert fi.on_star_enabled() is False
+    for off in ("0", " 0 ", "False", "NO", "off", ""):
+        monkeypatch.setenv("FAVORITE_PHOTOS_ON_STAR", off)
+        assert fi.on_star_enabled() is False, off
+    monkeypatch.setenv("FAVORITE_PHOTOS_ON_STAR", "1")
+    assert fi.on_star_enabled() is True
 
 
 def test_mirror_never_uses_raw_image_url():
     """The favorite's own image_url is the watermarked CDN file — never the source of a public photo."""
     src = open(fi.__file__).read()
     assert "image_url" not in src.replace("clean_image_urls", "").replace("hero_image_url", "").replace("image_urls", "")
+
+
+# ─── scripts/favorite_photos.py ───
+
+def _cli(monkeypatch, argv, favs, results):
+    """Run the CLI with fake favorites; `results` maps asset_id -> mirror return."""
+    import sys
+    from scripts import favorite_photos as cli
+    monkeypatch.setattr(cli.favorites, "list_all", lambda: favs)
+    monkeypatch.setattr(cli.favorite_images, "mirror_favorite_photos",
+                        lambda asset_id, force=False: results.get(asset_id))
+    monkeypatch.setattr(sys, "argv", ["favorite_photos.py", *argv])
+    return cli.main()
+
+
+class _Fav:
+    def __init__(self, asset_id, clean_hero_url=None):
+        self.asset_id, self.clean_hero_url = asset_id, clean_hero_url
+
+
+def test_cli_skips_favorites_that_already_have_photos(monkeypatch, capsys):
+    favs = [_Fav("1/2"), _Fav("3/4", "https://r2/x.jpg"), _Fav("ps:9")]
+    assert _cli(monkeypatch, ["--all", "--dry-run"], favs, {}) == 0
+    out = capsys.readouterr().out
+    assert "1 favorite(s)" in out and "would mirror 1/2" in out and "3/4" not in out
+
+
+def test_cli_max_lots_bounds_the_sweep(monkeypatch, capsys):
+    favs = [_Fav(f"{i}/1") for i in range(5)]
+    assert _cli(monkeypatch, ["--all", "--dry-run", "--max-lots", "2"], favs, {}) == 0
+    assert capsys.readouterr().out.count("would mirror") == 2
+
+
+def test_cli_summary_counts_and_exit_codes(monkeypatch, capsys):
+    favs = [_Fav("1/2"), _Fav("3/4")]
+    ok = {"hero_image_url": "h", "image_urls": ["a", "b"]}
+    assert _cli(monkeypatch, ["--all"], favs, {"1/2": ok}) == 0
+    assert "mirrored 1" in capsys.readouterr().out
+    # every attempt failed → non-zero, so a cron/operator notices
+    assert _cli(monkeypatch, ["--all"], favs, {}) == 2
+    assert "failed 2" in capsys.readouterr().out
+
+
+def test_cli_empty_sweep_is_success(monkeypatch, capsys):
+    assert _cli(monkeypatch, ["--all"], [], {}) == 0

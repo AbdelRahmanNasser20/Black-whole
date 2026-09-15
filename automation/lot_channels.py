@@ -339,12 +339,16 @@ def clean_and_upload(key: str, urls: list[str], log: Log = _print, *,
     Does NOT touch inventory — callers stamp the returned URLs where they belong
     (`mirror_photos` -> `inventory`, `favorite_images` -> `auction_favorites`).
 
-    `strict=True` refuses to publish a photo the API could not clean: anything
-    left in `_originals/` is dropped, and `None` comes back if nothing clean
-    remains. Non-strict keeps today's behaviour (a kept original still ships).
+    A watermarked photo is never published, on any path: `dewatermark()` archives
+    every original into `_originals/` and returns only what it actually cleaned,
+    so a failure is a *missing* file, and if nothing came back this returns None.
+    `strict=True` adds the belt: it refuses `dewatermark=False` (raw seller photos
+    could not otherwise be ruled out) and asserts nothing archived slips through.
     """
     import asyncio
     import httpx
+    if strict and not dewatermark:
+        raise ValueError("strict requires dewatermark=True — raw seller photos carry the watermark")
     urls = list(urls or [])[:limit] if limit else list(urls or [])
     if not urls:
         return None
@@ -372,18 +376,22 @@ def clean_and_upload(key: str, urls: list[str], log: Log = _print, *,
         from . import dewatermark as dw
         _phase("dewatermark", "running", lot_id=key)
         cleaned = asyncio.run(dw.dewatermark(None, files, folder, lot_label=key))
-        dirty = [c for c in cleaned if c.parent.name == "_originals"]
-        if dirty:
-            log(f"  ! {len(dirty)}/{len(files)} photos still watermarked (API failed) — "
-                + ("dropped" if strict else "kept originals"))
-        _phase("dewatermark", "done", cleaned=len(cleaned) - len(dirty), files=len(files))
-        log(f"  ✓ dewatermarked {len(cleaned) - len(dirty)}/{len(files)} via dewatermark.ai")
         if strict:
-            files = [c for c in cleaned if c.parent.name != "_originals"]
-            if not files:
-                return None
-        else:
-            files = cleaned or files
+            assert all(c.parent.name != "_originals" for c in cleaned), \
+                "dewatermark() returned an archived original — never publish it"
+        cleaned = [c for c in cleaned if c.parent.name != "_originals"]
+        failed_n = len(files) - len(cleaned)
+        _phase("dewatermark", "done", cleaned=len(cleaned), files=len(files))
+        log(f"  ✓ dewatermarked {len(cleaned)}/{len(files)} via dewatermark.ai")
+        if failed_n:
+            log(f"  ! {failed_n}/{len(files)} photos could not be cleaned (API failed) — dropped")
+        if not cleaned:
+            log("  ! nothing clean to publish — the originals stay in _originals/")
+            return None
+        # `dewatermark()` returns paths in cache-layer order, and
+        # `upload_lot_images` makes file 0 the hero — put the gallery back in
+        # download order (stems are 00, 01, …) so the hero is photo one.
+        files = sorted(cleaned, key=lambda p: p.stem)
     return listing_images.upload_lot_images(key, files)
 
 

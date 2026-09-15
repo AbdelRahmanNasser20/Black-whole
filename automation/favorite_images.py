@@ -68,4 +68,4 @@ def mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> 
 
 def on_star_enabled() -> bool:
     """`FAVORITE_PHOTOS_ON_STAR=0` turns the star route's background mirror off."""
-    return os.environ.get("FAVORITE_PHOTOS_ON_STAR", "1") not in ("0", "false", "no")
+    return os.environ.get("FAVORITE_PHOTOS_ON_STAR", "1").strip().lower() not in ("0", "false", "no", "off", "")
