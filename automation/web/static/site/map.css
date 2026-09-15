@@ -1,0 +1,53 @@
+/* static/site/map.css — public map surfaces. Colours are tokens only (test_no_hardcoded_hex_outside_tokens). */
+.site-map { min-height: 320px; border: 1px solid var(--border); background: var(--surface-2); }
+.site-map--full { min-height: max(480px, calc(100vh - 260px)); }
+.site-map--home { min-height: 360px; }
+.site-map--mini { min-height: 240px; }
+.map-loading { background: linear-gradient(90deg, var(--sk-a), var(--sk-b), var(--sk-a)); background-size: 200% 100%; animation: mapsk 1.2s linear infinite; }
+@keyframes mapsk { to { background-position: -200% 0; } }
+
+/* pin colours by bucket — admin_map.js adds .amap-pin; we add .b-<bucket> via p.cls */
+.amap-pin.b-available { background: var(--accent); border-color: var(--border); }
+.amap-pin.b-incoming  { background: var(--info);   border-color: var(--border); }
+.amap-pin.b-sold      { background: var(--muted);  border-color: var(--border); opacity: .75; }
+
+.map-split { display: grid; grid-template-columns: 7fr 3fr; gap: var(--gap); align-items: start; }
+.map-list { display: grid; gap: var(--gap); max-height: max(480px, calc(100vh - 260px)); overflow: auto; }
+.map-item { display: grid; grid-template-columns: 72px 1fr; gap: var(--gap); padding: var(--pad); border: 1px solid var(--border); background: var(--surface); color: var(--text); text-decoration: none; border-left-width: 4px; }
+.map-item.b-available { border-left-color: var(--accent); }
+.map-item.b-incoming  { border-left-color: var(--info); }
+.map-item.b-sold      { border-left-color: var(--muted); opacity: .8; }
+.map-item img, .map-item-noimg { width: 72px; height: 54px; object-fit: cover; background: var(--surface-2); display: block; }
+.map-item-body { display: grid; gap: 2px; }
+.map-item-title { font-weight: 600; }
+.map-empty { padding: var(--pad); border: 1px dashed var(--border); color: var(--muted); }
+.map-status { min-height: 1em; color: var(--muted); }
+.map-status[data-state="ready"] { display: none; }
+
+.map-pop img { width: 100%; height: 120px; object-fit: cover; display: block; margin-bottom: 6px; }
+.map-pop-title { font-weight: 600; margin-bottom: 2px; }
+.map-pop a { display: inline-block; margin-top: 6px; color: var(--accent); }
+
+.map-filters .seg-btn { border: 1px solid var(--border); background: var(--surface); color: var(--muted); padding: 6px 10px; font: inherit; cursor: pointer; }
+.map-filters .seg-btn.on { color: var(--text); background: var(--surface-2); border-bottom: 3px solid var(--accent); }
+.map-filters .seg-btn.b-incoming.on { border-bottom-color: var(--info); }
+.map-filters .seg-btn.b-sold.on { border-bottom-color: var(--muted); }
+.filter-group--grow { flex: 1 1 240px; }
+
+.home-map-band { display: grid; gap: var(--gap); }
+.home-map-search { display: flex; gap: var(--gap); flex-wrap: wrap; align-items: center; }
+.home-map-search input[type="search"] { flex: 1 1 260px; padding: 10px 12px; border: 1px solid var(--border); background: var(--surface); font: inherit; }
+.map-legend { display: flex; gap: var(--gap); flex-wrap: wrap; }
+.map-legend i { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border: 1px solid var(--border); }
+.map-legend .b-available i { background: var(--accent); }
+.map-legend .b-incoming i { background: var(--info); }
+.map-legend .b-sold i { background: var(--muted); }
+
+.nearby { margin-top: var(--gap); display: grid; gap: var(--gap); }
+.nearby-list { display: grid; gap: 6px; }
+
+@media (max-width: 1024px) {
+  .map-split { grid-template-columns: 1fr; }
+  .site-map--full { min-height: 50vh; }
+  .map-list { max-height: none; }
+}
