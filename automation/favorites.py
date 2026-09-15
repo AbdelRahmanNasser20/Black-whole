@@ -14,8 +14,9 @@ re-fires.
 """
 from __future__ import annotations
 
+import json
 import warnings
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Iterable
 
@@ -128,12 +129,22 @@ class Favorite:
     last_synced_at: str
     notes: str | None
     sent_intervals: list[str]
+    # Dewatermarked R2 copies (migration 010). The raw GovDeals ``image_url``
+    # is never shown publicly; these are what the public map renders.
+    clean_hero_url: str | None = None
+    clean_image_urls: list[str] = field(default_factory=list)
+
+    @property
+    def is_private(self) -> bool:
+        """`#private` anywhere in notes keeps this favorite off the public map."""
+        return "#private" in (self.notes or "").lower()
 
     def to_dict(self) -> dict:
         d = {k: getattr(self, k) for k in (
             "asset_id", "link", "title", "quantity", "end_date_iso",
             "end_date_raw", "image_url", "location", "starred_at",
             "last_synced_at", "notes", "sent_intervals",
+            "clean_hero_url", "clean_image_urls",
         )}
         # Add a derived seconds_until_end so the UI doesn't have to re-parse.
         end_dt = self.end_dt
@@ -166,7 +177,22 @@ def _row_to_favorite(row: dict, sent: list[str]) -> Favorite:
         last_synced_at=row["last_synced_at"],
         notes=row["notes"],
         sent_intervals=sent,
+        # ``.get`` on purpose: before migration 010 is applied these columns
+        # are absent, and that must degrade to "no photo", never a KeyError.
+        clean_hero_url=row.get("clean_hero_url"),
+        clean_image_urls=list(row.get("clean_image_urls") or []),
     )
+
+
+def set_clean_images(asset_id: str, hero_url: str | None, image_urls: list[str]) -> None:
+    """Stamp the dewatermarked R2 copies (automation/favorite_images.py). Fails loud
+    if migration 010 is not applied — that is the CLI's problem, not the site's."""
+    with inventory.connect() as conn:
+        conn.execute(
+            "UPDATE auction_favorites SET clean_hero_url = %s, clean_image_urls = %s::jsonb, "
+            "clean_images_at = now() WHERE asset_id = %s",
+            (hero_url, json.dumps(list(image_urls or [])), asset_id),
+        )
 
 
 def _sent_intervals(conn, asset_id: str) -> list[str]:
