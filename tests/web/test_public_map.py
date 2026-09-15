@@ -1,5 +1,6 @@
 # tests/web/test_public_map.py
 """Public map read model: buckets, allow-list, multi-location pins, favorites redaction, nearby."""
+import hashlib
 import re
 
 import pytest
@@ -10,6 +11,11 @@ from automation.web import public_map as pm
 PRIVATE = ("storage_note", "govdeals_username", "govdeals_password", "contact_email",
            "contact_phone", "buyer_cert_path", "folder_path", "seller_id", "zip_code",
            "image_url", "link", "asset_id", "end_date_iso", "notes")
+
+# Task 8 names the dewatermarked R2 object after the same opaque key this module
+# uses for the pin id, so no public string ever spells the GovDeals asset id.
+FAV_KEY = hashlib.sha256(b"9685/56").hexdigest()[:12]
+FAV_HERO = f"https://r2/fav-{FAV_KEY}.jpg"
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +73,11 @@ def test_multi_location_lot_yields_one_pin_per_place():
     assert pts[0]["id"] != pts[1]["id"]
 
 
+def test_free_lot_keeps_a_zero_price():
+    p = pm.points_from_inventory([_row(price_per_chair=0)])[0]
+    assert p["price_per_chair"] == 0.0
+
+
 def test_unresolvable_place_is_dropped():
     assert pm.points_from_inventory([_row(city="Nowhere", state=None)]) == []
 
@@ -76,7 +87,7 @@ def _fav(**kw):
                 title="Lot of 2,500 banquet chairs", quantity=2500, end_date_iso="2099-01-01T00:00:00+00:00",
                 end_date_raw=None, image_url="https://cdn.govdeals.com/raw.jpg", location="Pittsburgh, PA",
                 starred_at="2026-09-14", last_synced_at="2026-09-14", notes=None, sent_intervals=[],
-                clean_hero_url="https://r2/fav-9685-56.jpg", clean_image_urls=[])
+                clean_hero_url=FAV_HERO, clean_image_urls=[])
     base.update(kw)
     return fav_mod.Favorite(**base)
 
@@ -85,17 +96,14 @@ def test_favorite_is_redacted_incoming():
     p = pm.points_from_favorites([_fav()])[0]
     assert set(p) <= pm.POINT_KEYS
     assert p["kind"] == "favorite" and p["bucket"] == "incoming"
-    assert p["hero"] == "https://r2/fav-9685-56.jpg" and p["url"] == "/#contact"
+    assert p["hero"] == FAV_HERO and p["url"] == "/#contact"
     flat = " ".join(str(v) for v in p.values())
     assert "govdeals" not in flat.lower() and "raw.jpg" not in flat
-    # The pin id is opaque: no piece of the asset id survives in a field this
-    # module builds, or the GovDeals URL is reconstructable from the map.
-    # (`hero` is excluded: the R2 filename is minted upstream and still spells
-    # the asset id — tracked separately, not something this module can fix.)
-    minted = " ".join(str(v) for k, v in p.items() if k != "hero")
-    assert p["id"].startswith("fav-") and len(p["id"]) == 16
+    # Nothing the public sees spells the asset id — not the pin id, not the
+    # photo URL — or the GovDeals listing is reconstructable from the map.
+    assert p["id"] == f"fav-{FAV_KEY}" and len(p["id"]) == 16
     for token in ("9685", "56"):
-        assert not re.search(rf"(?<![0-9a-f]){token}(?![0-9a-f])", minted), token
+        assert not re.search(rf"(?<![0-9a-f]){token}(?![0-9a-f])", flat), token
 
 
 def test_favorite_without_clean_photo_has_no_hero():
