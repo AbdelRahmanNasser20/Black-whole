@@ -1,5 +1,7 @@
 # tests/web/test_public_map.py
 """Public map read model: buckets, allow-list, multi-location pins, favorites redaction, nearby."""
+import re
+
 import pytest
 
 from automation import favorites as fav_mod
@@ -40,6 +42,7 @@ def _row(**kw):
     (_row(status="owned", fake_sold_out=True), "sold"),
     (_row(status="hidden"), None),
     (_row(status="lost"), None),
+    (_row(status="hidden", fake_sold_out=True), None),
 ])
 def test_bucket(row, expect):
     assert pm.bucket(row) == expect
@@ -83,9 +86,16 @@ def test_favorite_is_redacted_incoming():
     assert set(p) <= pm.POINT_KEYS
     assert p["kind"] == "favorite" and p["bucket"] == "incoming"
     assert p["hero"] == "https://r2/fav-9685-56.jpg" and p["url"] == "/#contact"
-    assert "9685" not in p["id"] or True  # id may embed the key; the assertions below are the rule
     flat = " ".join(str(v) for v in p.values())
     assert "govdeals" not in flat.lower() and "raw.jpg" not in flat
+    # The pin id is opaque: no piece of the asset id survives in a field this
+    # module builds, or the GovDeals URL is reconstructable from the map.
+    # (`hero` is excluded: the R2 filename is minted upstream and still spells
+    # the asset id — tracked separately, not something this module can fix.)
+    minted = " ".join(str(v) for k, v in p.items() if k != "hero")
+    assert p["id"].startswith("fav-") and len(p["id"]) == 16
+    for token in ("9685", "56"):
+        assert not re.search(rf"(?<![0-9a-f]){token}(?![0-9a-f])", minted), token
 
 
 def test_favorite_without_clean_photo_has_no_hero():
@@ -108,6 +118,8 @@ def test_fetch_points_filters_and_near(monkeypatch):
     assert out["near"]["label"] == "Boise, ID" and out["points"][0]["distance_mi"] == 0.0
     far = pm.fetch_points(statuses=None, near="Boise, ID", radius_mi=100)
     assert [p["lot_id"] for p in far["points"]] == ["gd-1-2"]
+    # The legend counts what is inside the radius, not what the checkboxes let through.
+    assert far["counts"] == {"available": 1, "incoming": 0, "sold": 0}
 
 
 def test_nearby_excludes_self_and_sold(monkeypatch):
@@ -119,3 +131,34 @@ def test_nearby_excludes_self_and_sold(monkeypatch):
     assert [p["lot_id"] for p in out["items"]] == []          # Boise is > 200 mi, sold excluded
     out = pm.nearby("gd-3-4", miles=5000)
     assert [p["lot_id"] for p in out["items"]] == ["gd-1-2"]
+
+
+def test_nearby_collapses_a_multi_location_lot_to_its_nearest_pin(monkeypatch):
+    rows = [_row(),
+            _row(lot_id="gd-3-4", city="Atlanta", state="GA",
+                 locations=[{"city": "Atlanta", "state": "GA", "quantity": 100},
+                            {"city": "Pittsburgh", "state": "PA", "quantity": 100}])]
+    monkeypatch.setattr(pm, "all_points", lambda: pm.points_from_inventory(rows))
+    out = pm.nearby("gd-1-2", miles=5000)
+    assert [p["lot_id"] for p in out["items"]] == ["gd-3-4"]     # one slot, not two
+    assert out["items"][0]["city"] == "Atlanta"                  # the nearer of its two pins
+
+
+def test_all_points_dedupes_lots_merges_favorites_and_survives_a_favorites_outage(monkeypatch):
+    pm.readcache.invalidate_all()
+    sold = _row(lot_id="gd-9-9", city="Atlanta", state="GA", status="sold_out")
+    monkeypatch.setattr(pm.inventory, "list_public", lambda: [_row(), sold])
+    monkeypatch.setattr(pm.inventory, "list_sold_showcase", lambda: [sold])
+    monkeypatch.setattr(pm.favorites_mod, "list_all", lambda: [_fav()])
+    pts = pm.all_points()
+    assert [p["lot_id"] for p in pts if p["kind"] == "lot"] == ["gd-1-2", "gd-9-9"]
+    assert [p["kind"] for p in pts].count("favorite") == 1
+
+    def boom():
+        raise RuntimeError("favorites table gone")
+
+    pm.readcache.invalidate_all()
+    monkeypatch.setattr(pm.favorites_mod, "list_all", boom)
+    pts = pm.all_points()
+    assert [p["lot_id"] for p in pts] == ["gd-1-2", "gd-9-9"]
+    pm.readcache.invalidate_all()

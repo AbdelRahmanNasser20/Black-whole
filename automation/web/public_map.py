@@ -12,6 +12,8 @@ Rules (tests enforce them):
 """
 from __future__ import annotations
 
+import hashlib
+import logging
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -20,9 +22,12 @@ from automation import inventory, lot_channels, lot_images
 from automation.alerts import geo
 from automation.web import readcache
 
+log = logging.getLogger(__name__)
+
 BUCKETS = ("available", "incoming", "sold")
 INCOMING_STATUSES = frozenset({"won_pickup", "active_bid"})
 AVAILABLE_STATUSES = frozenset({"listed", "owned", "draft"})
+HIDDEN_STATUSES = frozenset({"hidden", "lost"})
 POINT_KEYS = frozenset({
     "id", "kind", "lot_id", "title", "bucket", "quantity", "unit", "price_per_chair",
     "city", "state", "lat", "lng", "precision", "hero", "url",
@@ -33,6 +38,10 @@ CACHE_TTL = 300
 def bucket(row: dict) -> str | None:
     row = row or {}
     status = row.get("status")
+    if status in HIDDEN_STATUSES:
+        # Off the map entirely — `fake_sold_out` must never resurrect a
+        # deliberately hidden or lost lot as a "sold" trophy pin.
+        return None
     if status in inventory.SOLD_STATUSES or row.get("fake_sold_out"):
         return "sold"
     if status in INCOMING_STATUSES:
@@ -90,7 +99,8 @@ def points_from_inventory(rows: Iterable[dict]) -> list[dict]:
                 id=f"{row['lot_id']}#{i}", kind="lot", lot_id=row["lot_id"],
                 title=row.get("title") or row["lot_id"], bucket=b, quantity=qty,
                 unit=lot_channels.unit_word(row).upper(),
-                price_per_chair=float(row["price_per_chair"]) if row.get("price_per_chair") else None,
+                price_per_chair=(float(row["price_per_chair"])
+                                 if row.get("price_per_chair") is not None else None),
                 city=place["city"], state=place["state"], lat=lat, lng=lng, precision=prec,
                 hero=lot_images.hero_src(row), url=f"/listings/{row['lot_id']}",
             ))
@@ -112,11 +122,14 @@ def points_from_favorites(favs: Iterable[favorites_mod.Favorite]) -> list[dict]:
         lat, lng, prec = geo.resolve_place(city, state, None)
         if lat is None:
             continue
-        key = "".join(ch if ch.isalnum() else "-" for ch in f.asset_id)
+        # Opaque, stable pin id. A readable asset id would hand the public the
+        # GovDeals URL for a lot we are still bidding on.
+        key = hashlib.sha256(f.asset_id.encode()).hexdigest()[:12]
         pts.append(_point(
             id=f"fav-{key}", kind="favorite", lot_id=None,
             title=f.title or "Incoming lot", bucket="incoming", quantity=f.quantity,
-            unit="CHAIR", price_per_chair=None, city=city, state=state, lat=lat, lng=lng,
+            unit=lot_channels.unit_word(f.title or "").upper(),
+            price_per_chair=None, city=city, state=state, lat=lat, lng=lng,
             precision=prec, hero=f.clean_hero_url or None, url="/#contact",
         ))
     return pts
@@ -131,8 +144,8 @@ def all_points() -> list[dict]:
     pts = points_from_inventory(uniq)
     try:
         pts += points_from_favorites(favorites_mod.list_all())
-    except Exception:  # noqa: BLE001 — favorites table trouble must not blank the map
-        pass
+    except Exception as e:  # noqa: BLE001 — favorites trouble must not blank the map
+        log.warning("public map: favorites unavailable: %r", e)
     return pts
 
 
@@ -149,9 +162,6 @@ def _resolve_near(text: str | None) -> dict | None:
 def fetch_points(*, statuses: set[str] | None = None, near: str | None = None,
                  radius_mi: float | None = None) -> dict:
     pts = [dict(p) for p in all_points()]
-    counts = {b: sum(1 for p in pts if p["bucket"] == b) for b in BUCKETS}
-    if statuses:
-        pts = [p for p in pts if p["bucket"] in statuses]
     origin = _resolve_near(near)
     if origin:
         for p in pts:
@@ -159,6 +169,12 @@ def fetch_points(*, statuses: set[str] | None = None, near: str | None = None,
         if radius_mi:
             pts = [p for p in pts if p["distance_mi"] <= radius_mi]
         pts.sort(key=lambda p: p["distance_mi"])
+    # Counts are the legend: how many of each bucket sit in the visible area.
+    # Area (near + radius) narrows them; the bucket checkboxes do not, or the
+    # legend would only ever report the buckets already ticked.
+    counts = {b: sum(1 for p in pts if p["bucket"] == b) for b in BUCKETS}
+    if statuses:
+        pts = [p for p in pts if p["bucket"] in statuses]
     return {"points": pts, "counts": counts, "near": origin}
 
 
@@ -168,13 +184,24 @@ def nearby(lot_id: str, *, miles: float = 200, limit: int = 6) -> dict:
     if not mine:
         return {"origin": None, "items": []}
     o = mine[0]
-    items = []
+    # One entry per lot — a multi-location lot takes one of the `limit` slots
+    # at its nearest pin, not one slot per warehouse.
+    best: dict[str | None, dict] = {}
+    loose: list[dict] = []
     for p in pts:
         if p["lot_id"] == lot_id or p["bucket"] == "sold":
             continue
         d = geo.haversine_miles(o["lat"], o["lng"], p["lat"], p["lng"])
-        if d <= miles:
-            items.append({**p, "distance_mi": round(d, 1)})
+        if d > miles:
+            continue
+        item = {**p, "distance_mi": round(d, 1)}
+        if p["lot_id"] is None:  # favorites carry no lot_id — never collapse them
+            loose.append(item)
+            continue
+        prior = best.get(p["lot_id"])
+        if prior is None or item["distance_mi"] < prior["distance_mi"]:
+            best[p["lot_id"]] = item
+    items = [*best.values(), *loose]
     items.sort(key=lambda p: p["distance_mi"])
     return {"origin": {"lat": o["lat"], "lng": o["lng"], "precision": o["precision"]},
             "items": items[:limit]}
