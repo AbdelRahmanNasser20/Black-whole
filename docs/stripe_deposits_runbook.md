@@ -68,9 +68,9 @@ Test matrix (all in test mode):
       `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
       `checkout.session.async_payment_failed`, `checkout.session.expired`,
       `charge.refunded`. Copy its `whsec_`.
-- [ ] Render dashboard → env group `blackwhole-secrets` → set live `STRIPE_SECRET_KEY` +
+- [ ] Render dashboard → service `black-whole-web` → **Environment → Environment Variables → Edit** (vars live on the service; no env group is linked — `blackwhole-secrets` from render.yaml is not in use) → set live `STRIPE_SECRET_KEY` +
       `STRIPE_WEBHOOK_SECRET`. Service restarts → feature lights up. No code change.
-- [ ] **Cloudflare**: add a WAF skip/bypass rule for path `/stripe/webhook` — Bot Fight
+- [ ] **Cloudflare** (optional — verified 2026-09-15: Access gates `/api/*` only; `POST /stripe/webhook` already reaches the origin, 404 while dark): add a WAF skip/bypass rule for path `/stripe/webhook` — Bot Fight
       Mode / managed challenges can 403 Stripe's POSTs. After the first live event, check
       the webhook's delivery log in Stripe for non-200s.
 - [ ] Smoke test: one hidden test lot priced at $0.50, pay by real card, watch the
