@@ -68,7 +68,29 @@ def test_city_latlon_without_pgeocode(monkeypatch):
     ("83702", (None, None, "83702")),
     ("Boise ID 83702", ("Boise", "ID", "83702")),
     ("Pittsburgh, Pennsylvania", ("Pittsburgh", "PA", None)),
+    # two-word state names must win over the one-word state hiding in their tail
+    ("Charleston, West Virginia", ("Charleston", "WV", None)),
+    ("West Virginia", (None, "WV", None)),
+    ("New York, New York", ("New York", "NY", None)),
     ("", (None, None, None)),
 ])
 def test_parse_place(text, expect):
     assert geo.parse_place(text) == expect
+
+
+@pytest.mark.parametrize("raw,code", [
+    ("ID", "ID"), ("id", "ID"), ("Idaho", "ID"), ("idaho", "ID"),
+    ("  Idaho  ", "ID"), ("New York", "NY"), ("new york", "NY"),
+    ("Freedonia", None), ("", None), (None, None),
+])
+def test_norm_state_accepts_full_names(raw, code):
+    """inventory.state holds "Idaho" on some rows, "ID" on others."""
+    assert geo._norm_state(raw) == code
+
+
+def test_full_state_name_still_pins_the_city():
+    assert geo.resolve_place("Boise", "Idaho", "83702")[2] == "city"
+
+
+def test_full_state_name_falls_back_to_state_centroid():
+    assert geo.resolve_latlon(None, "Pennsylvania")[2] == "state"

@@ -62,9 +62,32 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return 2 * EARTH_RADIUS_MILES * math.asin(math.sqrt(a))
 
 
+_STATE_NAMES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA",
+    "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
+    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
+    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+
+
 def _norm_state(state: str | None) -> str | None:
-    s = (state or "").strip().upper()
-    return s if s in STATE_CENTROIDS else None
+    """Normalize a state to its 2-letter code, or None if it isn't one.
+
+    Accepts both spellings because `inventory.state` is inconsistent: some rows
+    carry "ID", others "Idaho". Case and repeated whitespace don't matter.
+    """
+    s = " ".join((state or "").split())
+    code = s.upper()
+    if code not in STATE_CENTROIDS:
+        code = _STATE_NAMES.get(s.lower(), "")
+    return code if code in STATE_CENTROIDS else None
 
 
 @lru_cache(maxsize=1)
@@ -122,20 +145,6 @@ def resolve_latlon(
         return (lat, lon, "state")
     return (None, None, None)
 
-
-_STATE_NAMES = {
-    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
-    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
-    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
-    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA",
-    "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
-    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
-    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
-    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
-    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
-    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
-    "district of columbia": "DC",
-}
 
 
 @lru_cache(maxsize=2048)
@@ -197,15 +206,14 @@ def parse_place(text: str | None) -> tuple[str | None, str | None, str | None]:
     parts = [p.strip() for p in re.split(r"[,\s]+", s) if p.strip()]
     state = None
     city_parts = parts
-    if parts:
-        last = parts[-1]
-        if _norm_state(last):
-            state, city_parts = _norm_state(last), parts[:-1]
-        else:
-            for n in (2, 1):
-                cand = " ".join(parts[-n:]).lower()
-                if cand in _STATE_NAMES:
-                    state, city_parts = _STATE_NAMES[cand], parts[:-n]
-                    break
+    # Two words before one: the tail of "West Virginia" is itself a state name,
+    # so a greedy one-word match would read it as Virginia.
+    for n in (2, 1):
+        if len(parts) < n:
+            continue
+        cand = _norm_state(" ".join(parts[-n:]))
+        if cand:
+            state, city_parts = cand, parts[:-n]
+            break
     city = " ".join(city_parts).strip() or None
     return (city, state, zip_code)
