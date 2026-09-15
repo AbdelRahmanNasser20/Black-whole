@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import signal
@@ -26,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -51,6 +52,7 @@ from .. import db
 from .. import catalog_feed, lot_channels
 from .. import inventory
 from .. import lot_images
+from .. import favorite_images
 from .. import favorites
 from .. import telegram_alerts
 from .. import deposits
@@ -62,6 +64,7 @@ from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
 from . import rate_limit
+from . import public_map
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -78,6 +81,8 @@ except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
     get_top_lots = None
     _auctions_cache_stats = None
+
+log = logging.getLogger(__name__)
 
 PKG_DIR = Path(__file__).parent
 TEMPLATE_DIR = PKG_DIR / "templates"
@@ -613,6 +618,11 @@ def public_listing_detail(request: Request, lot_id: str):
     _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
+    try:
+        near = public_map.nearby(lot_id, miles=public_map.NEARBY_MILES)
+    except Exception:  # noqa: BLE001 — the page must render without the map
+        log.exception("nearby lots failed for %s", lot_id)
+        near = {"origin": None, "items": []}
     return templates.TemplateResponse(
         request, "listing_detail.html",
         _public_ctx({
@@ -627,9 +637,42 @@ def public_listing_detail(request: Request, lot_id: str):
                 "enabled": bool(_freight_origin_zip(row)) and not row["is_sold"],
                 "default_qty": _freight_default_qty(row),
             },
+            "nearby": near,
             **_detail_seo(row, hero, images),
         }),
     )
+
+
+@app.get("/map", response_class=HTMLResponse)
+def public_map_page(request: Request, near: str | None = None, status: str | None = None,
+                    radius: float | None = None):
+    """Full-screen public map of our lots (plan 2026-09-15). Shell only: the JS
+    fetches /map/api/points. `near`/`status`/`radius` seed the filter bar."""
+    visits.track(request)
+    return templates.TemplateResponse(request, "map.html", _public_ctx({
+        "near": (near or "").strip(), "status": status or "available,incoming",
+        "radius": radius or "",
+    }))
+
+
+@app.get("/map/api/points")
+def public_map_points(status: str | None = None, near: str | None = None,
+                      radius: float | None = None):
+    """Public JSON for every map surface. Allow-listed in public_map — never add
+    columns here. Lives under /map/api/ (public), not /api/ (auth-gated)."""
+    wanted = {s.strip() for s in (status or "available,incoming").split(",") if s.strip()}
+    if not wanted <= set(public_map.BUCKETS):
+        raise HTTPException(400, f"status must be a comma list of {','.join(public_map.BUCKETS)}")
+    try:
+        data = public_map.fetch_points(statuses=wanted, near=near, radius_mi=radius)
+    except Exception as e:  # noqa: BLE001
+        # The repr carries the DSN and local paths, and this route is public +
+        # unauthenticated — the detail goes to the server log, never the body.
+        log.warning("map points query failed: %r", e)
+        raise HTTPException(503, "map temporarily unavailable")
+    # Public, identical for everyone, and already memoised server-side for
+    # CACHE_TTL — let the browser and any CDN in front of us hold it too.
+    return JSONResponse(data, headers={"Cache-Control": "public, max-age=120"})
 
 
 @app.get("/api/visits/summary")
@@ -1384,7 +1427,7 @@ def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
 def sitemap_xml():
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/sell"):
+    for path in ("/", "/listings", "/map", "/sell"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.
@@ -2931,7 +2974,7 @@ async def list_favorites():
 
 
 @app.post("/api/auctions/favorites")
-def star_favorite(payload: dict):
+def star_favorite(payload: dict, background: BackgroundTasks):
     """Star (or refresh) an auction by URL. Body: ``{link, title?, quantity?,
     end_date?, image_url?, location?, asset_id?}``. ``asset_id`` is derived
     from the link if not provided."""
@@ -2952,6 +2995,13 @@ def star_favorite(payload: dict):
         location=payload.get("location"),
         notes=payload.get("notes"),
     )
+    if fav and favorite_images.on_star_enabled():
+        # Clean photos for the public map's "incoming" pin. Runs after the
+        # response, so the star never waits on dewatermark.ai; budget caps
+        # apply, and a failure (migration 010 unapplied, closed lot) surfaces
+        # in the server log, never in the star response. `_safely` because a
+        # background task that raises tears down the request's task group.
+        background.add_task(favorite_images.mirror_favorite_photos_safely, fav.asset_id)
     return fav.to_dict() if fav else {}
 
 
@@ -3122,6 +3172,7 @@ async def _alerts_loop() -> None:
 
 
 _tracking_task: asyncio.Task | None = None
+_geo_warm_task: asyncio.Task | None = None
 
 
 async def _tracking_loop() -> None:
@@ -3135,7 +3186,7 @@ async def _tracking_loop() -> None:
 
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
-    global _alerts_task, _tracking_task
+    global _alerts_task, _tracking_task, _geo_warm_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -3144,6 +3195,18 @@ async def _start_alerts_loop() -> None:
             await asyncio.to_thread(db.get_pool)
         except Exception as e:  # never block startup on the pool
             print(f"[db] pool pre-warm skipped: {e!r}")
+    # Pre-warm pgeocode: constructing Nominatim("us") downloads the GeoNames US
+    # dataset to ~/.cache/pgeocode the first time, which is seconds of blocking
+    # work no map request should pay for. Fire-and-forget, NEVER awaited: the app
+    # serves nothing (not even /api/health) until this hook returns, and pgeocode
+    # opens that URL with no timeout — one blackholed connection would hang the
+    # boot forever. The task's own failures are logged inside `_pgeocode_us`.
+    try:
+        from ..alerts import geo as _geo
+        # Held in a global: asyncio keeps only a weak reference to a bare task.
+        _geo_warm_task = asyncio.create_task(asyncio.to_thread(_geo._pgeocode_us))
+    except Exception as e:  # never block startup on the geocoder
+        print(f"[geo] pgeocode pre-warm skipped: {e!r}")
     if _tracking_task is None or _tracking_task.done():
         _tracking_task = asyncio.create_task(_tracking_loop())
         print(f"[tracking] bid-history poller started (tick={_SCHEDULER_TICK_SEC:.0f}s)")

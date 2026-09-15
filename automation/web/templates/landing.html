@@ -2,6 +2,10 @@
 {% block title %}Bulk Banquet &amp; Stacking Chairs for Sale | Black Whole Liquidation{% endblock %}
 {% block meta_description %}Wholesale banquet, stacking, and event chairs sold by the lot. Local pickup in the listed city or nationwide freight — priced to move.{% endblock %}
 {% block body_class %}page-landing{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
+{% endblock %}
 
 {% block content %}
 <section class="hero">
@@ -59,6 +63,26 @@
       </div>
       <div class="stat-label">{% if stats.moved %}CHAIRS MOVED{% else %}INTAKE STATUS{% endif %}</div>
     </div>
+  </div>
+</section>
+
+<section class="home-map-band" id="where">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <div class="section-label mono tiny">WHERE THE CHAIRS ARE</div>
+  </div>
+  <form class="home-map-search" action="/map" method="get">
+    <input type="search" name="near" placeholder="Your city or ZIP — find chairs near you" aria-label="Find chairs near a city or ZIP">
+    <button type="submit" class="btn btn-primary">FIND NEAR ME</button>
+    <label class="mono tiny"><input type="checkbox" id="home-map-sold"> Show sold</label>
+    <a href="/map" class="btn btn-ghost">FULL MAP →</a>
+  </form>
+  <div id="home-map" class="site-map site-map--home map-loading" aria-label="Map of chair lots"
+       data-points-url="/map/api/points" data-status="available,incoming" data-tiles="light" data-compact="1"></div>
+  <div class="map-legend mono tiny">
+    <span class="b-available"><i></i>AVAILABLE</span>
+    <span class="b-incoming"><i></i>INCOMING</span>
+    <span class="b-sold"><i></i>SOLD</span>
   </div>
 </section>
 
@@ -195,4 +219,5 @@
 
 {% block scripts %}
 <script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/map.js?v={{ now }}"></script>
 {% endblock %}

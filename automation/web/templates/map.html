@@ -1,0 +1,51 @@
+{% extends "_public_base.html" %}
+{% block title %}Where the chairs are — Black Whole Liquidation{% endblock %}
+{% block meta_description %}Every Black Whole chair lot on one map — available, incoming and sold. Search near your city.{% endblock %}
+{% block body_class %}page-map{% endblock %}
+{% block head_extra %}
+<link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
+{% endblock %}
+{% block content %}
+<section class="page-head">
+  <div class="section-rule"></div>
+  <h1 class="display">Where the chairs are</h1>
+  <p class="lede">Available now, on the way, and already moved. City-level pins — message us for pickup details.</p>
+</section>
+
+<form class="filter-bar map-filters" id="map-filters" action="/map" method="get">
+  <div class="filter-group filter-group--grow">
+    <label for="map-near" class="mono tiny">NEAR</label>
+    <input id="map-near" name="near" type="search" value="{{ near }}" placeholder="City or ZIP" autocomplete="off">
+  </div>
+  <div class="filter-group">
+    <label for="map-radius" class="mono tiny">WITHIN</label>
+    <select id="map-radius" name="radius">
+      <option value="" {% if not radius %}selected{% endif %}>Any distance</option>
+      {% for r in (100, 200, 500, 1000) %}<option value="{{ r }}" {% if radius and radius|int == r %}selected{% endif %}>{{ r }} mi</option>{% endfor %}
+    </select>
+  </div>
+  <div class="filter-group seg" id="map-status" data-value="{{ status }}">
+    <label class="mono tiny">SHOW</label>
+    <button type="button" class="seg-btn b-available" data-bucket="available">Available</button>
+    <button type="button" class="seg-btn b-incoming" data-bucket="incoming">Incoming</button>
+    <button type="button" class="seg-btn b-sold" data-bucket="sold">Sold</button>
+    <input type="hidden" name="status" value="{{ status }}">
+  </div>
+  <div class="filter-group">
+    <button type="submit" class="btn btn-primary">GO</button>
+    <span id="map-count" class="mono tiny" aria-live="polite"></span>
+  </div>
+</form>
+
+<section class="map-split">
+  <div id="site-map" class="site-map site-map--full map-loading" aria-label="Map of chair lots"
+       data-points-url="/map/api/points" data-status="{{ status }}" data-near="{{ near }}" data-radius="{{ radius }}" data-tiles="light"
+       data-list="#map-list" data-count="#map-count"></div>
+  <aside id="map-list" class="map-list" data-state="loading"></aside>
+</section>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/map.js?v={{ now }}"></script>
+{% endblock %}
