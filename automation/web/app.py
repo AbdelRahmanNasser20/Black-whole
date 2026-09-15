@@ -55,6 +55,7 @@ from .. import telegram_alerts
 from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
+from . import public_map
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -587,6 +588,32 @@ def public_listing_detail(request: Request, lot_id: str):
             **_detail_seo(row, hero, images),
         }),
     )
+
+
+@app.get("/map", response_class=HTMLResponse)
+def public_map_page(request: Request, near: str | None = None, status: str | None = None,
+                    radius: float | None = None):
+    """Full-screen public map of our lots (plan 2026-09-15). Shell only: the JS
+    fetches /map/api/points. `near`/`status`/`radius` seed the filter bar."""
+    visits.track(request)
+    return templates.TemplateResponse(request, "map.html", _public_ctx({
+        "near": (near or "").strip(), "status": status or "available,incoming",
+        "radius": radius or "",
+    }))
+
+
+@app.get("/map/api/points")
+def public_map_points(status: str | None = None, near: str | None = None,
+                      radius: float | None = None):
+    """Public JSON for every map surface. Allow-listed in public_map — never add
+    columns here. Lives under /map/api/ (public), not /api/ (auth-gated)."""
+    wanted = {s.strip() for s in (status or "available,incoming").split(",") if s.strip()}
+    if not wanted <= set(public_map.BUCKETS):
+        raise HTTPException(400, f"status must be a comma list of {','.join(public_map.BUCKETS)}")
+    try:
+        return public_map.fetch_points(statuses=wanted, near=near, radius_mi=radius)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"map query failed: {e!r}")
 
 
 @app.get("/api/visits/summary")
@@ -1341,7 +1368,7 @@ def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
 def sitemap_xml():
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/sell"):
+    for path in ("/", "/listings", "/map", "/sell"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.
