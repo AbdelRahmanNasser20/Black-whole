@@ -30,3 +30,55 @@
 - Don't bypass the ledger to work around a "stuck" row. Delete/edit via the admin Inventory tab or `DELETE /api/inventory/{lot_id}`, don't hack the DB directly.
 
 **Dashboard URL migration (breaking):** the admin console moved from `/` → `/admin` to make room for the public site. JS/API paths under `/api/*`, `/image/*`, `/screenshot/*`, `/static/*` are unchanged. Bookmarks and any external scripts hitting `/` now land on the customer-facing landing page instead.
+
+## Auction expiry / relist sync (2026-09-15)
+
+**Summary.** A lot we're bidding on (`status = 'active_bid'`) used to stay on the
+storefront after its GovDeals auction closed. A 30-minute loop in the web process
+now takes the dead ones off as fake-sold-out, keeps watching them, and puts them
+back — with a Telegram ping — when the auction relists.
+
+- **Code:** `automation/auction_sync.py` (decisions + the pass),
+  `automation/auction_watch_store.py` (SQL), `scripts/sync_auction_status.py` (CLI),
+  `_auction_sync_loop` in `automation/web/app.py`.
+  Plan: `docs/superpowers/plans/2026-09-15-auction-expiry-sync.md`.
+- **Scope:** `inventory` rows carrying a `govdeals_url` that are either
+  `status = 'active_bid'` or already on the watch list as `expired`. Public
+  Surplus is out — there's no `govdeals_url` to parse.
+- **Expire = `lot_channels.remove_lot(lot_id, channels=("site","business"))`**,
+  the same path `/list-lot` and the admin Launcher use: `status` → `lost_sold_out`
+  (via `sold_status_for`), `fake_sold_out = true`, `crm_offerable = false`. The
+  `fb` channel is never touched — Marketplace needs a browser and an operator.
+  Photos, `quantity_original`, prices and platform URLs are untouched, so the lot
+  lands on the ALREADY MOVED strip with a real card.
+  - **`fake_sold_out` alone does not hide a lot.** `list_public` / `list_catalog_feed`
+    gate on `status`; `fake_sold_out` is the flag the CRM honors by never offering
+    it. The pair is what "fake sold out" means here — pinned by
+    `tests/test_auction_sync.py::TestExpiredLotLeavesEveryPublicSurface`.
+- **Relist = `lot_channels.restore_lot(lot_id, status=<prior status>)`** +
+  `inventory.set_fields(lot_id, govdeals_url=…)` (that column joined the
+  `set_fields` whitelist for this) + a Telegram message on the `deals` topic:
+  `RELISTED: <title> — <city> — closes <time> — back on black-whole.com/listings/<lot_id>`.
+  Same auction id back live reads `BACK LIVE:` — a close we called ~15 min early,
+  self-healing rather than a second listing.
+- **Live / closed is decided by `assetStatusCd`** (`STA` = live), reusing
+  `deals.tracking.is_closed` so this and the bid-history poller can't disagree.
+  Close *times* come from the bidbox's `assetAuctionEndDateUTC` only — the detail
+  endpoint's `assetAuctionEndDate` has no timezone and is US/Eastern.
+- **Silence is never an answer.** Maestro serves HTTP 204 with an empty body for
+  a purged asset (verified on `53677/357`, both id orders). An unreadable lot is
+  counted as `unresolved`, gets a `poll_error`, and is left exactly as it was.
+- **Watch list = `inventory_auction_watch`** (migration
+  `scripts/sql/011_inventory_auction_watch.sql`, **operator gate — not applied**),
+  keyed by `lot_id` with `(asset_id, account_id)` unique on top: an unsold lot
+  relists under the same asset with a new auction id, the same reason
+  `tracked_lots` is keyed that way. Bounded scalar columns only (`state`,
+  `reason` ≤200 chars, timestamps) — nothing that grows, because Supabase is at
+  the 500 MB line. Until the migration is applied, a real run refuses with the
+  exact command to run; `--dry-run` still reports.
+- **Where it runs:** `_auction_sync_loop` in the web process, `AUCTION_SYNC_INTERVAL_SEC`
+  (default 1800) / `AUCTION_SYNC_ENABLED` (default on). No Render cron, same
+  reason as `_tracking_loop`. Manual: `scripts/sync_auction_status.py --once [--dry-run] [--lot ID]`.
+- **Not adopted:** the `lost_sold_out` + `fake_sold_out` rows already in prod.
+  Those were pulled by hand (moved / sold), not expired — putting them on the
+  watch list would relist lots we deliberately took down.
