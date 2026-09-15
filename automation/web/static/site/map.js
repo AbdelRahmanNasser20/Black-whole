@@ -4,27 +4,31 @@ import { load, api, esc, fmt } from '/static/ui/state.js';
 
 const BUCKET_LABEL = { available: 'Available', incoming: 'Incoming', sold: 'Sold' };
 
+let adminMapLoad = null;   // in-flight <script> promise — two surfaces on one page share it
+
 function ensureAdminMap() {
   if (window.AdminMap) return Promise.resolve(window.AdminMap);
-  return new Promise((resolve, reject) => {
+  if (adminMapLoad) return adminMapLoad;
+  adminMapLoad = new Promise((resolve, reject) => {
     const s = document.createElement('script');
     s.src = '/static/admin_map.js';
     s.onload = () => resolve(window.AdminMap);
-    s.onerror = () => reject(new Error('map library failed to load'));
+    s.onerror = () => { adminMapLoad = null; reject(new Error('map library failed to load')); };
     document.head.appendChild(s);
   });
+  return adminMapLoad;
 }
 
 function popupHtml(p) {
   const qty = p.quantity != null ? `${fmt.int(p.quantity)} ${esc(p.unit || 'CHAIR')}${p.quantity === 1 ? '' : 'S'}` : '';
-  const price = p.price_per_chair != null ? ` · $${fmt.int(p.price_per_chair)}/ea` : '';
+  const price = p.price_per_chair != null ? ` · ${fmt.money(p.price_per_chair)}/ea` : '';
   const where = [p.city, p.state].filter(Boolean).join(', ');
   const cta = p.kind === 'favorite' ? 'Message us to reserve →' : 'View lot →';
   return `<div class="map-pop b-${esc(p.bucket)}">
     ${p.hero ? `<img src="${esc(p.hero)}" alt="" loading="lazy">` : ''}
     <div class="map-pop-title">${esc(p.title)}</div>
     <div class="mono tiny">${esc(BUCKET_LABEL[p.bucket] || p.bucket)}${p.precision !== 'city' ? ' · approx' : ''} · ${esc(where)}</div>
-    <div class="mono">${qty}${price}${p.distance_mi != null ? ` · ${p.distance_mi} mi` : ''}</div>
+    <div class="mono">${qty}${price}${p.distance_mi != null ? ` · ${esc(p.distance_mi)} mi` : ''}</div>
     <a href="${esc(p.url)}">${cta}</a>
   </div>`;
 }
@@ -35,13 +39,21 @@ function listItemHtml(p) {
     ${p.hero ? `<img src="${esc(p.hero)}" alt="" loading="lazy">` : '<span class="map-item-noimg"></span>'}
     <span class="map-item-body">
       <span class="map-item-title">${esc(p.title)}</span>
-      <span class="mono tiny">${esc(BUCKET_LABEL[p.bucket] || p.bucket)} · ${esc(where)}${p.distance_mi != null ? ` · ${p.distance_mi} mi` : ''}</span>
-      <span class="mono">${p.quantity != null ? fmt.int(p.quantity) + ' ' + esc(p.unit || 'CHAIR') + 'S' : ''}${p.price_per_chair != null ? ' · $' + fmt.int(p.price_per_chair) + '/ea' : ''}</span>
+      <span class="mono tiny">${esc(BUCKET_LABEL[p.bucket] || p.bucket)} · ${esc(where)}${p.distance_mi != null ? ` · ${esc(p.distance_mi)} mi` : ''}</span>
+      <span class="mono">${p.quantity != null ? fmt.int(p.quantity) + ' ' + esc(p.unit || 'CHAIR') + (p.quantity === 1 ? '' : 'S') : ''}${p.price_per_chair != null ? ' · ' + fmt.money(p.price_per_chair) + '/ea' : ''}</span>
     </span></a>`;
 }
 
-function readStatus(el, fallback = 'available,incoming') {
-  return (el.dataset.status || fallback).split(',').map(s => s.trim()).filter(Boolean);
+// 'none' is how "every bucket off" round-trips through ?status= — it never reaches
+// the server (fetchAll always asks for all three and filters client-side).
+function parseStatus(raw, fallback = 'available,incoming') {
+  const s = (raw || fallback).trim();
+  if (s === 'none') return [];
+  return s.split(',').map(x => x.trim()).filter(Boolean);
+}
+
+function readStatus(el, fallback) {
+  return parseStatus(el.dataset.status, fallback);
 }
 
 export async function mountSiteMap(el, opts = {}) {
@@ -114,13 +126,13 @@ function wireFilters(form, ctl) {
   const seg = form.querySelector('#map-status');
   const hidden = seg && seg.querySelector('input[name="status"]');
   if (!seg || !hidden) return;
-  const active = new Set((seg.dataset.value || 'available,incoming').split(','));
+  const active = new Set(parseStatus(seg.dataset.value));
   const paint = () => seg.querySelectorAll('.seg-btn').forEach(b => b.classList.toggle('on', active.has(b.dataset.bucket)));
   paint();
   seg.addEventListener('click', (e) => {
     const b = e.target.closest('.seg-btn'); if (!b) return;
     if (active.has(b.dataset.bucket)) active.delete(b.dataset.bucket); else active.add(b.dataset.bucket);
-    paint(); hidden.value = [...active].join(','); ctl.setStatus(active);
+    paint(); hidden.value = [...active].join(',') || 'none'; ctl.setStatus(active);
     const u = new URL(location.href); u.searchParams.set('status', hidden.value); history.replaceState(null, '', u);
   });
   form.addEventListener('submit', (e) => {

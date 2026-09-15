@@ -3,6 +3,7 @@
 {% block meta_description %}Every Black Whole chair lot on one map — available, incoming and sold. Search near your city.{% endblock %}
 {% block body_class %}page-map{% endblock %}
 {% block head_extra %}
+<link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
 {% endblock %}
 {% block content %}
@@ -21,7 +22,7 @@
     <label for="map-radius" class="mono tiny">WITHIN</label>
     <select id="map-radius" name="radius">
       <option value="" {% if not radius %}selected{% endif %}>Any distance</option>
-      {% for r in (100, 200, 500, 1000) %}<option value="{{ r }}" {% if radius|string == r|string %}selected{% endif %}>{{ r }} mi</option>{% endfor %}
+      {% for r in (100, 200, 500, 1000) %}<option value="{{ r }}" {% if radius and radius|int == r %}selected{% endif %}>{{ r }} mi</option>{% endfor %}
     </select>
   </div>
   <div class="filter-group seg" id="map-status" data-value="{{ status }}">

@@ -6,10 +6,21 @@
 .map-loading { background: linear-gradient(90deg, var(--sk-a), var(--sk-b), var(--sk-a)); background-size: 200% 100%; animation: mapsk 1.2s linear infinite; }
 @keyframes mapsk { to { background-position: -200% 0; } }
 
-/* pin colours by bucket — admin_map.js adds .amap-pin; we add .b-<bucket> via p.cls */
-.amap-pin.b-available { background: var(--accent); border-color: var(--border); }
-.amap-pin.b-incoming  { background: var(--info);   border-color: var(--border); }
-.amap-pin.b-sold      { background: var(--muted);  border-color: var(--border); opacity: .75; }
+/* Pin colours by bucket — admin_map.js adds .amap-pin; we add .b-<bucket> via p.cls.
+   admin_map.js injects its own <style> at mount time, i.e. AFTER this sheet, and its
+   `.amap-pin` / `.amap-pin.approx` rules set background + an accent/warn box-shadow halo.
+   So each bucket spells out `.approx` too (0,3,0 beats 0,2,0) and restates box-shadow;
+   otherwise every approx pin renders grey-on-amber and every pin wears an orange halo. */
+.amap-pin.b-available,
+.amap-pin.approx.b-available { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); border-color: var(--border); }
+.amap-pin.b-incoming,
+.amap-pin.approx.b-incoming  { background: var(--info);   box-shadow: 0 0 0 1px var(--info);   border-color: var(--border); }
+.amap-pin.b-sold,
+.amap-pin.approx.b-sold      { background: var(--muted);  box-shadow: 0 0 0 1px var(--muted);  border-color: var(--border); opacity: .75; }
+/* precision cue: a zip/state-level pin reads softer than a city-exact one */
+.amap-pin.approx.b-available,
+.amap-pin.approx.b-incoming  { opacity: .65; }
+.amap-pin.approx.b-sold      { opacity: .5; }
 
 .map-split { display: grid; grid-template-columns: 7fr 3fr; gap: var(--gap); align-items: start; }
 .map-list { display: grid; gap: var(--gap); max-height: max(480px, calc(100vh - 260px)); overflow: auto; }
@@ -28,6 +39,10 @@
 .map-pop-title { font-weight: 600; margin-bottom: 2px; }
 .map-pop a { display: inline-block; margin-top: 6px; color: var(--accent); }
 
+/* .filter-group is column flex in site.css, which would stack the three SHOW buttons.
+   The label keeps its own line; the buttons sit side by side so the bar stays one row. */
+.map-filters #map-status { display: flex; flex-direction: row; flex-wrap: wrap; align-items: flex-end; gap: 6px; }
+.map-filters #map-status > label { flex-basis: 100%; }
 .map-filters .seg-btn { border: 1px solid var(--border); background: var(--surface); color: var(--muted); padding: 6px 10px; font: inherit; cursor: pointer; }
 .map-filters .seg-btn.on { color: var(--text); background: var(--surface-2); border-bottom: 3px solid var(--accent); }
 .map-filters .seg-btn.b-incoming.on { border-bottom-color: var(--info); }
