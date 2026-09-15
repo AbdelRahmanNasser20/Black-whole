@@ -1339,7 +1339,7 @@ Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>"
 
 **Interfaces:**
 - `lot_channels.clean_and_upload(key: str, urls: list[str], log=_print, *, dewatermark: bool = True, limit: int | None = None) -> dict | None` — download → dewatermark → `listing_images.upload_lot_images(key, files)`; returns `{"hero_image_url", "image_urls"}` or None. `mirror_photos` = `clean_and_upload(lot_id, urls, …)` then `inventory.set_images(...)` (behaviour unchanged).
-- `favorite_images.FAVORITE_PHOTO_LIMIT = 6`; `favorite_images.r2_key(asset_id) -> str | None` (`"9685/56"` → `"fav-9685-56"`; `ps:`/`bs:` → None); `favorite_images.mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> dict | None`.
+- `favorite_images.FAVORITE_PHOTO_LIMIT = 6`; `favorite_images.r2_key(asset_id) -> str | None` (`"9685/56"` → `"fav-" + sha256("9685/56")[:12]` — opaque, the R2 filename must not spell the auction id; `ps:`/`bs:` → None); `favorite_images.mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> dict | None`.
 - Env `FAVORITE_PHOTOS_ON_STAR` (default `1`): star route schedules a background mirror.
 
 - [ ] **Step 1: Failing tests**
@@ -1350,7 +1350,9 @@ from automation import favorite_images as fi
 
 
 def test_r2_key():
-    assert fi.r2_key("9685/56") == "fav-9685-56"
+    import hashlib
+    assert fi.r2_key("9685/56") == "fav-" + hashlib.sha256(b"9685/56").hexdigest()[:12]
+    assert "9685" not in fi.r2_key("9685/56")
     assert fi.r2_key("ps:123") is None and fi.r2_key("bs:abc") is None and fi.r2_key("") is None
 
 
@@ -1364,7 +1366,7 @@ def test_mirror_fetches_cleans_uploads_and_stamps(monkeypatch):
     monkeypatch.setattr(fi.lot_channels, "clean_and_upload", fake_clean)
     monkeypatch.setattr(fi.favorites, "set_clean_images", lambda a, h, u: calls.update(stamped=(a, h, u)))
     out = fi.mirror_favorite_photos("9685/56", log=lambda *a: None)
-    assert calls["key"] == "fav-9685-56" and calls["n"] == fi.FAVORITE_PHOTO_LIMIT and calls["dw"] is True
+    assert calls["key"] == fi.r2_key("9685/56") and calls["n"] == fi.FAVORITE_PHOTO_LIMIT and calls["dw"] is True
     assert calls["stamped"][0] == "9685/56" and out["hero_image_url"].startswith("https://r2/")
 
 
@@ -1444,12 +1446,13 @@ Keep the original docstring text on `mirror_photos` (the "dewatermark=False exis
 
 A favorite has no inventory row, so `lot_channels.mirror_photos` can't stamp it.
 This module runs the same download → dewatermark.ai → R2 path under a synthetic
-key (`fav-<asset>-<account>`) and stamps `auction_favorites.clean_*` instead.
+key (`fav-<sha256(asset_id)[:12]>` — opaque, so the public photo URL cannot be turned back into the auction) and stamps `auction_favorites.clean_*` instead.
 Only GovDeals favorites are supported (the gallery fetch is GovDeals-only).
 Never reads the favorite's raw CDN photo column — that file is watermarked.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 
@@ -1460,8 +1463,10 @@ _GD_KEY = re.compile(r"^(\d+)/(\d+)$")
 
 
 def r2_key(asset_id: str | None) -> str | None:
-    m = _GD_KEY.match((asset_id or "").strip())
-    return f"fav-{m.group(1)}-{m.group(2)}" if m else None
+    key = (asset_id or "").strip()
+    if not _GD_KEY.match(key):
+        return None
+    return "fav-" + hashlib.sha256(key.encode()).hexdigest()[:12]
 
 
 def mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> dict | None:
