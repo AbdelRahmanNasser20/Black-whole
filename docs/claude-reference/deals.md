@@ -76,3 +76,15 @@ Full spec + rationale: `docs/superpowers/plans/2026-07-03-govdeals-deal-tracker-
   - Live numbers 2026-09-04: 8,801 public lots of 9,490 active; pins feed capped at 5,000 (8,681 mapped).
   - Indexes (**operator gate — NOT applied yet**): `scripts/sql/007_deal_lots_active_indexes.sql` = `pg_trgm` + partial `ix_deal_lots_active_end (end_utc)` + `ix_deal_lots_active_title_trgm gin(title gin_trgm_ops)`, both `WHERE outcome_complete IS NOT TRUE`. Apply with `.venv/bin/python scripts/apply_sql.py scripts/sql/007_deal_lots_active_indexes.sql` (autocommit; run `scripts/reclaim_db_space.py --all` first if `DiskFull`). DDL mirrored in the workspace `docs/claude-reference/data-model.md`.
   - Cuts + follow-ups: `$/unit` sort and qty filter need a persisted `deal_lots.quantity` (blocked on DB headroom → `scripts/reclaim_db_space.py --all` first); verdict coverage of active lots is 0 because the Render `deals-analyze` cron isn't applied; laptop-measured page flips are still ~4 s (pooler handshake + un-indexed active set) until the indexes land.
+
+## Inventory-side auction sync (2026-09-15)
+
+`automation/auction_sync.py` is the third in-process poller, alongside
+`_tracking_loop` and the favorites countdown. It reuses this package's
+`GovDealsAdapter` (`fetch_detail` for the current auction id, `fetch_bid_state`
+for status + `assetAuctionEndDateUTC`) and `tracking.is_closed` / `LIVE_STATUS` /
+`CLOSE_GRACE`, but writes to `inventory`, not `deal_lots`: an `active_bid` lot
+whose auction closed is flipped fake-sold-out, and one that relists is restored
+and announced on Telegram. Full detail:
+`docs/claude-reference/inventory-ledger.md` § "Auction expiry / relist sync".
+Not a Render cron, for the reason in the `tracking.py` bullet above.

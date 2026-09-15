@@ -3242,11 +3242,51 @@ async def _channel_sync_loop() -> None:
     while True:
         await _channel_sync_tick()
         await asyncio.sleep(_channel_sync_interval() or 300.0)
+# ─────────── auction-expiry sync (runs in-process, sibling of _tracking_loop) ───────────
+#
+# A lot we're bidding on sits in the ledger as `active_bid` and shows on the
+# storefront as incoming stock. When its GovDeals auction closes, nothing told
+# the site — so it gets flipped fake-sold-out here, and put back (plus a
+# Telegram ping) if the auction relists. Detail: automation/auction_sync.py.
+#
+# Same placement rule as the tracking poller: in the web process, NOT a Render
+# cron — the Render blueprint has not been re-applied since 2026-07-18, so a
+# cron declared in render.yaml would simply never run.
+_AUCTION_SYNC_INTERVAL_SEC = float(os.getenv("AUCTION_SYNC_INTERVAL_SEC", "1800"))
+_AUCTION_SYNC_ENABLED = (os.getenv("AUCTION_SYNC_ENABLED", "1").strip().lower()
+                         not in ("0", "false", "no", "off"))
+_auction_sync_task: asyncio.Task | None = None
+
+
+def _auction_sync_pass() -> dict:
+    """Blocking: one reconcile pass. Runs in a worker thread off the tick.
+
+    Cheap when nothing changed — one indexed SELECT plus two maestro calls per
+    watched lot, and the watched set is a handful of lots, not the whole site.
+    """
+    from automation import auction_sync
+    return auction_sync.sync_once(log=lambda m: None)
+
+
+async def _auction_sync_tick() -> None:
+    try:
+        rep = await asyncio.to_thread(_auction_sync_pass)
+        if rep.get("expired") or rep.get("relisted") or rep.get("errors") or rep.get("error"):
+            print(f"[auction-sync] {rep}")
+    except Exception as e:
+        # Same rule as the other two ticks: one bad pass must not kill the loop.
+        print(f"[auction-sync] tick error: {e!r}")
+
+
+async def _auction_sync_loop() -> None:
+    while True:
+        await _auction_sync_tick()
+        await asyncio.sleep(_AUCTION_SYNC_INTERVAL_SEC)
 
 
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
-    global _alerts_task, _tracking_task, _geo_warm_task, _channel_sync_task
+    global _alerts_task, _tracking_task, _geo_warm_task, _channel_sync_task, _auction_sync_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -3281,13 +3321,19 @@ async def _start_alerts_loop() -> None:
     if sync_sec and (_channel_sync_task is None or _channel_sync_task.done()):
         _channel_sync_task = asyncio.create_task(_channel_sync_loop())
         print(f"[channels] sync loop started (every {sync_sec:.0f}s; CHANNEL_SYNC_SEC=0 disables)")
+    if _AUCTION_SYNC_ENABLED and (_auction_sync_task is None or _auction_sync_task.done()):
+        _auction_sync_task = asyncio.create_task(_auction_sync_loop())
+        print(f"[auction-sync] expiry/relist sync started "
+              f"(every {_AUCTION_SYNC_INTERVAL_SEC / 60:.0f} min)")
+    elif not _AUCTION_SYNC_ENABLED:
+        print("[auction-sync] disabled (AUCTION_SYNC_ENABLED=0)")
 
 
 @app.on_event("shutdown")
 async def _stop_alerts_loop() -> None:
     global _alerts_task
     await asyncio.to_thread(db.reset_pool)   # close pooled sockets off-loop
-    for task in (_alerts_task, _channel_sync_task):
+    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task):
         if task and not task.done():
             task.cancel()
             try:
