@@ -80,3 +80,12 @@ def test_points_failure_does_not_leak_the_exception(monkeypatch, client, caplog)
     assert r.status_code == 503
     assert "postgres://" not in r.text and "secret" not in r.text
     assert "postgres://x" in caplog.text  # operator still sees it in the server log
+
+
+def test_home_has_map_band(monkeypatch):
+    monkeypatch.setattr(app_mod, "_landing_data", lambda: {"counts": {"lots": 1, "chairs": 500, "cities": 1, "moved": 0}, "featured": []})
+    html = TestClient(app).get("/").text
+    assert 'id="home-map"' in html and 'data-points-url="/map/api/points"' in html
+    assert 'action="/map"' in html and 'name="near"' in html
+    assert 'id="home-map-sold"' in html
+    assert "/static/site/map.js" in html
