@@ -2645,6 +2645,7 @@ async def _alerts_loop() -> None:
 
 
 _tracking_task: asyncio.Task | None = None
+_geo_warm_task: asyncio.Task | None = None
 
 
 async def _tracking_loop() -> None:
@@ -2658,7 +2659,7 @@ async def _tracking_loop() -> None:
 
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
-    global _alerts_task, _tracking_task
+    global _alerts_task, _tracking_task, _geo_warm_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -2669,10 +2670,14 @@ async def _start_alerts_loop() -> None:
             print(f"[db] pool pre-warm skipped: {e!r}")
     # Pre-warm pgeocode: constructing Nominatim("us") downloads the GeoNames US
     # dataset to ~/.cache/pgeocode the first time, which is seconds of blocking
-    # work no map request should pay for. Off-loop, and never fatal.
+    # work no map request should pay for. Fire-and-forget, NEVER awaited: the app
+    # serves nothing (not even /api/health) until this hook returns, and pgeocode
+    # opens that URL with no timeout — one blackholed connection would hang the
+    # boot forever. The task's own failures are logged inside `_pgeocode_us`.
     try:
         from ..alerts import geo as _geo
-        await asyncio.to_thread(_geo._pgeocode_us)
+        # Held in a global: asyncio keeps only a weak reference to a bare task.
+        _geo_warm_task = asyncio.create_task(asyncio.to_thread(_geo._pgeocode_us))
     except Exception as e:  # never block startup on the geocoder
         print(f"[geo] pgeocode pre-warm skipped: {e!r}")
     if _tracking_task is None or _tracking_task.done():
