@@ -331,22 +331,26 @@ def quantity_from_detail(detail: dict) -> int | None:
     return int(m.group(1)) if m else None
 
 
-def mirror_photos(lot_id: str, urls: list[str], log: Log = _print, *,
-                  dewatermark: bool = True) -> dict | None:
-    """Seller photos -> dewatermark.ai -> R2 under our key contract; stamps hero/gallery.
+def clean_and_upload(key: str, urls: list[str], log: Log = _print, *,
+                     dewatermark: bool = True, limit: int | None = None,
+                     strict: bool = False) -> dict | None:
+    """Seller photos -> dewatermark.ai -> R2 under `key` (any string; key_base sanitises).
 
-    Same three-layer cache + budget as run.py's phase 3 (`automation.dewatermark`):
-    a hash already cleaned anywhere on this machine never hits the API again.
-    Seller photos carry the tiled www.govdeals.com watermark, so shipping them
-    raw is never right — `dewatermark=False` exists for tests only.
+    Does NOT touch inventory — callers stamp the returned URLs where they belong
+    (`mirror_photos` -> `inventory`, `favorite_images` -> `auction_favorites`).
+
+    `strict=True` refuses to publish a photo the API could not clean: anything
+    left in `_originals/` is dropped, and `None` comes back if nothing clean
+    remains. Non-strict keeps today's behaviour (a kept original still ships).
     """
     import asyncio
     import httpx
+    urls = list(urls or [])[:limit] if limit else list(urls or [])
     if not urls:
         return None
     # The lot folder lives under SCRATCH_DIR (not a throwaway tmp) so the
     # dewatermark sidecar + _originals/ persist and re-runs are free.
-    folder = Path(config.SCRATCH_DIR) / "lot_channels" / listing_images.key_base(lot_id)
+    folder = Path(config.SCRATCH_DIR) / "lot_channels" / listing_images.key_base(key)
     folder.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
     with httpx.Client(timeout=60.0, follow_redirects=True, headers=DOWNLOAD_HEADERS) as client:
@@ -366,15 +370,33 @@ def mirror_photos(lot_id: str, urls: list[str], log: Log = _print, *,
         return None
     if dewatermark:
         from . import dewatermark as dw
-        _phase("dewatermark", "running", lot_id=lot_id)
-        cleaned = asyncio.run(dw.dewatermark(None, files, folder, lot_label=lot_id))
+        _phase("dewatermark", "running", lot_id=key)
+        cleaned = asyncio.run(dw.dewatermark(None, files, folder, lot_label=key))
         dirty = [c for c in cleaned if c.parent.name == "_originals"]
         if dirty:
-            log(f"  ! {len(dirty)}/{len(files)} photos still watermarked (API failed) — kept originals")
+            log(f"  ! {len(dirty)}/{len(files)} photos still watermarked (API failed) — "
+                + ("dropped" if strict else "kept originals"))
         _phase("dewatermark", "done", cleaned=len(cleaned) - len(dirty), files=len(files))
         log(f"  ✓ dewatermarked {len(cleaned) - len(dirty)}/{len(files)} via dewatermark.ai")
-        files = cleaned or files
-    result = listing_images.upload_lot_images(lot_id, files)
+        if strict:
+            files = [c for c in cleaned if c.parent.name != "_originals"]
+            if not files:
+                return None
+        else:
+            files = cleaned or files
+    return listing_images.upload_lot_images(key, files)
+
+
+def mirror_photos(lot_id: str, urls: list[str], log: Log = _print, *,
+                  dewatermark: bool = True) -> dict | None:
+    """Seller photos -> dewatermark.ai -> R2 under our key contract; stamps hero/gallery.
+
+    Same three-layer cache + budget as run.py's phase 3 (`automation.dewatermark`):
+    a hash already cleaned anywhere on this machine never hits the API again.
+    Seller photos carry the tiled www.govdeals.com watermark, so shipping them
+    raw is never right — `dewatermark=False` exists for tests only.
+    """
+    result = clean_and_upload(lot_id, urls, log, dewatermark=dewatermark)
     if result:
         inventory.set_images(lot_id, result["hero_image_url"], result["image_urls"])
     return result

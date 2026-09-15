@@ -27,7 +27,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -51,6 +51,7 @@ from .. import db
 from .. import catalog_feed, lot_channels
 from .. import inventory
 from .. import lot_images
+from .. import favorite_images
 from .. import favorites
 from .. import telegram_alerts
 from ..alerts import blast as alerts_blast
@@ -2443,7 +2444,7 @@ async def list_favorites():
 
 
 @app.post("/api/auctions/favorites")
-def star_favorite(payload: dict):
+def star_favorite(payload: dict, background: BackgroundTasks):
     """Star (or refresh) an auction by URL. Body: ``{link, title?, quantity?,
     end_date?, image_url?, location?, asset_id?}``. ``asset_id`` is derived
     from the link if not provided."""
@@ -2464,6 +2465,12 @@ def star_favorite(payload: dict):
         location=payload.get("location"),
         notes=payload.get("notes"),
     )
+    if fav and favorite_images.on_star_enabled():
+        # Clean photos for the public map's "incoming" pin. Runs after the
+        # response, so the star never waits on dewatermark.ai; budget caps
+        # apply, and a failure (migration 010 unapplied, closed lot) surfaces
+        # in the server log, never in the star response.
+        background.add_task(favorite_images.mirror_favorite_photos, fav.asset_id)
     return fav.to_dict() if fav else {}
 
 
