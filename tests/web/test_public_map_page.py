@@ -89,3 +89,17 @@ def test_home_has_map_band(monkeypatch):
     assert 'action="/map"' in html and 'name="near"' in html
     assert 'id="home-map-sold"' in html
     assert "/static/site/map.js" in html
+
+
+def test_listing_detail_shows_nearby(monkeypatch):
+    row = {"lot_id": "gd-1-2", "title": "500 chairs", "status": "owned", "quantity_remaining": 500,
+           "city": "Boise", "state": "ID", "hero_image_url": None, "image_urls": [], "locations": None,
+           "price_per_chair": 25, "storage_note": "gate 4321"}
+    monkeypatch.setattr(app_mod.inventory, "get", lambda lot_id: dict(row))
+    monkeypatch.setattr(app_mod.public_map, "nearby", lambda lot_id, **k: {
+        "origin": {"lat": 43.6, "lng": -116.2, "precision": "city"},
+        "items": [{**POINT, "lot_id": "gd-3-4", "url": "/listings/gd-3-4", "title": "200 chairs", "distance_mi": 42.0}]})
+    html = TestClient(app).get("/listings/gd-1-2").text
+    assert 'id="lot-map"' in html and 'data-focus-lat="43.6"' in html
+    assert "1 other lot within 200 mi" in html and 'href="/listings/gd-3-4"' in html
+    assert "gate 4321" not in html and "storage_note" not in html

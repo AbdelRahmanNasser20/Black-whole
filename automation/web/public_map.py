@@ -25,6 +25,8 @@ from automation.web import readcache
 log = logging.getLogger(__name__)
 
 BUCKETS = ("available", "incoming", "sold")
+# Radius behind the listing page's "N other lots within N mi" block.
+NEARBY_MILES = 200
 INCOMING_STATUSES = frozenset({"won_pickup", "active_bid"})
 AVAILABLE_STATUSES = frozenset({"listed", "owned", "draft"})
 HIDDEN_STATUSES = frozenset({"hidden", "lost"})

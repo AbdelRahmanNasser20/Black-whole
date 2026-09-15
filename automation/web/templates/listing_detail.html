@@ -10,6 +10,8 @@
 {% endblock %}
 {% block head_extra %}
   <script type="application/ld+json">{{ product_jsonld | safe }}</script>
+  <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
 {% endblock %}
 {% block body_class %}page-detail{% endblock %}
 
@@ -87,6 +89,30 @@
       <div><dt>CONDITION</dt><dd>Used — inspected · see photos</dd></div>
     </dl>
 
+    {% if nearby and nearby.origin %}
+    <div class="nearby">
+      <div class="section-rule"></div>
+      <div class="section-label mono tiny">
+        {{ nearby['items'] | length }} other lot{% if nearby['items'] | length != 1 %}s{% endif %} within 200 mi
+      </div>
+      <div id="lot-map" class="site-map site-map--mini map-loading" aria-label="Map around this lot"
+           data-points-url="/map/api/points" data-status="available,incoming" data-tiles="light"
+           data-focus-lat="{{ nearby.origin.lat }}" data-focus-lng="{{ nearby.origin.lng }}"></div>
+      {% if nearby['items'] %}
+      <div class="nearby-list">
+        {% for n in nearby['items'] %}
+        <a class="map-item b-{{ n.bucket }}" href="{{ n.url }}">
+          <span class="map-item-body">
+            <span class="map-item-title">{{ n.title }}</span>
+            <span class="mono tiny">{{ n.city }}{% if n.state %}, {{ n.state }}{% endif %} · {{ n.distance_mi }} mi{% if n.quantity %} · {{ "{:,}".format(n.quantity) }} {{ n.unit }}S{% endif %}</span>
+          </span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
     {% if item.description %}
     <div class="description">
       <div class="section-rule"></div>
@@ -149,4 +175,5 @@
 
 {% block scripts %}
 <script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/map.js?v={{ now }}"></script>
 {% endblock %}

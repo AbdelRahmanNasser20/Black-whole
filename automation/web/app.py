@@ -582,12 +582,18 @@ def public_listing_detail(request: Request, lot_id: str):
     _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
+    try:
+        near = public_map.nearby(lot_id, miles=public_map.NEARBY_MILES)
+    except Exception:  # noqa: BLE001 — the page must render without the map
+        log.exception("nearby lots failed for %s", lot_id)
+        near = {"origin": None, "items": []}
     return templates.TemplateResponse(
         request, "listing_detail.html",
         _public_ctx({
             "item": row,
             "hero": hero,
             "images": images,
+            "nearby": near,
             **_detail_seo(row, hero, images),
         }),
     )

@@ -60,6 +60,8 @@
 
 .nearby { margin-top: var(--gap); display: grid; gap: var(--gap); }
 .nearby-list { display: grid; gap: 6px; }
+.nearby .section-label { text-transform: uppercase; }
+.nearby-list .map-item { grid-template-columns: 1fr; }
 
 @media (max-width: 1024px) {
   .map-split { grid-template-columns: 1fr; }
