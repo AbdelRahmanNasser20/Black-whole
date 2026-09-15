@@ -34,7 +34,7 @@
 -- number is documentation, not a sequencer — kept as 004 because the plan and
 -- the sibling freight migration (005) were numbered against it.
 --
--- Applied to Supabase project nihgzltpjriekyqqucbd on: PENDING
+-- Applied to Supabase project nihgzltpjriekyqqucbd on: 2026-09-15
 
 -- ── 1. the money ledger ─────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS deposits (

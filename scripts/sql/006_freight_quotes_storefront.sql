@@ -36,7 +36,7 @@
 -- RLS: intentionally disabled, workspace-wide decision. All writes go through
 -- a server holding the pooler `postgres` role. Do not add anon-key policies.
 --
--- Applied to Supabase project nihgzltpjriekyqqucbd on: PENDING
+-- Applied to Supabase project nihgzltpjriekyqqucbd on: 2026-09-15
 
 -- ── 1. a storefront quote has no Messenger thread ───────────────────────────
 ALTER TABLE public.freight_quotes ALTER COLUMN thread_url DROP NOT NULL;
