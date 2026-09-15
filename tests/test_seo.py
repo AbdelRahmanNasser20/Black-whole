@@ -46,6 +46,7 @@ def client(monkeypatch):
     monkeypatch.setattr(web_app.inventory, "list_public", lambda: [dict(ROW)])
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: dict(ROW) if lot_id == "10340" else None)
     monkeypatch.setattr(web_app.inventory, "stats", lambda: {"lots": 1, "chairs": 100, "cities": 1})
+    monkeypatch.setattr(web_app.public_map, "nearby", lambda lot_id, **k: {"origin": None, "items": []})
     return TestClient(web_app.app)
 
 

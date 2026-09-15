@@ -7,8 +7,8 @@
  * popups are painted with the page's CSS tokens (amber accent, radius 0).
  *
  * Usage:
- *   const map = await AdminMap.mount(containerEl);
- *   map.setPoints([{lat, lng, popup: '<html>', approx: false}, …]);
+ *   const map = await AdminMap.mount(containerEl);              // opts: {tiles: 'dark'|'light'|<url>}
+ *   map.setPoints([{lat, lng, popup: '<html>', approx: false, cls: 'b-available'}, …]);
  *   map.fit();
  *   map.onViewport(({bounds, visible}) => …);   // fires on pan/zoom (moveend)
  *   map.inBounds(point) → bool                  // current-viewport test
@@ -19,6 +19,14 @@
   const LEAFLET_VER = '1.9.4';
   const CLUSTER_VER = '1.5.3';
   const CDN = 'https://cdnjs.cloudflare.com/ajax/libs';
+
+  // Basemaps. `dark` is the admin default; the public storefront mounts `light`.
+  // Esri Canvas tiles are keyless and unwatermarked (CARTO's free tiles now stamp
+  // "API KEY REQUIRED" across every tile).
+  const TILES = {
+    dark: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    light: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  };
 
   // Colours come from the page's tokens (static/ui/tokens.css on the rebuilt pages; app.css legacy names on
   // the admin until E lands) — no literal hex here. Radius is 0 everywhere (plan §1.2), map container included.
@@ -99,7 +107,7 @@
     return loadPromise;
   }
 
-  async function mount(container) {
+  async function mount(container, opts = {}) {
     const L = await loadLibs();
     container.classList.add('admin-map-box');
 
@@ -108,9 +116,9 @@
       zoom: 4,
       worldCopyJump: true,
     });
-    // Esri Dark Gray Canvas: keyless, no watermark (CARTO free tiles now
-    // stamp "API KEY REQUIRED" across every tile).
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', {
+    // opts.tiles: 'light' | 'dark' | a full https tile URL. Absent → dark (admin default).
+    const tiles = /^https?:/.test(opts.tiles || '') ? opts.tiles : (TILES[opts.tiles] || TILES.dark);
+    L.tileLayer(tiles, {
       attribution: 'Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ',
       maxZoom: 16,
     }).addTo(map);
@@ -151,7 +159,7 @@
         cluster.addLayers(points.map((p) => {
           const m = L.marker([p.lat, p.lng], {
             icon: L.divIcon({
-              className: 'amap-pin' + (p.approx ? ' approx' : ''),
+              className: 'amap-pin' + (p.approx ? ' approx' : '') + (p.cls ? ' ' + p.cls : ''),
               iconSize: [14, 14],
             }),
             title: p.title || '',
