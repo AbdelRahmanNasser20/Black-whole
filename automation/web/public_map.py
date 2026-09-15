@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Iterable
 
@@ -35,6 +36,9 @@ POINT_KEYS = frozenset({
     "city", "state", "lat", "lng", "precision", "hero", "url",
 })
 CACHE_TTL = 300
+# GovDeals asset URLs are `/asset/{a}/{b}`; `favorites.asset_id` is the same two
+# ids in the same order, so the URL's own text is the join key.
+ASSET_URL_RE = re.compile(r"/asset/(\d+)/(\d+)")
 
 
 def bucket(row: dict) -> str | None:
@@ -109,11 +113,26 @@ def points_from_inventory(rows: Iterable[dict]) -> list[dict]:
     return pts
 
 
-def points_from_favorites(favs: Iterable[favorites_mod.Favorite]) -> list[dict]:
+def owned_asset_ids(rows: Iterable[dict]) -> frozenset[str]:
+    """`{"<a>/<b>"}` for every inventory row that came from a GovDeals asset URL."""
+    out = set()
+    for row in rows:
+        m = ASSET_URL_RE.search(row.get("govdeals_url") or "")
+        if m:
+            out.add(f"{m.group(1)}/{m.group(2)}")
+    return frozenset(out)
+
+
+def points_from_favorites(favs: Iterable[favorites_mod.Favorite], *,
+                          exclude: frozenset[str] | set[str] = frozenset()) -> list[dict]:
     now = datetime.now(timezone.utc)
     pts: list[dict] = []
     for f in favs:
         if f.is_private:
+            continue
+        # Once the auction is a real inventory row it pins as the lot. Keeping
+        # the star would pin the same chairs twice in the same city.
+        if f.asset_id in exclude:
             continue
         end = f.end_dt
         if end is not None and end.tzinfo is None:
@@ -145,7 +164,8 @@ def all_points() -> list[dict]:
     uniq = [r for r in rows if not (r["lot_id"] in seen or seen.add(r["lot_id"]))]
     pts = points_from_inventory(uniq)
     try:
-        pts += points_from_favorites(favorites_mod.list_all())
+        pts += points_from_favorites(favorites_mod.list_all(),
+                                     exclude=owned_asset_ids(uniq))
     except Exception as e:  # noqa: BLE001 — favorites trouble must not blank the map
         log.warning("public map: favorites unavailable: %r", e)
     return pts

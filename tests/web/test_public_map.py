@@ -116,6 +116,26 @@ def test_private_or_ended_favorites_are_skipped():
     assert pm.points_from_favorites([_fav(end_date_iso="2000-01-01T00:00:00+00:00")]) == []
 
 
+def test_favorite_is_hidden_once_the_lot_is_in_inventory(monkeypatch):
+    """The PA lot we won shows once — as the lot, not twice with its favorite."""
+    pm.readcache.invalidate_all()
+    row = _row(lot_id="gd-56-9685", city="Pittsburgh", state="PA", status="active_bid",
+               govdeals_url="https://www.govdeals.com/en/asset/9685/56")
+    monkeypatch.setattr(pm.inventory, "list_public", lambda: [row])
+    monkeypatch.setattr(pm.inventory, "list_sold_showcase", lambda: [])
+    monkeypatch.setattr(pm.favorites_mod, "list_all", lambda: [_fav()])
+    pts = pm.all_points()
+    pitt = [p for p in pts if p["city"] == "Pittsburgh"]
+    assert len(pitt) == 1
+    assert pitt[0]["kind"] == "lot" and pitt[0]["lot_id"] == "gd-56-9685"
+    pm.readcache.invalidate_all()
+
+
+def test_points_from_favorites_exclude_skips_owned_assets():
+    assert pm.points_from_favorites([_fav()], exclude={"9685/56"}) == []
+    assert len(pm.points_from_favorites([_fav()], exclude={"1/2"})) == 1
+
+
 def test_fetch_points_filters_and_near(monkeypatch):
     rows = [_row(), _row(lot_id="gd-3-4", city="Atlanta", state="GA", status="sold_out")]
     monkeypatch.setattr(pm, "all_points", lambda: pm.points_from_inventory(rows))
