@@ -33,6 +33,10 @@
   --text: #0B0B0B;  --muted: #6B6257;  --dim: #6a655c;
   --accent: #FF4A1C;  --accent-soft: #FFE9DF;
   --danger: #B00020;  --danger-soft: #FFE0E0;  --success: #1f7a3a;
+  /* status colours the dark palette also defines — without these the storefront
+     inherited the dark ones, which wash out on #F4F1EC. Blue reads as info next
+     to the orange accent; --warn is that accent family, darkened for contrast. */
+  --info: #1F5FBF;  --warn: #9A5B00;
   --sk-a: #ECE7DD;  --sk-b: #F4F1EC;
   /* prose shades the storefront uses beside --text / --muted (were hard-coded in public.css) */
   --text-lede: #2b2924;  --text-soft: #3a3731;  --text-prose: #2a2822;

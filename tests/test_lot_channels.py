@@ -134,3 +134,126 @@ def test_sold_status_for(status, expect):
 def test_google_category_by_row_words():
     assert google_category({"chair_type": "Banquet Chairs", "title": "x"}) == "Furniture > Chairs"
     assert google_category({"chair_type": None, "title": "14 Round Folding Tables"}) == "Furniture > Tables"
+
+
+# ─── clean_and_upload (no network: httpx + dewatermark + R2 are faked) ───
+
+class _FakeResp:
+    def __init__(self, content=b"jpegbytes"):
+        self.content = content
+
+    def raise_for_status(self):
+        return None
+
+
+class _FakeClient:
+    def __init__(self, *a, **kw):
+        pass
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
+
+    def get(self, url):
+        return _FakeResp()
+
+
+def _fake_dewatermark(monkeypatch, clean_indexes, *, order=None):
+    """Stand in for automation.dewatermark.dewatermark, matching its real contract:
+    every input is archived into `_originals/` up front, and ONLY the cleaned
+    root-folder outputs come back (a failure is a missing path, never a
+    watermarked one). `order` re-orders the returned list the way the three
+    cache layers do."""
+    from automation import dewatermark as dw
+
+    async def fake(_run, files, folder, lot_label=None):
+        originals = folder / "_originals"
+        originals.mkdir(parents=True, exist_ok=True)
+        out = []
+        for i, f in enumerate(files):
+            (originals / f.name).write_bytes(f.read_bytes())
+            f.unlink()
+            if i in clean_indexes:
+                cleaned = folder / f"{f.stem}.png"
+                cleaned.write_bytes(b"cleanbytes")
+                out.append(cleaned)
+        return [out[i] for i in order] if order else out
+
+    monkeypatch.setattr(dw, "dewatermark", fake)
+
+
+@pytest.fixture
+def _scratch(tmp_path, monkeypatch):
+    monkeypatch.setattr(lc.config, "SCRATCH_DIR", str(tmp_path))
+    monkeypatch.setattr("httpx.Client", _FakeClient)
+    return tmp_path
+
+
+@pytest.fixture
+def _uploads(monkeypatch):
+    """Records what reached R2. Nothing watermarked may ever appear here."""
+    seen = {}
+
+    def fake_upload(key, files):
+        seen["key"] = key
+        seen["names"] = [f.name for f in files]
+        assert all(f.parent.name != "_originals" for f in files), "watermarked original uploaded"
+        return {"hero_image_url": "h", "image_urls": ["a"]}
+
+    monkeypatch.setattr(lc.listing_images, "upload_lot_images", fake_upload)
+    return seen
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_clean_and_upload_publishes_only_cleaned_photos(_scratch, _uploads, monkeypatch, strict):
+    """Partial API failure: the photo that failed is simply absent — never shipped."""
+    _fake_dewatermark(monkeypatch, clean_indexes={0})
+    lines = []
+    out = lc.clean_and_upload("fav-abc", ["https://cdn/0.jpg", "https://cdn/1.jpg"],
+                              log=lines.append, strict=strict)
+    assert out == {"hero_image_url": "h", "image_urls": ["a"]}
+    assert _uploads["key"] == "fav-abc" and _uploads["names"] == ["00.png"]
+    assert any("1/2" in ln and "dropped" in ln for ln in lines), lines
+
+
+@pytest.mark.parametrize("strict", [True, False])
+def test_clean_and_upload_uploads_nothing_when_every_photo_fails(_scratch, monkeypatch, strict):
+    _fake_dewatermark(monkeypatch, clean_indexes=set())
+    monkeypatch.setattr(lc.listing_images, "upload_lot_images",
+                        lambda key, files: pytest.fail("must not upload watermarked files"))
+    assert lc.clean_and_upload("fav-abc", ["https://cdn/0.jpg", "https://cdn/1.jpg"],
+                               log=lambda *a: None, strict=strict) is None
+
+
+def test_clean_and_upload_restores_gallery_order_for_the_hero(_scratch, _uploads, monkeypatch):
+    """`dewatermark()` returns cache-layer order; file 0 becomes the hero, so
+    the first gallery photo must be first again."""
+    _fake_dewatermark(monkeypatch, clean_indexes={0, 1, 2}, order=[2, 0, 1])
+    lc.clean_and_upload("k", [f"https://cdn/{i}.jpg" for i in range(3)], log=lambda *a: None)
+    assert _uploads["names"] == ["00.png", "01.png", "02.png"]
+
+
+def test_clean_and_upload_strict_refuses_to_skip_dewatermarking(_scratch):
+    with pytest.raises(ValueError, match="strict"):
+        lc.clean_and_upload("k", ["https://cdn/0.jpg"], log=lambda *a: None,
+                            dewatermark=False, strict=True)
+
+
+def test_clean_and_upload_honours_limit_and_does_not_touch_inventory(_scratch, _uploads, monkeypatch):
+    _fake_dewatermark(monkeypatch, clean_indexes=set(range(6)))
+    monkeypatch.setattr(lc.inventory, "set_images",
+                        lambda *a: pytest.fail("clean_and_upload must not stamp inventory"))
+    lc.clean_and_upload("k", [f"https://cdn/{i}.jpg" for i in range(9)], log=lambda *a: None, limit=6)
+    assert len(_uploads["names"]) == 6
+
+
+def test_mirror_photos_stamps_inventory(_scratch, _uploads, monkeypatch):
+    _fake_dewatermark(monkeypatch, clean_indexes={0})
+    stamped = {}
+    monkeypatch.setattr(lc.inventory, "set_images",
+                        lambda lot_id, hero, urls: stamped.update(lot_id=lot_id, hero=hero, urls=urls))
+    out = lc.mirror_photos("gd-1-2", ["https://cdn/0.jpg"], log=lambda *a: None)
+    assert out["hero_image_url"] == "h"
+    assert stamped == {"lot_id": "gd-1-2", "hero": "h", "urls": ["a"]}

@@ -3,23 +3,35 @@
 The CRM resolves a zip/state to lat-lon with `pgeocode` and measures distance
 with a haversine (`geo_utils.zip_to_latlon` / `haversine_miles`). That code is
 NOT vendored into this repo, so this module reimplements the small slice the
-blast needs — with no hard new dependency:
+blast needs:
 
   - `haversine_miles(...)` — great-circle distance, pure Python.
   - `resolve_latlon(zip_code, state)` — best-effort coordinates + a *precision*
-    tag (`'zip' | 'state' | None`). Zip precision is used **only if `pgeocode`
-    happens to be installed**; otherwise we fall back to a built-in state
-    centroid table, so matching still works (at state precision) with zero
-    extra packages. The matcher degrades honestly when precision is coarse
-    (see `matcher.match_lot`).
+    tag (`'zip' | 'state' | None`).
+  - `resolve_place(city, state, zip_code)` — the coarser ladder the public map
+    pins use (`'city' | 'zip' | 'state' | None`), city first so a pin is never
+    more precise than a city. `city_latlon` and `parse_place` back it.
 
-Nothing here touches the network at import time. `pgeocode` (if present) reads a
-bundled offline dataset.
+`pgeocode` supplies the city and zip coordinates. It is a declared dependency,
+but every call stays guarded: if it is missing we fall back to a built-in state
+centroid table, so matching still works at state precision. The matcher degrades
+honestly when precision is coarse (see `matcher.match_lot`).
+
+Nothing here touches the network at import time. `pgeocode` is NOT bundled with
+its data: constructing `Nominatim("us")` downloads the GeoNames US dataset into
+`~/.cache/pgeocode` on first use (one network fetch per container/machine), then
+reads it offline forever after. That first call is why the web app pre-warms
+`_pgeocode_us()` on startup instead of paying for it inside a request.
 """
 from __future__ import annotations
 
+import logging
 import math
+import re
+import time
 from functools import lru_cache
+
+log = logging.getLogger(__name__)
 
 # ── state centroids (approx geographic center, WGS84) ───────────────────────
 # Enough for a state-precision fallback when a zip can't be resolved. Values are
@@ -57,26 +69,64 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
     return 2 * EARTH_RADIUS_MILES * math.asin(math.sqrt(a))
 
 
+_STATE_NAMES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA",
+    "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
+    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
+    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+
+
 def _norm_state(state: str | None) -> str | None:
-    s = (state or "").strip().upper()
-    return s if s in STATE_CENTROIDS else None
+    """Normalize a state to its 2-letter code, or None if it isn't one.
 
-
-@lru_cache(maxsize=1)
-def _pgeocode_us():
-    """Return a cached pgeocode US nominatim, or None if pgeocode is absent.
-
-    Import is lazy + guarded: the package is optional. Absent => zip precision
-    is simply unavailable and callers fall back to the state centroid.
+    Accepts both spellings because `inventory.state` is inconsistent: some rows
+    carry "ID", others "Idaho". Case and repeated whitespace don't matter.
     """
+    s = " ".join((state or "").split())
+    code = s.upper()
+    if code not in STATE_CENTROIDS:
+        code = _STATE_NAMES.get(s.lower(), "")
+    return code if code in STATE_CENTROIDS else None
+
+
+# Only a *successful* Nominatim is cached. `lru_cache` used to memoise the None
+# too, so one flaky first call (the GeoNames download failing on a cold Render
+# boot) pinned every pin in the process to a state centroid until a redeploy.
+_NOMI = None
+_NOMI_FAILED_AT: float = 0.0
+_NOMI_RETRY_SEC = 60.0
+
+
+def _pgeocode_us():
+    """Return the cached pgeocode US nominatim, or None if it is unavailable.
+
+    Import + construction are lazy and guarded: the package is optional and its
+    dataset download can fail. A failure is NOT memoised — it is retried, at
+    most once every `_NOMI_RETRY_SEC`, so a transient outage costs coarse pins
+    for a minute rather than for the life of the process.
+    """
+    global _NOMI, _NOMI_FAILED_AT
+    if _NOMI is not None:
+        return _NOMI
+    if _NOMI_FAILED_AT and (time.monotonic() - _NOMI_FAILED_AT) < _NOMI_RETRY_SEC:
+        return None
     try:
         import pgeocode  # type: ignore
-    except Exception:
+        _NOMI = pgeocode.Nominatim("us")
+    except Exception as e:  # noqa: BLE001 — absent package or a failed download
+        _NOMI_FAILED_AT = time.monotonic()
+        log.warning("pgeocode unavailable: %r — pins fall back to state centroids", e)
         return None
-    try:
-        return pgeocode.Nominatim("us")
-    except Exception:
-        return None
+    _NOMI_FAILED_AT = 0.0
+    return _NOMI
 
 
 def _zip_latlon(zip_code: str | None) -> tuple[float, float] | None:
@@ -116,3 +166,81 @@ def resolve_latlon(
         lat, lon = STATE_CENTROIDS[st]
         return (lat, lon, "state")
     return (None, None, None)
+
+
+
+@lru_cache(maxsize=2048)
+def city_latlon(city: str | None, state: str | None) -> tuple[float, float] | None:
+    """City centroid from pgeocode's offline GeoNames (median of the city's zip rows).
+
+    The match must be exact on both the 2-letter state and the (case-insensitive)
+    place name. `query_location` is fuzzy, so a near-miss like "Meridian, ID" can
+    come back as rows for *Boise*; pinning those would put a lot in the wrong
+    city under a `'city'` precision label. Anything short of an exact match is
+    None, and `resolve_place` drops to the zip/state rung instead.
+    """
+    st = _norm_state(state)
+    name = (city or "").strip()
+    if not name or st is None:
+        return None
+    nomi = _pgeocode_us()
+    if nomi is None:
+        return None
+    try:
+        # top_k is a hard cap on candidates, ranked by pgeocode's fuzzy score.
+        # A name shared across many states ("Charleston", "Springfield") can push
+        # the state we want past a small cap, costing the pin; 200 is wide enough
+        # and costs nothing — the exact state+name filter below does the real work.
+        df = nomi.query_location(name, top_k=200)
+    except Exception as e:  # noqa: BLE001 — pgeocode raises on odd input; treat as miss
+        log.debug("pgeocode query_location(%r) failed: %r", name, e)
+        return None
+    if df is None or df.empty:
+        return None
+    hit = df[(df["state_code"] == st) & (df["place_name"].str.lower() == name.lower())]
+    if hit.empty:
+        return None
+    return (float(hit["latitude"].median()), float(hit["longitude"].median()))
+
+
+def resolve_place(
+    city: str | None, state: str | None, zip_code: str | None
+) -> tuple[float | None, float | None, str | None]:
+    """Public-map ladder: city centroid → zip centroid → state centroid → none.
+
+    City first on purpose: pins must never be more precise than a city.
+    """
+    hit = city_latlon(city, state)
+    if hit is not None:
+        return (hit[0], hit[1], "city")
+    lat, lon, prec = resolve_latlon(zip_code, state)
+    return (lat, lon, prec)
+
+
+_ZIP_RE = re.compile(r"\b(\d{5})\b")
+
+
+def parse_place(text: str | None) -> tuple[str | None, str | None, str | None]:
+    """Free text ("Boise, ID", "83702", "Boise ID 83702") → (city, state, zip)."""
+    s = (text or "").strip()
+    if not s:
+        return (None, None, None)
+    zip_code = None
+    m = _ZIP_RE.search(s)
+    if m:
+        zip_code = m.group(1)
+        s = (s[:m.start()] + s[m.end():]).strip(" ,")
+    parts = [p.strip() for p in re.split(r"[,\s]+", s) if p.strip()]
+    state = None
+    city_parts = parts
+    # Two words before one: the tail of "West Virginia" is itself a state name,
+    # so a greedy one-word match would read it as Virginia.
+    for n in (2, 1):
+        if len(parts) < n:
+            continue
+        cand = _norm_state(" ".join(parts[-n:]))
+        if cand:
+            state, city_parts = cand, parts[:-n]
+            break
+    city = " ".join(city_parts).strip() or None
+    return (city, state, zip_code)

@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from automation import inventory
-from automation.web import app as app_mod
+from automation.web import public_map
 from automation.web import auth as auth_svc
 from automation.web.app import app
 
@@ -54,6 +54,7 @@ def _sold(**over):
 def client(monkeypatch):
     monkeypatch.setattr(inventory, "list_public", lambda: [_live()])
     monkeypatch.setattr(inventory, "list_sold_showcase", lambda *a, **k: [_sold()])
+    monkeypatch.setattr(public_map, "nearby", lambda lot_id, **k: {"origin": None, "items": []})
     return TestClient(app)
 
 
