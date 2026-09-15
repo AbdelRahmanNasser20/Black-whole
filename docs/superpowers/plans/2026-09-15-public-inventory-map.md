@@ -428,7 +428,7 @@ def _fixed_geo(monkeypatch):
         hit = table.get((city, state))
         return (hit[0], hit[1], "city") if hit else (None, None, None)
     monkeypatch.setattr(pm.geo, "resolve_place", fake)
-    pm.all_points.cache_clear() if hasattr(pm.all_points, "cache_clear") else None
+    pm.readcache.invalidate_all()
 
 
 def _row(**kw):
@@ -713,7 +713,7 @@ def nearby(lot_id: str, *, miles: float = 200, limit: int = 6) -> dict:
             "items": items[:limit]}
 ```
 
-If `readcache.cached` does not expose `cache_clear`, the test fixture's `hasattr` guard handles it; tests that need a fresh memo monkeypatch `pm.all_points` directly. Verify `inventory.parse_locations` accepts `None` (returns `[]`); if it raises, guard with `row.get("locations") and ...`.
+`readcache.invalidate_all()` clears the memo (no per-function `cache_clear`); tests that need a fresh memo monkeypatch `pm.all_points` directly. `inventory.parse_locations(None)` returns `None` — the `or []` in `_places` handles it.
 
 - [ ] **Step 4: Run tests**
 
@@ -859,10 +859,11 @@ In `sitemap_xml`: `for path in ("/", "/listings", "/map", "/sell"):`.
 `templates/map.html`:
 ```html
 {% extends "_public_base.html" %}
-{% block title %}Where the chairs are — BLACK WHOLE{% endblock %}
-{% block head %}
+{% block title %}Where the chairs are — Black Whole Liquidation{% endblock %}
+{% block meta_description %}Every Black Whole chair lot on one map — available, incoming and sold. Search near your city.{% endblock %}
+{% block body_class %}page-map{% endblock %}
+{% block head_extra %}
 <link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
-<meta name="description" content="Every BLACK WHOLE chair lot on one map — available, incoming and sold. Search near your city.">
 {% endblock %}
 {% block content %}
 <section class="page-head">
@@ -907,7 +908,7 @@ In `sitemap_xml`: `for path in ("/", "/listings", "/map", "/sell"):`.
 <script type="module" src="/static/site/map.js?v={{ now }}"></script>
 {% endblock %}
 ```
-Check `_public_base.html` block names (`head`, `content`, `scripts`, `title`) before writing — mirror whatever `listings.html` uses. Create an empty `static/site/map.css` so the asset test passes now (real styles come in Task 5).
+`_public_base.html` blocks are `title`, `meta_description`, `body_class`, `head_extra`, `content`, `scripts` — never override `head` (it wraps the SEO/og meta). Create an empty `static/site/map.css` so the asset test passes now (real styles come in Task 5).
 
 - [ ] **Step 5: Run tests + relaunch smoke**
 
@@ -1012,6 +1013,8 @@ export async function mountSiteMap(el, opts = {}) {
     radius: opts.radius ?? el.dataset.radius ?? '',
     points: [], all: [],
   };
+  let statusEl = el.parentElement.querySelector(':scope > .map-status');
+  if (!statusEl) { statusEl = document.createElement('div'); statusEl.className = 'map-status mono tiny'; el.insertAdjacentElement('afterend', statusEl); }
   const AdminMap = await ensureAdminMap();
   const map = await AdminMap.mount(el, { tiles: el.dataset.tiles || 'light' });
   el.classList.remove('map-loading');
@@ -1034,10 +1037,19 @@ export async function mountSiteMap(el, opts = {}) {
     if (state.near) q.set('near', state.near);
     if (state.radius) q.set('radius', state.radius);
     const url = `${el.dataset.pointsUrl || '/map/api/points'}?${q}`;
-    const target = listEl || el;
+    // NEVER hand the Leaflet container to load(): it replaces innerHTML with a
+    // skeleton and would wipe the map. The side list (or a status sibling) owns
+    // the loading state.
+    const target = listEl || statusEl;
     return load(target, ({ signal }) => api(url, { signal }), {
-      skeleton: 'card', count: 3, keepOld: !!listEl,
-      render: (d) => { state.all = d.points || []; render(); if (d.near) map.leaflet.setView([d.near.lat, d.near.lng], state.radius ? 6 : 5); else if (!el.dataset.focusLat) map.fit(); if (opts.onOrigin) opts.onOrigin(d.near); return listEl ? undefined : ''; },
+      skeleton: listEl ? 'card' : 'line', count: listEl ? 3 : 1, keepOld: !!listEl,
+      render: (d) => {
+        state.all = d.points || []; render();
+        if (d.near) map.leaflet.setView([d.near.lat, d.near.lng], state.radius ? 6 : 5);
+        else if (!el.dataset.focusLat) map.fit();
+        if (opts.onOrigin) opts.onOrigin(d.near);
+        return listEl ? undefined : '';          // clear the status skeleton; the list rendered itself
+      },
       isEmpty: () => false,
     });
   };
@@ -1124,6 +1136,8 @@ Check `fmt.int` exists in `state.js:5-17` (the report says `fmt` has `money`, `i
 .map-item-body { display: grid; gap: 2px; }
 .map-item-title { font-weight: 600; }
 .map-empty { padding: var(--pad); border: 1px dashed var(--border); color: var(--muted); }
+.map-status { min-height: 1em; color: var(--muted); }
+.map-status[data-state="ready"] { display: none; }
 
 .map-pop img { width: 100%; height: 120px; object-fit: cover; display: block; margin-bottom: 6px; }
 .map-pop-title { font-weight: 600; margin-bottom: 2px; }
@@ -1217,7 +1231,7 @@ Insert after `</section>` of `.stats`:
   </div>
 </section>
 ```
-Add `<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">` in landing's head block (create `{% block head %}` if the template lacks one — check `_public_base.html` for the block name) and `<script type="module" src="/static/site/map.js?v={{ now }}"></script>` after `site.js`.
+Add `{% block head_extra %}<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">{% endblock %}` to landing.html (never override `head`) and `<script type="module" src="/static/site/map.js?v={{ now }}"></script>` after `site.js`.
 
 - [ ] **Step 3: Verify**
 
@@ -1298,7 +1312,7 @@ Template, after `</dl>`:
     </div>
     {% endif %}
 ```
-Note Jinja: `nearby['items']` not `nearby.items` (dict method). Add `map.css` to the head block and `map.js` to `scripts` like Task 6.
+Note Jinja: `nearby['items']` not `nearby.items` (dict method). Add `{% block head_extra %}<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">{% endblock %}` and `map.js` to `scripts` like Task 6.
 
 - [ ] **Step 3: Verify**
 
