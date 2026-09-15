@@ -3,15 +3,19 @@
 The CRM resolves a zip/state to lat-lon with `pgeocode` and measures distance
 with a haversine (`geo_utils.zip_to_latlon` / `haversine_miles`). That code is
 NOT vendored into this repo, so this module reimplements the small slice the
-blast needs — with no hard new dependency:
+blast needs:
 
   - `haversine_miles(...)` — great-circle distance, pure Python.
   - `resolve_latlon(zip_code, state)` — best-effort coordinates + a *precision*
-    tag (`'zip' | 'state' | None`). Zip precision is used **only if `pgeocode`
-    happens to be installed**; otherwise we fall back to a built-in state
-    centroid table, so matching still works (at state precision) with zero
-    extra packages. The matcher degrades honestly when precision is coarse
-    (see `matcher.match_lot`).
+    tag (`'zip' | 'state' | None`).
+  - `resolve_place(city, state, zip_code)` — the coarser ladder the public map
+    pins use (`'city' | 'zip' | 'state' | None`), city first so a pin is never
+    more precise than a city. `city_latlon` and `parse_place` back it.
+
+`pgeocode` supplies the city and zip coordinates. It is a declared dependency,
+but every call stays guarded: if it is missing we fall back to a built-in state
+centroid table, so matching still works at state precision. The matcher degrades
+honestly when precision is coarse (see `matcher.match_lot`).
 
 Nothing here touches the network at import time. `pgeocode` (if present) reads a
 bundled offline dataset.
@@ -19,6 +23,7 @@ bundled offline dataset.
 from __future__ import annotations
 
 import math
+import re
 from functools import lru_cache
 
 # ── state centroids (approx geographic center, WGS84) ───────────────────────
@@ -116,3 +121,89 @@ def resolve_latlon(
         lat, lon = STATE_CENTROIDS[st]
         return (lat, lon, "state")
     return (None, None, None)
+
+
+_STATE_NAMES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA",
+    "colorado": "CO", "connecticut": "CT", "delaware": "DE", "florida": "FL", "georgia": "GA",
+    "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA",
+    "michigan": "MI", "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT",
+    "nebraska": "NE", "nevada": "NV", "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM",
+    "new york": "NY", "north carolina": "NC", "north dakota": "ND", "ohio": "OH", "oklahoma": "OK",
+    "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI", "south carolina": "SC",
+    "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "district of columbia": "DC",
+}
+
+
+@lru_cache(maxsize=2048)
+def city_latlon(city: str | None, state: str | None) -> tuple[float, float] | None:
+    """City centroid from pgeocode's offline GeoNames (median of the city's zip rows).
+
+    Needs a matching 2-letter state: "Boise, GA" is None, not a wrong pin.
+    """
+    st = _norm_state(state)
+    name = (city or "").strip()
+    if not name or st is None:
+        return None
+    nomi = _pgeocode_us()
+    if nomi is None:
+        return None
+    try:
+        df = nomi.query_location(name, top_k=25)
+    except Exception:  # noqa: BLE001 — pgeocode raises on odd input; treat as miss
+        return None
+    if df is None or df.empty:
+        return None
+    hit = df[(df["state_code"] == st) & (df["place_name"].str.lower() == name.lower())]
+    if hit.empty:
+        hit = df[df["state_code"] == st]
+    if hit.empty:
+        return None
+    return (float(hit["latitude"].median()), float(hit["longitude"].median()))
+
+
+def resolve_place(
+    city: str | None, state: str | None, zip_code: str | None
+) -> tuple[float | None, float | None, str | None]:
+    """Public-map ladder: city centroid → zip centroid → state centroid → none.
+
+    City first on purpose: pins must never be more precise than a city.
+    """
+    hit = city_latlon(city, state)
+    if hit is not None:
+        return (hit[0], hit[1], "city")
+    lat, lon, prec = resolve_latlon(zip_code, state)
+    return (lat, lon, prec)
+
+
+_ZIP_RE = re.compile(r"\b(\d{5})\b")
+
+
+def parse_place(text: str | None) -> tuple[str | None, str | None, str | None]:
+    """Free text ("Boise, ID", "83702", "Boise ID 83702") → (city, state, zip)."""
+    s = (text or "").strip()
+    if not s:
+        return (None, None, None)
+    zip_code = None
+    m = _ZIP_RE.search(s)
+    if m:
+        zip_code = m.group(1)
+        s = (s[:m.start()] + s[m.end():]).strip(" ,")
+    parts = [p.strip() for p in re.split(r"[,\s]+", s) if p.strip()]
+    state = None
+    city_parts = parts
+    if parts:
+        last = parts[-1]
+        if _norm_state(last):
+            state, city_parts = _norm_state(last), parts[:-1]
+        else:
+            for n in (2, 1):
+                cand = " ".join(parts[-n:]).lower()
+                if cand in _STATE_NAMES:
+                    state, city_parts = _STATE_NAMES[cand], parts[:-n]
+                    break
+    city = " ".join(city_parts).strip() or None
+    return (city, state, zip_code)
