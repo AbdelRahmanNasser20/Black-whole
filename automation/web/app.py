@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import signal
@@ -72,6 +73,8 @@ except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
     get_top_lots = None
     _auctions_cache_stats = None
+
+log = logging.getLogger(__name__)
 
 PKG_DIR = Path(__file__).parent
 TEMPLATE_DIR = PKG_DIR / "templates"
@@ -613,7 +616,10 @@ def public_map_points(status: str | None = None, near: str | None = None,
     try:
         return public_map.fetch_points(statuses=wanted, near=near, radius_mi=radius)
     except Exception as e:  # noqa: BLE001
-        raise HTTPException(503, f"map query failed: {e!r}")
+        # The repr carries the DSN and local paths, and this route is public +
+        # unauthenticated — the detail goes to the server log, never the body.
+        log.warning("map points query failed: %r", e)
+        raise HTTPException(503, "map temporarily unavailable")
 
 
 @app.get("/api/visits/summary")

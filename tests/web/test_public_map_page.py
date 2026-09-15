@@ -68,3 +68,15 @@ def test_sitemap_lists_map(monkeypatch):
     monkeypatch.setattr(app_mod.inventory, "list_public", lambda: [])
     monkeypatch.setattr(app_mod.inventory, "list_sold_showcase", lambda: [])
     assert "/map</loc>" in TestClient(app).get("/sitemap.xml").text
+
+
+def test_points_failure_does_not_leak_the_exception(monkeypatch, client, caplog):
+    """A DB error repr carries the DSN and local paths. /map/api/points is public
+    and unauthenticated, so the detail is logged, never returned."""
+    def boom(**kw):
+        raise RuntimeError("secret dsn postgres://x")
+    monkeypatch.setattr(app_mod.public_map, "fetch_points", boom)
+    r = client.get("/map/api/points")
+    assert r.status_code == 503
+    assert "postgres://" not in r.text and "secret" not in r.text
+    assert "postgres://x" in caplog.text  # operator still sees it in the server log
