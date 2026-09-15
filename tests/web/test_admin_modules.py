@@ -13,7 +13,7 @@ from automation.web.app import app
 
 ADMIN = Path("automation/web/static/admin")
 TABS = ["launcher", "drafts", "auctions", "inventory", "inquiries", "subscribers",
-        "listings_db", "test_scrape", "deals", "tracking"]
+        "listings_db", "test_scrape", "deals", "tracking", "deposits"]
 
 
 @pytest.fixture(autouse=True)

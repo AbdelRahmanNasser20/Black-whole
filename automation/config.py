@@ -63,6 +63,16 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        return default
+
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = os.getenv(name)
     if raw is None:
@@ -102,6 +112,25 @@ MAX_ALERTS_PER_DAY = _env_int("MAX_ALERTS_PER_DAY", 100)
 ALERTS_FROM_EMAIL = os.getenv("ALERTS_FROM_EMAIL", "alerts@black-whole.com")
 ALERTS_REPLY_TO = os.getenv("ALERTS_REPLY_TO", "")  # operator Gmail (PRD §8)
 ALERTS_POSTAL_ADDRESS = os.getenv("ALERTS_POSTAL_ADDRESS", "")
+
+# ── Reserve with deposit (Stripe Checkout) ──────────────────────────────────
+# SHIPS DARK. No STRIPE_SECRET_KEY => no Reserve button on the storefront,
+# /reserve/* and /stripe/webhook return 404, and nothing imports the `stripe`
+# SDK. That's the production default until the operator activates the account
+# and sets these in Render's `blackwhole-secrets` group.
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+# Signing secret for the Stripe webhook endpoint (whsec_…). Unverified webhook
+# posts are rejected, so an unset secret means the webhook stays closed too.
+STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
+
+# SEED DEFAULTS ONLY — the live deposit rule lives in the `site_settings` table
+# and is edited from the admin Deposits tab. These values are what a fresh DB
+# gets seeded with (see scripts/sql/005_deposits.sql) and what
+# automation/site_settings.py falls back to if the DB is unreachable, so a
+# public page never 500s over a settings lookup. Changing them does NOT change
+# the rule on a DB that already has rows.
+DEPOSIT_PCT_DEFAULT = _env_float("DEPOSIT_PCT_DEFAULT", 0.15)
+DEPOSIT_MIN_USD_DEFAULT = _env_int("DEPOSIT_MIN_USD_DEFAULT", 200)
 
 DEFAULT_PRICE_PER_CHAIR = 20
 FB_PACKAGE_WEIGHT_LB = 12
