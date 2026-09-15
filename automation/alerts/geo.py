@@ -142,7 +142,11 @@ _STATE_NAMES = {
 def city_latlon(city: str | None, state: str | None) -> tuple[float, float] | None:
     """City centroid from pgeocode's offline GeoNames (median of the city's zip rows).
 
-    Needs a matching 2-letter state: "Boise, GA" is None, not a wrong pin.
+    The match must be exact on both the 2-letter state and the (case-insensitive)
+    place name. `query_location` is fuzzy, so a near-miss like "Meridian, ID" can
+    come back as rows for *Boise*; pinning those would put a lot in the wrong
+    city under a `'city'` precision label. Anything short of an exact match is
+    None, and `resolve_place` drops to the zip/state rung instead.
     """
     st = _norm_state(state)
     name = (city or "").strip()
@@ -158,8 +162,6 @@ def city_latlon(city: str | None, state: str | None) -> tuple[float, float] | No
     if df is None or df.empty:
         return None
     hit = df[(df["state_code"] == st) & (df["place_name"].str.lower() == name.lower())]
-    if hit.empty:
-        hit = df[df["state_code"] == st]
     if hit.empty:
         return None
     return (float(hit["latitude"].median()), float(hit["longitude"].median()))

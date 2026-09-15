@@ -14,6 +14,14 @@ class _FakeNominatim:
                 "latitude": [43.60, 43.63, 43.66],
                 "longitude": [-116.27, -116.20, -116.25],
             })
+        if name.lower() == "meridian":
+            # pgeocode's query_location is fuzzy: right state, wrong city.
+            return pd.DataFrame({
+                "place_name": ["Boise", "Boise"],
+                "state_code": ["ID", "ID"],
+                "latitude": [43.60, 43.63],
+                "longitude": [-116.27, -116.20],
+            })
         return pd.DataFrame(columns=["place_name", "state_code", "latitude", "longitude"])
 
     def query_postal_code(self, code):
@@ -41,6 +49,12 @@ def test_city_ladder_falls_to_zip_then_state():
 
 def test_city_requires_matching_state():
     assert geo.city_latlon("Boise", "GA") is None
+
+
+def test_fuzzy_neighbour_is_not_a_city_hit():
+    """A right-state/wrong-city fuzzy match must not be pinned as that city."""
+    assert geo.city_latlon("Meridian", "ID") is None
+    assert geo.resolve_place("Meridian", "ID", "83702")[2] == "zip"
 
 
 def test_city_latlon_without_pgeocode(monkeypatch):
