@@ -154,6 +154,11 @@ def upload_lot_images(lot_id, paths) -> dict | None:
             hero_path = li.opaque_hero_path(lot_id) if opaque else li.hero_object_path(lot_id, ext=ext)
             if hero_path and put_object(s3, bucket=bucket, path=hero_path, data=data, content_type=ct):
                 hero_url = public_url(hero_path, public_base=public_base, version=ver)
+                if opaque:
+                    twin = image_disguise.disguise(source, key=base_key, watermark=False)
+                    if twin:
+                        put_object(s3, bucket=bucket, path=li.catalog_path(hero_path),
+                                   data=twin[0], content_type=twin[2])
 
     if not gallery and not hero_url:
         return None

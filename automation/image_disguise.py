@@ -324,8 +324,11 @@ def _encode(img: Image.Image, quality: int) -> bytes:
     return buf.getvalue()
 
 
-def disguise(data: bytes, *, key: str) -> tuple[bytes, str, str] | None:
+def disguise(data: bytes, *, key: str, watermark: bool = True) -> tuple[bytes, str, str] | None:
     """Disguised JPEG for one photo of lot `key`: ``(bytes, "jpg", "image/jpeg")``.
+
+    `watermark=False` is only for the FB catalog feed's hero, because Meta
+    rejects catalog images that carry a watermark. Lens can match that copy.
 
     None when the bytes aren't a readable image — the caller must then skip the
     file rather than upload the original.
@@ -338,7 +341,7 @@ def disguise(data: bytes, *, key: str) -> tuple[bytes, str, str] | None:
     key = _norm(key)
     digest = hashlib.sha256(data).hexdigest()
     mirror = mirror_allowed(key)
-    mark = watermark_text()
+    mark = watermark_text() if watermark else None
     src_hashes = (image_hash.phash(src), image_hash.dhash(src))
 
     best: tuple[int, bytes] | None = None

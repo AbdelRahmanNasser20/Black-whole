@@ -232,3 +232,40 @@ def test_hash_self_distance_zero_and_reencode_close():
     img.save(buf, format="JPEG", quality=70)
     p, dh = image_hash.distance(img, _open(buf.getvalue()))
     assert p <= 4 and dh <= 4
+
+
+# --- FB catalog twin (Meta rejects watermarked catalog images) ----------------
+
+def test_catalog_url_maps_only_disguised_heroes():
+    hero = "https://pub-xyz.r2.dev/p/abc/h.jpg?v=12345678"
+    assert li.catalog_url(hero) == "https://pub-xyz.r2.dev/p/abc/h.c.jpg?v=12345678"
+    gallery = "https://pub-xyz.r2.dev/p/abc/0f0f0f.jpg?v=1"
+    legacy = "https://pub-xyz.r2.dev/31225.jpg?v=1"
+    assert li.catalog_url(gallery) == gallery
+    assert li.catalog_url(legacy) == legacy
+    assert li.catalog_url(None) is None
+
+
+def test_r2_upload_puts_a_watermark_free_hero_twin(tmp_path, monkeypatch):
+    for k, v in _R2.items():
+        monkeypatch.setenv(k, v)
+    fake = FakeS3()
+    monkeypatch.setattr(r2, "client", lambda cfg=None: fake)
+    src = tmp_path / "a.jpg"
+    src.write_bytes(_photo())
+
+    r2.upload_lot_images("31225", [src])
+
+    bodies = {p["Key"]: p["Body"] for p in fake.puts}
+    hero_key = li.opaque_hero_path("31225")
+    twin_key = li.catalog_path(hero_key)
+    assert twin_key in bodies and bodies[twin_key] != bodies[hero_key]
+    assert bodies[twin_key] == d.disguise(src.read_bytes(), key="31225", watermark=False)[0]
+
+
+def test_catalog_feed_ships_the_twin(monkeypatch):
+    from automation import catalog_feed
+    row = {"lot_id": "31225", "title": "300 banquet chairs", "price_per_chair": 12,
+           "quantity_remaining": 300, "status": "owned",
+           "hero_image_url": "https://pub-xyz.r2.dev/p/abc/h.jpg?v=1", "image_urls": []}
+    assert catalog_feed._image_link(row) == "https://pub-xyz.r2.dev/p/abc/h.c.jpg?v=1"

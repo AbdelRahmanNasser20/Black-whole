@@ -32,7 +32,7 @@ import io
 import os
 from collections.abc import Iterable
 
-from . import lot_images
+from . import listing_images, lot_images
 from .config import PUBLIC_BASE_URL
 
 # Column order copied from Meta's template header, 2026-08-25.
@@ -148,7 +148,8 @@ def _image_link(row: dict) -> str | None:
     candidates = ([resolved.hero] if resolved.hero else []) + resolved.urls
     for url in candidates:
         if url and lot_images.storage_backend(url) != "supabase":
-            return url
+            # Disguised hero → its watermark-free twin: Meta rejects watermarks.
+            return listing_images.catalog_url(url)
     return None
 
 

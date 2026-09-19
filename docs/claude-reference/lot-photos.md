@@ -80,6 +80,11 @@ same scene). No honest edit removes that; photos we take ourselves do.
 (defaults to one derived from `R2_SECRET_ACCESS_KEY`; never rotate it casually —
 new salt = new keys for every re-upload).
 
+**FB catalog twin.** Meta rejects watermarked catalog images, so each disguised
+hero also gets a watermark-free copy at `…/h.c.jpg`; `catalog_feed._image_link`
+ships that (`listing_images.catalog_url`). Lens can match that copy, so it is
+used only by the feed.
+
 **Paths covered.** R2 uploads (`upload_lot_images`: lot_channels add/redo-photos,
 import_deal_images, backfill_listing_images, favorites mirror), `run.py` FB/eBay
 drafts (`public_copies`), and via R2 URLs: site, CRM, FB catalog feed,

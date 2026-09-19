@@ -150,6 +150,25 @@ def opaque_gallery_path(lot_id, source: bytes) -> str | None:
     return f"{base}/{image_disguise.token('img', hashlib.sha256(source).hexdigest(), 12)}.jpg"
 
 
+def catalog_path(hero_path: str) -> str:
+    """Watermark-free twin of a disguised hero (`…/h.jpg` → `…/h.c.jpg`).
+
+    Meta's catalog rejects watermarked images, so the FB feed gets this copy;
+    every other surface keeps the watermarked hero (the part that beats Lens).
+    """
+    return hero_path[: -len(".jpg")] + ".c.jpg"
+
+
+def catalog_url(url: str | None) -> str | None:
+    """The catalog twin for a disguised hero URL; any other URL unchanged."""
+    if not url or not is_disguised_url(url):
+        return url
+    path, sep, query = url.partition("?")
+    if not path.endswith("/h.jpg"):
+        return url
+    return catalog_path(path) + sep + query
+
+
 def is_disguised_url(url: str | None) -> bool:
     """True for a URL whose object key sits under the opaque `p/` namespace."""
     return urlparse(url or "").path.lstrip("/").startswith(OPAQUE_PREFIX)

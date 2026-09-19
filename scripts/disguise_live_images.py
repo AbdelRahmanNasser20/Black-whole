@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -49,7 +50,7 @@ class Converter:
         if not self.cfg:
             raise SystemExit("R2 is not configured — nothing to re-publish to")
         self.s3 = r2_images.client(self.cfg) if apply else None
-        self.http = httpx.Client(timeout=30.0, follow_redirects=True)
+        self.http = httpx.Client(timeout=90.0, follow_redirects=True)
         self.done: dict[tuple[str, str, bool], str] = {}
         self.stats = {"converted": 0, "kept": 0, "failed": 0}
 
@@ -64,12 +65,8 @@ class Converter:
         memo = (url, lot_key, hero)
         if memo in self.done:
             return self.done[memo]
-        try:
-            resp = self.http.get(url)
-            resp.raise_for_status()
-            source = resp.content
-        except httpx.HTTPError as e:
-            print(f"    ! download failed, kept old URL: {url} ({e})")
+        source = self.fetch(url)
+        if source is None:
             self.stats["failed"] += 1
             return url
         result = image_disguise.disguise(source, key=li.key_base(lot_key))
@@ -85,9 +82,27 @@ class Converter:
                                                    path=path, data=blob, content_type=ct):
             self.stats["failed"] += 1
             return url
+        if hero and self.apply:  # watermark-free twin for the FB catalog feed
+            twin = image_disguise.disguise(source, key=li.key_base(lot_key), watermark=False)
+            if twin:
+                r2_images.put_object(self.s3, bucket=self.cfg["bucket"], path=li.catalog_path(path),
+                                     data=twin[0], content_type=twin[2])
         self.stats["converted"] += 1
         self.done[memo] = new
         return new
+
+    def fetch(self, url: str, attempts: int = 4) -> bytes | None:
+        for n in range(1, attempts + 1):
+            try:
+                resp = self.http.get(url)
+                resp.raise_for_status()
+                return resp.content
+            except httpx.HTTPError as e:
+                if n == attempts:
+                    print(f"    ! download failed {attempts}x, kept old URL: {url} ({e})")
+                    return None
+                time.sleep(2 * n)
+        return None
 
     def row(self, lot_key: str, hero: str | None, gallery: list[str]) -> tuple[str | None, list[str]]:
         return (self.convert(hero, lot_key, hero=True),
