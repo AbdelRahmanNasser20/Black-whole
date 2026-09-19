@@ -24,6 +24,13 @@ _ENV = {
 }
 
 
+@pytest.fixture(autouse=True)
+def _legacy_byte_path(monkeypatch):
+    """These pin the legacy lot-id key contract (IMAGE_DISGUISE=0). The default
+    disguised path + opaque keys are covered in tests/test_image_disguise.py."""
+    monkeypatch.setenv("IMAGE_DISGUISE", "0")
+
+
 @pytest.fixture
 def r2_env(monkeypatch):
     for k, v in _ENV.items():

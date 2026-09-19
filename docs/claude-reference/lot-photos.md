@@ -43,3 +43,49 @@ that cost those buyers, and it's silent. `scripts/check_offerable_images.py`
 exits non-zero on any such lot; `--http` also proves the URLs return 200 (which
 is what catches a backend going dark, as Supabase did). Run it after flipping
 any lot to `crm_offerable`.
+
+## Disguise — every public photo, before upload (2026-09-19)
+
+**Why.** Most lot photos are the GovDeals seller's own. Google Lens exact-matched
+our live copies to GovDeals, AllSurplus and GovDeals' Instagram (lots 31225,
+125), so a buyer could find the auction and what we paid. The R2 keys also
+spelled the GovDeals ids (`gd-239-31465/00.jpg`).
+
+**What runs.** `listing_images.prepare_for_web()` → `image_disguise.disguise()`:
+mirror → keystone → 1–3° tilt + crop-in → uneven crop → small colour grade →
+resize → tiled `BLACKWHOLE` watermark → grain → metadata-free JPEG. Seeded by
+HMAC(salt, lot, source bytes), so re-runs are byte-identical. Output must clear
+pHash/dHash distance 12 (`image_hash.py`) or it is redrawn stronger. Unreadable
+files are skipped, never uploaded raw. Stored under `p/<hmac>/h.jpg` (hero) and
+`p/<hmac>/<hmac>.jpg` (gallery); the `p/` prefix is also the "done" marker.
+
+**Lens results that set the recipe** (exact matches → GovDeals?):
+
+| variant | 31225 | 125 |
+|---|---|---|
+| live photo, as uploaded before | match | match |
+| crop/tilt/keystone/colour/grain, no mirror | match | match |
+| same + mirror | match | match |
+| 68% zoom crop, branded card, 5° warp (each) | match | – |
+| watermark only | match | – |
+| no mirror + watermark | match | – |
+| **mirror + re-frame + watermark (shipped)** | **none** | **none** |
+
+The AllSurplus copy of 125 still showed ~25th in "visual matches" (same chair,
+same scene). No honest edit removes that; photos we take ourselves do.
+
+**Knobs.** `IMAGE_DISGUISE=0` kill switch (legacy path + lot-id keys).
+`IMAGE_DISGUISE_NO_MIRROR_LOTS=lot,lot` for photos whose text must read right
+(tape measures) — those lots can be matched again. `IMAGE_DISGUISE_SALT`
+(defaults to one derived from `R2_SECRET_ACCESS_KEY`; never rotate it casually —
+new salt = new keys for every re-upload).
+
+**Paths covered.** R2 uploads (`upload_lot_images`: lot_channels add/redo-photos,
+import_deal_images, backfill_listing_images, favorites mirror), `run.py` FB/eBay
+drafts (`public_copies`), and via R2 URLs: site, CRM, FB catalog feed,
+post_fb_listing, fb_replace_photos. **Not covered:** photos already posted on
+FB Marketplace — re-upload with `scripts/fb_replace_photos.py` (writes to FB).
+
+**Live photos.** `scripts/disguise_live_images.py` (dry-run default, `--apply`,
+`--lot`, `--rollback <log>`). Re-publishes inventory + `auction_favorites.clean_*`
+photos, keeps old objects, logs old→new under `~/.listing_automation/logs/`.

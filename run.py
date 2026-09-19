@@ -186,6 +186,11 @@ async def _run(
             print("[3/5] skipped")
             progress.emit("phase", phase="dewatermark", status="skipped")
 
+        # FB / eBay drafts post files straight from disk: hand them the same
+        # disguised pixels the site serves (automation/image_disguise.py), so a
+        # reverse image search on the listing can't land on the GovDeals lot.
+        public_imgs = listing_images.public_copies(meta.lot_id or meta.folder_name, cleaned)
+
         existing_inv = inventory.get(meta.lot_id) if meta.lot_id else None
         fb_url: str | None = None
         fb_rendered_description: str | None = None
@@ -199,7 +204,7 @@ async def _run(
             # crashing the run, so Craigslist (BLACKWHOLE-20) can arrive later.
             from automation.publish import orchestrator, registry as _pub_registry
 
-            data = orchestrator.build_listing_data(primary, meta, confirmed, cleaned)
+            data = orchestrator.build_listing_data(primary, meta, confirmed, public_imgs)
             published: dict[str, str] = {}
             if existing_inv and not force_republish:
                 if existing_inv.get("facebook_url"):
@@ -251,7 +256,7 @@ async def _run(
                     quantity=primary.quantity,
                     dimensions=primary.dimensions,
                     style_suffix=primary.style_suffix,
-                    images=cleaned,
+                    images=public_imgs,
                     description_text=primary.description_text,
                     city=primary.city or meta.city,
                     state=primary.state or meta.state,
@@ -286,7 +291,7 @@ async def _run(
                     dimensions=primary.dimensions,
                     price_each=confirmed,
                     lot_id=meta.lot_id,
-                    images=cleaned,
+                    images=public_imgs,
                     description_text=primary.description_text,
                 )
                 print(f"  eBay draft: {ebay_url}")
