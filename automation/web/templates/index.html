@@ -32,6 +32,7 @@
   <a class="rail-tab" data-tab="deals" href="?tab=deals" data-rail-close><span class="rail-tab-num">09</span><span class="rail-tab-label">Deals</span></a>
   <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close><span class="rail-tab-num">10</span><span class="rail-tab-label">Tracking</span></a>
   <a class="rail-tab" data-tab="deposits" href="?tab=deposits" data-rail-close><span class="rail-tab-num">11</span><span class="rail-tab-label">Deposits</span></a>
+  <a class="rail-tab" data-tab="channels" href="?tab=channels" data-rail-close><span class="rail-tab-num">12</span><span class="rail-tab-label">Channels</span></a>
 </nav>
 {% endblock %}
 
@@ -817,6 +818,63 @@
 
   {#- skeleton twin ships in the HTML; static/admin/deposits.js (UI.load) swaps it for cards / empty / error -#}
   <div class="deposit-list" id="dep-list" data-state="loading">{{ skeleton_cards(5) }}</div>
+</section>
+
+<!-- ───────────── Channels ───────────── -->
+<section class="panel" data-pane="channels" hidden>
+  {#- Channels (12, multichannel master plan Phase 1.6): this pane's CSS lives in static/admin/channels.css; the
+      shared .controls/.table/.badge/.btn come from static/ui/components.css. skeleton_rows(n) (_ui/macros.html) is
+      byte-for-byte skeleton('row', n) from state.js. The switches are rendered here, one per
+      automation.channels.CHANNELS, so a channel can never be missing from the admin — channels.js only paints
+      their state from GET /api/channels and PATCHes /api/channels/switches on change. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
+  <link rel="stylesheet" href="/static/admin/channels.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">CHANNELS / WHERE EVERY LOT IS</div>
+    <h1 class="hero-title">One inventory row, every sales channel.</h1>
+    <p class="hero-sub">
+      Feed channels (site, FB catalog, Google) follow inventory automatically.
+      Push channels go out through the sync loop when their switch is on.
+      <span class="lex running">FB Marketplace</span> ships <span class="lex error">OFF</span>:
+      Renew / Relist are the spam triggers, so every (re)list on it parks in the queue below
+      until you press <span class="lex done">Approve</span>, and nothing posts until you flip its switch.
+    </p>
+  </div>
+
+  <div class="controls ch-switches" id="ch-switches">
+    <span class="ch-switches-label">SWITCHES</span>
+    <label class="ch-switch ch-switch--master" title="Master switch — off means no channel syncs at all">
+      <input type="checkbox" data-key="channels_master_enabled" aria-label="All channels">
+      <span class="ch-switch-label">ALL</span>
+      <span class="ch-switch-state">OFF</span>
+    </label>
+    {% for c in channels %}
+    <label class="ch-switch" title="channel_{{ c }}_enabled">
+      <input type="checkbox" data-key="channel_{{ c }}_enabled" aria-label="{{ c }}">
+      <span class="ch-switch-label">{{ c | replace('_', ' ') | upper }}</span>
+      <span class="ch-switch-state">OFF</span>
+      {% if c == 'fb_marketplace' %}<span class="ch-pill" id="ch-pill-fb_marketplace" title="Only the operator flips channel_fb_marketplace_enabled">OFF — waiting for operator</span>{% endif %}
+    </label>
+    {% endfor %}
+    <div class="ch-tools">
+      <button type="button" class="btn btn-small" id="ch-refresh">↻ refresh</button>
+      <button type="button" class="btn btn-small btn-primary" id="ch-sync" title="Run one sync pass now (same as the background loop)">⟳ Sync now</button>
+    </div>
+  </div>
+
+  <div class="ch-head">
+    <h2>APPROVAL QUEUE</h2>
+    <span class="ch-count" id="ch-queue-count"></span>
+    <span class="ch-hint">Approve → queued for the next sync pass · Reject → off, lot stays everywhere else</span>
+  </div>
+  {#- skeleton twin ships in the HTML; static/admin/channels.js (UI.load) swaps it for the table / empty / error -#}
+  <div class="table-wrap ch-queue" id="ch-queue" data-state="loading">{{ skeleton_rows(3) }}</div>
+
+  <div class="ch-head">
+    <h2>MATRIX</h2>
+    <span class="ch-hint">one row per lot, one cell per channel · hover a red cell for the error</span>
+  </div>
+  <div class="table-wrap ch-matrix" id="ch-matrix" data-state="loading">{{ skeleton_rows(6) }}</div>
 </section>
 {% endblock %}
 

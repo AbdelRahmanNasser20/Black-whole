@@ -1,0 +1,72 @@
+/* static/admin/channels.css — Channels tab (12), multichannel master plan Phase 1.6.
+   Switch row (master + one per channel), the FB Marketplace "OFF — waiting for operator" pill, the approval
+   queue and the lot × channel matrix (shared .table / .table-wrap from components.css, one modifier class per
+   state so the colour is data-driven). Tokens only (tokens.css), radius 0.
+   Loading/empty/error come from skeleton.css (.sk-row / .ui-empty / .ui-error). */
+
+/* ── switches ────────────────────────────────────────────────── */
+.ch-switches {
+  display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap;
+  padding: 12px 0; border-bottom: 1px solid var(--border); margin: 0 0 var(--gap);
+}
+.ch-switches-label { align-self: center; font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.ch-switch {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px;
+  border: 1px solid var(--border); background: var(--surface); cursor: pointer; user-select: none;
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted);
+}
+.ch-switch input { accent-color: var(--accent); margin: 0; }
+.ch-switch.is-on { color: var(--text); border-color: var(--border-strong); }
+.ch-switch.is-masked { opacity: .55; }                 /* master is off → this one cannot act */
+.ch-switch.is-pending { opacity: .6; pointer-events: none; }
+.ch-switch--master { border-color: var(--accent); }
+.ch-switch-label { letter-spacing: .06em; }
+.ch-switch-state {
+  padding: 1px 6px; font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  border: 1px solid currentColor;
+}
+.ch-switch.is-on .ch-switch-state { color: var(--success); }
+.ch-switch:not(.is-on) .ch-switch-state { color: var(--dim); }
+
+/* the pill FB Marketplace wears until the operator flips its switch (D2) */
+.ch-pill {
+  display: inline-flex; align-items: center; padding: 1px 8px;
+  font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  color: var(--bg); background: var(--danger); border: 1px solid var(--danger);
+}
+.ch-pill[hidden] { display: none; }
+
+.ch-switches .ch-tools { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+
+/* ── section heads ───────────────────────────────────────────── */
+.ch-head { display: flex; align-items: baseline; gap: 12px; margin: var(--gap) 0 8px; }
+.ch-head h2 { margin: 0; font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.ch-head .ch-count { font-family: var(--mono); font-size: var(--fs-xs); color: var(--warn); }
+.ch-head .ch-hint { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+
+/* ── tables ──────────────────────────────────────────────────── */
+.ch-queue, .ch-matrix { margin: 0 0 var(--gap); }
+.ch-matrix { padding-bottom: 40px; }
+.ch-lot a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.ch-tiny { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
+.ch-chan { color: var(--text); }
+.ch-actions { white-space: nowrap; text-align: right; }
+.ch-actions .btn + .btn { margin-left: 6px; }
+.ch-danger { color: var(--danger); border-color: var(--danger); }
+.ch-danger:hover:not(:disabled) { background: var(--danger); color: var(--bg); border-color: var(--danger); }
+
+/* one modifier per state — the matrix colours are data, not markup */
+.ch-cell { font-family: var(--mono); font-size: var(--fs-xs); white-space: nowrap; }
+.ch-cell .ch-state { display: inline-block; padding: 2px 8px; border: 1px solid transparent; }
+.ch-cell a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.ch-cell--off .ch-state              { color: var(--dim); border-color: var(--border); }
+.ch-cell--queued .ch-state           { color: var(--bg); background: var(--warn); border-color: var(--warn); }
+.ch-cell--pending_approval .ch-state { color: var(--warn); border-color: var(--warn); }
+.ch-cell--live .ch-state             { color: var(--bg); background: var(--success); border-color: var(--success); }
+.ch-cell--delisted .ch-state         { color: var(--muted); border-color: var(--border-strong); }
+.ch-cell--error .ch-state            { color: var(--bg); background: var(--danger); border-color: var(--danger); cursor: help; }
+
+@media (max-width: 639px) {
+  .ch-switches .ch-tools { margin-left: 0; flex-basis: 100%; }
+  .ch-actions { white-space: normal; }
+}

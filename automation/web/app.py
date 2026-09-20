@@ -337,7 +337,14 @@ async def admin(request: Request):
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"phases": PHASES, "now": int(time.time())},
+        {
+            "phases": PHASES,
+            "now": int(time.time()),
+            # Channels tab (Phase 1.6): one switch per channel is rendered server-side so a
+            # channel can never be missing from the admin; channels.js only paints state.
+            "channels": list(channels_pkg.CHANNELS),
+            "approval_channels": sorted(channels_pkg.APPROVAL_CHANNELS),
+        },
     )
 
 
