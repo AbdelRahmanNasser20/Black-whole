@@ -19,6 +19,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
+from . import channels as _channels
 from . import config, db
 
 # key -> {type, min, max, default}. Adding a setting means adding it here AND
@@ -40,6 +41,21 @@ SPEC: dict[str, dict[str, Any]] = {
         "default": config.DEPOSIT_MIN_USD_DEFAULT,
     },
 }
+
+# ── Channel switches (multichannel Phase 1.2) ────────────────────────────────
+# 0/1 ints, not bools, so the same int coercion + bounds check applies and the
+# seed rows in scripts/sql/011_listing_channels.sql are plain '0' / '1'.
+# Feed channels (site, fb_catalog, google) ship ON — they are the pull-based
+# CSVs that already exist. Push channels ship OFF. **FB Marketplace stays OFF
+# until the operator flips it in the admin Channels tab — never in code.**
+_SWITCH = {"type": int, "min": 0, "max": 1}
+SPEC["channels_master_enabled"] = {**_SWITCH, "default": 1}
+for _c in _channels.CHANNELS:
+    SPEC[f"channel_{_c}_enabled"] = {**_SWITCH, "default": 1 if _c in _channels.FEED_CHANNELS else 0}
+# Pacing for the browser-driven channels (fb_marketplace, craigslist): at most
+# `daily_cap` list actions per UTC day, `spacing_s` seconds apart.
+SPEC["browser_channel_daily_cap"] = {"type": int, "min": 0, "max": 50, "default": 4}
+SPEC["browser_channel_spacing_s"] = {"type": int, "min": 60, "max": 86_400, "default": 1200}
 
 
 def defaults() -> dict[str, Any]:
@@ -97,3 +113,13 @@ def set_many(values: dict[str, Any]) -> dict[str, Any]:
             (key, Jsonb(value)),
         )
     return get_all()
+
+
+def channel_enabled(channel: str) -> bool:
+    """Master switch AND the channel's own switch. Never raises.
+
+    An unknown channel name reads as disabled — the sync loop must never act on
+    a channel that has no switch.
+    """
+    values = get_all()
+    return bool(values.get("channels_master_enabled", 0)) and bool(values.get(f"channel_{channel}_enabled", 0))

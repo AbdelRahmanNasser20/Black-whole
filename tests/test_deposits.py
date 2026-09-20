@@ -337,7 +337,8 @@ def test_settings_read_values_from_the_table(monkeypatch, real_get_all):
         {"key": "deposit_pct", "value": 0.2},
         {"key": "deposit_min_usd", "value": 300},
     ])
-    assert real_get_all() == {"deposit_pct": 0.2, "deposit_min_usd": 300}
+    # Table values win; every other key (the channel switches, Phase 1.2) keeps its seed default.
+    assert real_get_all() == {**site_settings.defaults(), "deposit_pct": 0.2, "deposit_min_usd": 300}
 
 
 def test_settings_ignore_junk_rows_and_unknown_keys(monkeypatch, real_get_all):
