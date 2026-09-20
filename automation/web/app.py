@@ -57,6 +57,9 @@ from .. import favorites
 from .. import telegram_alerts
 from .. import deposits
 from .. import site_settings
+from .. import channels as channels_pkg
+from ..channels import store as channel_store
+from ..channels import sync as channel_sync
 from .. import stripe_gateway
 from .. import freight_estimate
 from .. import freight_log
@@ -3184,9 +3187,42 @@ async def _tracking_loop() -> None:
         await asyncio.sleep(_SCHEDULER_TICK_SEC)
 
 
+_channel_sync_task: asyncio.Task | None = None
+
+
+def _channel_sync_interval() -> float:
+    """Seconds between channel-sync passes. `CHANNEL_SYNC_SEC=0` disables the
+    loop (tests, a laptop with no Chrome profile); junk falls back to 300."""
+    raw = os.getenv("CHANNEL_SYNC_SEC")
+    if raw is None or not raw.strip():
+        return 300.0
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return 300.0
+
+
+async def _channel_sync_tick() -> None:
+    try:
+        rep = await asyncio.to_thread(channel_sync.run_once)
+        if rep.get("applied") or rep.get("errors"):
+            print(f"[channels] {rep}")
+    except Exception as e:
+        # Same rule as the other pollers: one bad pass must not kill the loop.
+        print(f"[channels] sync error: {e!r}")
+
+
+async def _channel_sync_loop() -> None:
+    # Its own task: a browser channel post can take a minute and must not
+    # delay the 5-minute favorites alert or the bid poller.
+    while True:
+        await _channel_sync_tick()
+        await asyncio.sleep(_channel_sync_interval() or 300.0)
+
+
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
-    global _alerts_task, _tracking_task, _geo_warm_task
+    global _alerts_task, _tracking_task, _geo_warm_task, _channel_sync_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -3217,18 +3253,23 @@ async def _start_alerts_loop() -> None:
             f"(tick={_SCHEDULER_TICK_SEC:.0f}s, intervals="
             f"{[l for l,_ in favorites.ALERT_INTERVALS]})"
         )
+    sync_sec = _channel_sync_interval()
+    if sync_sec and (_channel_sync_task is None or _channel_sync_task.done()):
+        _channel_sync_task = asyncio.create_task(_channel_sync_loop())
+        print(f"[channels] sync loop started (every {sync_sec:.0f}s; CHANNEL_SYNC_SEC=0 disables)")
 
 
 @app.on_event("shutdown")
 async def _stop_alerts_loop() -> None:
     global _alerts_task
     await asyncio.to_thread(db.reset_pool)   # close pooled sockets off-loop
-    if _alerts_task and not _alerts_task.done():
-        _alerts_task.cancel()
-        try:
-            await _alerts_task
-        except (asyncio.CancelledError, Exception):
-            pass
+    for task in (_alerts_task, _channel_sync_task):
+        if task and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):
+                pass
 
 
 @app.get("/api/auctions/cache-stats")
@@ -3739,6 +3780,89 @@ async def settings_update(payload: dict):
         return await asyncio.to_thread(site_settings.set_many, payload or {})
     except ValueError as e:
         raise HTTPException(400, str(e))
+
+
+# ───────────────────────────── channels API ─────────────────────────────
+# Multichannel Phase 1.5. `inventory` stays the master; `listing_channels` holds
+# one row per lot × channel and the Channels tab reads/edits it here. Admin-only
+# by construction (under /api/). Every write drops the readcache memo through
+# the middleware. Three rules the routes enforce, not the UI:
+#   1. The switches PATCH only touches `channel*` / `browser_channel*` keys —
+#      the deposit rule is not editable from here.
+#   2. Approving a queued post on a DISABLED channel is a 409: the approval
+#      queue is never a back door past the switch. **FB Marketplace ships OFF
+#      and nothing in code flips it.**
+#   3. Reject always works — taking something out of the queue needs no switch.
+
+_SWITCH_PREFIXES = ("channel", "browser_channel")
+
+
+def _channel_switches(values: dict) -> dict:
+    return {k: v for k, v in values.items() if k.startswith(_SWITCH_PREFIXES)}
+
+
+@app.get("/api/channels")
+@readcache.cached()
+def channels_get():
+    # sync handler → FastAPI threadpool; memoised (readcache.py)
+    return {
+        "switches": _channel_switches(site_settings.get_all()),
+        "matrix": channel_store.matrix(),
+        "queue": channel_store.queue(),
+        "channels": {
+            "all": list(channels_pkg.CHANNELS),
+            "feed": list(channels_pkg.FEED_CHANNELS),
+            "push": list(channels_pkg.PUSH_CHANNELS),
+            "browser": sorted(channels_pkg.BROWSER_CHANNELS),
+            "approval": sorted(channels_pkg.APPROVAL_CHANNELS),
+        },
+    }
+
+
+@app.patch("/api/channels/switches")
+def channels_switches_update(payload: dict):
+    payload = payload or {}
+    if not payload:
+        raise HTTPException(400, "no switches given")
+    bad = [k for k in payload if not str(k).startswith(_SWITCH_PREFIXES)]
+    if bad:
+        raise HTTPException(400, f"not a channel switch: {', '.join(map(str, bad))}")
+    try:
+        return _channel_switches(site_settings.set_many(payload))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/channels/queue/{row_id}/approve")
+def channels_queue_approve(row_id: int):
+    row = channel_store.get_by_id(row_id)
+    if row is None:
+        raise HTTPException(404, "not found")
+    if not site_settings.channel_enabled(row["channel"]):
+        raise HTTPException(409, {"reason": "channel disabled"})
+    out = channel_store.approve(row_id)
+    if out is None:
+        raise HTTPException(409, {"reason": "not pending approval"})
+    return out
+
+
+@app.post("/api/channels/queue/{row_id}/reject")
+def channels_queue_reject(row_id: int):
+    if channel_store.get_by_id(row_id) is None:
+        raise HTTPException(404, "not found")
+    out = channel_store.reject(row_id)
+    if out is None:
+        raise HTTPException(409, {"reason": "not pending approval"})
+    return out
+
+
+@app.post("/api/channels/sync")
+async def channels_sync_now():
+    """Manual 'Sync now'. Same pass the background loop runs."""
+    try:
+        return await asyncio.to_thread(channel_sync.run_once)
+    except Exception as e:  # noqa: BLE001 — surface, don't 500
+        raise HTTPException(502, f"channel sync failed: {e!r}")
 
 
 # ───────────────────────────── subscribers API ─────────────────────────────
