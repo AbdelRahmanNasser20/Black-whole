@@ -43,6 +43,7 @@ from typing import Callable
 from . import config  # noqa: F401  (loads .env)
 from . import db, inventory, listing_images, lot_images, progress
 from .catalog_feed import FEED_COLUMNS, build_feed_rows, state_code
+from .channels import store as channel_store
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAN_PATH = ROOT / "scripts" / "fb_relist_plan_2026-08-24.json"
@@ -56,6 +57,9 @@ FB_PROFILE = Path(os.getenv("LISTING_FB_PROFILE")
                   or (Path.home() / ".listing_automation" / "chrome_profile_dad"))
 
 CHANNELS = ("site", "fb", "business")
+# lot_channels channel names → listing_channels channel names (automation.channels).
+_STORE_CHANNEL = {"site": "site", "business": "fb_catalog", "fb": "fb_marketplace"}
+FB_ITEM_ID_RE = re.compile(r"marketplace/item/(\d+)")
 GOVDEALS_URL_RE = re.compile(r"govdeals\.com/(?:[a-z]{2}/)?asset/(\d+)/(\d+)", re.I)
 
 # The CDN 403s without a browser-shaped request (same as automation/downloader.py).
@@ -70,6 +74,18 @@ Log = Callable[[str], None]
 
 def _print(msg: str) -> None:
     print(msg, flush=True)
+
+
+def _record_channel(fn: Callable, *args, log: Log = _print, **kwargs) -> None:
+    """Mirror what a writer just did into `listing_channels` (Phase 1.7).
+
+    Bookkeeping only: a store failure (table not migrated yet, pooler down) is
+    logged and swallowed so the post / remove / restore itself never breaks.
+    """
+    try:
+        fn(*args, **kwargs)
+    except Exception as e:  # noqa: BLE001 — never let bookkeeping break the flow
+        log(f"  · listing_channels not updated ({getattr(fn, '__name__', 'store')}): {e}")
 
 
 # ───────────────────────────── pure helpers ─────────────────────────────
@@ -654,6 +670,9 @@ def post_to_facebook(lot_id: str, *, log: Log = _print, spacing_s: int = 0) -> t
         log(f"  ! {err}")
         return None, err
     inventory.set_platform_url(lot_id, "facebook", url)
+    m = FB_ITEM_ID_RE.search(url)
+    _record_channel(channel_store.upsert, lot_id, "fb_marketplace", state="live", url=url,
+                    external_id=m.group(1) if m else None, log=log)
     log(f"  ✓ Marketplace: {url}")
     return url, None
 
@@ -693,6 +712,10 @@ def remove_lot(lot_id: str, *, channels: tuple[str, ...] = CHANNELS, log: Log = 
         else:
             ok, err = mark_sold_on_facebook(lot_id, log=log)
             res.fb_marked_sold, res.fb_error = ok, err
+    for ch in channels:
+        store_ch = _STORE_CHANNEL.get(ch)
+        if store_ch:
+            _record_channel(channel_store.set_state, lot_id, store_ch, "delisted", log=log)
     return res
 
 
@@ -725,13 +748,17 @@ def mark_sold_on_facebook(lot_id: str, *, log: Log = _print) -> tuple[bool, str 
 
 
 def restore_lot(lot_id: str, status: str = "active_bid", log: Log = _print) -> dict:
-    """Undo `remove` on the ledger side (Marketplace has to be re-listed by hand —
-    Renew / Delete & Relist are the spam-filter triggers, so we never automate them)."""
+    """Undo `remove` on the ledger side. Marketplace is never relisted from here —
+    Renew / Delete & Relist are the spam-filter triggers — so the lot goes into the
+    Channels tab approval queue (`pending_approval`) and only a click on Approve,
+    with `channel_fb_marketplace_enabled` on, lets the sync loop post it."""
     row = inventory.set_fields(lot_id, status=status, fake_sold_out=False)
     if not row:
         raise ValueError(f"no inventory row {lot_id!r}")
     db.execute("UPDATE inventory SET crm_offerable = true WHERE lot_id = %s", (lot_id,))
     log(f"  ✓ {lot_id}: status {status}, fake_sold_out=false")
+    _record_channel(channel_store.set_state, lot_id, "fb_marketplace", "pending_approval", log=log)
+    log("  · Marketplace relist queued for your approval (admin → Channels)")
     return row
 
 

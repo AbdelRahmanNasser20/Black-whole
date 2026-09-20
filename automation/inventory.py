@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import secrets
+import sys
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -496,6 +497,25 @@ _PLATFORM_COLUMNS: dict[str, tuple[str, str]] = {
 # just because we linked promotional content to it.
 _MARKETPLACE_PLATFORMS: frozenset[str] = frozenset({"facebook", "ebay"})
 
+# Marketplace platform → `listing_channels` channel (automation.channels). A URL
+# recorded here IS the listing, so the store mirrors it as `live` (Phase 1.7).
+_PLATFORM_CHANNEL: dict[str, str] = {"facebook": "fb_marketplace", "ebay": "ebay"}
+
+
+def _mirror_channel(lot_id: str, platform: str, url: str | None) -> None:
+    """Best-effort mirror into `listing_channels`; never breaks the ledger write."""
+    channel = _PLATFORM_CHANNEL.get(platform)
+    if not channel:
+        return
+    try:
+        from .channels import store  # lazy: store imports this module
+        if url:
+            store.upsert(lot_id, channel, state="live", url=url)
+        else:
+            store.set_state(lot_id, channel, "off")
+    except Exception as e:  # noqa: BLE001 — bookkeeping only
+        print(f"[inventory] listing_channels not updated for {lot_id}/{channel}: {e}", file=sys.stderr)
+
 
 def set_platform_url(
     lot_id: str, platform: str, url: str | None, clear_timestamp: bool = False
@@ -525,6 +545,7 @@ def set_platform_url(
                 (now, str(lot_id)),
             )
         conn.commit()
+    _mirror_channel(str(lot_id), platform, url)
     return get(lot_id)
 
 

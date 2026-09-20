@@ -257,3 +257,94 @@ def test_mirror_photos_stamps_inventory(_scratch, _uploads, monkeypatch):
     out = lc.mirror_photos("gd-1-2", ["https://cdn/0.jpg"], log=lambda *a: None)
     assert out["hero_image_url"] == "h"
     assert stamped == {"lot_id": "gd-1-2", "hero": "h", "urls": ["a"]}
+
+
+# ───────────────────────── listing_channels mirror (Phase 1.7) ─────────────────────────
+# The existing writers record what they did into `listing_channels` through
+# automation.channels.store. A store failure is logged and swallowed: the post /
+# remove / restore itself must never be broken by bookkeeping.
+
+class _Proc:
+    def __init__(self, rc=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+@pytest.fixture
+def _fb_ready(tmp_path, monkeypatch):
+    """A Chrome profile that 'exists', a post_fb_listing that 'succeeds', and a plan
+    entry carrying the Marketplace URL it read back."""
+    monkeypatch.setattr(lc, "FB_PROFILE", tmp_path)
+    monkeypatch.setattr(lc.subprocess, "run", lambda *a, **k: _Proc(0, "posted\n"))
+    monkeypatch.setattr(lc, "plan_entry_for",
+                        lambda lot_id, path=None: {"fb_listing_url": "https://www.facebook.com/marketplace/item/123456789/"})
+    monkeypatch.setattr(lc.inventory, "set_platform_url", lambda *a, **k: {})
+
+
+def test_post_to_facebook_records_live_marketplace_row(_fb_ready, monkeypatch):
+    seen = []
+    monkeypatch.setattr(lc.channel_store, "upsert", lambda *a, **k: seen.append((a, k)) or {})
+    url, err = lc.post_to_facebook("gd-1-2", log=lambda _m: None)
+    assert err is None and url.endswith("/item/123456789/")
+    assert seen == [(("gd-1-2", "fb_marketplace"),
+                     {"state": "live", "url": url, "external_id": "123456789"})]
+
+
+def test_post_to_facebook_survives_a_store_failure(_fb_ready, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("listing_channels does not exist yet")
+    monkeypatch.setattr(lc.channel_store, "upsert", boom)
+    logs = []
+    url, err = lc.post_to_facebook("gd-1-2", log=logs.append)
+    assert err is None and url
+    assert any("listing_channels" in m for m in logs), "the swallowed failure is logged, not silent"
+
+
+def test_post_to_facebook_failure_records_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(lc, "FB_PROFILE", tmp_path)
+    monkeypatch.setattr(lc.subprocess, "run", lambda *a, **k: _Proc(1, "", "boom"))
+    monkeypatch.setattr(lc.channel_store, "upsert", lambda *a, **k: pytest.fail("no store write on a failed post"))
+    url, err = lc.post_to_facebook("gd-1-2", log=lambda _m: None)
+    assert url is None and "exit 1" in err
+
+
+@pytest.fixture
+def _ledger(monkeypatch):
+    monkeypatch.setattr(lc.inventory, "get", lambda lot_id: {"lot_id": lot_id, "status": "owned", "facebook_url": None})
+    monkeypatch.setattr(lc.inventory, "set_fields", lambda lot_id, **f: {"lot_id": lot_id, **f})
+    monkeypatch.setattr(lc.db, "execute", lambda *a, **k: None)
+    monkeypatch.setattr(lc, "plan_entry_for", lambda lot_id, path=None: {})
+
+
+def test_remove_lot_delists_every_requested_channel(_ledger, monkeypatch):
+    seen = []
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda lot_id, ch, state, **k: seen.append((lot_id, ch, state)) or {})
+    monkeypatch.setattr(lc, "mark_sold_on_facebook", lambda *a, **k: pytest.fail("no live item → no browser"))
+    res = lc.remove_lot("gd-1-2", log=lambda _m: None)
+    assert res.status == "sold_out"
+    assert sorted(seen) == sorted([("gd-1-2", "site", "delisted"), ("gd-1-2", "fb_catalog", "delisted"),
+                                   ("gd-1-2", "fb_marketplace", "delisted")])
+
+
+def test_remove_lot_maps_only_the_channels_asked_for(_ledger, monkeypatch):
+    seen = []
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda lot_id, ch, state, **k: seen.append(ch) or {})
+    lc.remove_lot("gd-1-2", channels=("business",), log=lambda _m: None)
+    assert seen == ["fb_catalog"]
+
+
+def test_remove_lot_survives_a_store_failure(_ledger, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(lc.channel_store, "set_state", boom)
+    logs = []
+    res = lc.remove_lot("gd-1-2", log=logs.append)
+    assert res.lot_id == "gd-1-2"
+    assert any("listing_channels" in m for m in logs)
+
+
+def test_restore_lot_queues_fb_marketplace_for_approval(_ledger, monkeypatch):
+    seen = []
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda lot_id, ch, state, **k: seen.append((ch, state)) or {})
+    row = lc.restore_lot("gd-1-2", log=lambda _m: None)
+    assert row["fake_sold_out"] is False and row["status"] == "active_bid"
+    assert seen == [("fb_marketplace", "pending_approval")], "relist is an approval, never an automatic post"
