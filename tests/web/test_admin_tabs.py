@@ -20,10 +20,10 @@ def test_admin_has_no_compare_tab():
     html = TestClient(app).get("/admin").text
     assert 'data-tab="compare"' not in html
     assert 'data-pane="compare"' not in html
-    # 11 rail tabs after the A/B removal and the Deposits addition (regex so `rail-tab-num`
+    # 12 rail tabs after the A/B removal, the Deposits addition and the Channels tab (Phase 1.6) (regex so `rail-tab-num`
     # spans don't count) — E1 rail markup. Every rail tab must have a pane and a shell module.
     tabs = re.findall(r'<a class="rail-tab(?: is-active)?" data-tab="([a-z-]+)"', html)
-    assert len(tabs) == 11, tabs
+    assert len(tabs) == 12, tabs
     assert "compare" not in tabs
     for t in tabs:
         assert f'data-pane="{t}"' in html, t

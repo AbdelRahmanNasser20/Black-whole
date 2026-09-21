@@ -36,6 +36,12 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Sold showcase = `status IN ('sold_out','lost_sold_out')` AND `quantity_original > 0` AND has a photo — don't loosen it without a plan for the junk rows.
 - **The FB catalog feed and CRM recommendations are status-gated** (`CATALOG_FEED_STATUSES` / `ROUTABLE_STATUSES`), so an archived lot can never be offered as stock. Keep it that way.
 
+**Channels (`automation/channels/` — READ `channels.md` BEFORE TOUCHING THE SYNC LOOP OR A CHANNEL WRITER):**
+- **FB Marketplace channel ships disabled; only the operator flips `channel_fb_marketplace_enabled`.** Every (re)list on it parks in `pending_approval`; Approve on a disabled channel is a 409. Never auto-flip the switch, never post around the queue.
+- `inventory` stays the single source of truth; `listing_channels` only records WHERE a lot is. Desired state = the `CATALOG_FEED_STATUSES` gate + `quantity_remaining > 0` + not `fake_sold_out` — don't widen it per channel.
+- Store calls from existing writers (`lot_channels`, `inventory.set_platform_url`) are wrapped: a store failure is logged and swallowed. Don't let bookkeeping break a post, a remove, or a ledger write.
+- Migration `scripts/sql/011_listing_channels.sql` is hand-applied (operator gate); seed rows with `scripts/backfill_listing_channels.py --apply` after it.
+
 **DB:**
 - **Connections are pooled** (`automation/db.py`, psycopg_pool, lazy, max 4). The pooler TLS+SCRAM handshake is ~0.4-1.4 s and the queries are <1 ms, so **never open `psycopg.connect(...)` per call again**, and never run `db.*`/`inventory.*` on the event loop — route handlers that touch the DB are plain `def` (FastAPI threadpool) or wrap the call in `asyncio.to_thread`. `tests/web/test_event_loop_hygiene.py` enforces it. Hold a connection outside a `with` only via `db.connect(pooled=False)`.
 - Read-only admin JSON handlers are memoised for `ADMIN_READ_CACHE_TTL` (15 s) via `automation/web/readcache.py`; every successful write through the API drops the memo. Decorate new read endpoints with `@readcache.cached()`; don't add a second cache layer.
@@ -104,3 +110,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 | `deals/` modules, LLM pacing, bidders, CLI, config gates, Render crons, v1 status | `docs/claude-reference/deals.md` |
 | DB size / TOAST / R2 raw archive / reclaim procedure | `docs/claude-reference/database-size.md` |
 | Stripe deposits: account setup, migrations, test matrix, go-live checklist | `docs/stripe_deposits_runbook.md` |
+| Channels: `listing_channels` model, states, switches, sync loop, Channels tab, how to enable FB Marketplace, backfill | `docs/claude-reference/channels.md` |
+
+## Done log (from Obsidian)
+- 2026-09-14 · WEB-PERF: PR #97 squash-merged; admin loads in <1 s instead of 8–56 s, 174 web tests green.
