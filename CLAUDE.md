@@ -40,6 +40,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - **FB Marketplace channel ships disabled; only the operator flips `channel_fb_marketplace_enabled`.** Every (re)list on it parks in `pending_approval`; Approve on a disabled channel is a 409. Never auto-flip the switch, never post around the queue.
 - `inventory` stays the single source of truth; `listing_channels` only records WHERE a lot is. Desired state = the `CATALOG_FEED_STATUSES` gate + `quantity_remaining > 0` + not `fake_sold_out` — don't widen it per channel.
 - Store calls from existing writers (`lot_channels`, `inventory.set_platform_url`) are wrapped: a store failure is logged and swallowed. Don't let bookkeeping break a post, a remove, or a ledger write.
+- Both catalog feeds (`facebook.csv`, `google.csv`) read `inventory.list_catalog_feed()` — never add a second sellable-lots query; price/image helpers live in `catalog_feed` and are shared.
 - Migration `scripts/sql/011_listing_channels.sql` is APPLIED to prod (2026-09-21) and the backfill has run (104 rows / 41 lots). Re-run `scripts/backfill_listing_channels.py --apply` only after a bulk inventory import.
 
 **DB:**
@@ -87,6 +88,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - `.env` (gitignored): `DEWATERMARK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `BLACKWHOLE_DB_URL`, `R2_*`, `SUPABASE_STORAGE_URL/KEY`, `GROQ_API_KEY` + `DEALS_LLM_PROVIDER=groq`, `TELEGRAM_BOT_TOKEN/CHAT_ID`. `auction_extractors/.env`: Ollama + `HEADLESS=0`.
 - Chrome profile: `~/.listing_automation/chrome_profile/` (logged into FB + eBay). Photos: `~/Desktop/Banquet chiars Pictures/`.
 - Photos onto a lot: `scripts/backfill_listing_images.py --lot|--missing`; `scripts/import_deal_images.py --lot <key>`.
+- `GET /catalog/google.csv` = Merchant Center feed (`automation/google_feed.py`, reuses `catalog_feed` helpers; setup `docs/google_merchant_runbook.md`).
 - Public map: `/map` (JSON `/map/api/points?statuses=&near=&radius=`). Favorite photos → dewatermark → R2: `.venv/bin/python scripts/favorite_photos.py --all` — needs `scripts/sql/010_favorites_clean_images.sql` applied first (**operator gate**).
 - Public deals: `http://127.0.0.1:8765/deals` (JSON `/deals/api/lots?page=&per_page=`). Indexes: `scripts/apply_sql.py scripts/sql/007_deal_lots_active_indexes.sql` (operator gate).
 - Deals: `.venv/bin/python -m deals.cli discover|watch-once|archive-active|archive-raw|track-bidders|digest|backfill-classify|saved-search-alerts|track add|list|sync|history`; `--profile <slug>` (or `DEALS_PROFILE`) on `discover|watch-once|digest|track-bidders`; research profiles CRUD at `/api/profiles` (`deals/profiles.py`, migration `scripts/sql/006_research_profiles.sql` — **not applied to prod yet**); `scripts/check_llm_provider.py`; `scripts/reclaim_db_space.py --all`; `scripts/query_cold_archive.py`.

@@ -16,6 +16,8 @@ Plan of record: `docs/superpowers/plans/2026-09-20-multichannel-listing-master.m
 
 Channels: `site`, `fb_catalog`, `google` (feed — pull-based CSV, bookkeeping only) · `ebay`, `fb_marketplace`, `craigslist` (push — an adapter posts).
 
+`google` — Merchant Center scheduled fetch of `/catalog/google.csv` (`automation/google_feed.py`); runbook `docs/google_merchant_runbook.md`; switch only affects bookkeeping, pause the feed in MC to actually pull products.
+
 States: `off` (never went out) → `queued` (approved, next pass posts) / `pending_approval` (waiting for the operator) → `live` → `delisted`; `error` carries `last_error`.
 
 Row columns: `lot_id, channel, state, external_id, url, payload_hash, last_synced_at, last_error, approved_at`. Bounded — no blobs, so no archival path needed.
