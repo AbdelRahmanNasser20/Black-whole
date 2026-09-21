@@ -40,7 +40,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - **FB Marketplace channel ships disabled; only the operator flips `channel_fb_marketplace_enabled`.** Every (re)list on it parks in `pending_approval`; Approve on a disabled channel is a 409. Never auto-flip the switch, never post around the queue.
 - `inventory` stays the single source of truth; `listing_channels` only records WHERE a lot is. Desired state = the `CATALOG_FEED_STATUSES` gate + `quantity_remaining > 0` + not `fake_sold_out` — don't widen it per channel.
 - Store calls from existing writers (`lot_channels`, `inventory.set_platform_url`) are wrapped: a store failure is logged and swallowed. Don't let bookkeeping break a post, a remove, or a ledger write.
-- Migration `scripts/sql/011_listing_channels.sql` is hand-applied (operator gate); seed rows with `scripts/backfill_listing_channels.py --apply` after it.
+- Migration `scripts/sql/011_listing_channels.sql` is APPLIED to prod (2026-09-21) and the backfill has run (104 rows / 41 lots). Re-run `scripts/backfill_listing_channels.py --apply` only after a bulk inventory import.
 
 **DB:**
 - **Connections are pooled** (`automation/db.py`, psycopg_pool, lazy, max 4). The pooler TLS+SCRAM handshake is ~0.4-1.4 s and the queries are <1 ms, so **never open `psycopg.connect(...)` per call again**, and never run `db.*`/`inventory.*` on the event loop — route handlers that touch the DB are plain `def` (FastAPI threadpool) or wrap the call in `asyncio.to_thread`. `tests/web/test_event_loop_hygiene.py` enforces it. Hold a connection outside a `with` only via `db.connect(pooled=False)`.

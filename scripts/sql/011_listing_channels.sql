@@ -1,5 +1,5 @@
 -- 011_listing_channels.sql — one row per lot × sales channel (multichannel master plan, Phase 1).
--- Status: PENDING — paste into Supabase → SQL Editor once. Idempotent.
+-- Status: APPLIED to prod 2026-09-21 via Supabase MCP (migration name: listing_channels). Idempotent.
 --
 -- `inventory` stays the single source of truth for WHAT we sell; this table only
 -- records WHERE each lot currently is (state, far-side id/url, payload hash, last
