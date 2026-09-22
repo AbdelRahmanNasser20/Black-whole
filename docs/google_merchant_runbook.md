@@ -1,5 +1,7 @@
 # Google Merchant Center — operator runbook
 
+> **Status 2026-09-22:** DONE. Account `5858057147` (Black Whole Liquidation, US) created on abdel.nasser045@gmail.com. black-whole.com shows Verified + Claimed (Search Console tag already on Render, no env change needed). Shipping policy US / 1–14 days / free. Feed source `10741813824` = scheduled fetch of the CSV every 24 h; first fetch ingested 9 products, all attributes recognised, 0 file issues, 9 under review. Open: returns policy (operator decision) and account time zone still Cairo. Cloudflare Web Analytics enabled the same day for black-whole.com (auto-inject).
+
 Feed URL: `https://black-whole.com/catalog/google.csv` (public, refreshes every 15 min from `inventory`).
 
 ## One-time setup (≈20 min, operator clicks)
