@@ -56,6 +56,16 @@ No cron, no rebuild step — it all renders from the ledger at request time.
 | `PUBLIC_BASE_URL` | `https://black-whole.com` | canonical/OG/sitemap origin |
 | `GOOGLE_SITE_VERIFICATION` | *(unset)* | Search Console HTML-tag token |
 
+## Where visitors come from (traffic attribution)
+
+Two tools, no code:
+1. **Cloudflare Web Analytics** (free, cookieless). black-whole.com is already proxied by Cloudflare, so: dash.cloudflare.com → black-whole.com → Analytics & Logs → Web Analytics → Enable. Cloudflare injects the beacon itself. Shows referrers (facebook.com, google.com, craigslist.org, ebay.com), countries, top pages, devices, Core Web Vitals. Data starts within an hour.
+2. **UTM tags** on every channel link: FB catalog links carry `utm_source=facebook&utm_medium=catalog`, Google feed links `utm_source=google&utm_medium=feed`. Cloudflare and Apollo both group on these, so a click from a feed is attributed even when the app strips the Referer.
+
+Already installed: **Apollo website-visitor pixel** (`_public_base.html`, tracker `6986af4f7ce37e001d9745cc`) — identifies *which companies* visited (Apollo → Website Visitors). It does not show traffic source; use Cloudflare for that.
+
+Not installed on purpose: Google Analytics (cookie banner + consent work for no extra signal we would act on).
+
 ## Later (not built, deliberately)
 
 - Per-city landing pages ("chairs in Boise") — revisit when there are

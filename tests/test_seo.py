@@ -122,3 +122,12 @@ def test_listings_page_meta(client):
 def test_google_verification_meta_absent_when_unset(client):
     r = client.get("/")
     assert "google-site-verification" not in r.text
+
+
+def test_detail_jsonld_never_leaks_storage_note(client, monkeypatch):
+    row = dict(ROW, storage_note="Unit 12, gate code 4455", description="Chairs.")
+    monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: row)
+    r = client.get("/listings/10340")
+    assert r.status_code == 200
+    assert "gate code" not in r.text
+    assert "Unit 12" not in r.text

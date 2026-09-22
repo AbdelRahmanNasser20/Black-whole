@@ -49,7 +49,7 @@ from ..config import (
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
-from .. import catalog_feed, lot_channels
+from .. import catalog_feed, google_feed, lot_channels
 from .. import inventory
 from .. import lot_images
 from .. import favorite_images
@@ -1464,6 +1464,23 @@ def facebook_catalog_feed():
     """
     body = catalog_feed.rows_to_csv(inventory.list_catalog_feed())
     return PlainTextResponse(body, media_type="text/csv; charset=utf-8")
+
+
+@app.get("/catalog/google.csv")
+def google_catalog_feed():
+    """Google Merchant Center product feed (multichannel Phase 2, D7).
+
+    Public, read-only, no secrets — Merchant Center fetches this URL on a
+    daily schedule. Same status/quantity gate as the FB feed
+    (`inventory.list_catalog_feed`); `google_feed` drops rows Google would
+    reject. Operator setup: docs/google_merchant_runbook.md.
+    """
+    body = google_feed.rows_to_csv(inventory.list_catalog_feed())
+    return PlainTextResponse(
+        body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Cache-Control": "public, max-age=900"},
+    )
 
 
 async def _notify_new_inquiry(row: dict) -> None:
