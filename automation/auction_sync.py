@@ -311,8 +311,8 @@ def sync_once(*, adapter=None, now: datetime | None = None, dry_run: bool = Fals
     ready = watch_store.schema_ready()
     if not ready:
         msg = ("inventory_auction_watch is missing — apply "
-               "scripts/sql/011_inventory_auction_watch.sql "
-               "(.venv/bin/python scripts/apply_sql.py scripts/sql/011_inventory_auction_watch.sql)")
+               "scripts/sql/012_inventory_auction_watch.sql "
+               "(.venv/bin/python scripts/apply_sql.py scripts/sql/012_inventory_auction_watch.sql)")
         if not dry_run:
             report["error"] = msg
             log(f"[auction-sync] {msg}")

@@ -1,5 +1,9 @@
--- Auction expiry sync (2026-09-15) — the watch list behind
--- `automation/auction_sync.py`. Plan: docs/superpowers/plans/2026-09-15-auction-expiry-sync.md
+-- 012_inventory_auction_watch.sql — Auction expiry sync (2026-09-15), the watch list
+-- behind `automation/auction_sync.py`. Plan: docs/superpowers/plans/2026-09-15-auction-expiry-sync.md
+--
+-- Status: PENDING — NOT applied to prod. Numbered 012 (not 011) because
+-- 011_listing_channels.sql is already APPLIED to prod (2026-09-21).
+-- Apply with: .venv/bin/python scripts/apply_sql.py scripts/sql/012_inventory_auction_watch.sql
 --
 -- One row per inventory lot whose GovDeals auction we are following. Keyed by
 -- lot_id, with (asset_id, account_id) unique on top, because a lot that does

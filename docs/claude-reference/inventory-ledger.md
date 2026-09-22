@@ -69,7 +69,7 @@ back — with a Telegram ping — when the auction relists.
   a purged asset (verified on `53677/357`, both id orders). An unreadable lot is
   counted as `unresolved`, gets a `poll_error`, and is left exactly as it was.
 - **Watch list = `inventory_auction_watch`** (migration
-  `scripts/sql/011_inventory_auction_watch.sql`, **operator gate — not applied**),
+  `scripts/sql/012_inventory_auction_watch.sql`, **operator gate — not applied**),
   keyed by `lot_id` with `(asset_id, account_id)` unique on top: an unsold lot
   relists under the same asset with a new auction id, the same reason
   `tracked_lots` is keyed that way. Bounded scalar columns only (`state`,

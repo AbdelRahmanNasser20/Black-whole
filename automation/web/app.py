@@ -3242,6 +3242,8 @@ async def _channel_sync_loop() -> None:
     while True:
         await _channel_sync_tick()
         await asyncio.sleep(_channel_sync_interval() or 300.0)
+
+
 # ─────────── auction-expiry sync (runs in-process, sibling of _tracking_loop) ───────────
 #
 # A lot we're bidding on sits in the ledger as `active_bid` and shows on the

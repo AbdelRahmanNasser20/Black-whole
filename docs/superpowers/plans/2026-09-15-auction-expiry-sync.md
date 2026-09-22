@@ -95,7 +95,7 @@ on the site and pings Telegram.
 <details open>
 
 - **New table `inventory_auction_watch`** (migration
-  `scripts/sql/011_inventory_auction_watch.sql`), one row per watched lot, keyed
+  `scripts/sql/012_inventory_auction_watch.sql`), one row per watched lot, keyed
   by `lot_id` with a unique `(asset_id, account_id)` — the same "key by asset,
   not by auction, so a relist keeps being followed" idea as `tracked_lots`.
 - **Why a table and not a column on `inventory`:** every field is a bounded
@@ -163,7 +163,7 @@ on the site and pings Telegram.
 
 <details open>
 
-1. `scripts/sql/011_inventory_auction_watch.sql` + `automation/auction_watch_store.py`
+1. `scripts/sql/012_inventory_auction_watch.sql` + `automation/auction_watch_store.py`
    (all SQL for the table, plus a `schema_ready()` probe so a pass before the
    migration is applied degrades to a clear message instead of a stack trace).
 2. `automation/auction_sync.py` — `AuctionState`, `lot_ref`, `is_live`,

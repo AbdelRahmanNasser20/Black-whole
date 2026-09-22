@@ -1,6 +1,6 @@
 """SQL for `inventory_auction_watch`. See `automation/auction_sync.py`.
 
-DDL of record: `scripts/sql/011_inventory_auction_watch.sql`.
+DDL of record: `scripts/sql/012_inventory_auction_watch.sql`.
 
 Every function here is I/O. The decisions live in `auction_sync` as pure
 functions so they can be tested without a database.
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from . import db
 
-DDL_PATH = Path(__file__).resolve().parent.parent / "scripts" / "sql" / "011_inventory_auction_watch.sql"
+DDL_PATH = Path(__file__).resolve().parent.parent / "scripts" / "sql" / "012_inventory_auction_watch.sql"
 
 TABLE = "inventory_auction_watch"
 

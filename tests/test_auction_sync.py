@@ -331,7 +331,7 @@ class TestSyncOnceNeverActsOnSilence:
     def test_without_the_migration_a_real_run_refuses(self, wired, monkeypatch):
         monkeypatch.setattr(watch_store, "schema_ready", lambda: False)
         rep = _run(FakeAdapter(DETAIL, {**BIDBOX, "assetStatusCd": "SOA"}))
-        assert "011_inventory_auction_watch.sql" in rep["error"]
+        assert "012_inventory_auction_watch.sql" in rep["error"]
         assert wired["removed"] == [], "no ledger write before the table exists"
 
     def test_without_the_migration_a_dry_run_still_reports(self, wired, monkeypatch):
