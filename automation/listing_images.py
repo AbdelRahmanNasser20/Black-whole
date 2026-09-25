@@ -19,15 +19,17 @@ the site just falls back to local-disk serving.
 """
 from __future__ import annotations
 
+import hashlib
 import io
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
 import httpx
 from PIL import Image, ImageOps
 
-from . import config
+from . import config, image_disguise
 
 DEFAULT_BUCKET = "listing-images"
 
@@ -123,6 +125,55 @@ def gallery_object_path(lot_id, index: int, *, ext: str = "jpg") -> str | None:
     return f"{base}/{index:02d}.{ext}" if base else None
 
 
+# Opaque keys for disguised photos. The legacy keys above spell out the lot id,
+# which for GovDeals lots IS the asset/account id (`gd-239-31465/00.jpg`) — a
+# buyer could type it into govdeals.com. These are HMAC tokens instead, and the
+# `p/` prefix doubles as the "already disguised" marker for the backfill.
+OPAQUE_PREFIX = "p/"
+
+
+def opaque_base(lot_id) -> str | None:
+    base = key_base(lot_id)
+    return f"{OPAQUE_PREFIX}{image_disguise.token('key', base, 16)}" if base else None
+
+
+def opaque_hero_path(lot_id) -> str | None:
+    base = opaque_base(lot_id)
+    return f"{base}/h.jpg" if base else None
+
+
+def opaque_gallery_path(lot_id, source: bytes) -> str | None:
+    """Keyed on the *source* bytes, so a reordered gallery reuses its objects."""
+    base = opaque_base(lot_id)
+    if not base:
+        return None
+    return f"{base}/{image_disguise.token('img', hashlib.sha256(source).hexdigest(), 12)}.jpg"
+
+
+def catalog_path(hero_path: str) -> str:
+    """Watermark-free twin of a disguised hero (`…/h.jpg` → `…/h.c.jpg`).
+
+    Meta's catalog rejects watermarked images, so the FB feed gets this copy;
+    every other surface keeps the watermarked hero (the part that beats Lens).
+    """
+    return hero_path[: -len(".jpg")] + ".c.jpg"
+
+
+def catalog_url(url: str | None) -> str | None:
+    """The catalog twin for a disguised hero URL; any other URL unchanged."""
+    if not url or not is_disguised_url(url):
+        return url
+    path, sep, query = url.partition("?")
+    if not path.endswith("/h.jpg"):
+        return url
+    return catalog_path(path) + sep + query
+
+
+def is_disguised_url(url: str | None) -> bool:
+    """True for a URL whose object key sits under the opaque `p/` namespace."""
+    return urlparse(url or "").path.lstrip("/").startswith(OPAQUE_PREFIX)
+
+
 def _content_type_for(path: Path) -> str:
     return _EXT_CT.get(path.suffix.lstrip(".").lower(), "image/jpeg")
 
@@ -173,6 +224,32 @@ def optimize_for_web(data: bytes, ext: str) -> tuple[bytes, str, str]:
     if not out or len(out) >= len(data):
         return original
     return out, "jpg", "image/jpeg"
+
+
+def prepare_for_web(data: bytes, ext: str, *, key: str) -> tuple[bytes, str, str] | None:
+    """The one gate every public lot photo passes before upload.
+
+    Disguise on (default): mirrored/re-framed/watermarked JPEG, or None when the
+    bytes aren't an image — skip the file, never upload the original. Kill
+    switch `IMAGE_DISGUISE=0`: the legacy `optimize_for_web` behaviour.
+    """
+    if image_disguise.enabled():
+        return image_disguise.disguise(data, key=key)
+    return optimize_for_web(data, ext)
+
+
+def public_copies(lot_id, paths, *, out_dir: Path | None = None) -> list[Path]:
+    """Local disguised copies for uploaders that post files (FB / eBay drafts).
+
+    Identity when disguise is off. Same key + source bytes as `upload_lot_images`,
+    so Marketplace and the site carry the same pixels.
+    """
+    files = [Path(p) for p in (paths or [])]
+    base = key_base(lot_id)
+    if not image_disguise.enabled() or not base:
+        return files
+    out_dir = out_dir or Path(config.SCRATCH_DIR) / "public_photos" / base
+    return image_disguise.disguise_files(files, key=base, out_dir=out_dir)
 
 
 def _post_object(client: httpx.Client, *, base, key, bucket, path, data, content_type) -> bool:
@@ -237,7 +314,11 @@ def upload_lot_images(lot_id, paths) -> dict | None:
                 continue
             if not data:
                 continue
-            data, ext, ct = optimize_for_web(data, guess_ext(fp.name))
+            prepared = prepare_for_web(data, guess_ext(fp.name), key=key_base(lot_id))
+            if prepared is None:
+                print(f"[listing_images] skipped unreadable image {fp.name}", file=sys.stderr)
+                continue
+            data, ext, ct = prepared
 
             gal_path = gallery_object_path(lot_id, i, ext=ext)
             if gal_path and _post_object(client, base=base, key=key, bucket=bucket,

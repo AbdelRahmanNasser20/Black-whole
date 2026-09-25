@@ -99,12 +99,14 @@ def upload_lot_images(lot_id, paths) -> dict | None:
     """R2 twin of `listing_images.upload_lot_images` — same keys, same return.
 
     Returns ``{"hero_image_url": str, "image_urls": [str, ...]}`` or None when
-    unconfigured / no lot id / nothing uploaded. Photos are run through the same
-    `optimize_for_web` egress guard before upload, so R2 objects are the small
-    JPEGs, not the raw multi-MB originals.
+    unconfigured / no lot id / nothing uploaded. Every photo passes
+    `listing_images.prepare_for_web` first: disguised (see `image_disguise`) and
+    stored under an opaque `p/…` key, or — with `IMAGE_DISGUISE=0` — the legacy
+    `optimize_for_web` JPEG under the lot-id key.
     """
     from pathlib import Path
 
+    from automation import image_disguise
     from automation import listing_images as li  # lazy: avoids an import cycle
 
     cfg = env_config()
@@ -124,27 +126,39 @@ def upload_lot_images(lot_id, paths) -> dict | None:
     bucket, public_base = cfg["bucket"], cfg["public_base"]
     hero_url: str | None = None
     gallery: list[str] = []
+    # Disguised photos go under opaque keys; the legacy keys spell the lot id.
+    opaque = image_disguise.enabled()
 
     for i, fp in enumerate(files):
         try:
-            data = fp.read_bytes()
+            source = fp.read_bytes()
         except OSError as e:
             print(f"[r2_images] read failed for {fp}: {e}", file=sys.stderr)
             continue
-        if not data:
+        if not source:
             continue
-        data, ext, ct = li.optimize_for_web(data, li.guess_ext(fp.name))
+        prepared = li.prepare_for_web(source, li.guess_ext(fp.name), key=base_key)
+        if prepared is None:
+            print(f"[r2_images] skipped unreadable image {fp.name}", file=sys.stderr)
+            continue
+        data, ext, ct = prepared
 
         ver = content_version(data)
 
-        gal_path = li.gallery_object_path(lot_id, i, ext=ext)
+        gal_path = (li.opaque_gallery_path(lot_id, source) if opaque
+                    else li.gallery_object_path(lot_id, i, ext=ext))
         if gal_path and put_object(s3, bucket=bucket, path=gal_path, data=data, content_type=ct):
             gallery.append(public_url(gal_path, public_base=public_base, version=ver))
 
-        if i == 0:
-            hero_path = li.hero_object_path(lot_id, ext=ext)
+        if hero_url is None:  # first photo that made it through is the cover
+            hero_path = li.opaque_hero_path(lot_id) if opaque else li.hero_object_path(lot_id, ext=ext)
             if hero_path and put_object(s3, bucket=bucket, path=hero_path, data=data, content_type=ct):
                 hero_url = public_url(hero_path, public_base=public_base, version=ver)
+                if opaque:
+                    twin = image_disguise.disguise(source, key=base_key, watermark=False)
+                    if twin:
+                        put_object(s3, bucket=bucket, path=li.catalog_path(hero_path),
+                                   data=twin[0], content_type=twin[2])
 
     if not gallery and not hero_url:
         return None
