@@ -44,6 +44,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Store calls from existing writers (`lot_channels`, `inventory.set_platform_url`) are wrapped: a store failure is logged and swallowed. Don't let bookkeeping break a post, a remove, or a ledger write.
 - Both catalog feeds (`facebook.csv`, `google.csv`) read `inventory.list_catalog_feed()` — never add a second sellable-lots query; price/image helpers live in `catalog_feed` and are shared.
 - Migration `scripts/sql/011_listing_channels.sql` is APPLIED to prod (2026-09-21) and the backfill has run (104 rows / 41 lots). Re-run `scripts/backfill_listing_channels.py --apply` only after a bulk inventory import.
+- 🚨 Migration `scripts/sql/012_inventory_auction_watch.sql` (auction-expiry sync, PR #100) is **PENDING — NOT applied to prod.** Don't assume it ran. Until it is applied, `automation/auction_sync.py` refuses a real run with the apply command (`.venv/bin/python scripts/apply_sql.py scripts/sql/012_inventory_auction_watch.sql`); `--dry-run` still reports.
 
 **DB:**
 - **Connections are pooled** (`automation/db.py`, psycopg_pool, lazy, max 4). The pooler TLS+SCRAM handshake is ~0.4-1.4 s and the queries are <1 ms, so **never open `psycopg.connect(...)` per call again**, and never run `db.*`/`inventory.*` on the event loop — route handlers that touch the DB are plain `def` (FastAPI threadpool) or wrap the call in `asyncio.to_thread`. `tests/web/test_event_loop_hygiene.py` enforces it. Hold a connection outside a `with` only via `db.connect(pooled=False)`.
@@ -119,3 +120,5 @@ Detail: `docs/claude-reference/` (index at bottom).
 
 ## Done log (from Obsidian)
 - 2026-09-14 · WEB-PERF: PR #97 squash-merged; admin loads in <1 s instead of 8–56 s, 174 web tests green.
+- 2026-09-25 · AUCTION-EXPIRY-SYNC: PR #100 squash-merged (`914ee2c`); 30-min `_auction_sync_loop` fake-sold-outs a closed lot and restores it on relist. Migration `012_inventory_auction_watch.sql` still PENDING.
+- 2026-09-25 · IMAGE-DISGUISE: PR #101 squash-merged (`05b6f93`) after rebase; every public photo is mirrored/re-framed/watermarked and R2 keys are opaque, so Google Lens no longer exact-matches GovDeals. 1,573 tests green. Backfill `scripts/disguise_live_images.py --apply` (53 rows / 297 photos) NOT run yet.
