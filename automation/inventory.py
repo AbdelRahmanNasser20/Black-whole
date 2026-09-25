@@ -561,6 +561,10 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         "zip_code", "contact_name", "contact_email", "contact_phone",
         "govdeals_username", "govdeals_password",
         "locations", "fake_sold_out", "sold_at", "deposit_pct_override",
+        # A relisted lot points at a NEW auction under the same asset, so the
+        # stored URL has to be re-stampable through the ledger rather than by
+        # raw UPDATE (automation/auction_sync.py).
+        "govdeals_url",
     }
     clean = {k: v for k, v in fields.items() if k in allowed}
     if not clean:

@@ -35,6 +35,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Don't bypass the ledger to work around a "stuck" row. Delete/edit via the admin Inventory tab or `DELETE /api/inventory/{lot_id}`, don't hack the DB directly.
 - Sold showcase = `status IN ('sold_out','lost_sold_out')` AND `quantity_original > 0` AND has a photo — don't loosen it without a plan for the junk rows.
 - **The FB catalog feed and CRM recommendations are status-gated** (`CATALOG_FEED_STATUSES` / `ROUTABLE_STATUSES`), so an archived lot can never be offered as stock. Keep it that way.
+- **Auction expiry sync** (`automation/auction_sync.py`): a closed auction takes the lot off the site through `lot_channels.remove_lot`, never by setting `fake_sold_out` alone — the storefront and the feed gate on `status`, `fake_sold_out` is the CRM's flag. **An unreadable lot is never expired**: maestro answers 204 for a purged asset, and "the endpoint went quiet" must not read as "the auction ended". Close times come from the bidbox's `assetAuctionEndDateUTC` only — the detail endpoint's `assetAuctionEndDate` is naive US/Eastern. Detail: `inventory-ledger.md`.
 
 **Channels (`automation/channels/` — READ `channels.md` BEFORE TOUCHING THE SYNC LOOP OR A CHANNEL WRITER):**
 - **FB Marketplace channel ships disabled; only the operator flips `channel_fb_marketplace_enabled`.** Every (re)list on it parks in `pending_approval`; Approve on a disabled channel is a 409. Never auto-flip the switch, never post around the queue.
@@ -90,6 +91,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Photos onto a lot: `scripts/backfill_listing_images.py --lot|--missing`; `scripts/import_deal_images.py --lot <key>`.
 - `GET /catalog/google.csv` = Merchant Center feed (`automation/google_feed.py`, reuses `catalog_feed` helpers; setup `docs/google_merchant_runbook.md`).
 - Public map: `/map` (JSON `/map/api/points?statuses=&near=&radius=`). Favorite photos → dewatermark → R2: `.venv/bin/python scripts/favorite_photos.py --all` — needs `scripts/sql/010_favorites_clean_images.sql` applied first (**operator gate**).
+- Auction expiry/relist sync: `.venv/bin/python scripts/sync_auction_status.py --once [--dry-run] [--lot ID]`; the loop runs in the web process (`AUCTION_SYNC_INTERVAL_SEC`=1800, `AUCTION_SYNC_ENABLED`=1). Needs `scripts/sql/012_inventory_auction_watch.sql` applied (**operator gate**).
 - Public deals: `http://127.0.0.1:8765/deals` (JSON `/deals/api/lots?page=&per_page=`). Indexes: `scripts/apply_sql.py scripts/sql/007_deal_lots_active_indexes.sql` (operator gate).
 - Deals: `.venv/bin/python -m deals.cli discover|watch-once|archive-active|archive-raw|track-bidders|digest|backfill-classify|saved-search-alerts|track add|list|sync|history`; `--profile <slug>` (or `DEALS_PROFILE`) on `discover|watch-once|digest|track-bidders`; research profiles CRUD at `/api/profiles` (`deals/profiles.py`, migration `scripts/sql/006_research_profiles.sql` — **not applied to prod yet**); `scripts/check_llm_provider.py`; `scripts/reclaim_db_space.py --all`; `scripts/query_cold_archive.py`.
 - Dewatermark audit: `python -m automation.dewatermark stats|verify <file>`.
