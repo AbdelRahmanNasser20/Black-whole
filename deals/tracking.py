@@ -126,6 +126,92 @@ def bidder_summary(observations: list[dict]) -> list[dict]:
     return sorted(by_id.values(), key=lambda e: (e["max_bid"] or 0), reverse=True)
 
 
+# ── landed cost: what the lot really costs, and per chair ────────────────────
+#
+# The bid is not the cost. GovDeals adds a buyer premium (premiumPercent, 12.5 %
+# on most sellers, 10 % on some) plus sales tax on bid AND premium. Once a lot
+# sells, the bidbox carries GovDeals' own invoice total (grandTotalAmount) —
+# that is the answer. Before then tax reads 0, so an open lot borrows the
+# effective rate of a sold lot from the same seller, else the same state; with
+# neither, the total is bid + premium and says tax is missing. Never a
+# guessed rate.
+
+def bidbox_costs(raw: dict) -> dict:
+    """The bidbox's fee fields, as the tracked_lots cost columns."""
+    from deals.bidders import _float
+    return {"premium_pct": _float(raw.get("premiumPercent")),
+            "admin_fee": _float(raw.get("adminFeeAmount")),
+            "tax_total": _float(raw.get("totalTaxAmount")),
+            "grand_total": _float(raw.get("grandTotalAmount")),
+            "lot_state": (raw.get("state") or None)}
+
+
+def _num(v) -> float | None:
+    return float(v) if v is not None else None
+
+
+def _tax_rate(row: dict) -> float | None:
+    """Effective tax rate on a sold lot's invoice: tax / (total - tax)."""
+    grand, tax = _num(row.get("grand_total")), _num(row.get("tax_total"))
+    if not grand or grand <= 0 or tax is None or grand - tax <= 0:
+        return None
+    return tax / (grand - tax)
+
+
+def landed_costs(rows: list[dict]) -> list[dict]:
+    """Each row plus a `cost` dict: qty, bid, premium, fees, tax, total,
+    per_chair, basis ('exact' | 'est' | 'est_no_tax'), tax_from."""
+    from deals.fees import fee_model_from_env
+    from deals.quantity import chair_quantity
+
+    by_seller: dict[int, float] = {}
+    by_state: dict[str, float] = {}
+    for r in rows:
+        rate = _tax_rate(r)
+        if rate is None:
+            continue
+        by_seller.setdefault(r["account_id"], rate)
+        if r.get("lot_state"):
+            by_state.setdefault(r["lot_state"], rate)
+    default_pct = fee_model_from_env().buyer_premium_pct * 100
+
+    out = []
+    for r in rows:
+        if r.get("quantity"):
+            qty, qty_source = int(r["quantity"]), "manual"
+        else:
+            qty, qty_source = chair_quantity(r.get("title"))
+        bid = _num(r.get("final_bid") if r.get("closed_at") else r.get("current_bid"))
+        cost = {"qty": qty, "qty_source": qty_source, "bid": bid, "premium": None,
+                "fees": None, "tax": None, "total": None, "per_chair": None,
+                "basis": None, "tax_from": None}
+        if bid:
+            pct = _num(r.get("premium_pct"))
+            premium = round(bid * (default_pct if pct is None else pct) / 100, 2)
+            fees = _num(r.get("admin_fee")) or 0.0
+            grand = _num(r.get("grand_total"))
+            if grand and grand > 0:
+                tax = _num(r.get("tax_total")) or 0.0
+                cost.update(premium=premium, fees=fees, tax=round(tax, 2),
+                            total=round(grand, 2), basis="exact")
+            else:
+                rate, source = by_seller.get(r["account_id"]), "seller"
+                if rate is None and r.get("lot_state") in by_state:
+                    rate, source = by_state[r["lot_state"]], "state"
+                pre_tax = bid + premium + fees
+                if rate is None:
+                    cost.update(premium=premium, fees=fees, total=round(pre_tax, 2),
+                                basis="est_no_tax")
+                else:
+                    tax = round(pre_tax * rate, 2)
+                    cost.update(premium=premium, fees=fees, tax=tax,
+                                total=round(pre_tax + tax, 2), basis="est", tax_from=source)
+            if qty:
+                cost["per_chair"] = round(cost["total"] / qty, 2)
+        out.append({**r, "cost": cost})
+    return out
+
+
 # ── I/O below this line ──────────────────────────────────────────────────────
 
 def _resolve_auction(adapter, asset_id: int, account_id: int) -> int | None:
@@ -233,6 +319,7 @@ def sync_tracked(adapter, *, now: datetime | None = None, verbose: bool = True) 
             closed = is_closed(state, now)
             next_at = None if closed else now + timedelta(seconds=poll_interval(state.end_utc, now))
             tracking_store.record_state(state, next_poll_at=next_at, closed_at=(now if closed else None))
+            tracking_store.record_costs(asset_id, account_id, bidbox_costs(raw))
             if closed:
                 report["closed"] += 1
                 # Fill deal_lots' outcome too when that row exists — this is
@@ -249,3 +336,33 @@ def sync_tracked(adapter, *, now: datetime | None = None, verbose: bool = True) 
                                       now + timedelta(seconds=WARM_INTERVAL))
             print(f"[tracking] {asset_id}/{account_id}: {type(e).__name__}: {e}")
     return report
+
+
+# Keys tried this process: a purged lot answers 204 forever, and the web tick
+# runs every 30 s — try each once per restart, not 2,880 times a day.
+_costs_tried: set[tuple[int, int, int]] = set()
+
+
+def fill_missing_costs(adapter, *, limit: int = 10, verbose: bool = False) -> int:
+    """Read the invoice fields for closed lots that never got them. A closed
+    lot's bidbox keeps serving its final totals for days, so this backfills the
+    lots that closed before migration 013. Small batches: it rides the 30 s tick."""
+    from deals import tracking_store
+
+    filled = 0
+    rows = tracking_store.missing_costs(limit + len(_costs_tried))
+    for row in [r for r in rows
+                if (r["asset_id"], r["account_id"], r["auction_id"]) not in _costs_tried][:limit]:
+        key = (row["asset_id"], row["account_id"], row["auction_id"])
+        _costs_tried.add(key)
+        try:
+            raw = adapter.fetch_bid_state(*key)
+        except Exception as e:  # noqa: BLE001 — a purged lot must not stop the batch
+            if verbose:
+                print(f"[tracking] costs {key}: {type(e).__name__}: {e}")
+            continue
+        if not raw:
+            continue
+        tracking_store.record_costs(key[0], key[1], bidbox_costs(raw))
+        filled += 1
+    return filled

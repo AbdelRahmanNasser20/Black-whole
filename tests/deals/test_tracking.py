@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from deals.bidders import BidState
-from deals.tracking import (CLOSE_GRACE, COLD_INTERVAL, HOT_INTERVAL, WARM_INTERVAL,
+from deals.tracking import (CLOSE_GRACE, fill_missing_costs, COLD_INTERVAL, HOT_INTERVAL, WARM_INTERVAL,
                             bidder_summary, is_closed, parse_lot_ref, poll_interval,
                             sync_tracked)
 
@@ -113,7 +113,8 @@ class _FakeAdapter:
 class _FakeStore:
     """Captures what sync_tracked writes, in place of deals.tracking_store."""
     def __init__(self, rows):
-        self.rows, self.states, self.errors = rows, [], []
+        self.rows, self.states, self.errors, self.costs = rows, [], [], []
+        self.missing = []
 
     def due(self, now):
         return list(self.rows)
@@ -124,6 +125,12 @@ class _FakeStore:
     def mark_error(self, asset_id, account_id, error, next_poll_at):
         self.errors.append((asset_id, account_id, error))
 
+    def record_costs(self, asset_id, account_id, costs):
+        self.costs.append((asset_id, account_id, costs))
+
+    def missing_costs(self, limit):
+        return self.missing[:limit]
+
 
 @pytest.fixture
 def wired(monkeypatch):
@@ -133,7 +140,7 @@ def wired(monkeypatch):
 
     def _wire(rows):
         fake = _FakeStore(rows)
-        for name in ("due", "record_state", "mark_error"):
+        for name in ("due", "record_state", "mark_error", "record_costs", "missing_costs"):
             monkeypatch.setattr(ts, name, getattr(fake, name))
         import deals.store as st
         monkeypatch.setattr(st, "append_bid_observation",
@@ -181,3 +188,25 @@ class TestSyncTracked:
         rep = sync_tracked(adapter, now=NOW, verbose=False)
         assert rep["errors"] == 1 and rep["recorded"] == 1
         assert fake.errors[0][:2] == (1, 2) and "RuntimeError" in fake.errors[0][2]
+
+
+class TestCosts:
+    def test_every_poll_saves_the_invoice_fields(self, wired):
+        fake, _, _ = wired([{"asset_id": 96, "account_id": 27562, "auction_id": 3}])
+        box = {**BIDBOX, "premiumPercent": 12.5, "adminFeeAmount": 0.0, "totalTaxAmount": 0.0,
+               "grandTotalAmount": 0.0, "state": "VA"}
+        sync_tracked(_FakeAdapter({KEY: box}), now=NOW, verbose=False)
+        assert fake.costs == [(96, 27562, {"premium_pct": 12.5, "admin_fee": 0.0, "tax_total": 0.0,
+                                           "grand_total": 0.0, "lot_state": "VA"})]
+
+    def test_closed_lots_without_costs_are_filled_once(self, wired):
+        fake, _, _ = wired([])
+        fake.missing = [{"asset_id": 420, "account_id": 9312, "auction_id": 5}]
+        box = {**BIDBOX, "premiumPercent": 12.5, "grandTotalAmount": 900.0, "state": "NV"}
+        assert fill_missing_costs(_FakeAdapter({(420, 9312, 5): box}), limit=5) == 1
+        assert fake.costs[0][2]["grand_total"] == 900.0
+
+    def test_fill_skips_a_dead_lot(self, wired):
+        fake, _, _ = wired([])
+        fake.missing = [{"asset_id": 1, "account_id": 2, "auction_id": 3}]
+        assert fill_missing_costs(_FakeAdapter({(1, 2, 3): RuntimeError("204")}), limit=5) == 0

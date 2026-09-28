@@ -180,3 +180,51 @@ def rival_lots(bidder_ids: list[int], *, exclude: tuple[int, int] | None = None,
         WHERE {' AND '.join(where)}
         GROUP BY o.high_bidder, o.asset_id, o.account_id, o.auction_id
         ORDER BY last_seen DESC LIMIT %s""", tuple(params))
+
+
+# ── landed cost columns (migration 013) ──────────────────────────────────────
+# Until 013 is applied these columns don't exist; writes are skipped quietly so
+# a deploy ahead of the migration never turns into a poll_error on every lot.
+
+_COST_COLS = ("premium_pct", "admin_fee", "tax_total", "grand_total", "lot_state")
+_costs_missing_logged = False
+
+
+def _undefined_column(e: Exception) -> bool:
+    global _costs_missing_logged
+    import psycopg
+    if not isinstance(e, psycopg.errors.UndefinedColumn):
+        return False
+    if not _costs_missing_logged:
+        _costs_missing_logged = True
+        print("[tracking] cost columns missing — apply scripts/sql/013_tracked_lots_costs.sql")
+    return True
+
+
+def record_costs(asset_id: int, account_id: int, costs: dict) -> None:
+    try:
+        db.execute(f"UPDATE tracked_lots SET {', '.join(c + '=%s' for c in _COST_COLS)} "
+                   "WHERE asset_id=%s AND account_id=%s",
+                   tuple(costs.get(c) for c in _COST_COLS) + (asset_id, account_id))
+    except Exception as e:  # noqa: BLE001
+        if not _undefined_column(e):
+            raise
+
+
+def missing_costs(limit: int) -> list[dict]:
+    """Closed lots that never had their invoice read (closed before 013, or
+    the closing poll failed). One bidbox read each fills them for good."""
+    try:
+        return db.fetch_all("""SELECT asset_id, account_id, auction_id FROM tracked_lots
+            WHERE closed_at IS NOT NULL AND auction_id IS NOT NULL AND premium_pct IS NULL
+            ORDER BY closed_at DESC LIMIT %s""", (limit,))
+    except Exception as e:  # noqa: BLE001
+        if _undefined_column(e):
+            return []
+        raise
+
+
+def set_quantity(asset_id: int, account_id: int, quantity: int | None) -> dict | None:
+    """Operator override; None clears it back to the title parse."""
+    return db.fetch_one("UPDATE tracked_lots SET quantity=%s WHERE asset_id=%s AND account_id=%s "
+                        "RETURNING *", (quantity, asset_id, account_id))

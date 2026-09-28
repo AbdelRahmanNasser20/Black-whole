@@ -105,6 +105,25 @@ function renderTrackingLabels() {
   }
 }
 
+// Landed cost cells. `r.cost` comes from deals.tracking.landed_costs: 'exact' = GovDeals' own invoice
+// total (sold lots), 'est' = bid + premium + tax at a sold lot's rate (same seller, else same state),
+// 'est_no_tax' = bid + premium only — no sold lot tells us the tax yet.
+function _trkCostCells(r, key) {
+  const c = r.cost || {};
+  const qtyTitle = c.qty_source === 'manual' ? 'set by you — clear to use the title'
+    : c.qty_source === 'title' ? 'read from the title — type to override' : 'no count in the title — type one';
+  const qty = `<input class="trk-qty-cell mono" inputmode="numeric" value="${c.qty_source === 'manual' || c.qty ? c.qty : ''}" placeholder="?" data-key="${key}" data-manual="${c.qty_source === 'manual' ? 1 : 0}" title="${qtyTitle}">`;
+  if (c.total == null) return `<td class="num">${qty}</td><td class="num mono">—</td><td class="num mono">—</td>`;
+  const parts = [`bid ${_trkMoney(c.bid)}`, `premium ${_trkMoney(c.premium)}`];
+  if (c.fees) parts.push(`fees ${_trkMoney(c.fees)}`);
+  parts.push(c.tax == null ? 'tax unknown (no sold lot from this seller or state yet)'
+    : `tax ${_trkMoney(c.tax)}${c.basis === 'est' ? ` (est, rate from same ${c.tax_from})` : ''}`);
+  const tag = c.basis === 'exact' ? '' : c.basis === 'est' ? ' <span class="tiny">est</span>' : ' <span class="tiny trk-warn">+tax?</span>';
+  return `<td class="num">${qty}</td>
+      <td class="num mono" title="${esc(parts.join(' · '))}">${_trkMoney(c.total)}${tag}</td>
+      <td class="num mono">${c.per_chair != null ? _trkMoney(c.per_chair) : '—'}</td>`;
+}
+
 function _trkStatus(r) {
   if (r.closed_at) {
     const tag = r.final_bid_count === 0 ? 'no bids' : (r.final_bid_count === 1 ? 'low bid' : 'sold');
@@ -136,6 +155,7 @@ function _trkRow(r) {
       <td>${_trkStatus(r)}</td>
       <td class="num mono">${bids ?? '—'}</td>
       <td class="num mono">${_trkMoney(price, r.currency_code)}</td>
+      ${_trkCostCells(r, key)}
       <td><span class="mono trk-handle">${esc(who || '—')}</span>${whoId ? `<span class="tiny"> ${whoId}</span>` : ''} ${traffic}</td>
       <td class="tiny">${_trkAgo(r.last_polled_at)}${r.poll_error && !closed ? `<div class="trk-err" title="${esc(r.poll_error)}">⚠ ${esc(r.poll_error.slice(0, 40))}</div>` : ''}</td>
       <td class="trk-actions">
@@ -143,7 +163,7 @@ function _trkRow(r) {
         <button type="button" class="btn btn-small trk-del" data-key="${key}" title="Stop tracking (keeps observations)">✕</button>
       </td>
     </tr>
-    ${isOpen ? `<tr class="trk-drawer" data-key="${key}"><td colspan="8"><div class="trk-drawer-body" data-key="${key}" data-state="${trk.history[key] ? 'ready' : 'loading'}">${trk.history[key] ? _trkDrawer(trk.history[key]) : ''}</div></td></tr>` : ''}`;
+    ${isOpen ? `<tr class="trk-drawer" data-key="${key}"><td colspan="11"><div class="trk-drawer-body" data-key="${key}" data-state="${trk.history[key] ? 'ready' : 'loading'}">${trk.history[key] ? _trkDrawer(trk.history[key]) : ''}</div></td></tr>` : ''}`;
 }
 
 function renderTrackingTable(body) {
@@ -152,7 +172,9 @@ function renderTrackingTable(body) {
       <thead>
         <tr>
           <th>LIST</th><th>LOT</th><th>STATUS</th><th class="num">BIDS</th>
-          <th class="num">PRICE</th><th>LEADER / WINNER</th><th>LAST POLL</th><th></th>
+          <th class="num">PRICE</th><th class="num" title="chairs in the lot">QTY</th>
+          <th class="num" title="bid + buyer premium + fees + tax">ALL-IN</th><th class="num">PER CHAIR</th>
+          <th>LEADER / WINNER</th><th>LAST POLL</th><th></th>
         </tr>
       </thead>
       <tbody id="trk-rows">${(body.items || []).map(_trkRow).join('')}</tbody>
@@ -289,6 +311,28 @@ async function renameList(inp) {
   finally { tr?.classList.remove('is-pending'); }
 }
 
+async function setQuantity(inp) {
+  const key = inp.dataset.key;
+  const r = trk.items.find(x => _trkKey(x) === key);
+  if (!r) return;
+  const raw = inp.value.trim();
+  const c = r.cost || {};
+  if (raw === '' && inp.dataset.manual !== '1') return;              // nothing typed, nothing to clear
+  if (raw !== '' && Number(raw) === c.qty) return;                   // unchanged
+  if (raw !== '' && !/^\d+$/.test(raw)) { toast('quantity must be a whole number', 'err'); inp.value = c.qty ?? ''; return; }
+  const tr = inp.closest('tr');
+  tr?.classList.add('is-pending');
+  try {
+    await api(`/api/tracking/${key}`, {
+      method: 'PATCH', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({quantity: raw === '' ? null : Number(raw)}),
+    });
+    toast(raw === '' ? `${key}: qty back to the title` : `${key}: ${raw} chairs`);
+    await loadTracking();
+  } catch (err) { toast(`qty failed: ${err.message || err}`, 'err'); }
+  finally { tr?.classList.remove('is-pending'); }
+}
+
 async function pollNow() {
   await pending($('#trk-sync'), '⟳ polling…', async () => {
     try {
@@ -338,10 +382,11 @@ export function mount() {
     if (del) removeLot(del, del.dataset.key);
   });
   list?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.classList.contains('trk-label-cell')) { e.preventDefault(); e.target.blur(); }
+    if (e.key === 'Enter' && (e.target.classList.contains('trk-label-cell') || e.target.classList.contains('trk-qty-cell'))) { e.preventDefault(); e.target.blur(); }
   });
   list?.addEventListener('focusout', (e) => {
     if (e.target.classList.contains('trk-label-cell')) renameList(e.target);
+    if (e.target.classList.contains('trk-qty-cell')) setQuantity(e.target);
   });
 }
 
