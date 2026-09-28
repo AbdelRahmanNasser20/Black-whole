@@ -4,6 +4,7 @@ from enum import Enum
 
 class Outcome(str, Enum):
     NO_BID = "no_bid"; LOW_BID = "low_bid"; SOLD = "sold"; UNKNOWN = "unknown"
+    RESERVE_NOT_MET = "reserve_not_met"; CANCELLED = "cancelled"   # tracked lots only (bidbox status)
 
 class Lane(str, Enum):
     COLD = "cold"; WARM = "warm"; HOT = "hot"; DONE = "done"

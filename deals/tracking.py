@@ -126,6 +126,24 @@ def bidder_summary(observations: list[dict]) -> list[dict]:
     return sorted(by_id.values(), key=lambda e: (e["max_bid"] or 0), reverse=True)
 
 
+# Closed-status codes that mean nobody bought the lot, whatever the bid count.
+# RNM = reserve not met (later reads show CNB), CAN = cancelled. 3357/527 ran
+# to 20 bids / $1,850 and was recorded 'sold' before this — bids ≠ a sale.
+RESERVE_NOT_MET = {"RNM", "CNB"}
+CANCELLED = {"CAN"}
+
+
+def close_outcome(status: str | None, bid_count: int | None) -> str:
+    """deal_lots.outcome for a lot tracked to its close."""
+    if status in RESERVE_NOT_MET:
+        return "reserve_not_met"
+    if status in CANCELLED:
+        return "cancelled"
+    if not bid_count:
+        return "no_bid"
+    return "low_bid" if bid_count <= 1 else "sold"
+
+
 # ── landed cost: what the lot really costs, and per chair ────────────────────
 #
 # The bid is not the cost. GovDeals adds a buyer premium (premiumPercent, 12.5 %
@@ -185,7 +203,10 @@ def landed_costs(rows: list[dict]) -> list[dict]:
         cost = {"qty": qty, "qty_source": qty_source, "bid": bid, "premium": None,
                 "fees": None, "tax": None, "total": None, "per_chair": None,
                 "basis": None, "tax_from": None}
-        if bid:
+        if r.get("closed_at") and (r.get("status") in RESERVE_NOT_MET | CANCELLED
+                                   or r.get("final_bid_count") == 0):
+            cost["basis"] = "not_sold"      # nobody pays this, so no all-in
+        elif bid:
             pct = _num(r.get("premium_pct"))
             premium = round(bid * (default_pct if pct is None else pct) / 100, 2)
             fees = _num(r.get("admin_fee")) or 0.0
@@ -324,8 +345,7 @@ def sync_tracked(adapter, *, now: datetime | None = None, verbose: bool = True) 
                 report["closed"] += 1
                 # Fill deal_lots' outcome too when that row exists — this is
                 # the exact final price the watcher can only infer.
-                outcome = ("no_bid" if state.bid_count == 0
-                           else "low_bid" if state.bid_count <= 1 else "sold")
+                outcome = close_outcome(state.status, state.bid_count)
                 store.record_outcome(key, outcome, state.current_bid, state.bid_count, now, True)
                 if verbose:
                     print(f"  [tracking] CLOSED {asset_id}/{account_id}: ${state.current_bid:,.2f} "

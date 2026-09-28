@@ -95,3 +95,23 @@ def test_missing_cost_columns_before_migration_still_estimates():
          "closed_at": None, "current_bid": 200, "final_bid": None}
     c = landed_costs([r])[0]["cost"]
     assert c["premium"] == 25.0 and c["total"] == 225.0 and c["per_chair"] == 2.25
+
+
+class TestCloseOutcome:
+    @pytest.mark.parametrize("status,bids,want", [
+        ("SOA", 54, "sold"), ("SOL", 1, "low_bid"), ("SOA", 0, "no_bid"),
+        # 3357/527: 20 bids to $1,850, reserve not met — was stored as 'sold'
+        ("RNM", 20, "reserve_not_met"), ("CNB", 20, "reserve_not_met"),
+        ("CAN", 3, "cancelled"),
+        ("STA", 5, "sold"),          # closed on the clock alone: status still live
+    ])
+    def test_status_decides_before_bid_count(self, status, bids, want):
+        from deals.tracking import close_outcome
+        assert close_outcome(status, bids) == want
+
+
+@pytest.mark.parametrize("status,bids", [("RNM", 20), ("CAN", 3), ("SOA", 0)])
+def test_unsold_closed_lot_has_no_all_in(status, bids):
+    r = _row(closed_at="x", final_bid=1850, final_bid_count=bids, status=status, lot_state="MO")
+    c = landed_costs([r])[0]["cost"]
+    assert c["total"] is None and c["per_chair"] is None and c["basis"] == "not_sold"
