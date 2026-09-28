@@ -274,11 +274,11 @@ services:
     dockerfilePath: ./Dockerfile
     schedule: "*/5 * * * *"      # every 5 min
     autoDeploy: true
-    # --discover-stale-hours 12 (up from the CLI default of 6): discover()
-    # has no change-gating yet, so every stale-refresh re-INSERTs a fresh
-    # row for every active lot it finds — a gentler cadence buys storage
-    # headroom until that's measured and fixed (see recorder/README.md's
-    # "Storage" section for the actual pg_total_relation_size numbers).
+    # --discover-stale-hours 12 (up from the CLI default of 6): originally a
+    # storage stopgap. discover() is change-gated since 2026-08-28
+    # (store.filter_changed drops rows identical to the lot's latest state),
+    # so the value is no longer load-bearing — see recorder/README.md
+    # "Storage". `run` also does the GovDeals 7-day SOA bidbox re-check.
     dockerCommand: ./scripts/recorder_cron.sh run --discover-stale-hours 12
     envVars:
       - fromGroup: blackwhole-secrets

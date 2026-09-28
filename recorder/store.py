@@ -10,8 +10,11 @@ recomputable from snapshots, never written to directly.
 from __future__ import annotations
 
 import json
+import time
 from datetime import datetime
 from typing import Any, Iterable
+
+import psycopg
 
 from automation import db
 
@@ -209,9 +212,9 @@ def tracked_active(source: str | None = None) -> list[dict]:
 
 def table_size_pretty() -> str:
     """Pretty-printed on-disk size of `listing_snapshots` (IMPORTANT 6 —
-    storage-size visibility, since discover() re-inserting the same active
-    lots on every stale-refresh has no change-gating yet; the coverage
-    report is where the operator will notice a growth problem first)."""
+    storage-size visibility; discover() is change-gated via `filter_changed`
+    since 2026-08-28, and the coverage report is still where the operator
+    will notice a growth problem first)."""
     row = db.fetch_one(
         "SELECT pg_size_pretty(pg_total_relation_size('listing_snapshots')) AS size"
     )
@@ -254,3 +257,100 @@ def coverage(days: int = 7) -> list[dict]:
         "covered": total_covered, "missed": total_missed, "pct": total_pct,
     })
     return result
+
+
+# --- GovDeals bidbox finals (2026-09-28) -------------------------------------
+#
+# Both queries are reads. `raw->'recorder_capture'->>'method'` is written by
+# recorder/sources/govdeals.py::bidbox_observation — the recorder's verdict
+# lives in raw beside the untouched payload, so no new column was needed.
+
+# `couldn't get a connection` = psycopg_pool.PoolTimeout (an OperationalError),
+# which is how a full pooler surfaces through automation/db.py's pool.
+_POOL_FULL_MARKERS = ("max clients", "too many clients", "remaining connection slots",
+                      "couldn't get a connection")
+
+
+def _read_with_backoff(fn, *args, attempts: int = 4, base_delay: float = 2.0):
+    """Run a read, backing off when the Supabase session pooler is full
+    ("max clients reached"). Anything else raises straight through."""
+    import time
+
+    import psycopg
+
+    for i in range(attempts):
+        try:
+            return fn(*args)
+        except psycopg.OperationalError as e:
+            if i == attempts - 1 or not any(m in str(e).lower() for m in _POOL_FULL_MARKERS):
+                raise
+            delay = base_delay * (2 ** i)
+            print(f"recorder.store: pooler full, retrying in {delay:.0f}s ({e})")
+            time.sleep(delay)
+
+
+# SOA finals whose latest row is still that final and is >= the recheck age.
+# A re-check writes a newer row (always — it is the done-marker), so a lot
+# drops out of this set after exactly one re-check.
+_SOA_RECHECK_DUE_SQL = """
+SELECT source_lot_id, observed_at, current_bid, bid_count, end_date,
+       raw->'recorder_capture'->>'status_code' AS status_code
+FROM (
+    SELECT DISTINCT ON (source_lot_id) *
+    FROM listing_snapshots
+    WHERE source = 'govdeals'
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+) latest
+WHERE status = 'closed'
+  AND raw->'recorder_capture'->>'method' = 'bidbox_final'
+  AND raw->'recorder_capture'->>'status_code' = ANY(%s)
+  AND observed_at <= now() - make_interval(secs => %s)
+ORDER BY observed_at
+LIMIT %s
+"""
+
+
+def soa_recheck_due(codes: list[str], older_than_seconds: float, limit: int) -> list[dict]:
+    return list(_read_with_backoff(
+        db.fetch_all, _SOA_RECHECK_DUE_SQL, (list(codes), older_than_seconds, limit)))
+
+
+# GovDeals lots whose last known clock fell in the window, that are no longer
+# being polled (latest row closed/gone), and that have never had a bidbox
+# final. `last_price` is what sold_comps reports for them today.
+_FINALS_BACKFILL_SQL = """
+WITH latest AS (
+    SELECT DISTINCT ON (source_lot_id) source_lot_id, status
+    FROM listing_snapshots WHERE source = %s
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+), ends AS (
+    SELECT DISTINCT ON (source_lot_id) source_lot_id, end_date
+    FROM listing_snapshots WHERE source = %s AND end_date IS NOT NULL
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+), priced AS (
+    SELECT DISTINCT ON (source_lot_id) source_lot_id, current_bid, bid_count
+    FROM listing_snapshots WHERE source = %s AND current_bid IS NOT NULL
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+)
+SELECT l.source_lot_id, l.status, e.end_date,
+       p.current_bid AS last_price, p.bid_count AS last_bid_count
+FROM latest l
+JOIN ends e USING (source_lot_id)
+LEFT JOIN priced p USING (source_lot_id)
+WHERE l.status IN ('closed', 'gone')
+  AND e.end_date >= now() - make_interval(days => %s)
+  AND e.end_date < now()
+  AND NOT EXISTS (
+      SELECT 1 FROM listing_snapshots s
+      WHERE s.source = %s AND s.source_lot_id = l.source_lot_id
+        AND s.raw->'recorder_capture'->>'method' IN ('bidbox_final', 'bidbox_recheck')
+  )
+ORDER BY e.end_date DESC
+LIMIT %s
+"""
+
+
+def finals_backfill_candidates(source: str, since_days: int, limit: int) -> list[dict]:
+    return list(_read_with_backoff(
+        db.fetch_all, _FINALS_BACKFILL_SQL,
+        (source, source, source, since_days, source, limit)))

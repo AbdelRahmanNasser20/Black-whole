@@ -9,9 +9,12 @@
   (per `recorder.schedule.is_due`), grouped by source.
 - `coverage [--days N]`     — print the coverage report (the Phase-0
   done-metric: closed lots vs. how many got a post-close observation).
-- `run [--discover-stale-hours H]` — poll-once always, plus discover for any
-  source whose newest observation is stale (or nonexistent). This is the one
-  command cron calls.
+- `run [--discover-stale-hours H]` — poll-once always, the GovDeals 7-day
+  SOA re-check, plus discover for any source whose newest observation is
+  stale (or nonexistent). This is the one command cron calls.
+- `finals-backfill --source govdeals [--since-days N] [--limit N] [--apply]`
+  — read the bidbox for recently-ended GovDeals lots that never got a
+  bidbox final; dry-run by default.
 
 Every command (except `--help`, which argparse short-circuits before any of
 our code runs) starts with a startup guard: if `listing_snapshots` doesn't
@@ -41,6 +44,7 @@ from automation import config  # noqa: F401
 from automation import db
 
 from recorder import schedule, store
+from recorder.sources import govdeals as govdeals_source
 from recorder.sources.govdeals import GovDealsSource
 from recorder.sources.gsa import GSASource
 from recorder.sources.mibid import MiBidSource
@@ -175,6 +179,98 @@ def cmd_coverage(days: int) -> int:
     return 0
 
 
+# --- GovDeals bidbox: 7-day SOA re-check + finals backfill -------------------
+
+def cmd_recheck_finals(registry: dict) -> int:
+    """One bounded pass of the 7-day SOA re-check (payment default / relist).
+    Re-check rows skip `filter_changed` on purpose: an unchanged re-check is
+    still the marker that the lot has been re-checked."""
+    adapter = registry.get("govdeals")
+    if adapter is None or not hasattr(adapter, "recheck_finals"):
+        return 0
+    try:
+        rows = store.soa_recheck_due(
+            sorted(govdeals_source.SOLD_CODES),
+            govdeals_source.SOA_RECHECK_AFTER.total_seconds(),
+            govdeals_source.SOA_RECHECK_LIMIT_PER_RUN,
+        )
+        if not rows:
+            return 0
+        observations = adapter.recheck_finals(rows)
+        n = store.insert_observations(observations)
+    except Exception as exc:  # noqa: BLE001 - never kill the run over the re-check
+        print(f"RECORDER ERROR source=govdeals recheck failed: {exc!r}", file=sys.stderr)
+        return 1
+    changed = sum(1 for o in observations if o.raw["recorder_capture"].get("changed"))
+    print(f"recheck source=govdeals due={len(rows)} inserted={n} changed={changed}")
+    return 0
+
+
+def _money(v) -> str:
+    return "—" if v is None else f"${float(v):,.2f}"
+
+
+def cmd_finals_backfill(source: str, since_days: int, limit: int, apply: bool,
+                        now: datetime | None = None, adapter=None) -> int:
+    """Bidbox finals for GovDeals lots that ended in the window and were
+    recorded `gone` (i.e. `last_snapshot`). Dry-run unless `apply`."""
+    if source != "govdeals":
+        print(f"finals-backfill: only govdeals has a post-close bidbox (got {source!r})",
+              file=sys.stderr)
+        return 2
+    now = now or datetime.now(timezone.utc)
+    adapter = adapter or govdeals_source.GovDealsAdapter()
+    rows = store.finals_backfill_candidates(source, since_days, limit)
+    counts = {"checked": 0, "final": 0, "purged": 0, "extended": 0, "grace": 0, "error": 0}
+    outcomes: dict[str, int] = {}
+    to_write = []
+    sample = []
+    higher = lower = same = 0
+    for row in rows:
+        parsed = govdeals_source._parse_lot_key(row["source_lot_id"])
+        if parsed is None:
+            continue
+        counts["checked"] += 1
+        result, obs = govdeals_source.resolve_with_bidbox(adapter, parsed, now)
+        counts[result] = counts.get(result, 0) + 1
+        if obs is None:
+            continue
+        to_write.append(obs)
+        if result != "final":
+            continue
+        outcome = obs.raw["recorder_capture"]["outcome"]
+        outcomes[outcome] = outcomes.get(outcome, 0) + 1
+        last = row.get("last_price")
+        if last is not None and obs.current_bid is not None:
+            if obs.current_bid > last:
+                higher += 1
+            elif obs.current_bid < last:
+                lower += 1
+            else:
+                same += 1
+        sample.append((row["source_lot_id"], last, row.get("last_bid_count"), obs.current_bid,
+                       obs.bid_count, obs.raw["recorder_capture"]["status_code"], outcome))
+
+    mode = "APPLY" if apply else "DRY-RUN"
+    print(f"finals-backfill [{mode}] source={source} since_days={since_days} limit={limit}")
+    print(f"  checked={counts['checked']} with_final={counts['final']} "
+          f"purged(204)={counts['purged']} extended={counts['extended']} "
+          f"grace={counts['grace']} errors={counts['error']}")
+    print(f"  outcomes: " + (", ".join(f"{k}={v}" for k, v in sorted(outcomes.items())) or "—"))
+    print(f"  final vs last_snapshot: higher={higher} lower={lower} same={same}")
+    if sample:
+        print("  sample (lot | last_snapshot price/bids -> bidbox final price/bids | code outcome):")
+        for lot_id, last, last_n, fin, fin_n, code, outcome in sample[:15]:
+            print(f"    {lot_id:<20} {_money(last):>11} / {last_n if last_n is not None else '—':<4}"
+                  f" -> {_money(fin):>11} / {fin_n if fin_n is not None else '—':<4} | {code} {outcome}")
+    if apply:
+        n = store.insert_observations(store.filter_changed(to_write))
+        print(f"  inserted={n}")
+    else:
+        print(f"  would insert={len(to_write)} (re-run with --apply to write)")
+    return 0
+
+
 # --- run (the cron entrypoint) ---------------------------------------------
 
 # Advisory lock key for `run` (IMPORTANT 3). Render cron fires every 5 min;
@@ -202,6 +298,7 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
             return 0
 
         poll_rc = cmd_poll_once(registry, now=now)
+        poll_rc = cmd_recheck_finals(registry) or poll_rc
 
         stale: list[str] = []
         for name in registry:
@@ -281,6 +378,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_run.add_argument("--discover-stale-hours", type=float, default=6.0)
 
+    p_backfill = sub.add_parser(
+        "finals-backfill",
+        help="read the post-close bidbox for recently-ended GovDeals lots (dry-run unless --apply)",
+    )
+    p_backfill.add_argument("--source", default="govdeals", choices=["govdeals"])
+    p_backfill.add_argument("--since-days", type=int, default=8)
+    p_backfill.add_argument("--limit", type=int, default=500)
+    p_backfill.add_argument("--apply", action="store_true",
+                            help="write the terminal observations (default: print only)")
+
     return parser
 
 
@@ -302,6 +409,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_coverage(args.days)
     if args.cmd == "run":
         return cmd_run(registry, discover_stale_hours=args.discover_stale_hours)
+    if args.cmd == "finals-backfill":
+        return cmd_finals_backfill(args.source, args.since_days, args.limit, args.apply)
 
     parser.error(f"unknown command {args.cmd!r}")  # pragma: no cover - argparse prevents this
     return 2  # pragma: no cover

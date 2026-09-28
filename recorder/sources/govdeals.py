@@ -199,8 +199,9 @@ exercise this module's own mapping functions on them — no network calls.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -209,6 +210,7 @@ import requests
 
 from deals.adapters.govdeals import GovDealsAdapter
 from deals.models import Lot, Snapshot, lot_key
+from deals.tracking import CLOSE_GRACE, LIVE_STATUS
 
 from recorder.models import Observation
 from recorder.sources.base import FURNITURE_TERMS
@@ -384,6 +386,205 @@ def _corroborate_absence(adapter: GovDealsAdapter, asset_id: int, account_id: in
     return "active", detail
 
 
+# --- bidbox finals (2026-09-28) ---------------------------------------------
+#
+# The search sweep can only ever see a lot while it is live, so every close
+# used to be recorded as `last_snapshot` — the last bid seen before the lot
+# vanished. Soft close adds ~3 min per late bid, so that snapshot routinely
+# missed the finish (audit: 10 of 15 lots were 15-73 % low; 5282/3780/2 was
+# recorded $460, the bidbox says $1,725). The per-lot bidbox keeps answering
+# for days after close with the final `currentBid`, `bidCount`, the extended
+# `assetAuctionEndDateUTC` and a closed `assetStatusCd`. Purged ⇒ HTTP 204,
+# which `fetch_bid_state` returns as `{}`.
+#
+# Codes seen live 2026-09-28: STA (live), SOA (sold, awaiting payment), RNM
+# (reserve not met), CNB (read after RNM / no bid). Code comments elsewhere
+# list SOL, CLO, CAN, HFR. Outcome names match `deals.tracking.close_outcome`
+# (PR #105) so the two line up once both merge.
+
+CAPTURE_BIDBOX_FINAL = "bidbox_final"
+CAPTURE_BIDBOX_RECHECK = "bidbox_recheck"
+CAPTURE_BIDBOX_LIVE = "bidbox_live"
+
+SOLD_CODES = frozenset({"SOA", "SOL"})
+RESERVE_NOT_MET_CODES = frozenset({"RNM", "CNB"})
+CANCELLED_CODES = frozenset({"CAN"})
+
+# Payment default / relist check: one more bidbox read this long after an
+# SOA final. The bidbox answered 25 days after close for 5282/3780/2, so the
+# read usually lands; a 204 is recorded as purged, never guessed.
+SOA_RECHECK_AFTER = timedelta(days=7)
+SOA_RECHECK_LIMIT_PER_RUN = 20
+
+# ≥1 s between bidbox requests in every path (poll, recheck, backfill).
+BIDBOX_MIN_INTERVAL_SECONDS = 1.0
+_bidbox_last_at: list[float] = []
+
+
+def _bidbox_throttle() -> None:
+    now = time.monotonic()
+    if _bidbox_last_at:
+        wait = BIDBOX_MIN_INTERVAL_SECONDS - (now - _bidbox_last_at[0])
+        if wait > 0:
+            time.sleep(wait)
+    _bidbox_last_at[:] = [time.monotonic()]
+
+
+def close_outcome(status_code: str | None, bid_count: int | None) -> str:
+    """Outcome of a closed lot from its bidbox code. Same precedence as
+    `deals.tracking.close_outcome` in PR #105 (not imported — not on main):
+    a reserve-not-met or cancelled lot is never a sale, whatever its bids."""
+    if status_code in RESERVE_NOT_MET_CODES:
+        return "reserve_not_met"
+    if status_code in CANCELLED_CODES:
+        return "cancelled"
+    if not bid_count:
+        return "no_bid"
+    if status_code in SOLD_CODES:
+        return "sold"
+    return "unknown"   # CLO, HFR, STA-past-grace, anything new — raw code kept
+
+
+def fetch_bidbox(adapter: GovDealsAdapter, key: tuple[int, int, int]) -> tuple[str, dict | None]:
+    """One throttled bidbox read. Returns `(result, payload)`:
+    `("ok", raw)`, `("purged", None)` on a 204 / empty body, or
+    `("error", None)` on anything that says nothing about the lot
+    (network, HTTP error, non-JSON body, no `currentBid`)."""
+    _bidbox_throttle()
+    lot_id = lot_key(*key)
+    try:
+        raw = adapter.fetch_bid_state(*key)
+    except requests.exceptions.RequestException as e:   # includes JSONDecodeError
+        print(f"[govdeals] RECORDER ERROR: bidbox fetch failed for {lot_id}: {e}")
+        return "error", None
+    except Exception as e:  # noqa: BLE001
+        print(f"[govdeals] RECORDER ERROR: bidbox fetch failed unexpectedly for {lot_id}: {e}")
+        return "error", None
+    if not raw:
+        return "purged", None
+    if raw.get("currentBid") is None or _parse_money(raw.get("currentBid")) is None:
+        print(f"[govdeals] RECORDER ERROR: bidbox for {lot_id} has no usable currentBid — skipping")
+        return "error", None
+    return "ok", raw
+
+
+def _bidbox_end(raw: dict) -> datetime | None:
+    s = raw.get("assetAuctionEndDateUTC")
+    if not s:
+        return None
+    try:
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00")).astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _bidbox_bid_count(raw: dict) -> int | None:
+    try:
+        return int(raw.get("bidCount"))
+    except (TypeError, ValueError):
+        return None
+
+
+def classify_bidbox(raw: dict, now: datetime) -> str:
+    """What a post-close bidbox read means. Pure.
+
+    - `"extended"` — STA and the clock is in the future: soft close moved it.
+    - `"grace"`    — STA, clock passed < CLOSE_GRACE ago: may still extend or
+      flip; read again next run.
+    - `"final"`    — any non-STA code, or STA past the grace (stuck; outcome
+      `unknown`, raw code kept).
+    """
+    code = raw.get("assetStatusCd")
+    end = _bidbox_end(raw)
+    if code == LIVE_STATUS:
+        if end is None or end > now:
+            return "extended"
+        if now < end + CLOSE_GRACE:
+            return "grace"
+    return "final"
+
+
+def bidbox_observation(key: str, raw: dict, *, method: str, url: str | None = None,
+                       extra: dict | None = None) -> Observation:
+    """Observation from a bidbox payload. `raw` stays untouched under
+    `"bidbox"`; the recorder's own verdict sits beside it under
+    `"recorder_capture"` (read by `sold_comps`, migration 014)."""
+    code = raw.get("assetStatusCd")
+    bids = _bidbox_bid_count(raw)
+    capture = {
+        "method": method,
+        "status_code": code,
+        "http_status": 200,
+        "url": url or f"govdeals-maestro-bidbox/{key}",
+    }
+    if method != CAPTURE_BIDBOX_LIVE:
+        capture["outcome"] = close_outcome(code, bids)
+    if extra:
+        capture.update(extra)
+    return Observation(
+        source=SOURCE,
+        source_lot_id=key,
+        status="active" if method == CAPTURE_BIDBOX_LIVE else "closed",
+        raw={"recorder_capture": capture, "bidbox": raw},
+        current_bid=_parse_money(raw.get("currentBid")),
+        bid_count=bids,
+        end_date=_bidbox_end(raw),
+    )
+
+
+def resolve_with_bidbox(adapter: GovDealsAdapter, parsed: tuple[int, int, int],
+                        now: datetime) -> tuple[str, Observation | None]:
+    """Read one past-end lot's bidbox and decide. Returns `(result, obs)`:
+    `final`/`extended` carry an Observation; `grace`/`error` carry None
+    (retry next run); `purged` carries None (caller falls back to the old
+    absence path, i.e. `last_snapshot`)."""
+    k = lot_key(*parsed)
+    result, raw = fetch_bidbox(adapter, parsed)
+    if result != "ok":
+        return result, None
+    verdict = classify_bidbox(raw, now)
+    if verdict == "extended":
+        return "extended", bidbox_observation(k, raw, method=CAPTURE_BIDBOX_LIVE)
+    if verdict == "grace":
+        return "grace", None
+    return "final", bidbox_observation(k, raw, method=CAPTURE_BIDBOX_FINAL)
+
+
+def recheck_observation(key: str, prior: dict, result: str, raw: dict | None) -> Observation | None:
+    """The 7-day SOA re-check row. `prior` is the SOA final's stored row
+    (`current_bid`, `bid_count`, `end_date`, `status_code`).
+
+    Written whether or not anything moved: it is also the "already checked"
+    marker (`store.soa_recheck_due` only picks lots whose LATEST row is still
+    the SOA `bidbox_final`), so each SOA final gets exactly one re-check. On a
+    204 the prior final's numbers are carried over and the row says
+    `result: purged` — nothing is guessed. `error` returns None (try again
+    next run)."""
+    if result == "error":
+        return None
+    if result == "purged" or raw is None:
+        return Observation(
+            source=SOURCE, source_lot_id=key, status="closed",
+            raw={"recorder_capture": {
+                "method": CAPTURE_BIDBOX_RECHECK, "result": "purged", "http_status": 204,
+                "status_code": prior.get("status_code"),
+                "outcome": close_outcome(prior.get("status_code"), prior.get("bid_count")),
+                "changed": None, "url": f"govdeals-maestro-bidbox/{key}",
+            }},
+            current_bid=prior.get("current_bid"), bid_count=prior.get("bid_count"),
+            end_date=prior.get("end_date"),
+        )
+    obs = bidbox_observation(key, raw, method=CAPTURE_BIDBOX_RECHECK)
+    changed = (
+        raw.get("assetStatusCd") != prior.get("status_code")
+        or obs.current_bid != prior.get("current_bid")
+        or obs.bid_count != prior.get("bid_count")
+    )
+    obs.raw["recorder_capture"].update({"result": "ok", "changed": changed,
+                                        "prior_status_code": prior.get("status_code")})
+    return obs
+
+
 def _lot_to_observation(lot: Lot) -> Observation:
     return Observation(
         source=SOURCE,
@@ -481,10 +682,25 @@ class GovDealsSource:
         return result
 
     def poll(self, lots: list[dict]) -> list[Observation]:
+        """Re-check tracked lots.
+
+        Lots whose stored `end_date` has passed go to the bidbox first (see
+        "bidbox finals" above): a final becomes a `closed` row with the real
+        price, an extension a fresh `active` row, a lot inside the 15-min
+        grace (or a failed read) is retried next run. Only a purged lot (204)
+        falls through to the old absence path (`_absence_observations`), which
+        yields `gone` and so `last_snapshot`. Lots still before their clock
+        (or with no clock) use the search refetch as before — and the 60-page
+        refetch is skipped entirely when no such lot is due.
+        """
         if not lots:
             return []
-        keys: list[tuple[int, int, int]] = []
-        key_by_lot_id: dict[str, tuple[int, int, int]] = {}
+        now = datetime.now(timezone.utc)
+        adapter = GovDealsAdapter()
+        observations: list[Observation] = []
+        upcoming: list[tuple[str, tuple[int, int, int]]] = []
+        purged: list[tuple[str, tuple[int, int, int]]] = []
+
         for lot in lots:
             lot_id = str(lot["source_lot_id"])
             parsed = _parse_lot_key(lot_id)
@@ -494,29 +710,65 @@ class GovDealsSource:
                     f"{lot_id!r} as asset/account/auction — skipping"
                 )
                 continue
-            keys.append(parsed)
-            key_by_lot_id[lot_id] = parsed
+            end_date = lot.get("end_date")
+            if end_date is None or end_date > now:
+                upcoming.append((lot_id, parsed))
+                continue
+            result, obs = resolve_with_bidbox(adapter, parsed, now)
+            if obs is not None:
+                observations.append(obs)
+            elif result == "purged":
+                print(f"[govdeals] RECORDER INFO: bidbox 204 (purged) for {lot_key(*parsed)} — "
+                      "falling back to absence detection (last_snapshot)")
+                purged.append((lot_key(*parsed), parsed))
+            # grace / error: nothing this round; the lot stays due.
 
-        if not keys:
-            return []
+        if upcoming:
+            try:
+                snapshots = adapter.refetch([p for _, p in upcoming])
+            except requests.exceptions.RequestException as e:
+                print(
+                    f"[govdeals] RECORDER ERROR: poll() refetch failed — skipping "
+                    f"{len(upcoming)} not-yet-closed lot(s) this round: {e}"
+                )
+                snapshots = None
+            except Exception as e:  # noqa: BLE001
+                print(
+                    f"[govdeals] RECORDER ERROR: poll() refetch failed unexpectedly — skipping "
+                    f"{len(upcoming)} not-yet-closed lot(s) this round: {e}"
+                )
+                snapshots = None
+            if snapshots is not None:
+                for _lot_id, parsed in upcoming:
+                    k = lot_key(*parsed)
+                    snapshot = snapshots.get(k)
+                    if snapshot is not None:
+                        observations.append(_snapshot_to_observation(k, snapshot))
+                    # absent but not yet past end_date (or unknown) — retried later.
 
+        observations.extend(self._absence_observations(adapter, purged))
+        return observations
+
+    def recheck_finals(self, rows: list[dict]) -> list[Observation]:
+        """The 7-day SOA re-check: one bidbox read per row from
+        `store.soa_recheck_due()`; returns the re-check rows to insert."""
         adapter = GovDealsAdapter()
-        try:
-            snapshots = adapter.refetch(keys)
-        except requests.exceptions.RequestException as e:
-            print(
-                f"[govdeals] RECORDER ERROR: poll() refetch failed — skipping gone-detection "
-                f"this round for {len(keys)} tracked lot(s), emitting no observations: {e}"
-            )
-            return []
-        except Exception as e:  # noqa: BLE001
-            print(
-                f"[govdeals] RECORDER ERROR: poll() refetch failed unexpectedly — skipping "
-                f"gone-detection this round for {len(keys)} tracked lot(s), emitting no observations: {e}"
-            )
-            return []
+        out: list[Observation] = []
+        for row in rows:
+            parsed = _parse_lot_key(str(row["source_lot_id"]))
+            if parsed is None:
+                continue
+            result, raw = fetch_bidbox(adapter, parsed)
+            obs = recheck_observation(lot_key(*parsed), row, result, raw)
+            if obs is not None:
+                out.append(obs)
+        return out
 
-        now = datetime.now(timezone.utc)
+    def _absence_observations(self, adapter: GovDealsAdapter,
+                              items: list[tuple[str, tuple[int, int, int]]]) -> list[Observation]:
+        """Pre-bidbox 'gone' detection, now reached only when the bidbox
+        answered 204: corroborate with `fetch_detail`, capped, with the
+        batch-level "gone_unverified" guard (fix rounds 1-2, docstring)."""
         observations: list[Observation] = []
         corroboration_calls = 0
         corroboration_cap_warned = False
@@ -526,24 +778,7 @@ class GovDealsSource:
         # first, exactly like public_surplus.py's 401 guard.
         pending: list[tuple[str, str, dict | None, int, int]] = []  # (k, verdict, payload, asset_id, account_id)
 
-        for lot in lots:
-            lot_id = str(lot["source_lot_id"])
-            parsed = key_by_lot_id.get(lot_id)
-            if parsed is None:
-                continue  # unparseable id — already logged above, skip
-            k = lot_key(*parsed)
-            snapshot = snapshots.get(k)
-            if snapshot is not None:
-                observations.append(_snapshot_to_observation(k, snapshot))
-                continue
-            end_date = lot.get("end_date")
-            if end_date is None or end_date > now:
-                # absent from a healthy refetch but not yet past end_date
-                # (or end_date unknown) — emit nothing this round, retried later.
-                continue
-
-            # Fix round 1 (review finding #2): corroborate via the per-lot
-            # detail endpoint before trusting 'gone' — see module docstring.
+        for k, parsed in items:
             asset_id, account_id, _auction_id = parsed
             if corroboration_calls >= CORROBORATION_CAP_PER_BATCH:
                 if not corroboration_cap_warned:
