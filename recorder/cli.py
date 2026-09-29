@@ -82,10 +82,11 @@ def build_registry() -> dict:
 
 # Whole-site GovDeals is ~27.6k live lots (2026-09-29) and ~125k new lots a
 # month, each stored with its sacred ~2.7 KB search `raw` — hundreds of MB a
-# month into `listing_snapshots`. Supabase free tier goes READ-ONLY at 500 MB
-# (docs/claude-reference/database-size.md), so the whole-site sweep refuses to
-# run above this size and falls back to the furniture scope, loudly.
-DB_MAX_MB_FOR_SCOPE_ALL_DEFAULT = 450
+# month into `listing_snapshots`. The project moved to Supabase Pro on
+# 2026-09-29 (8 GB disk included, $0.125/GB after), so the whole-site sweep
+# refuses to run above 6 GB — headroom before the included disk runs out —
+# and falls back to the furniture scope, loudly.
+DB_MAX_MB_FOR_SCOPE_ALL_DEFAULT = 6000
 
 
 def _govdeals_scope_for_run() -> str:
