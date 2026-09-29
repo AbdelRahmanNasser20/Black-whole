@@ -71,6 +71,7 @@ from . import public_map
 from . import auth as auth_svc
 from . import readcache
 from . import visits
+from . import lot_archive_view
 from deals import profiles
 from deals.fees import fee_model_from_env
 from deals.geo import distance_from_home
@@ -1423,6 +1424,76 @@ def deal_lot_json(asset_id: int, account_id: int, auction_id: int):
         row.pop(k)
     return {**row, "images": images,
             "image_source": "archived" if row["images_archived"] else "cdn"}
+
+
+# ── Lot archive (admin-only; recorder/lot_archive.py) ──────────────────────
+# The private, permanent copy of every closed GovDeals lot. Every route sits
+# under /admin or /api (session-walled) and none of it may ever reach a public
+# page: photos are the seller's own, undisguised, streamed from the store.
+
+def _archive_or_503(fn, *a, **kw):
+    try:
+        return fn(*a, **kw)
+    except lot_archive_view.ArchiveUnavailable as e:
+        raise HTTPException(503, str(e))
+
+
+@app.get("/admin/archive")
+def admin_archive_page():
+    """The list lives in the admin shell as the Archive tab."""
+    return RedirectResponse("/admin?tab=archive", status_code=303)
+
+
+@app.get("/admin/archive/govdeals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
+def admin_archive_lot_page(request: Request, asset_id: int, account_id: int, auction_id: int):
+    key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
+    ctx = _archive_or_503(lot_archive_view.page_context, key)
+    if ctx is None:
+        raise HTTPException(404, "lot not archived")
+    return templates.TemplateResponse(request, "archive_lot.html", ctx)
+
+
+@app.get("/api/archive/lots")
+@readcache.cached()
+def archive_lots(q: str | None = None, category: str | None = None, outcome: str | None = None,
+                 min_price: float | None = None, max_price: float | None = None,
+                 since: str | None = None, until: str | None = None,
+                 page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200)):
+    return _archive_or_503(lot_archive_view.list_lots, q=q, category=category, outcome=outcome,
+                           min_price=min_price, max_price=max_price, since=since, until=until,
+                           page=page, per_page=per_page)
+
+
+@app.get("/api/archive/govdeals/{asset_id}/{account_id}/{auction_id}")
+@readcache.cached()
+def archive_lot_json(asset_id: int, account_id: int, auction_id: int):
+    key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
+    out = _archive_or_503(lot_archive_view.lot_json, key)
+    if out is None:
+        raise HTTPException(404, "lot not archived")
+    return out
+
+
+@app.get("/api/archive/govdeals/{asset_id}/{account_id}/{auction_id}/photo/{i}")
+def archive_lot_photo(asset_id: int, account_id: int, auction_id: int, i: int):
+    key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
+    data = _archive_or_503(lot_archive_view.photo_bytes, key, i)
+    if data is None:
+        raise HTTPException(404, "no such photo")
+    return Response(data, media_type="image/jpeg",
+                    headers={"Cache-Control": "private, max-age=604800",
+                             "X-Robots-Tag": "noindex"})
+
+
+@app.post("/api/archive/govdeals/{asset_id}/{account_id}/{auction_id}/analyze")
+def archive_lot_analyze(asset_id: int, account_id: int, auction_id: int):
+    """Re-run the LLM analysis now (one lot, a few seconds). An LLM failure is
+    returned as status=unavailable, never a default."""
+    key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
+    out = _archive_or_503(lot_archive_view.rerun_analysis, key)
+    if out.get("error") == "lot is not archived":
+        raise HTTPException(404, "lot not archived")
+    return out
 
 
 @app.get("/sell", response_class=HTMLResponse)

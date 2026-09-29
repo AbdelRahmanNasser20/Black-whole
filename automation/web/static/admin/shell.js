@@ -14,10 +14,11 @@ import * as deals from './deals.js';
 import * as tracking from './tracking.js';
 import * as deposits from './deposits.js';
 import * as channels from './channels.js';
+import * as archive from './archive.js';
 import {applyState, connectStream} from './launcher.js';
 import {setScrapeStrip, connectScrapeStream} from './auctions.js';
 
-const TABS = {launcher, drafts, auctions, inventory, inquiries, subscribers, 'listings-db': listingsDb, 'test-scrape': testScrape, deals, tracking, deposits, channels};
+const TABS = {launcher, drafts, auctions, inventory, inquiries, subscribers, 'listings-db': listingsDb, 'test-scrape': testScrape, deals, tracking, deposits, channels, archive};
 const DEFAULT_TAB = 'launcher';
 const LEGACY_TAB_KEY = 'admin.lastTab';   // pre-E1 localStorage key — read once, moved into the URL, deleted
 

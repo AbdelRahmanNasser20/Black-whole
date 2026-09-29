@@ -69,6 +69,13 @@ python -m recorder.cli run --discover-stale-hours 6
 # GovDeals lots that ended in the last N days and never got a bidbox final:
 # read the bidbox, print a summary. Writes only with --apply.
 python -m recorder.cli finals-backfill --source govdeals --since-days 8 [--limit N] [--apply]
+
+# permanent private archive of closed GovDeals lots (detail, photos, bidbox,
+# our timeline) into R2. Dry-run (no request) unless --apply.
+python -m recorder.cli archive-backfill --source govdeals --since-days 30 [--limit N] [--lot a/b/c ...] [--apply] [--force]
+
+# LLM analysis of archived lots, cached per lot (runs once; --force re-runs)
+python -m recorder.cli archive-analyze [--limit 30] [--lot a/b/c] [--force]
 ```
 
 `python -m recorder` is an equivalent shorthand for `python -m recorder.cli`
@@ -167,6 +174,62 @@ outcomes, and a sample of last_snapshot vs bidbox final. Dry-run by default;
 **DB backoff.** The finals/re-check reads back off when the Supabase session
 pooler is full (`max clients reached`) instead of failing
 (`store._read_with_backoff`).
+
+## GovDeals scope — "track everything" (2026-09-29)
+
+`RECORDER_GOVDEALS_SCOPE=all` (the default) makes `discover` sweep the whole
+site: one unfiltered search sorted by close time, paged until it runs dry
+(≤ `RECORDER_GOVDEALS_ALL_MAX_PAGES`, 300). `furniture` is the old chairs
+cluster + `FURNITURE_TERMS`.
+
+Measured 2026-09-29: **27,578 live lots = 230 pages ≈ 4 min at 1 req/s, ~76 MB
+of JSON.** Whole-site closes run ~4,200/day (deal_lots, Jul–Aug: ~29k/week).
+
+Per-run requests, and how a 5-minute run stays bounded:
+
+| Step | Requests | Bound |
+|---|---|---|
+| discover (only when stale, ≥12 h on Render) | ~231 search pages | `ALL_MAX_PAGES`; ≤1 req/s |
+| poll: past-end lots → bidbox | ≤120 | `RECORDER_GOVDEALS_BIDBOX_MAX_PER_RUN`, **just-closed first**; the rest wait a run |
+| poll: upcoming lots → search refetch | usually 1–5 pages | only lots closing inside `RECORDER_GOVDEALS_REFETCH_HORIZON_HOURS` (24); ≤ `RECORDER_GOVDEALS_REFETCH_MAX_PAGES` (40) |
+| 7-day SOA re-check | ≤20 | unchanged |
+| lot archive | ≤15 lots × (≤1 bidbox + 1 detail + ≤6 photos) | `RECORDER_ARCHIVE_MAX_PER_RUN`, `RECORDER_ARCHIVE_TIME_BUDGET_S` (90 s) |
+
+Every maestro call (search, bidbox, detail) shares one ≤1 req/s throttle
+(`PoliteGovDealsAdapter` — `deals/` stays import-only; the subclass throttles
+the inherited `discover`/`refetch`). A run that overruns just makes the next
+cron tick a no-op (advisory lock).
+
+**DB guard — read before enabling on a cron.** Every new lot is stored with its
+~2.7 KB search `raw`; whole site means ~125k new lots a month → hundreds of MB
+a month into `listing_snapshots`, against Supabase's 500 MB read-only ceiling.
+`discover` refuses `all` while `pg_database_size` is over
+`RECORDER_DB_MAX_MB_FOR_SCOPE_ALL` (450) and sweeps furniture instead, loudly.
+It was 595 MB on 2026-09-29, so the switch is inert until space is reclaimed
+and `listing_snapshots.raw` gets an archival path (like `deals/raw_archive.py`).
+
+## Lot archive (the moat)
+
+At close the recorder keeps the whole listing — maestro detail (116 keys incl.
+the description), gallery, bidbox final, our snapshot/bid timeline — as one
+gzip JSON document in R2 at `archive/lots/govdeals/{asset}_{account}_{auction}.json.gz`,
+plus up to `LOT_ARCHIVE_PHOTOS` (6) photos resized to ≤1024 px JPEG q75 at
+`archive/lots/govdeals/{slug}/{i}.jpg`. Private: never disguised, never public —
+the admin page streams it behind the session cookie.
+
+- `run` archives a bounded batch every tick (lots closed ≥1 h ago, newest
+  first). Idempotent (document = done marker), read-back verified, R2 unset is a
+  hard error for `archive-backfill --apply` and a `RECORDER NOTE` in `run`.
+- Non-sales (reserve not met, no bid, cancelled) lose their detail at close
+  (204), so they are archived `partial` at once from the bidbox + our snapshots,
+  with the sweep's cover photo when the CDN still has it.
+- Admin: tab `13 Archive` and `/admin/archive/govdeals/{a}/{b}/{c}` — the page
+  rebuilt from the archive, with the LLM analyzer panel (cached, re-run button).
+- Sample 2026-09-29: 30 lots, ~436 KB/lot → whole site ≈ 54 GB/month,
+  ≈ $9.65/month after a year on R2. Detail + costs:
+  `docs/claude-reference/lot-archive.md`.
+- Index table `scripts/sql/015_lot_archive_index.sql` is **PENDING**; until it
+  is applied the list reads `_meta/` sidecars from R2.
 
 ## Coverage metric (the Phase-0 done-measure)
 

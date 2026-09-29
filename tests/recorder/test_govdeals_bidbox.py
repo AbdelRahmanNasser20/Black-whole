@@ -181,6 +181,33 @@ def test_mixed_batch_only_refetches_upcoming_lots(monkeypatch):
     assert [o.status for o in obs] == ["closed"]
 
 
+def test_bidbox_cap_reads_just_closed_first(monkeypatch, capsys):
+    now = datetime.now(timezone.utc)
+    monkeypatch.setenv("RECORDER_GOVDEALS_BIDBOX_MAX_PER_RUN", "2")
+    raw = payload("rnm_8_32408_4")
+    calls = _serve(monkeypatch, {k: raw for k in ("1/1/1", "2/2/2", "3/3/3")})
+    govdeals.GovDealsSource().poll([
+        {"source_lot_id": "1/1/1", "end_date": now - timedelta(days=3)},
+        {"source_lot_id": "2/2/2", "end_date": now - timedelta(hours=1)},
+        {"source_lot_id": "3/3/3", "end_date": now - timedelta(hours=5)},
+    ])
+    assert calls == ["2/2/2", "3/3/3"]          # newest close first, oldest waits
+    assert "wait for the next run" in capsys.readouterr().out
+
+
+def test_far_lots_stay_out_of_the_refetch(monkeypatch):
+    now = datetime.now(timezone.utc)
+    seen = []
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch",
+                        lambda self, keys: seen.extend(keys) or {})
+    govdeals.GovDealsSource().poll([
+        {"source_lot_id": "11/3156/1", "end_date": now + timedelta(hours=5)},
+        {"source_lot_id": "12/3156/1", "end_date": now + timedelta(days=4)},
+        {"source_lot_id": "13/3156/1", "end_date": None},
+    ])
+    assert seen == [(11, 3156, 1), (13, 3156, 1)]
+
+
 def test_bidbox_throttle_spaces_requests(monkeypatch):
     monkeypatch.setattr(govdeals, "BIDBOX_MIN_INTERVAL_SECONDS", 1.0)
     sleeps = []

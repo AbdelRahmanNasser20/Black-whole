@@ -1,0 +1,144 @@
+{#- templates/archive_lot.html — a closed GovDeals lot rebuilt from OUR archive only (recorder/lot_archive.py).
+    ADMIN-ONLY: served under /admin (session-walled). Photos are the seller's own, undisguised, streamed from the
+    private store via /api/archive/.../photo/{i}. Never extend this into a public page.
+    Context: doc, s (doc.summary), analysis (cached LLM analysis or None), series, chart, key, photo_base, json_url. -#}
+{% extends "_base.html" %}
+{% from "_ui/macros.html" import section %}
+{% set nav_active = 'admin' %}
+{% set brand_href = '/admin' %}
+{% macro money(v) -%}{% if v is none %}—{% else %}${{ '{:,.2f}'.format(v) }}{% endif %}{%- endmacro %}
+{% macro when(iso) -%}{% if iso %}<time datetime="{{ iso }}">{{ iso[:16]|replace('T', ' ') }} UTC</time>{% else %}—{% endif %}{%- endmacro %}
+{% set outcome = s.outcome or 'unknown' %}
+{% set place = [s.city, s.state]|select|join(', ') %}
+{% set photos = doc.photos or [] %}
+{% block title %}{{ s.title or key }} · Lot archive{% endblock %}
+{% block head %}
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="/static/deals/detail.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/admin/archive.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<a class="back-link" href="/admin?tab=archive">← Lot archive</a>
+<h1 class="page-title arc-title">{{ s.title or 'Untitled lot' }}</h1>
+<p class="crumbs mono">
+  <span class="crumb-src">GovDeals</span> · {{ (s.canonical_category or 'other')|replace('_', ' ') }}
+  {% if s.category_name %} · {{ s.category_name }}{% endif %}{% if place %} · {{ place }}{% endif %}
+  · <span class="arc-key">{{ key }}</span>
+</p>
+
+<div class="arc-strip" role="list">
+  <div class="arc-stat" role="listitem"><span class="arc-k">Final</span><span class="arc-v arc-big">{{ money(s.final_price) }}</span></div>
+  <div class="arc-stat" role="listitem"><span class="arc-k">Outcome</span><span class="arc-v"><span class="arc-outcome arc-o-{{ outcome }}">{{ outcome|replace('_', ' ') }}</span></span></div>
+  <div class="arc-stat" role="listitem"><span class="arc-k">Bids</span><span class="arc-v">{{ s.bid_count if s.bid_count is not none else '—' }}</span></div>
+  <div class="arc-stat" role="listitem"><span class="arc-k">Closed</span><span class="arc-v arc-small">{{ when(s.closed_at) }}</span></div>
+</div>
+
+<div class="detail">
+  <div class="detail-main">
+    {% call section('Photos') %}
+      {% if photos %}
+      <div class="gallery arc-gallery">
+        {% for p in photos %}<a href="{{ photo_base }}/{{ p.i }}" target="_blank" rel="noopener"><img src="{{ photo_base }}/{{ p.i }}" alt="{{ s.title if loop.first else '' }}" width="{{ p.w }}" height="{{ p.h }}"{% if not loop.first %} loading="lazy"{% endif %}></a>{% endfor %}
+      </div>
+      <p class="muted data-line">{{ photos|length }} of {{ (doc.gallery_urls or [])|length }} GovDeals photos kept · ≤1024 px · private archive, never public.</p>
+      {% else %}
+      <p class="muted">No photos were archived for this lot.</p>
+      {% endif %}
+    {% endcall %}
+
+    {% call section('Price over time') %}
+      {% if chart %}
+      <svg class="arc-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="Bid price over time, {{ series|length }} points">
+        <line class="arc-axis" x1="{{ chart.pad }}" y1="{{ chart.baseline }}" x2="{{ chart.width - chart.pad }}" y2="{{ chart.baseline }}"></line>
+        <text class="arc-tick" x="{{ chart.pad }}" y="{{ chart.pad - 10 }}">{{ money(chart.y_max) }}</text>
+        <path class="arc-line" d="{{ chart.path }}"></path>
+        {% for d in chart.dots %}<circle class="arc-dot{% if d.final %} is-final{% endif %}" cx="{{ d.x }}" cy="{{ d.y }}" r="{{ 5 if d.final else 3 }}"><title>{{ d.t[:16]|replace('T', ' ') }} · {{ money(d.price) }}{% if d.bids is not none %} · {{ d.bids }} bids{% endif %}</title></circle>{% endfor %}
+        <text class="arc-tick" x="{{ chart.pad }}" y="{{ chart.height - 6 }}">{{ chart.t_start[:10] }}</text>
+        <text class="arc-tick arc-tick-end" x="{{ chart.width - chart.pad }}" y="{{ chart.height - 6 }}">{{ chart.t_end[:10] }}</text>
+      </svg>
+      <p class="muted data-line">{{ series|length }} observed prices (recorder snapshots + bidbox samples) ending at the bidbox final.</p>
+      {% elif series %}
+      <p class="muted">One observed price only: {{ money(series[0].price) }} at {{ series[0].t[:16]|replace('T', ' ') }}.</p>
+      {% else %}
+      <p class="muted">We never observed this lot while it was live — only its final is known.</p>
+      {% endif %}
+    {% endcall %}
+
+    {% call section('Description') %}
+      {% if s.description %}<pre class="desc">{{ s.description }}</pre>{% else %}<p class="muted">No description was captured.</p>{% endif %}
+    {% endcall %}
+
+    {% call section('Seller & location') %}
+      <dl class="facts">
+        <dt>Seller</dt><dd>{{ s.seller or '—' }}{% if s.department %} · {{ s.department }}{% endif %}</dd>
+        <dt>Location</dt><dd>{{ place or '—' }}{% if s.zip %} {{ s.zip }}{% endif %}</dd>
+        <dt>Opened</dt><dd class="mono">{{ when(s.opened_at) }}</dd>
+        <dt>Closed</dt><dd class="mono">{{ when(s.closed_at) }}{% if s.auto_extensions %} · {{ s.auto_extensions }} soft-close extension(s){% endif %}</dd>
+        <dt>Opening bid</dt><dd class="mono">{{ money(s.opening_bid) }}</dd>
+        <dt>Buyer paid</dt><dd class="mono">{{ money(s.grand_total) if outcome == 'sold' else '— (no sale)' }}{% if s.premium_pct %} · {{ s.premium_pct }}% premium{% endif %}</dd>
+        <dt>Winner</dt><dd class="mono">{{ s.winner_handle or '—' }}</dd>
+        <dt>Traffic</dt><dd class="mono">{{ s.visitors if s.visitors is not none else '—' }} visitors · {{ s.hits if s.hits is not none else '—' }} hits</dd>
+        <dt>Status code</dt><dd class="mono">{{ s.status_code or '—' }}{% if s.reserve_not_met %} · reserve not met{% endif %}</dd>
+        <dt>Quantity</dt><dd>{{ s.quantity_text or s.quantity or '—' }}</dd>
+      </dl>
+    {% endcall %}
+  </div>
+
+  <aside class="detail-rail">
+    <section class="rail-card arc-analysis" id="arc-analysis" data-rerun="{{ json_url }}/analyze">
+      <div class="rail-row"><span class="rail-label">LLM analyzer</span>
+        <button type="button" class="btn btn-small" id="arc-rerun">↻ re-run</button></div>
+      {% if not analysis %}
+        <p class="muted arc-note">Not analyzed yet. Re-run to analyze now (a few seconds).</p>
+      {% elif analysis.status != 'ok' %}
+        <p class="arc-unavail"><strong>Analysis unavailable</strong> — {{ analysis.error or 'the model did not answer' }}.</p>
+        <p class="muted arc-note">Nothing was guessed. Tried {{ (analysis.analyzed_at or '')[:16]|replace('T', ' ') }} UTC.</p>
+      {% else %}
+        {% set d = analysis.deal or {} %}
+        {% set r = analysis.resale or {} %}
+        <div class="arc-verdict arc-v-{{ (d.verdict or 'none')|replace(' ', '-') }}">{{ d.verdict or 'no verdict' }}</div>
+        <p class="arc-note">{{ d.verdict_label }}</p>
+        <dl class="facts arc-facts">
+          <dt>Category</dt><dd>{% if analysis.category.llm %}{{ analysis.category.llm|replace('_', ' ') }}{% if analysis.category.confidence is not none %} <span class="muted">({{ '%.0f'|format(analysis.category.confidence * 100) }}%)</span>{% endif %}{% else %}<span class="arc-unavail">unavailable</span>{% endif %}</dd>
+          <dt>Item</dt><dd>{{ [analysis.identity.brand, analysis.identity.model, analysis.identity.item_type]|select|join(' ') or '—' }}</dd>
+          <dt>Quantity</dt><dd>{{ analysis.quantity.value }} <span class="muted">({{ analysis.quantity.source }})</span></dd>
+          <dt>Condition</dt><dd>{{ analysis.condition.llm or '—' }}{% if analysis.condition.govdeals_code %} <span class="muted mono">· GD {{ analysis.condition.govdeals_code }}</span>{% endif %}</dd>
+          <dt>Final / unit</dt><dd class="mono">{{ money(d.final_per_unit) }}</dd>
+          <dt>Comps / unit</dt><dd class="mono">{% if d.median_per_unit is not none %}{{ money(d.p25_per_unit) }}–{{ money(d.p75_per_unit) }} <span class="muted">median {{ money(d.median_per_unit) }}, n={{ d.comps }}</span>{% else %}—{% endif %}</dd>
+          <dt>Fair resale</dt><dd class="mono">{% if r.low is defined and r.low is not none %}{{ money(r.low) }}–{{ money(r.high) }}{% else %}unavailable{% endif %} <span class="muted">{{ (r.method or '')|replace('_', ' ') }}{% if r.confidence %}, {{ r.confidence }}{% endif %}</span></dd>
+          {% if r.margin is defined and r.margin is not none %}<dt>Margin</dt><dd class="mono">{{ money(r.margin) }} <span class="muted">vs landed {{ money(r.landed_cost) }}</span></dd>{% endif %}
+        </dl>
+        {% if r.note %}<p class="muted arc-note">{{ r.note }}</p>{% endif %}
+        <p class="muted arc-note">Keywords {{ (d.keywords or [])|join(', ') or '—' }} · {{ d.excluded_unknown_count or 0 }} comps skipped (unit count unknown) · {{ analysis.provider or 'llm' }} · {{ (analysis.analyzed_at or '')[:16]|replace('T', ' ') }} UTC</p>
+      {% endif %}
+    </section>
+  </aside>
+</div>
+
+{% if analysis and analysis.status == 'ok' and analysis.comps %}
+{% call section('Auction comps') %}
+  <div class="table-wrap">
+  <table class="table arc-comps">
+    <thead><tr><th>Similar close</th><th>Price</th><th>Qty</th><th>/unit</th><th>Closed</th><th>Used</th></tr></thead>
+    <tbody>
+    {% for c in analysis.comps %}
+      <tr{% if not c.used %} class="is-muted"{% endif %}><td>{{ c.title }}</td><td class="mono">{{ money(c.price) }}</td><td class="mono">{{ c.quantity }}</td><td class="mono">{{ money(c.per_unit) }}</td><td class="mono">{{ (c.closed_at or '')[:10] }}</td><td class="mono">{{ 'yes' if c.used else 'no' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+{% endcall %}
+{% endif %}
+
+{% call section('Archive record') %}
+  <dl class="facts">
+    <dt>Archived</dt><dd class="mono">{{ when(doc.archived_at) }} · {{ doc.completeness }}</dd>
+    <dt>Bidbox</dt><dd class="mono">{{ doc.bidbox_result }}</dd>
+    <dt>Timeline</dt><dd class="mono">{{ (doc.timeline or [])|length }} rows</dd>
+    <dt>JSON</dt><dd class="mono"><a href="{{ json_url }}">{{ json_url }}</a></dd>
+  </dl>
+{% endcall %}
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/admin/archive_lot.js?v={{ asset_v }}"></script>
+{% endblock %}

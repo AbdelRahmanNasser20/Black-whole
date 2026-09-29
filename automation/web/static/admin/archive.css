@@ -1,0 +1,67 @@
+/* static/admin/archive.css — the private lot archive: the admin Archive tab (.arc-bar/.arc-list) and the
+   rebuilt closed-lot page (templates/archive_lot.html). Tokens only (tokens.css), radius 0. */
+
+/* ── tab: filter bar ── */
+.arc-bar {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 14px;
+  padding: var(--pad); margin-bottom: var(--gap); border: 1px solid var(--border); background: var(--surface);
+}
+.arc-bar .arc-grow { grid-column: span 2; }
+.arc-field { display: grid; gap: 4px; font: 500 var(--fs-xs)/1.2 var(--mono); color: var(--muted); letter-spacing: .08em; text-transform: uppercase; }
+.arc-field input, .arc-field select {
+  height: 32px; padding: 0 8px; width: 100%; min-width: 0;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); font: 400 var(--fs-sm) var(--sans);
+  text-transform: none; letter-spacing: 0;
+}
+.arc-field input:focus, .arc-field select:focus { outline: none; border-color: var(--border-strong); }
+.arc-bar-actions { display: flex; gap: 8px; align-items: end; }
+.arc-summary { font: 400 var(--fs-xs)/1.4 var(--mono); color: var(--muted); margin: 0 0 8px; }
+.arc-list { margin-bottom: 40px; }
+.arc-list .table { min-width: 760px; }
+.arc-list .arc-lot a { color: var(--text); text-decoration: none; }
+.arc-list .arc-lot a:hover { text-decoration: underline; }
+.arc-list .tiny { font-size: var(--fs-xs); color: var(--muted); }
+.arc-thumb { width: 56px; height: 42px; object-fit: cover; display: block; background: var(--surface-2); border: 1px solid var(--border); }
+.arc-pager { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin: 8px 0 0; font: 400 var(--fs-xs) var(--mono); color: var(--muted); }
+@media (max-width: 640px) { .arc-bar .arc-grow { grid-column: 1 / -1; } }
+
+/* ── outcome pill (tab + page) ── */
+.arc-outcome { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-strong); font: 500 var(--fs-xs)/1.4 var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
+.arc-o-sold { color: var(--success); border-color: var(--success); }
+.arc-o-reserve_not_met { color: var(--warn); border-color: var(--warn); }
+.arc-o-no_bid, .arc-o-cancelled { color: var(--danger); border-color: var(--danger); }
+
+/* ── page: header strip ── */
+.arc-title { overflow-wrap: anywhere; }
+.arc-key { color: var(--dim); }
+.arc-strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0 0 var(--gap); border: 1px solid var(--border); background: var(--border); }
+.arc-stat { background: var(--surface); padding: 12px 14px; display: grid; gap: 6px; min-width: 0; }
+.arc-k { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--muted); }
+.arc-v { font: 500 var(--fs-lg)/1.2 var(--mono); color: var(--text); overflow-wrap: anywhere; }
+.arc-big { font-size: var(--fs-2xl); color: var(--accent); }
+.arc-small { font-size: var(--fs-sm); }
+@media (max-width: 640px) { .arc-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } .arc-big { font-size: var(--fs-xl); } }
+.arc-gallery a:first-child img { height: 420px; }
+@media (max-width: 640px) { .arc-gallery a:first-child img { height: 260px; } .arc-gallery img { height: 120px; } }
+
+/* ── page: chart ── */
+.arc-chart { width: 100%; height: auto; display: block; background: var(--surface); border: 1px solid var(--border); }
+.arc-line { fill: none; stroke: var(--accent); stroke-width: 2; }
+.arc-axis { stroke: var(--border-strong); stroke-width: 1; }
+.arc-dot { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+.arc-dot.is-final { fill: var(--accent); }
+.arc-tick { fill: var(--muted); font: 400 11px var(--mono); }
+.arc-tick-end { text-anchor: end; }
+
+/* ── page: analyzer panel ── */
+.arc-analysis { display: grid; gap: 10px; }
+.arc-verdict { font: 400 var(--fs-2xl)/1.1 var(--display); color: var(--text); text-transform: capitalize; }
+.arc-v-steal, .arc-v-good-deal { color: var(--success); }
+.arc-v-market-price { color: var(--info); }
+.arc-v-above-market { color: var(--danger); }
+.arc-v-none { color: var(--muted); }
+.arc-note { margin: 0; font-size: var(--fs-sm); }
+.arc-facts { grid-template-columns: max-content minmax(0, 1fr); }
+.arc-unavail { color: var(--danger); margin: 0; }
+.arc-analysis[aria-busy="true"] { opacity: .6; }
+.arc-comps tr.is-muted td { color: var(--dim); }
