@@ -310,10 +310,10 @@ def test_parser_archive_commands_default_to_dry_run():
 
 def test_scope_all_refused_when_database_is_too_big(monkeypatch, capsys):
     monkeypatch.delenv("RECORDER_GOVDEALS_SCOPE", raising=False)
-    monkeypatch.setattr(cli.store, "database_size_mb", lambda: 595.0)
+    monkeypatch.setattr(cli.store, "database_size_mb", lambda: 6500.0)
     assert cli._govdeals_scope_for_run() == "furniture"
     assert "refused" in capsys.readouterr().err
-    monkeypatch.setattr(cli.store, "database_size_mb", lambda: 300.0)
+    monkeypatch.setattr(cli.store, "database_size_mb", lambda: 595.0)
     assert cli._govdeals_scope_for_run() == "all"
     monkeypatch.setenv("RECORDER_GOVDEALS_SCOPE", "furniture")
     assert cli._govdeals_scope_for_run() == "furniture"
