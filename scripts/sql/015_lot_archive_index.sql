@@ -1,6 +1,6 @@
 -- 015_lot_archive_index.sql — index of the private GovDeals lot archive.
 --
--- STATUS: PENDING — NOT applied to prod. The operator applies it:
+-- STATUS: APPLIED to prod 2026-09-30 (Supabase migration 015_lot_archive_index). Re-apply with:
 --   .venv/bin/python scripts/apply_sql.py scripts/sql/015_lot_archive_index.sql
 --
 -- The archive itself is R2 (recorder/lot_archive.py): one gzip JSON document +
