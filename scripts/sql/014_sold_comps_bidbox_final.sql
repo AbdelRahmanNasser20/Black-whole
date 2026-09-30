@@ -1,6 +1,6 @@
 -- 014_sold_comps_bidbox_final.sql — sold_comps reads the GovDeals bidbox final.
 --
--- Status: PENDING — NOT applied to prod. Numbered 014 because PR #105 claims
+-- Status: APPLIED to prod 2026-09-30 (Supabase migration 014_sold_comps_bidbox_final). Numbered 014 because PR #105 claims
 -- 013_tracked_lots_costs.sql.
 -- Apply with: .venv/bin/python scripts/apply_sql.py scripts/sql/014_sold_comps_bidbox_final.sql
 --
