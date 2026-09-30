@@ -25,7 +25,7 @@
 - `summary` is re-derived from the untouched payloads on every read (like the `sold_comps` view) — fix `summarize()`, every archived lot shows the fix.
 - Idempotent: a lot with a document costs zero requests. `--force` (with `--lot`) overwrites.
 - Stores: R2 (default; `LOT_ARCHIVE_R2_BUCKET` = a separate private bucket). `LOT_ARCHIVE_STORE=local` (+ `LOT_ARCHIVE_LOCAL_DIR`) = dev store on disk. R2 unset = hard error for a write; `run` logs a `RECORDER NOTE` and carries on.
-- 🚨 The shared bucket `blackwhole-images` has a public `r2.dev` base. Archive objects are never linked, but anyone who guesses a key (`archive/lots/govdeals/5282_3780_2/0.jpg`) can fetch it. Before the archive grows, set `LOT_ARCHIVE_R2_BUCKET` to a bucket with public access OFF (or block `/archive/*` on the public domain).
+- 🚨 **Scraped lots live in the PRIVATE bucket `blackwhole-archive` (no public access), never in `blackwhole-images`.** `blackwhole-images` has a public `r2.dev` base and holds only our own disguised storefront photos; an archive key there (`archive/lots/govdeals/5282_3780_2/0.jpg`) would be fetchable by anyone who guesses it. Set `LOT_ARCHIVE_R2_BUCKET=blackwhole-archive` everywhere the recorder or web app runs (`.env` done 2026-10-01; Render `blackwhole-secrets` = operator). The 30 sample lots (200 objects) were moved there 2026-10-01 and deleted from the public bucket. Photos reach the admin page only through the auth-walled `/api/archive/.../photo` proxy.
 
 ### When it runs
 
