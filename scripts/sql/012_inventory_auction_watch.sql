@@ -1,7 +1,8 @@
 -- 012_inventory_auction_watch.sql — Auction expiry sync (2026-09-15), the watch list
 -- behind `automation/auction_sync.py`. Plan: docs/superpowers/plans/2026-09-15-auction-expiry-sync.md
 --
--- Status: PENDING — NOT applied to prod. Numbered 012 (not 011) because
+-- Status: APPLIED 2026-10-01 (scripts/apply_sql.py). Comments must stay free of semicolons
+-- (apply_sql.py splits on them). Numbered 012 (not 011) because
 -- 011_listing_channels.sql is already APPLIED to prod (2026-09-21).
 -- Apply with: .venv/bin/python scripts/apply_sql.py scripts/sql/012_inventory_auction_watch.sql
 --
@@ -26,7 +27,7 @@ CREATE TABLE IF NOT EXISTS inventory_auction_watch (
     -- successful poll (maestro serves 204 for purged assets).
     auction_id         BIGINT,
     -- 'live'    = the auction is running and the lot is on the channels.
-    -- 'expired' = we flipped it fake-sold-out; keep polling for the relist.
+    -- 'expired' = we flipped it fake-sold-out — keep polling for the relist.
     state              TEXT NOT NULL DEFAULT 'live' CHECK (state IN ('live', 'expired')),
     -- Why we last changed state, short and human: "assetStatusCd=SOA".
     reason             VARCHAR(200),
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS inventory_auction_watch (
     relisted_at        TIMESTAMPTZ,
     last_seen_live_at  TIMESTAMPTZ,
     last_checked_at    TIMESTAMPTZ,
-    -- Last poll failure. An unresolvable lot is never expired on; the error is
+    -- Last poll failure. An unresolvable lot is never expired on — the error is
     -- recorded so the operator can see which lots the sync cannot decide.
     poll_error         VARCHAR(500),
     -- The inventory status the lot carried before we expired it, so a relist
@@ -45,7 +46,7 @@ CREATE TABLE IF NOT EXISTS inventory_auction_watch (
     updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- The asset is the real-world identity; two inventory rows must never claim
+-- The asset is the real-world identity — two inventory rows must never claim
 -- the same GovDeals asset or a relist would restore both.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_inventory_auction_watch_asset
     ON inventory_auction_watch (asset_id, account_id);
