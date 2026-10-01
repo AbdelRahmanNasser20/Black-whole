@@ -144,6 +144,38 @@ def close_outcome(status: str | None, bid_count: int | None) -> str:
     return "low_bid" if bid_count <= 1 else "sold"
 
 
+NOT_SOLD = RESERVE_NOT_MET | CANCELLED
+
+
+def outcome_correction(stored_status: str | None, new_status: str | None,
+                       bid_count: int | None, current_outcome: str | None = None
+                       ) -> tuple[str | None, str | None]:
+    """What a later bidbox read changes on a closed lot: (tracked_lots.status
+    to write, deal_lots.outcome to write); None = leave it.
+
+    A lot closed on the clock alone still reads STA, so close_outcome calls it
+    'sold' — provisionally. GovDeals flips it to RNM/CNB/CAN afterwards when
+    the reserve wasn't met or the sale was cancelled; that corrects it. A
+    confirmed non-sale is final: no later read turns it back into 'sold'.
+    `current_outcome` (deal_lots' value, when known) suppresses a no-op write.
+    """
+    if stored_status in NOT_SOLD:
+        effective, status_out = stored_status, None
+    elif (new_status and new_status != LIVE_STATUS and new_status != stored_status
+          and (stored_status in (None, LIVE_STATUS) or new_status in NOT_SOLD)):
+        # Only resolve a provisional close or record a non-sale; post-sale
+        # lifecycle codes (SOA → DEL, HFR, RF1…) on a settled sale are churn.
+        effective, status_out = new_status, new_status
+    else:
+        effective, status_out = stored_status, None
+    outcome = None
+    if effective in NOT_SOLD:
+        want = close_outcome(effective, bid_count)
+        if want != current_outcome:
+            outcome = want
+    return status_out, outcome
+
+
 # ── landed cost: what the lot really costs, and per chair ────────────────────
 #
 # The bid is not the cost. GovDeals adds a buyer premium (premiumPercent, 12.5 %
@@ -362,15 +394,23 @@ def sync_tracked(adapter, *, now: datetime | None = None, verbose: bool = True) 
 # runs every 30 s — try each once per restart, not 2,880 times a day.
 _costs_tried: set[tuple[int, int, int]] = set()
 
+# Upper bound on rows fetched per pass to skip past the already-tried keys —
+# without it the query grows by one row per lot ever tried this process.
+REREAD_SCAN_MAX = 200
+
 
 def fill_missing_costs(adapter, *, limit: int = 10, verbose: bool = False) -> int:
-    """Read the invoice fields for closed lots that never got them. A closed
-    lot's bidbox keeps serving its final totals for days, so this backfills the
-    lots that closed before migration 013. Small batches: it rides the 30 s tick."""
+    """Re-read the bidbox for closed lots that need it: the invoice fields were
+    never read (closed before migration 013, or the closing poll failed), or
+    the lot closed on the clock still reading STA so its 'sold' is only
+    provisional. A closed lot's bidbox keeps serving its final totals and
+    status for days. The same read fills the costs and, when GovDeals now says
+    RNM/CNB/CAN, corrects tracked_lots.status and deal_lots.outcome (see
+    outcome_correction). Small batches: it rides the 30 s tick."""
     from deals import tracking_store
 
     filled = 0
-    rows = tracking_store.missing_costs(limit + len(_costs_tried))
+    rows = tracking_store.needs_reread(min(limit + len(_costs_tried), REREAD_SCAN_MAX))
     for row in [r for r in rows
                 if (r["asset_id"], r["account_id"], r["auction_id"]) not in _costs_tried][:limit]:
         key = (row["asset_id"], row["account_id"], row["auction_id"])
@@ -379,10 +419,63 @@ def fill_missing_costs(adapter, *, limit: int = 10, verbose: bool = False) -> in
             raw = adapter.fetch_bid_state(*key)
         except Exception as e:  # noqa: BLE001 — a purged lot must not stop the batch
             if verbose:
-                print(f"[tracking] costs {key}: {type(e).__name__}: {e}")
+                print(f"[tracking] re-read {key}: {type(e).__name__}: {e}")
             continue
         if not raw:
             continue
         tracking_store.record_costs(key[0], key[1], bidbox_costs(raw))
+        apply_correction(row, raw.get("assetStatusCd"), verbose=verbose)
         filled += 1
     return filled
+
+
+def backfill_outcomes(adapter, rows: list[dict], *, apply: bool) -> list[dict]:
+    """One-off repair for closed lots stored as 'sold' before outcome_correction
+    existed (scripts/backfill_tracking_outcomes.py). `rows` = tracking_store.
+    closed_for_backfill(). Re-reads each bidbox; an unreadable lot is judged on
+    its stored status alone (never "unreadable = unsold"). Idempotent: a second
+    run finds nothing. Returns one dict per lot that needs (or got) a change."""
+    from deals import store, tracking_store
+    changes = []
+    for row in rows:
+        key = (row["asset_id"], row["account_id"], row["auction_id"])
+        try:
+            raw = adapter.fetch_bid_state(*key) or {}
+        except Exception:  # noqa: BLE001 — purged lot: judge on the stored status
+            raw = {}
+        new_status = raw.get("assetStatusCd")
+        current = row.get("deal_outcome") if row.get("has_deal_row") else None
+        status_out, outcome = outcome_correction(row.get("status"), new_status,
+                                                 row.get("final_bid_count"), current)
+        if outcome and not row.get("has_deal_row"):
+            outcome = None                 # no deal_lots row to correct
+        if not (status_out or outcome):
+            continue
+        if apply:
+            if status_out:
+                tracking_store.set_status(key[0], key[1], status_out)
+            if outcome:
+                store.record_outcome(key, outcome, row.get("final_bid"),
+                                     row.get("final_bid_count"), row.get("closed_at"), True)
+        changes.append({"key": key, "title": row.get("title"), "bidbox": new_status,
+                        "status": (row.get("status"), status_out),
+                        "outcome": (current, outcome)})
+    return changes
+
+
+def apply_correction(row: dict, new_status: str | None, *, verbose: bool = False
+                     ) -> tuple[str | None, str | None]:
+    """Write outcome_correction's verdict for one closed tracked row. Returns it."""
+    from deals import store, tracking_store
+    key = (row["asset_id"], row["account_id"], row["auction_id"])
+    status_out, outcome = outcome_correction(row.get("status"), new_status,
+                                             row.get("final_bid_count"))
+    if status_out:
+        tracking_store.set_status(key[0], key[1], status_out)
+    if outcome:
+        store.record_outcome(key, outcome, row.get("final_bid"), row.get("final_bid_count"),
+                             row.get("closed_at"), True)
+    if verbose and (status_out or outcome):
+        print(f"[tracking] corrected {key[0]}/{key[1]}: status {row.get('status')} → "
+              f"{status_out or row.get('status')}, outcome → {outcome or 'unchanged'}")
+    return status_out, outcome

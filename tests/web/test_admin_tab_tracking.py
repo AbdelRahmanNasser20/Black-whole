@@ -2,7 +2,10 @@
 data-state="loading" (no "Loading…" text), every read goes through UI.load and every mutation through
 UI.pending, the `label` filter lives in the URL via shell.js, and the tab's CSS lives in
 static/admin/tracking.css (tokens only, shared .table) — not app.css."""
+import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -92,3 +95,22 @@ def test_tracking_css_moved_out_of_app_css_tokens_only():
     app_css = re.sub(r"/\*.*?\*/", "", app_css, flags=re.S)
     assert not re.search(r"^\.trk-", app_css, flags=re.M), "Tracking rules must leave app.css"
     assert not re.search(r"^\.ac-grow\b", app_css, flags=re.M), ".ac-grow was tracking-only (deals has .deal-topbar .ac-grow)"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+@pytest.mark.parametrize("row,tag", [
+    # 3357/527: 20 bids, reserve not met — bids alone must not say "sold"
+    ({"status": "RNM", "final_bid_count": 20}, "reserve not met"),
+    ({"status": "CNB", "final_bid_count": 20}, "reserve not met"),
+    ({"status": "CAN", "final_bid_count": 3}, "cancelled"),
+    ({"status": "SOA", "final_bid_count": 0}, "no bids"),
+    ({"status": "SOA", "final_bid_count": 1}, "low bid"),
+    ({"status": "SOA", "final_bid_count": 54}, "sold"),
+])
+def test_closed_status_label_reads_bidbox_status_first(row, tag):
+    src = TRACKING_JS.read_text()
+    m = re.search(r"^function _trkOutcome\(r\) \{.*?^\}", src, flags=re.S | re.M)
+    assert m, "_trkOutcome helper missing"
+    js = m.group(0) + f"\nconsole.log(_trkOutcome({json.dumps(row)}).tag);"
+    out = subprocess.run(["node", "-e", js], capture_output=True, text=True, check=True).stdout
+    assert out.strip() == tag

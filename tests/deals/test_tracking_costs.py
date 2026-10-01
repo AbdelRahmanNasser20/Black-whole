@@ -103,7 +103,9 @@ class TestCloseOutcome:
         # 3357/527: 20 bids to $1,850, reserve not met — was stored as 'sold'
         ("RNM", 20, "reserve_not_met"), ("CNB", 20, "reserve_not_met"),
         ("CAN", 3, "cancelled"),
-        ("STA", 5, "sold"),          # closed on the clock alone: status still live
+        # closed on the clock alone: status still live → provisional 'sold' that
+        # outcome_correction overrides once the bidbox says RNM/CNB/CAN
+        ("STA", 5, "sold"),
     ])
     def test_status_decides_before_bid_count(self, status, bids, want):
         from deals.tracking import close_outcome
@@ -115,3 +117,38 @@ def test_unsold_closed_lot_has_no_all_in(status, bids):
     r = _row(closed_at="x", final_bid=1850, final_bid_count=bids, status=status, lot_state="MO")
     c = landed_costs([r])[0]["cost"]
     assert c["total"] is None and c["per_chair"] is None and c["basis"] == "not_sold"
+
+
+class TestOutcomeCorrection:
+    """A lot closed on the clock reads STA → provisional 'sold'. A later bidbox
+    read saying RNM/CNB/CAN must correct it. Never the other way round."""
+
+    @pytest.mark.parametrize("stored,new,bids,want", [
+        # provisional STA close, bidbox later says no sale → correct both
+        ("STA", "RNM", 20, ("RNM", "reserve_not_met")),
+        ("STA", "CNB", 20, ("CNB", "reserve_not_met")),
+        ("STA", "CAN", 3, ("CAN", "cancelled")),
+        # provisional STA close confirmed sold → status only, outcome already right
+        ("STA", "SOA", 5, ("SOA", None)),
+        (None, "SOL", 5, ("SOL", None)),
+        # nothing new
+        ("STA", "STA", 5, (None, None)),
+        ("STA", None, 5, (None, None)),
+        ("SOA", "SOA", 5, (None, None)),
+        # post-sale lifecycle codes on a confirmed sale are churn, not a correction
+        ("SOA", "DEL", 5, (None, None)),
+        ("SOA", "RF1", 5, (None, None)),
+        ("HFR", "SOA", 5, (None, None)),
+        # a confirmed non-sale is never flipped back to sold
+        ("RNM", "SOA", 20, (None, "reserve_not_met")),
+        ("CAN", "STA", 3, (None, "cancelled")),
+    ])
+    def test_correction(self, stored, new, bids, want):
+        from deals.tracking import outcome_correction
+        assert outcome_correction(stored, new, bids) == want
+
+    def test_already_right_outcome_is_left_alone(self):
+        from deals.tracking import outcome_correction
+        assert outcome_correction("RNM", "RNM", 20, current_outcome="reserve_not_met") == (None, None)
+        # stored RNM but deal_lots still says sold (written before bf3dec9) → fix it
+        assert outcome_correction("RNM", None, 20, current_outcome="sold") == (None, "reserve_not_met")

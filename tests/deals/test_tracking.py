@@ -114,7 +114,7 @@ class _FakeStore:
     """Captures what sync_tracked writes, in place of deals.tracking_store."""
     def __init__(self, rows):
         self.rows, self.states, self.errors, self.costs = rows, [], [], []
-        self.missing = []
+        self.missing, self.statuses, self.reread_limits = [], [], []
 
     def due(self, now):
         return list(self.rows)
@@ -128,8 +128,12 @@ class _FakeStore:
     def record_costs(self, asset_id, account_id, costs):
         self.costs.append((asset_id, account_id, costs))
 
-    def missing_costs(self, limit):
+    def needs_reread(self, limit):
+        self.reread_limits.append(limit)
         return self.missing[:limit]
+
+    def set_status(self, asset_id, account_id, status):
+        self.statuses.append((asset_id, account_id, status))
 
 
 @pytest.fixture
@@ -140,7 +144,8 @@ def wired(monkeypatch):
 
     def _wire(rows):
         fake = _FakeStore(rows)
-        for name in ("due", "record_state", "mark_error", "record_costs", "missing_costs"):
+        for name in ("due", "record_state", "mark_error", "record_costs", "needs_reread",
+                     "set_status"):
             monkeypatch.setattr(ts, name, getattr(fake, name))
         import deals.store as st
         monkeypatch.setattr(st, "append_bid_observation",
@@ -148,6 +153,8 @@ def wired(monkeypatch):
         monkeypatch.setattr(st, "record_outcome",
                             lambda key, o, fb, fbc, ca, c: outcomes.append((key, o, fb, fbc, c)))
         monkeypatch.setattr(st, "live_auction_id", lambda a, acc: None)
+        import deals.tracking as tr
+        monkeypatch.setattr(tr, "_costs_tried", set())
         return fake, observations, outcomes
     return _wire
 
@@ -210,3 +217,86 @@ class TestCosts:
         fake, _, _ = wired([])
         fake.missing = [{"asset_id": 1, "account_id": 2, "auction_id": 3}]
         assert fill_missing_costs(_FakeAdapter({(1, 2, 3): RuntimeError("204")}), limit=5) == 0
+
+
+class TestRereadCorrectsOutcome:
+    """STA at close = provisional 'sold'. The re-read that fills costs also
+    reads the bidbox status, and a later RNM/CNB/CAN corrects the outcome."""
+    CLOSED = {"asset_id": 3357, "account_id": 527, "auction_id": 4, "status": "STA",
+              "final_bid": 1850.0, "final_bid_count": 20, "closed_at": NOW}
+
+    def test_later_rnm_corrects_status_and_deal_lots_outcome(self, wired):
+        fake, _, outcomes = wired([])
+        fake.missing = [dict(self.CLOSED)]
+        box = {**BIDBOX, "assetStatusCd": "RNM", "bidCount": 20, "currentBid": 1850.0}
+        assert fill_missing_costs(_FakeAdapter({(3357, 527, 4): box}), limit=5) == 1
+        assert fake.statuses == [(3357, 527, "RNM")]
+        assert outcomes == [((3357, 527, 4), "reserve_not_met", 1850.0, 20, True)]
+
+    def test_later_sold_status_updates_status_only(self, wired):
+        fake, _, outcomes = wired([])
+        fake.missing = [dict(self.CLOSED)]
+        box = {**BIDBOX, "assetStatusCd": "SOA"}
+        fill_missing_costs(_FakeAdapter({(3357, 527, 4): box}), limit=5)
+        assert fake.statuses == [(3357, 527, "SOA")] and outcomes == []
+
+    def test_confirmed_non_sale_is_never_flipped_back(self, wired):
+        fake, _, outcomes = wired([])
+        fake.missing = [{**self.CLOSED, "status": "RNM"}]
+        box = {**BIDBOX, "assetStatusCd": "SOA"}
+        fill_missing_costs(_FakeAdapter({(3357, 527, 4): box}), limit=5)
+        assert fake.statuses == []
+        assert [o[1] for o in outcomes] in ([], ["reserve_not_met"])
+
+    def test_scan_size_is_capped(self, wired, monkeypatch):
+        import deals.tracking as tr
+        fake, _, _ = wired([])
+        monkeypatch.setattr(tr, "_costs_tried", {(i, i, i) for i in range(5000)})
+        fill_missing_costs(_FakeAdapter({}), limit=5)
+        assert fake.reread_limits and fake.reread_limits[0] <= tr.REREAD_SCAN_MAX
+
+
+class TestBackfillOutcomes:
+    """scripts/backfill_tracking_outcomes.py: fix lots already stored as 'sold'."""
+    ROWS = [
+        # closed on the clock reading STA, bidbox now says RNM → both fixed
+        {"asset_id": 3357, "account_id": 527, "auction_id": 4, "status": "STA", "final_bid": 1850.0,
+         "final_bid_count": 20, "closed_at": NOW, "deal_outcome": "sold", "has_deal_row": True},
+        # status already RNM, deal_lots still 'sold' (pre-bf3dec9), bidbox purged → outcome only
+        {"asset_id": 1, "account_id": 2, "auction_id": 3, "status": "RNM", "final_bid": 900.0,
+         "final_bid_count": 9, "closed_at": NOW, "deal_outcome": "sold", "has_deal_row": True},
+        # a real sale → untouched
+        {"asset_id": 5282, "account_id": 3780, "auction_id": 2, "status": "SOA", "final_bid": 1725.0,
+         "final_bid_count": 54, "closed_at": NOW, "deal_outcome": "sold", "has_deal_row": True},
+        # cancelled, no deal_lots row → status only
+        {"asset_id": 7, "account_id": 8, "auction_id": 9, "status": "STA", "final_bid": 50.0,
+         "final_bid_count": 2, "closed_at": NOW, "deal_outcome": None, "has_deal_row": False},
+    ]
+    BOXES = {(3357, 527, 4): {**BIDBOX, "assetStatusCd": "RNM"},
+             (1, 2, 3): RuntimeError("204"),
+             (5282, 3780, 2): {**BIDBOX, "assetStatusCd": "SOA"},
+             (7, 8, 9): {**BIDBOX, "assetStatusCd": "CAN"}}
+
+    def test_dry_run_reports_and_writes_nothing(self, wired):
+        from deals.tracking import backfill_outcomes
+        fake, _, outcomes = wired([])
+        changes = backfill_outcomes(_FakeAdapter(self.BOXES), [dict(r) for r in self.ROWS], apply=False)
+        assert [c["key"] for c in changes] == [(3357, 527, 4), (1, 2, 3), (7, 8, 9)]
+        assert changes[0]["status"] == ("STA", "RNM") and changes[0]["outcome"] == ("sold", "reserve_not_met")
+        assert changes[1]["status"] == ("RNM", None) and changes[1]["outcome"] == ("sold", "reserve_not_met")
+        assert changes[2]["status"] == ("STA", "CAN") and changes[2]["outcome"] == (None, None)
+        assert fake.statuses == [] and outcomes == []
+
+    def test_apply_writes_and_is_idempotent(self, wired):
+        from deals.tracking import backfill_outcomes
+        fake, _, outcomes = wired([])
+        backfill_outcomes(_FakeAdapter(self.BOXES), [dict(r) for r in self.ROWS], apply=True)
+        assert fake.statuses == [(3357, 527, "RNM"), (7, 8, "CAN")]
+        assert outcomes == [((3357, 527, 4), "reserve_not_met", 1850.0, 20, True),
+                            ((1, 2, 3), "reserve_not_met", 900.0, 9, True)]
+        # second run over the corrected rows finds nothing
+        fixed = [{**r} for r in self.ROWS]
+        fixed[0].update(status="RNM", deal_outcome="reserve_not_met")
+        fixed[1].update(deal_outcome="reserve_not_met")
+        fixed[3].update(status="CAN")
+        assert backfill_outcomes(_FakeAdapter(self.BOXES), fixed, apply=True) == []

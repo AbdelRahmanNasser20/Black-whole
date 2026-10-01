@@ -96,7 +96,7 @@ function renderTrackingLabels() {
   if (opts) opts.innerHTML = trk.labels.map(l => `<option value="${esc(l.label)}">`).join('');
   const open = trk.items.filter(r => !r.closed_at).length;
   const closed = trk.items.length - open;
-  const sold = trk.items.filter(r => r.closed_at && r.final_bid != null);
+  const sold = trk.items.filter(r => r.closed_at && r.final_bid != null && _trkOutcome(r).sold);
   const total = sold.reduce((a, r) => a + Number(r.final_bid || 0), 0);
   const summary = $('#trk-summary');
   if (summary) {
@@ -124,10 +124,20 @@ function _trkCostCells(r, key) {
       <td class="num mono">${c.per_chair != null ? _trkMoney(c.per_chair) : '—'}</td>`;
 }
 
+// Closed-lot label. The bidbox status decides first (mirrors deals.tracking.close_outcome): RNM/CNB =
+// reserve not met, CAN = cancelled — whatever the bid count (3357/527 had 20 bids and no sale).
+function _trkOutcome(r) {
+  if (r.status === 'RNM' || r.status === 'CNB') return {tag: 'reserve not met', sold: false};
+  if (r.status === 'CAN') return {tag: 'cancelled', sold: false};
+  if (!r.final_bid_count) return {tag: 'no bids', sold: false};
+  if (r.final_bid_count === 1) return {tag: 'low bid', sold: true};
+  return {tag: 'sold', sold: true};
+}
+
 function _trkStatus(r) {
   if (r.closed_at) {
-    const tag = r.final_bid_count === 0 ? 'no bids' : (r.final_bid_count === 1 ? 'low bid' : 'sold');
-    return `<span class="lex ${r.final_bid_count > 1 ? 'done' : 'pending'}">${tag}</span> <span class="tiny">${_trkWhen(r.closed_at)}</span>`;
+    const o = _trkOutcome(r);
+    return `<span class="lex ${o.tag === 'sold' ? 'done' : 'pending'}">${o.tag}</span> <span class="tiny">${_trkWhen(r.closed_at)}</span>`;
   }
   if (!r.end_utc) return `<span class="lex running">open</span> <span class="tiny">${r.poll_error ? esc(r.poll_error) : 'end unknown'}</span>`;
   const secs = (new Date(r.end_utc).getTime() - Date.now()) / 1000;

@@ -211,17 +211,48 @@ def record_costs(asset_id: int, account_id: int, costs: dict) -> None:
             raise
 
 
-def missing_costs(limit: int) -> list[dict]:
-    """Closed lots that never had their invoice read (closed before 013, or
-    the closing poll failed). One bidbox read each fills them for good."""
+def needs_reread(limit: int) -> list[dict]:
+    """Closed lots whose bidbox is worth one more read: the invoice was never
+    read (closed before 013, or the closing poll failed), or the lot closed on
+    the clock still reading STA (or no status) — a provisional 'sold' that
+    GovDeals may since have turned into RNM/CNB/CAN. Once the status leaves
+    STA and the costs are in, the row drops out for good."""
+    cols = "asset_id, account_id, auction_id, status, final_bid, final_bid_count, closed_at"
+    provisional = "(status IS NULL OR status = 'STA')"
     try:
-        return db.fetch_all("""SELECT asset_id, account_id, auction_id FROM tracked_lots
-            WHERE closed_at IS NOT NULL AND auction_id IS NOT NULL AND premium_pct IS NULL
+        return db.fetch_all(f"""SELECT {cols} FROM tracked_lots
+            WHERE closed_at IS NOT NULL AND auction_id IS NOT NULL
+              AND (premium_pct IS NULL OR {provisional})
             ORDER BY closed_at DESC LIMIT %s""", (limit,))
     except Exception as e:  # noqa: BLE001
-        if _undefined_column(e):
-            return []
-        raise
+        if not _undefined_column(e):
+            raise
+    return db.fetch_all(f"""SELECT {cols} FROM tracked_lots
+        WHERE closed_at IS NOT NULL AND auction_id IS NOT NULL AND {provisional}
+        ORDER BY closed_at DESC LIMIT %s""", (limit,))
+
+
+def set_status(asset_id: int, account_id: int, status: str) -> None:
+    """Correct a closed lot's status from a later bidbox read. The WHERE
+    clause is the second guard (outcome_correction is the first): a confirmed
+    non-sale (RNM/CNB/CAN) is never overwritten."""
+    db.execute("""UPDATE tracked_lots SET status=%s
+        WHERE asset_id=%s AND account_id=%s
+          AND (status IS NULL OR status NOT IN ('RNM', 'CNB', 'CAN'))""",
+               (status, asset_id, account_id))
+
+
+def closed_for_backfill() -> list[dict]:
+    """Every closed tracked lot with its deal_lots outcome (NULL when the lot
+    has no deal_lots row) — the input of scripts/backfill_tracking_outcomes.py."""
+    return db.fetch_all("""SELECT t.asset_id, t.account_id, t.auction_id, t.status,
+            t.final_bid, t.final_bid_count, t.closed_at, t.title,
+            l.outcome AS deal_outcome, (l.asset_id IS NOT NULL) AS has_deal_row
+        FROM tracked_lots t
+        LEFT JOIN deal_lots l ON l.asset_id=t.asset_id AND l.account_id=t.account_id
+                             AND l.auction_id=t.auction_id
+        WHERE t.closed_at IS NOT NULL AND t.auction_id IS NOT NULL
+        ORDER BY t.closed_at DESC""")
 
 
 def set_quantity(asset_id: int, account_id: int, quantity: int | None) -> dict | None:
