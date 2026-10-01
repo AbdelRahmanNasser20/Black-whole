@@ -29,6 +29,17 @@ def _load(name: str):
     return json.loads((FIXTURES / name).read_text())
 
 
+@pytest.fixture(autouse=True)
+def _bidbox_purged_by_default(monkeypatch):
+    """poll() reads the bidbox before any past-end absence logic. Default it
+    to a 204 (purged) so the pre-bidbox absence tests below keep exercising
+    that fallback path; tests/recorder/test_govdeals_bidbox.py covers the
+    bidbox itself. No throttle sleeps in tests."""
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_bid_state",
+                        lambda self, a, c, u: {})
+    monkeypatch.setattr(govdeals, "BIDBOX_MIN_INTERVAL_SECONDS", 0.0)
+
+
 @pytest.fixture
 def lot_raws():
     return _load("lot_raw_examples.json")
@@ -584,8 +595,10 @@ def test_poll_refetch_failure_emits_no_observations(monkeypatch, capsys):
         raise requests.exceptions.ConnectionError("boom")
 
     monkeypatch.setattr(govdeals.GovDealsAdapter, "refetch", fake_refetch)
-    past_end = datetime.now(timezone.utc) - timedelta(hours=1)
-    obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": past_end}])
+    # refetch only serves lots still before their clock; past-end lots go to
+    # the bidbox instead (test_govdeals_bidbox.py).
+    future_end = datetime.now(timezone.utc) + timedelta(hours=1)
+    obs = govdeals.GovDealsSource().poll([{"source_lot_id": "999/888/1", "end_date": future_end}])
     assert obs == []
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out

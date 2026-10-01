@@ -41,7 +41,10 @@ is usually impossible anyway). Its `capture_method` column is `api_final`
 when the latest snapshot is `status='closed'` with a non-null `current_bid`
 (a real reported winning bid), else `last_snapshot` (the last state we
 observed before the lot disappeared — a lower-confidence estimate of the
-close). See the schema file for the exact SQL.
+close). See the schema file for the exact SQL. Migration `014_sold_comps_bidbox_final.sql`
+(**PENDING — not applied to prod**) adds `bidbox_final` for GovDeals finals
+and drops non-sales (reserve not met, cancelled, no bid) — see "GovDeals
+finals" below.
 
 ## CLI usage
 
@@ -58,10 +61,14 @@ python -m recorder.cli poll-once
 # Phase-0 done-metric: closed lots vs. how many got a post-close observation
 python -m recorder.cli coverage --days 7
 
-# the single cron entrypoint: poll-once always, plus discover for any
-# source whose newest observation is older than --discover-stale-hours
-# (default 6) or nonexistent
+# the single cron entrypoint: poll-once always, the GovDeals 7-day SOA
+# re-check, plus discover for any source whose newest observation is older
+# than --discover-stale-hours (default 6) or nonexistent
 python -m recorder.cli run --discover-stale-hours 6
+
+# GovDeals lots that ended in the last N days and never got a bidbox final:
+# read the bidbox, print a summary. Writes only with --apply.
+python -m recorder.cli finals-backfill --source govdeals --since-days 8 [--limit N] [--apply]
 ```
 
 `python -m recorder` is an equivalent shorthand for `python -m recorder.cli`
@@ -106,8 +113,60 @@ snapshot actually confirms `closed` or `gone`. A lot leaves the poll set
 | `municibid`     | Server-rendered search-results HTML with an embedded full-result JSON marker, plus per-card HTML for bid counts (paginated, `bs4`-parsed). `sold_sweep()` hits `StatusFilter=completed_only`. | `api_final` — sold sweep returns real "Final Bid" prices |
 | `mibid`         | Michigan's own Knockout.js homepage embeds the entire 2,000+ auction catalog as a literal JS array; per-lot bid data confirmed via `GET /AuctionBid/GetBasicInfo?guid=`. | `api_final` — `sold_sweep()` filters the embed to `status=4` (closed) and enriches each match with `GetBasicInfo` for a trustworthy final bid + bid count |
 | `gsa`           | Official `api.data.gov` GSA Auctions JSON API (`GSA_API_KEY`, falls back to the shared `DEMO_KEY`). No closed/sold feed exists — a lot simply drops off the active list. **`bid_count` is really `biddersCount`** (GSA doesn't publish a bid-count field) — it's the number of distinct bidders, not the number of bids; don't read it as a bid-count in comps analysis. | `last_snapshot` — the last observation before a lot vanishes from the active feed is the de-facto close |
-| `govdeals`      | Thin import-only wrapper over `deals.adapters.govdeals.GovDealsAdapter` (the maestro JSON search API already built for the `deals/` closing-price tracker). No closed/sold feed used here. | `last_snapshot` |
+| `govdeals`      | Thin import-only wrapper over `deals.adapters.govdeals.GovDealsAdapter` (the maestro JSON search API already built for the `deals/` closing-price tracker). After close, the per-lot bidbox (`fetch_bid_state`). | `bidbox_final` — see "GovDeals finals"; `last_snapshot` only when the bidbox is purged (204) |
 | `public_surplus`| Independent plain-HTTP scrape of the server-rendered `publicsurplus.com` search + detail pages (legacy JSP, no JSON API). | `last_snapshot` — **closed/removed lots return HTTP 401** (a login wall), not 404 and not a distinguishable "closed" page, so `poll()` reads a 401 as `status='gone'`. Documented in detail in `recorder/sources/public_surplus.py`'s module docstring. |
+
+## GovDeals finals (bidbox)
+
+**Problem.** The search sweep only sees live lots, so every GovDeals close
+used to be `last_snapshot` — the last bid seen before the lot vanished.
+Soft close adds ~3 min per late bid, so that missed the finish: an audit
+found 10 of 15 lots 15-73 % low (5282/3780/2: recorded $460, sold $1,725).
+
+**Fix.** GovDeals' per-lot bidbox
+(`GET /bids/bidbox/GD/{asset}/{account}/{auction}`) keeps answering after
+close with the final `currentBid`, `bidCount`, the extended
+`assetAuctionEndDateUTC` and a closed `assetStatusCd`. `poll()` sends every
+tracked lot whose stored `end_date` has passed to the bidbox (≤1 request/s)
+before anything else:
+
+| Bidbox says | Recorded |
+|---|---|
+| `STA`, clock in the future (extended) | `active` row with the new end time + bid; keeps polling |
+| `STA`, clock passed < 15 min (`deals.tracking.CLOSE_GRACE`) | nothing — read again next run |
+| any other code, or `STA` past the grace | `closed` row, `current_bid`/`bid_count`/`end_date` from the bidbox |
+| 204 (purged) | old path: `fetch_detail` corroboration → `gone` (`last_snapshot`), logged `RECORDER INFO` |
+| network / HTTP error / no `currentBid` | nothing — retry next run |
+
+Outcome (names match `deals.tracking.close_outcome` in PR #105):
+`RNM`/`CNB` → `reserve_not_met`, `CAN` → `cancelled`, 0 bids → `no_bid`,
+`SOA`/`SOL` → `sold`, anything else (`CLO`, `HFR`, stuck `STA`) → `unknown`
+with the raw code kept. Codes seen live 2026-09-28: STA, SOA, RNM, CNB.
+
+**Where it's stored — no new column.** `raw` is
+`{"recorder_capture": {"method", "status_code", "outcome", "http_status",
+"url", ...}, "bidbox": <untouched payload>}`. `method` is `bidbox_final`,
+`bidbox_recheck`, or `bidbox_live` (the extended case). The current
+`sold_comps` view already reads these closed rows as `api_final`; PENDING
+migration `014_sold_comps_bidbox_final.sql` labels them `bidbox_final`,
+appends `outcome`/`status_code`, and drops non-sales.
+
+**7-day re-check.** `run` re-reads the bidbox once for each `SOA` final
+whose row is ≥7 days old (≤20 per run), to catch payment default / relist.
+It always writes one `bidbox_recheck` row (`changed: true|false`; on a 204
+it carries the prior numbers with `result: purged`) — that row is also the
+"done" marker, so each lot is re-checked exactly once. Re-check rows skip
+change-gating on purpose.
+
+**Backfill.** `finals-backfill` finds GovDeals lots whose last known clock
+fell in `--since-days`, whose latest row is `closed`/`gone`, and that have no
+bidbox row; it reads each bidbox and prints: checked, with final, purged,
+outcomes, and a sample of last_snapshot vs bidbox final. Dry-run by default;
+`--apply` writes the terminal rows (through `filter_changed`).
+
+**DB backoff.** The finals/re-check reads back off when the Supabase session
+pooler is full (`max clients reached`) instead of failing
+(`store._read_with_backoff`).
 
 ## Coverage metric (the Phase-0 done-measure)
 
