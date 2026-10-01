@@ -167,16 +167,23 @@ def main():
             pair = tracking.parse_lot_ref(a.ref)
             print("removed" if pair and tracking_store.delete(*pair) else "not tracked")
         elif a.track_cmd == "list":
-            for r in tracking_store.list_all():
+            for r in tracking.landed_costs(tracking_store.list_all()):
+                c = r["cost"]
+                cost = ""
+                if c["total"]:
+                    est = "" if c["basis"] == "exact" else " (est)"
+                    per = f" · ${c['per_chair']:,.2f}/chair" if c["per_chair"] else ""
+                    cost = f"  qty {c['qty'] or '?'} · all-in ${c['total']:,.2f}{est}{per}"
                 state = (f"CLOSED ${r['final_bid'] or 0:,.2f} / {r['final_bid_count'] or 0} bids "
                          f"→ {r['final_bidder_username'] or '—'}" if r["closed_at"]
                          else f"${r['current_bid'] or 0:,.2f} / {r['bid_count'] or 0} bids "
                               f"high={r['high_bidder_username'] or '—'} "
                               f"ends={r['end_utc'].isoformat() if r['end_utc'] else '?'}")
-                print(f"[{r['label']}] {r['asset_id']}/{r['account_id']}  {state}  {r['title'] or ''}")
+                print(f"[{r['label']}] {r['asset_id']}/{r['account_id']}  {state}{cost}  {r['title'] or ''}")
         elif a.track_cmd == "sync":
             print(f"adopted {tracking.adopt_favorites(adapter, verbose=True)} favorite(s)")
             print(tracking.sync_tracked(adapter))
+            print(f"filled costs on {tracking.fill_missing_costs(adapter, limit=100, verbose=True)} closed lot(s)")
         elif a.track_cmd == "history":
             pair = tracking.parse_lot_ref(a.ref)
             if not pair:

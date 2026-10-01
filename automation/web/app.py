@@ -1311,9 +1311,13 @@ def _govdeals_adapter():
 @app.get("/api/tracking")
 @readcache.cached()
 def tracking_list(label: str | None = None):
-    from deals import tracking_store
-    return {"items": tracking_store.list_all(label or None),
-            "labels": tracking_store.labels()}
+    from deals import tracking, tracking_store
+    # Costs over the whole list, then filter: an open lot borrows its tax rate
+    # from a sold lot by the same seller even when that one is on another list.
+    items = tracking.landed_costs(tracking_store.list_all())
+    if label:
+        items = [r for r in items if r["label"] == label]
+    return {"items": items, "labels": tracking_store.labels()}
 
 
 @app.post("/api/tracking")
@@ -1341,6 +1345,21 @@ def tracking_patch(asset_id: int, account_id: int, payload: dict):
     row = tracking_store.patch(asset_id, account_id,
                                label=(label.strip() or "default") if isinstance(label, str) else None,
                                note=payload.get("note"))
+    if row and "quantity" in payload:
+        # null / "" / 0 clears the override back to the title parse
+        q = payload.get("quantity")
+        try:
+            q = int(q) if q not in (None, "") else None
+        except (TypeError, ValueError):
+            raise HTTPException(400, "quantity must be a whole number")
+        if q is not None and q < 0:
+            raise HTTPException(400, "quantity must be positive")
+        try:
+            row = tracking_store.set_quantity(asset_id, account_id, q or None)
+        except Exception as e:  # noqa: BLE001
+            if type(e).__name__ == "UndefinedColumn":
+                raise HTTPException(503, "apply scripts/sql/013_tracked_lots_costs.sql first")
+            raise
     if not row:
         raise HTTPException(404, "not tracked")
     return row
@@ -3179,7 +3198,9 @@ def _tracking_pass() -> dict:
     from deals import tracking
     adapter = _govdeals_adapter()
     tracking.adopt_favorites(adapter)
-    return tracking.sync_tracked(adapter, verbose=False)
+    report = tracking.sync_tracked(adapter, verbose=False)
+    report["costs_filled"] = tracking.fill_missing_costs(adapter, limit=5)
+    return report
 
 
 async def _tracking_tick() -> None:

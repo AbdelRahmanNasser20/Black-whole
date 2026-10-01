@@ -180,3 +180,82 @@ def rival_lots(bidder_ids: list[int], *, exclude: tuple[int, int] | None = None,
         WHERE {' AND '.join(where)}
         GROUP BY o.high_bidder, o.asset_id, o.account_id, o.auction_id
         ORDER BY last_seen DESC LIMIT %s""", tuple(params))
+
+
+# ── landed cost columns (migration 013) ──────────────────────────────────────
+# Until 013 is applied these columns don't exist; writes are skipped quietly so
+# a deploy ahead of the migration never turns into a poll_error on every lot.
+
+_COST_COLS = ("premium_pct", "admin_fee", "tax_total", "grand_total", "lot_state")
+_costs_missing_logged = False
+
+
+def _undefined_column(e: Exception) -> bool:
+    global _costs_missing_logged
+    import psycopg
+    if not isinstance(e, psycopg.errors.UndefinedColumn):
+        return False
+    if not _costs_missing_logged:
+        _costs_missing_logged = True
+        print("[tracking] cost columns missing — apply scripts/sql/013_tracked_lots_costs.sql")
+    return True
+
+
+def record_costs(asset_id: int, account_id: int, costs: dict) -> None:
+    try:
+        db.execute(f"UPDATE tracked_lots SET {', '.join(c + '=%s' for c in _COST_COLS)} "
+                   "WHERE asset_id=%s AND account_id=%s",
+                   tuple(costs.get(c) for c in _COST_COLS) + (asset_id, account_id))
+    except Exception as e:  # noqa: BLE001
+        if not _undefined_column(e):
+            raise
+
+
+def needs_reread(limit: int) -> list[dict]:
+    """Closed lots whose bidbox is worth one more read: the invoice was never
+    read (closed before 013, or the closing poll failed), or the lot closed on
+    the clock still reading STA (or no status) — a provisional 'sold' that
+    GovDeals may since have turned into RNM/CNB/CAN. Once the status leaves
+    STA and the costs are in, the row drops out for good."""
+    cols = "asset_id, account_id, auction_id, status, final_bid, final_bid_count, closed_at"
+    provisional = "(status IS NULL OR status = 'STA')"
+    try:
+        return db.fetch_all(f"""SELECT {cols} FROM tracked_lots
+            WHERE closed_at IS NOT NULL AND auction_id IS NOT NULL
+              AND (premium_pct IS NULL OR {provisional})
+            ORDER BY closed_at DESC LIMIT %s""", (limit,))
+    except Exception as e:  # noqa: BLE001
+        if not _undefined_column(e):
+            raise
+    return db.fetch_all(f"""SELECT {cols} FROM tracked_lots
+        WHERE closed_at IS NOT NULL AND auction_id IS NOT NULL AND {provisional}
+        ORDER BY closed_at DESC LIMIT %s""", (limit,))
+
+
+def set_status(asset_id: int, account_id: int, status: str) -> None:
+    """Correct a closed lot's status from a later bidbox read. The WHERE
+    clause is the second guard (outcome_correction is the first): a confirmed
+    non-sale (RNM/CNB/CAN) is never overwritten."""
+    db.execute("""UPDATE tracked_lots SET status=%s
+        WHERE asset_id=%s AND account_id=%s
+          AND (status IS NULL OR status NOT IN ('RNM', 'CNB', 'CAN'))""",
+               (status, asset_id, account_id))
+
+
+def closed_for_backfill() -> list[dict]:
+    """Every closed tracked lot with its deal_lots outcome (NULL when the lot
+    has no deal_lots row) — the input of scripts/backfill_tracking_outcomes.py."""
+    return db.fetch_all("""SELECT t.asset_id, t.account_id, t.auction_id, t.status,
+            t.final_bid, t.final_bid_count, t.closed_at, t.title,
+            l.outcome AS deal_outcome, (l.asset_id IS NOT NULL) AS has_deal_row
+        FROM tracked_lots t
+        LEFT JOIN deal_lots l ON l.asset_id=t.asset_id AND l.account_id=t.account_id
+                             AND l.auction_id=t.auction_id
+        WHERE t.closed_at IS NOT NULL AND t.auction_id IS NOT NULL
+        ORDER BY t.closed_at DESC""")
+
+
+def set_quantity(asset_id: int, account_id: int, quantity: int | None) -> dict | None:
+    """Operator override; None clears it back to the title parse."""
+    return db.fetch_one("UPDATE tracked_lots SET quantity=%s WHERE asset_id=%s AND account_id=%s "
+                        "RETURNING *", (quantity, asset_id, account_id))

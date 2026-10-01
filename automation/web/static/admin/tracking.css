@@ -32,7 +32,7 @@
 
 /* ── the table (.table from components.css + tracking modifiers) ── */
 .trk-list { margin-bottom: 40px; }
-.trk-list .table { min-width: 880px; }   /* narrow screens scroll the wrap, never squash the lot column */
+.trk-list .table { min-width: 1100px; }   /* narrow screens scroll the wrap, never squash the lot column */
 .trk-list .trk-lot { min-width: 220px; }
 .trk-list .tiny { font-size: 10px; letter-spacing: 0.06em; color: var(--muted); }
 .trk-list .trk-lot a { color: var(--text); text-decoration: none; }
@@ -47,6 +47,13 @@
   color: var(--text); font: inherit; padding: 2px 4px;
 }
 .trk-label-cell:focus { border-color: var(--border); background: var(--surface-2); outline: none; }
+.trk-qty-cell {
+  width: 56px; text-align: right; background: transparent; border: 1px solid transparent;
+  color: var(--text); font: inherit; padding: 2px 4px;
+}
+.trk-qty-cell:focus { border-color: var(--border); background: var(--surface-2); outline: none; }
+.trk-qty-cell::placeholder { color: var(--muted); }
+.trk-warn { color: var(--danger); }
 .trk-actions { white-space: nowrap; }
 .trk-actions .btn { vertical-align: middle; }
 .trk-del:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }

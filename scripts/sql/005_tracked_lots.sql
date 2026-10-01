@@ -49,3 +49,13 @@ CREATE TABLE IF NOT EXISTS tracked_lots (
 CREATE INDEX IF NOT EXISTS ix_tracked_lots_due
   ON tracked_lots (next_poll_at) WHERE closed_at IS NULL;
 CREATE INDEX IF NOT EXISTS ix_tracked_lots_label ON tracked_lots (label);
+
+-- Landed cost columns (013_tracked_lots_costs.sql) — repeated here so a fresh
+-- init_schema matches prod.
+ALTER TABLE tracked_lots
+  ADD COLUMN IF NOT EXISTS quantity    INT,
+  ADD COLUMN IF NOT EXISTS premium_pct NUMERIC(6,3),
+  ADD COLUMN IF NOT EXISTS admin_fee   NUMERIC(12,2),
+  ADD COLUMN IF NOT EXISTS tax_total   NUMERIC(12,2),
+  ADD COLUMN IF NOT EXISTS grand_total NUMERIC(12,2),
+  ADD COLUMN IF NOT EXISTS lot_state   TEXT;

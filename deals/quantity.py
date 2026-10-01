@@ -8,6 +8,8 @@ free-tier ceiling (2026-09-04), so quantity is derived at read time.
 """
 from __future__ import annotations
 
+import re
+
 from auction_extractors.quantity_infer import explicit_title_quantity
 
 DESCRIPTION_WINDOW = 600  # chars; descriptions are TOAST blobs, don't scan them all
@@ -29,3 +31,28 @@ def unit_price(amount: float | None, quantity: int) -> float | None:
         return None
     q = quantity if quantity and quantity > 0 else 1
     return round(float(amount) / q, 2)
+
+
+# "150 Student Chairs", "LOT of ~2500 Wire Frame Linkable CHAIRS": a count up
+# to four words before the noun. Only used where the noun is known (the
+# Tracking tab's chair lots), so a bare leading number can't be a model year.
+_NOUN_COUNT = re.compile(
+    r"(?:^|[\s(:~])(\d{1,3}(?:,\d{3})+|\d{1,5})\)?\s+(?:[a-z][\w'-]*\s+){0,4}?chairs?\b",
+    re.IGNORECASE)
+
+
+def chair_quantity(title: str | None) -> tuple[int | None, str]:
+    """(quantity, source) for a chair lot's title; (None, 'unknown') when the
+    title names no count — never a default 1, which would pass the lot total
+    off as a per-chair price."""
+    if not title:
+        return None, "unknown"
+    hit = explicit_title_quantity(title)
+    if hit and hit[0] > 0:
+        return int(hit[0]), "title"
+    m = _NOUN_COUNT.search(title)
+    if m:
+        n = int(m.group(1).replace(",", ""))
+        if n > 0:
+            return n, "title"
+    return None, "unknown"
