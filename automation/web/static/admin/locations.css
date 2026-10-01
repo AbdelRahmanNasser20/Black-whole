@@ -1,0 +1,26 @@
+/* static/admin/locations.css — Locations tab (13): held lots + their private storage notes.
+   Shared .controls/.seg/.table/.badge/.btn come from static/ui/components.css. Tokens only (tokens.css), radius 0.
+   Loading/empty/error come from skeleton.css (.sk-row / .ui-empty / .ui-error). */
+
+.loc-toolbar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.loc-actions { margin-left: auto; display: flex; gap: 8px; }
+
+.loc-table td { vertical-align: top; }
+.loc-where { white-space: nowrap; color: var(--muted); }
+.loc-table td:nth-child(2) { min-width: 24ch; }
+.loc-title { color: var(--text); }
+.loc-id { color: var(--dim); word-break: break-all; }
+.loc-qty { text-align: right; white-space: nowrap; }
+.loc-note { white-space: pre-wrap; max-width: 52ch; color: var(--text); }
+.loc-table tr.is-missing .loc-where { color: var(--text); }
+
+.loc-missing { color: var(--danger); border-color: var(--danger); }
+.loc-fso { color: var(--dim); }
+.loc-status-owned { color: var(--success); }
+.loc-status-won_pickup, .loc-status-in_transit { color: var(--accent); }
+
+.loc-input {
+  width: 100%; min-width: 32ch; box-sizing: border-box; padding: 6px 8px;
+  border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); resize: vertical;
+}
+.loc-edit-actions { display: flex; gap: 6px; margin-top: 6px; }

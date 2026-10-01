@@ -90,6 +90,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Pipeline: `python run.py <govdeals-url>` (`--price`, `--skip-*`, `--force-republish`).
 - `.env` (gitignored): `DEWATERMARK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `BLACKWHOLE_DB_URL`, `R2_*`, `SUPABASE_STORAGE_URL/KEY`, `GROQ_API_KEY` + `DEALS_LLM_PROVIDER=groq`, `TELEGRAM_BOT_TOKEN/CHAT_ID`. `auction_extractors/.env`: Ollama + `HEADLESS=0`.
 - Chrome profile: `~/.listing_automation/chrome_profile/` (logged into FB + eBay). Photos: `~/Desktop/Banquet chiars Pictures/`.
+- Where chairs physically sit: admin **13 Locations** tab (`/admin?tab=locations`, `GET/PUT /api/locations`) or `.venv/bin/python scripts/lot_location.py --all|--missing|<lot>|--set <lot> "<note>"`. Both read private `inventory.storage_note` via `automation/storage_locations.py`; gate codes masked unless edit / `--show-codes`. The only web surface for the note.
 - Photos onto a lot: `scripts/backfill_listing_images.py --lot|--missing`; `scripts/import_deal_images.py --lot <key>`.
 - `GET /catalog/google.csv` = Merchant Center feed (`automation/google_feed.py`, reuses `catalog_feed` helpers; setup `docs/google_merchant_runbook.md`).
 - Public map: `/map` (JSON `/map/api/points?statuses=&near=&radius=`). Favorite photos → dewatermark → R2: `.venv/bin/python scripts/favorite_photos.py --all` — needs `scripts/sql/010_favorites_clean_images.sql` applied first (**operator gate**).
