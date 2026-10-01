@@ -33,6 +33,7 @@
   <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close><span class="rail-tab-num">10</span><span class="rail-tab-label">Tracking</span></a>
   <a class="rail-tab" data-tab="deposits" href="?tab=deposits" data-rail-close><span class="rail-tab-num">11</span><span class="rail-tab-label">Deposits</span></a>
   <a class="rail-tab" data-tab="channels" href="?tab=channels" data-rail-close><span class="rail-tab-num">12</span><span class="rail-tab-label">Channels</span></a>
+  <a class="rail-tab" data-tab="locations" href="?tab=locations" data-rail-close><span class="rail-tab-num">13</span><span class="rail-tab-label">Locations</span></a>
 </nav>
 {% endblock %}
 
@@ -875,6 +876,36 @@
     <span class="ch-hint">one row per lot, one cell per channel · hover a red cell for the error</span>
   </div>
   <div class="table-wrap ch-matrix" id="ch-matrix" data-state="loading">{{ skeleton_rows(6) }}</div>
+</section>
+<!-- ───────────── Locations ───────────── -->
+<section class="panel" data-pane="locations" hidden>
+  {#- Locations (13): where every held lot physically sits. The rows (and the private storage notes, gate codes
+      masked) come from GET /api/locations via static/admin/locations.js — nothing private renders server-side.
+      skeleton_rows(n) is byte-for-byte skeleton('row', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
+  <link rel="stylesheet" href="/static/admin/locations.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">LOCATIONS / WHERE THE CHAIRS ARE</div>
+    <h1 class="hero-title">Every chair we hold, and where it sits.</h1>
+    <p class="hero-sub">
+      Private storage notes (address, unit, gate). Codes stay <span class="lex pending">hidden</span> until you press
+      Edit. <span class="lex error">NOT RECORDED</span> means nobody wrote it down yet — fix it here.
+      Never paste a note into a listing or a buyer draft.
+    </p>
+  </div>
+
+  <div class="controls loc-toolbar">
+    <div class="seg" id="loc-filter" role="group" aria-label="Filter">
+      <button type="button" class="seg-btn is-active" data-value="">all held</button>
+      <button type="button" class="seg-btn" data-value="missing">not recorded</button>
+    </div>
+    <span class="result-count" id="loc-count" aria-live="polite"></span>
+    <div class="loc-actions">
+      <button type="button" class="btn btn-small" id="loc-refresh">↻ refresh</button>
+    </div>
+  </div>
+
+  <div class="table-wrap loc-list" id="loc-list" data-state="loading">{{ skeleton_rows(6) }}</div>
 </section>
 {% endblock %}
 

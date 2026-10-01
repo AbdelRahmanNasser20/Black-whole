@@ -51,6 +51,7 @@ from .. import config as app_config
 from .. import db
 from .. import catalog_feed, google_feed, lot_channels
 from .. import inventory
+from .. import storage_locations
 from .. import lot_images
 from .. import favorite_images
 from .. import favorites
@@ -3991,6 +3992,36 @@ def sub_delete(subscriber_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+# ───────────────────────────── locations API ─────────────────────────────
+# Admin Locations tab: where every held lot physically sits (inventory.storage_note). PRIVATE — this is the
+# only web surface that reads the note, and it is behind the /api/* auth wall. Gate codes are masked unless
+# ?raw=1 (the edit box asks for it). automation/storage_locations.py owns the queries + masking.
+
+@app.get("/api/locations")
+@readcache.cached()
+def locations_list(missing: int = 0):
+    return {"items": storage_locations.list_held(missing_only=bool(missing))}
+
+
+@app.get("/api/locations/{lot_id:path}")
+def locations_get(lot_id: str, raw: int = 0):
+    row = storage_locations.get(lot_id, raw=bool(raw))
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
+
+
+@app.put("/api/locations/{lot_id:path}")
+def locations_set(lot_id: str, payload: dict):
+    note = (payload or {}).get("storage_note")
+    if not isinstance(note, str) or len(note) > 2000:
+        raise HTTPException(400, "storage_note must be a string ≤ 2000 chars")
+    row = storage_locations.set_note(lot_id, note)
+    if row is None:
+        raise HTTPException(404, "not found")
+    return row
 
 
 # ─────────────────────── alert blast (BLACKWHOLE-10) ───────────────────────
