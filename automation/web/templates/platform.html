@@ -1,0 +1,333 @@
+{#- templates/platform.html — GET /platform: what the software behind this store does, with a read-only demo.
+    Reached by direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex.
+    · Deal finder tab  = LIVE, read through the existing public endpoints (/deals/api/lots, /deals/api/facets);
+                         automation/web/public_deals.py owns every exclusion, nothing is filtered here.
+                         The tab's tag says "Real data" until the feed reports open auctions, then "Live data":
+                         platform.js never claims "open right now" unless the endpoint says so.
+    · Inventory + CRM  = SAMPLE data, invented, shipped as static JSON (static/site/platform/*.sample.json).
+                         No real lot, cost, buyer, message, phone or address; inventory.storage_note never renders.
+    · Request access   = POST /contact (existing endpoint, unchanged). The lead is tagged in `message` with
+                         "[PLATFORM PAGE]" because `inquiries` has no source column (no schema change).
+    The demo console is a dark island: <div data-theme="dark"> re-declares the operator palette from tokens.css. -#}
+{% extends "_public_base.html" %}
+{% block title %}Liquidation software: deal finder, listings and buyer CRM | Black Whole{% endblock %}
+{% block meta_description %}The software Black Whole Liquidation runs on: an auction deal finder, an inventory ledger that keeps every sales channel in step, and a buyer CRM. Read-only demo.{% endblock %}
+{% block body_class %}page-platform{% endblock %}
+{% block head_extra %}
+  <meta name="robots" content="noindex,nofollow">
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/site/platform.css?v={{ now }}">
+{% endblock %}
+
+{% block content %}
+<section class="pf-hero">
+  <h1 class="pf-index">
+    <a class="pf-index-row" href="#deals" data-pf-jump="deals">
+      <span class="pf-index-line">Find the lot.</span>
+      <span class="pf-index-what">Deal finder, on real auction data</span>
+    </a>
+    <a class="pf-index-row" href="#inventory" data-pf-jump="inventory">
+      <span class="pf-index-line">List it everywhere.</span>
+      <span class="pf-index-what">Inventory and listings</span>
+    </a>
+    <a class="pf-index-row" href="#crm" data-pf-jump="crm">
+      <span class="pf-index-line">Keep the buyers.</span>
+      <span class="pf-index-what">Buyer CRM</span>
+    </a>
+  </h1>
+  <div class="pf-hero-copy">
+    <p class="pf-lede">
+      This is the software Black Whole Liquidation runs on. One person uses it to scan
+      government auctions, keep a ledger of every lot, push listings out to each sales
+      channel, and stay on top of buyer conversations.
+    </p>
+    <p class="pf-lede-note">
+      Try it below. The deal finder reads the real auction database. The other two tabs
+      show invented sample data, because the real ones hold private stock and private people.
+    </p>
+  </div>
+</section>
+
+<section class="pf-demo" id="demo" aria-label="Product demo">
+  <div class="pf-console" data-theme="dark">
+    <div class="pf-console-bar">
+      <span class="pf-console-name">Operator console</span>
+      <span class="pf-console-mode">Read-only demo. Nothing you do here is saved.</span>
+    </div>
+
+    <div class="pf-tabs" role="tablist" aria-label="Demo sections">
+      <button class="pf-tab is-active" type="button" role="tab" id="pf-tab-deals"
+              aria-controls="pf-pane-deals" aria-selected="true" data-tab="deals">
+        <span class="pf-tab-name">Deal finder</span>
+        <span class="pf-tag pf-tag--live" id="pf-deals-tag">Real data</span>
+      </button>
+      <button class="pf-tab" type="button" role="tab" id="pf-tab-inventory"
+              aria-controls="pf-pane-inventory" aria-selected="false" tabindex="-1" data-tab="inventory">
+        <span class="pf-tab-name">Inventory &amp; listings</span>
+        <span class="pf-tag pf-tag--sample">Sample data</span>
+      </button>
+      <button class="pf-tab" type="button" role="tab" id="pf-tab-crm"
+              aria-controls="pf-pane-crm" aria-selected="false" tabindex="-1" data-tab="crm">
+        <span class="pf-tab-name">Buyer CRM</span>
+        <span class="pf-tag pf-tag--sample">Sample data</span>
+      </button>
+    </div>
+
+    {# ───────────── Deal finder — LIVE ───────────── #}
+    <div class="pf-pane" role="tabpanel" id="pf-pane-deals" aria-labelledby="pf-tab-deals" data-source="live">
+      <p class="pf-pane-note">
+        <strong>Real data.</strong> Government surplus auctions from GovDeals, read from the scanner's own database.
+        <span id="pf-deals-stats" aria-live="polite"></span>
+      </p>
+      <form class="pf-toolbar" id="pf-deals-form" role="search" autocomplete="off">
+        <div class="pf-seg" role="group" aria-label="Auction status" id="pf-deals-status">
+          <button class="pf-seg-btn is-active" type="button" data-status="active" aria-pressed="true">Open now</button>
+          <button class="pf-seg-btn" type="button" data-status="closed" aria-pressed="false">Closed</button>
+        </div>
+        <label class="pf-field pf-field--grow">
+          <span>Search titles</span>
+          <input type="search" id="pf-deals-q" placeholder="forklift, laptops, fryer">
+        </label>
+        <label class="pf-field">
+          <span>State</span>
+          <select id="pf-deals-state"><option value="">All states</option></select>
+        </label>
+        <label class="pf-field">
+          <span>Sort by</span>
+          <select id="pf-deals-sort"></select>
+        </label>
+        <label class="pf-check">
+          <input type="checkbox" id="pf-deals-nobids">
+          <span>No bids</span>
+        </label>
+      </form>
+      <div class="pf-chips" id="pf-deals-cats" role="group" aria-label="Category"></div>
+      <div class="pf-table-wrap">
+        <table class="pf-table pf-table--deals">
+          <thead>
+            <tr>
+              <th scope="col">Lot</th>
+              <th scope="col">Category</th>
+              <th scope="col" class="num" id="pf-deals-th-bid">Current bid</th>
+              <th scope="col" class="num">Per unit</th>
+              <th scope="col" class="num" title="Current bid plus the auction site's buyer's premium. Tax, pickup and freight are extra.">Est. all-in</th>
+              <th scope="col" class="num">Bids</th>
+              <th scope="col" class="num" id="pf-deals-th-end">Ends in</th>
+            </tr>
+          </thead>
+          <tbody id="pf-deals-rows" aria-live="polite">
+            <tr class="pf-row-msg"><td colspan="7">Loading auctions…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pf-pager">
+        <span class="pf-pager-count" id="pf-deals-count"></span>
+        <span class="pf-pager-btns">
+          <button class="pf-btn" type="button" id="pf-deals-prev" disabled>Previous</button>
+          <button class="pf-btn" type="button" id="pf-deals-next" disabled>Next</button>
+        </span>
+      </div>
+    </div>
+
+    {# ───────────── Inventory & listings — SAMPLE ───────────── #}
+    <div class="pf-pane" role="tabpanel" id="pf-pane-inventory" aria-labelledby="pf-tab-inventory" data-source="sample" hidden>
+      <p class="pf-pane-note pf-pane-note--sample">
+        <strong>Sample data.</strong> These lots are invented to show how the ledger works.
+        Real stock, costs and storage locations never appear on this page.
+      </p>
+      <form class="pf-toolbar" id="pf-inv-form" autocomplete="off">
+        <label class="pf-field pf-field--grow">
+          <span>Search lots</span>
+          <input type="search" id="pf-inv-q" placeholder="tables, Tulsa, L-2041">
+        </label>
+        <label class="pf-field">
+          <span>Status</span>
+          <select id="pf-inv-status"><option value="">Any status</option></select>
+        </label>
+        <label class="pf-field">
+          <span>Live on</span>
+          <select id="pf-inv-channel"><option value="">Any channel</option></select>
+        </label>
+        {# phones only: the column headers that sort the table are not on screen there #}
+        <label class="pf-field pf-field--phone">
+          <span>Sort by</span>
+          <select id="pf-inv-sort">
+            <option value="lot_id:desc">Newest lot</option>
+            <option value="quantity_remaining:desc">Most left</option>
+            <option value="price_per_unit:asc">Price, low to high</option>
+            <option value="price_per_unit:desc">Price, high to low</option>
+            <option value="title:asc">Item, A to Z</option>
+            <option value="status:asc">Status</option>
+          </select>
+        </label>
+      </form>
+      <div class="pf-table-wrap">
+        <table class="pf-table pf-table--inv">
+          <thead>
+            <tr>
+              <th scope="col"><button class="pf-sort" type="button" data-sort="lot_id">Lot</button></th>
+              <th scope="col"><button class="pf-sort" type="button" data-sort="title">Item</button></th>
+              <th scope="col" class="num"><button class="pf-sort" type="button" data-sort="quantity_remaining">Qty left</button></th>
+              <th scope="col" class="num"><button class="pf-sort" type="button" data-sort="price_per_unit">Price / unit</button></th>
+              <th scope="col"><button class="pf-sort" type="button" data-sort="status">Status</button></th>
+              <th scope="col" class="pf-ch-head">Site</th>
+              <th scope="col" class="pf-ch-head">FB Catalog</th>
+              <th scope="col" class="pf-ch-head">Google</th>
+              <th scope="col" class="pf-ch-head">eBay</th>
+              <th scope="col" class="pf-ch-head">FB Mkt</th>
+              <th scope="col" class="pf-ch-head">Craigslist</th>
+            </tr>
+          </thead>
+          <tbody id="pf-inv-rows">
+            <tr class="pf-row-msg"><td colspan="11">Loading sample lots…</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="pf-pager">
+        <span class="pf-pager-count" id="pf-inv-count"></span>
+        <span class="pf-legend" aria-hidden="true">
+          <span class="pf-ch pf-ch--live">live</span>
+          <span class="pf-ch pf-ch--pending_approval">needs OK</span>
+          <span class="pf-ch pf-ch--queued">queued</span>
+          <span class="pf-ch pf-ch--error">error</span>
+          <span class="pf-ch pf-ch--delisted">down</span>
+          <span class="pf-ch pf-ch--off">off</span>
+        </span>
+      </div>
+    </div>
+
+    {# ───────────── Buyer CRM — SAMPLE ───────────── #}
+    <div class="pf-pane" role="tabpanel" id="pf-pane-crm" aria-labelledby="pf-tab-crm" data-source="sample" hidden>
+      <p class="pf-pane-note pf-pane-note--sample">
+        <strong>Sample data.</strong> These buyers and messages are invented.
+        The real CRM holds private conversations and is never shown here.
+      </p>
+      <form class="pf-toolbar" id="pf-crm-form" autocomplete="off">
+        <label class="pf-field">
+          <span>Stage</span>
+          <select id="pf-crm-stage"><option value="">Any stage</option></select>
+        </label>
+        <label class="pf-field">
+          <span>Channel</span>
+          <select id="pf-crm-channel"><option value="">Any channel</option></select>
+        </label>
+        <label class="pf-field">
+          <span>Sort by</span>
+          <select id="pf-crm-sort">
+            <option value="recent">Latest message</option>
+            <option value="qty">Quantity wanted</option>
+            <option value="name">Name</option>
+          </select>
+        </label>
+        <span class="pf-toolbar-count" id="pf-crm-count"></span>
+      </form>
+      <div class="pf-crm" id="pf-crm">
+        <ul class="pf-buyers" id="pf-crm-list" aria-label="Buyers">
+          <li class="pf-row-msg">Loading sample buyers…</li>
+        </ul>
+        <div class="pf-thread" id="pf-crm-thread" aria-live="polite"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="pf-how" id="how">
+  <div class="pf-how-head">
+    <h2 class="section-title">HOW IT WORKS</h2>
+    <p class="pf-how-lede">
+      One lot moves through four stages. Each stage is labelled with what is built
+      and what is still in progress.
+    </p>
+  </div>
+  <ol class="pf-steps">
+    <li class="pf-step">
+      <span class="pf-step-num mono" aria-hidden="true">1</span>
+      <h3>Scan the auctions</h3>
+      <p>
+        A scanner sweeps every open GovDeals auction on a schedule. It reads the quantity
+        out of each title so a lot is priced per unit, adds the buyer's premium, and keeps
+        the final result when the auction closes.
+      </p>
+      <p class="pf-step-state"><span class="pf-state pf-state--on">Built</span> Covers GovDeals. More auction sites are being added.</p>
+    </li>
+    <li class="pf-step">
+      <span class="pf-step-num mono" aria-hidden="true">2</span>
+      <h3>Keep one ledger</h3>
+      <p>
+        Every lot you win becomes one row: how many are left, the price, the status, the
+        photos. Sell some and the row changes once. Everything else reads from it.
+      </p>
+      <p class="pf-step-state"><span class="pf-state pf-state--on">Built</span> It is the ledger behind this store.</p>
+    </li>
+    <li class="pf-step">
+      <span class="pf-step-num mono" aria-hidden="true">3</span>
+      <h3>List on every channel</h3>
+      <p>
+        The ledger feeds a storefront, a Facebook catalog and Google Merchant Center.
+        Marketplace posts wait in a queue until you approve them, and a lot that sells
+        out drops off the feeds on its own.
+      </p>
+      <p class="pf-step-state"><span class="pf-state pf-state--part">Partly built</span> The storefront and both feeds are built. eBay and Craigslist posting are in progress.</p>
+    </li>
+    <li class="pf-step">
+      <span class="pf-step-num mono" aria-hidden="true">4</span>
+      <h3>Work the buyers</h3>
+      <p>
+        Buyer conversations land in one list with a stage and a next action. Replies are
+        drafted for you, and nothing sends until you approve it. Prices, addresses and
+        pickup times are always your call.
+      </p>
+      <p class="pf-step-state"><span class="pf-state pf-state--part">Partly built</span> Facebook Marketplace is built. Other channels are in progress.</p>
+    </li>
+  </ol>
+  <p class="pf-built">
+    Built and run by Abdel Nasser. Python and FastAPI on Postgres, Playwright for the
+    browser work, Cloudflare R2 for photos, plain ES modules on the front end.
+    The deal finder above reads the same public API as the <a href="/deals">full deal feed</a>.
+  </p>
+</section>
+
+<section class="contact pf-access" id="access">
+  <div class="contact-grid">
+    <div>
+      <div class="section-rule"></div>
+      <h2 class="section-title">REQUEST ACCESS</h2>
+      <p class="contact-lede">
+        Run a liquidation business? Tell me what you sell and where you list it.
+      </p>
+      <p class="pf-access-note">
+        There is no price list yet. The software runs one business today and is not
+        packaged for anyone else. I want to hear from a few liquidators before deciding
+        what that package should be.
+      </p>
+      <p class="pf-access-note">Hiring, or just curious how it is built? Use the same form.</p>
+    </div>
+    <form class="manifest-form" id="pf-access-form" novalidate>
+      <div class="mf-row mf-row--two">
+        <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+        <label><span>EMAIL</span><input name="email" type="email" required autocomplete="email"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>COMPANY</span><input name="company" autocomplete="organization"></label>
+        <label>
+          <span>I AM A</span>
+          <select name="role">
+            <option value="liquidator">Liquidator or reseller</option>
+            <option value="recruiter">Recruiter or hiring manager</option>
+            <option value="other">Something else</option>
+          </select>
+        </label>
+      </div>
+      <label class="mf-row"><span>WHAT DO YOU SELL, AND WHERE DO YOU LIST IT?</span>
+        <textarea name="note" rows="4" placeholder="What you buy and resell, how many lots a month, which marketplaces you post on."></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">REQUEST ACCESS</button>
+      <div class="mf-result" hidden></div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/platform.js?v={{ now }}"></script>
+{% endblock %}

@@ -1536,6 +1536,22 @@ async def public_sell(request: Request):
     )
 
 
+@app.get("/platform", response_class=HTMLResponse)
+def public_platform(request: Request):
+    """The software behind the store, with a read-only demo (templates/platform.html).
+
+    Deliberately unlinked: chair buyers should not land on a software pitch, so
+    this is not in the storefront nav or the sitemap and the page is `noindex`.
+    The handler reads nothing — the Deal finder tab calls the existing public
+    `/deals/api/*` endpoints from the browser (policy: public_deals.py), the
+    other two tabs load invented sample JSON from `static/site/platform/`, and
+    the request-access form posts to the existing `/contact`.
+    """
+    return templates.TemplateResponse(
+        request, "platform.html", _public_ctx({}),
+    )
+
+
 @app.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     return (
