@@ -1,5 +1,11 @@
-{#- templates/platform.html — GET /platform: what the software behind this store does, with a read-only demo.
+{#- templates/platform.html — GET /platform: surplus-auction finder + operator desk, with a read-only demo.
     Reached by direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex.
+    Order: hero → sources strip → map (include) → console → why → access. Few words on purpose.
+    · Sources strip    = names render server-side (no DB read); platform.js adds counts + freshness from
+                         GET /platform/api/sources. If that fails the strip stays names-only.
+                         Never say "all sites": the number tracked comes from that endpoint.
+    · AI               = today it sorts lots into categories and checks comparable sold prices.
+                         Plain-English search does NOT exist yet; it is only ever labelled "coming".
     · Deal finder tab  = LIVE, read through the existing public endpoints (/deals/api/lots, /deals/api/facets);
                          automation/web/public_deals.py owns every exclusion, nothing is filtered here.
                          The tab's tag says "Real data" until the feed reports open auctions, then "Live data":
@@ -10,49 +16,56 @@
                          "[PLATFORM PAGE]" because `inquiries` has no source column (no schema change).
     The demo console is a dark island: <div data-theme="dark"> re-declares the operator palette from tokens.css. -#}
 {% extends "_public_base.html" %}
-{% block title %}Liquidation software: deal finder, listings and buyer CRM | Black Whole{% endblock %}
-{% block meta_description %}The software Black Whole Liquidation runs on: an auction deal finder, an inventory ledger that keeps every sales channel in step, and a buyer CRM. Read-only demo.{% endblock %}
+{% block title %}Surplus auctions in one place | Black Whole{% endblock %}
+{% block meta_description %}Government surplus auction sites in one feed, plus the operator desk for inventory, listings and buyers. Read-only demo, no signup.{% endblock %}
 {% block body_class %}page-platform{% endblock %}
 {% block head_extra %}
   <meta name="robots" content="noindex,nofollow">
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/site/platform.css?v={{ now }}">
+  <link rel="stylesheet" href="/static/site/platform/map.css?v={{ now }}">
 {% endblock %}
 
 {% block content %}
-<section class="pf-hero">
-  <h1 class="pf-index">
-    <a class="pf-index-row" href="#deals" data-pf-jump="deals">
-      <span class="pf-index-line">Find the lot.</span>
-      <span class="pf-index-what">Deal finder, on real auction data</span>
-    </a>
-    <a class="pf-index-row" href="#inventory" data-pf-jump="inventory">
-      <span class="pf-index-line">List it everywhere.</span>
-      <span class="pf-index-what">Inventory and listings</span>
-    </a>
-    <a class="pf-index-row" href="#crm" data-pf-jump="crm">
-      <span class="pf-index-line">Keep the buyers.</span>
-      <span class="pf-index-what">Buyer CRM</span>
-    </a>
-  </h1>
-  <div class="pf-hero-copy">
-    <p class="pf-lede">
-      This is the software Black Whole Liquidation runs on. One person uses it to scan
-      government auctions, keep a ledger of every lot, push listings out to each sales
-      channel, and stay on top of buyer conversations.
-    </p>
-    <p class="pf-lede-note">
-      Try it below. The deal finder reads the real auction database. The other two tabs
-      show invented sample data, because the real ones hold private stock and private people.
-    </p>
+<section class="pf-hero" id="top" data-theme="dark">
+  <nav class="pf-nav" aria-label="Page">
+    <a class="pf-nav-brand" href="/">◉ BLACK&nbsp;WHOLE</a>
+    <span class="pf-nav-links">
+      <a href="#map">Finder</a>
+      <a href="#demo">Desk</a>
+      <a href="#why">Why</a>
+      <a href="#access">Access</a>
+    </span>
+  </nav>
+  <div class="pf-hero-body">
+    <h1 class="pf-headline">Surplus auctions, in one place.</h1>
+    <p class="pf-hero-sub">Government surplus sites in one feed, sorted by AI, checked against sold prices.</p>
+    <a class="pf-cta" href="#map">Try it. No signup.</a>
   </div>
 </section>
 
-<section class="pf-demo" id="demo" aria-label="Product demo">
+{# Sources strip. Names come from the handler (a constant, no DB); platform.js fills counts + freshness. #}
+<section class="pf-sources" id="sources" data-theme="dark" aria-labelledby="pf-sources-title">
+  <div class="pf-sources-head">
+    <h2 class="pf-eyebrow" id="pf-sources-title">Sites we track</h2>
+    <span class="pf-sources-count" id="pf-sources-count" aria-live="polite"></span>
+  </div>
+  <ul class="pf-sources-list" id="pf-sources-list">
+    {% for name in platform_sources %}
+    <li class="pf-source"><span class="pf-source-name">{{ name }}</span></li>
+    {% endfor %}
+  </ul>
+</section>
+
+{# The combined map lives in its own partial + static/site/platform/map.{js,css}; keep this include. #}
+{% include "_platform_map.html" %}
+
+<section class="pf-demo" id="demo" aria-labelledby="pf-demo-title">
+  <h2 class="pf-h2" id="pf-demo-title">The operator desk</h2>
   <div class="pf-console" data-theme="dark">
     <div class="pf-console-bar">
       <span class="pf-console-name">Operator console</span>
-      <span class="pf-console-mode">Read-only demo. Nothing you do here is saved.</span>
+      <span class="pf-console-mode">Read-only demo. Nothing is saved.</span>
     </div>
 
     <div class="pf-tabs" role="tablist" aria-label="Demo sections">
@@ -76,7 +89,7 @@
     {# ───────────── Deal finder — LIVE ───────────── #}
     <div class="pf-pane" role="tabpanel" id="pf-pane-deals" aria-labelledby="pf-tab-deals" data-source="live">
       <p class="pf-pane-note">
-        <strong>Real data.</strong> Government surplus auctions from GovDeals, read from the scanner's own database.
+        <strong>Real data.</strong> GovDeals auctions from the scanner's database.
         <span id="pf-deals-stats" aria-live="polite"></span>
       </p>
       <form class="pf-toolbar" id="pf-deals-form" role="search" autocomplete="off">
@@ -132,8 +145,7 @@
     {# ───────────── Inventory & listings — SAMPLE ───────────── #}
     <div class="pf-pane" role="tabpanel" id="pf-pane-inventory" aria-labelledby="pf-tab-inventory" data-source="sample" hidden>
       <p class="pf-pane-note pf-pane-note--sample">
-        <strong>Sample data.</strong> These lots are invented to show how the ledger works.
-        Real stock, costs and storage locations never appear on this page.
+        <strong>Sample data.</strong> These lots are invented. No real stock, costs or locations.
       </p>
       <form class="pf-toolbar" id="pf-inv-form" autocomplete="off">
         <label class="pf-field pf-field--grow">
@@ -199,8 +211,7 @@
     {# ───────────── Buyer CRM — SAMPLE ───────────── #}
     <div class="pf-pane" role="tabpanel" id="pf-pane-crm" aria-labelledby="pf-tab-crm" data-source="sample" hidden>
       <p class="pf-pane-note pf-pane-note--sample">
-        <strong>Sample data.</strong> These buyers and messages are invented.
-        The real CRM holds private conversations and is never shown here.
+        <strong>Sample data.</strong> These buyers and messages are invented. No real conversations.
       </p>
       <form class="pf-toolbar" id="pf-crm-form" autocomplete="off">
         <label class="pf-field">
@@ -231,76 +242,42 @@
   </div>
 </section>
 
-<section class="pf-how" id="how">
-  <div class="pf-how-head">
-    <h2 class="section-title">HOW IT WORKS</h2>
-    <p class="pf-how-lede">
-      One lot moves through four stages. Each stage is labelled with what is built
-      and what is still in progress.
-    </p>
-  </div>
-  <ol class="pf-steps">
-    <li class="pf-step">
-      <span class="pf-step-num mono" aria-hidden="true">1</span>
-      <h3>Scan the auctions</h3>
-      <p>
-        A scanner sweeps every open GovDeals auction on a schedule. It reads the quantity
-        out of each title so a lot is priced per unit, adds the buyer's premium, and keeps
-        the final result when the auction closes.
-      </p>
-      <p class="pf-step-state"><span class="pf-state pf-state--on">Built</span> Covers GovDeals. More auction sites are being added.</p>
+{# ══════════ WHY LIQUIDATORS — COPY BLOCK (start) ══════════
+   Three rows, pain → what this does about it, about 40 words in total. A research agent refines this
+   wording later: edit ONLY the text inside .pf-why-pain / .pf-why-fix, keep three rows, keep it short.
+   Source: direction/tasks/2026-10-02/liquidator-problems-research.md (section 5).
+   Claim only what is built. No customer counts, no prices, no "all sites". #}
+<section class="pf-why" id="why" aria-labelledby="pf-why-title">
+  <h2 class="pf-h2" id="pf-why-title">Why liquidators</h2>
+  <ul class="pf-why-rows">
+    <li class="pf-why-row">
+      <span class="pf-why-pain">The bid is not the cost.</span>
+      <span class="pf-why-fix">Landed cost per unit: bid, premium, freight.</span>
     </li>
-    <li class="pf-step">
-      <span class="pf-step-num mono" aria-hidden="true">2</span>
-      <h3>Keep one ledger</h3>
-      <p>
-        Every lot you win becomes one row: how many are left, the price, the status, the
-        photos. Sell some and the row changes once. Everything else reads from it.
-      </p>
-      <p class="pf-step-state"><span class="pf-state pf-state--on">Built</span> It is the ledger behind this store.</p>
+    <li class="pf-why-row">
+      <span class="pf-why-pain">One lot, many listings to update.</span>
+      <span class="pf-why-fix">List once. It comes down when sold.</span>
     </li>
-    <li class="pf-step">
-      <span class="pf-step-num mono" aria-hidden="true">3</span>
-      <h3>List on every channel</h3>
-      <p>
-        The ledger feeds a storefront, a Facebook catalog and Google Merchant Center.
-        Marketplace posts wait in a queue until you approve them, and a lot that sells
-        out drops off the feeds on its own.
-      </p>
-      <p class="pf-step-state"><span class="pf-state pf-state--part">Partly built</span> The storefront and both feeds are built. eBay and Craigslist posting are in progress.</p>
+    <li class="pf-why-row">
+      <span class="pf-why-pain">Buyers scattered across chats.</span>
+      <span class="pf-why-fix">One CRM, and a map of past buyers near each lot.</span>
     </li>
-    <li class="pf-step">
-      <span class="pf-step-num mono" aria-hidden="true">4</span>
-      <h3>Work the buyers</h3>
-      <p>
-        Buyer conversations land in one list with a stage and a next action. Replies are
-        drafted for you, and nothing sends until you approve it. Prices, addresses and
-        pickup times are always your call.
-      </p>
-      <p class="pf-step-state"><span class="pf-state pf-state--part">Partly built</span> Facebook Marketplace is built. Other channels are in progress.</p>
-    </li>
-  </ol>
-  <p class="pf-built">
-    Built and run by Abdel Nasser. Python and FastAPI on Postgres, Playwright for the
-    browser work, Cloudflare R2 for photos, plain ES modules on the front end.
-    The deal finder above reads the same public API as the <a href="/deals">full deal feed</a>.
+  </ul>
+  <p class="pf-why-state">
+    <span class="pf-why-item"><span class="pf-state pf-state--on">Built</span> Finder.</span>
+    <span class="pf-why-item"><span class="pf-state pf-state--part">Partly built</span> Listings, buyer CRM.</span>
+    <span class="pf-why-item"><span class="pf-state pf-state--soon">Coming</span> Plain-English search.</span>
   </p>
 </section>
+{# ══════════ WHY LIQUIDATORS — COPY BLOCK (end) ══════════ #}
 
 <section class="contact pf-access" id="access">
   <div class="contact-grid">
     <div>
       <div class="section-rule"></div>
       <h2 class="section-title">REQUEST ACCESS</h2>
-      <p class="contact-lede">
-        Run a liquidation business? Tell me what you sell and where you list it.
-      </p>
-      <p class="pf-access-note">
-        There is no price list yet. The software runs one business today and is not
-        packaged for anyone else. I want to hear from a few liquidators before deciding
-        what that package should be.
-      </p>
-      <p class="pf-access-note">Hiring, or just curious how it is built? Use the same form.</p>
+      <p class="contact-lede">Run a liquidation business? Tell me what you sell.</p>
+      <p class="pf-access-note">There is no price list yet. Hiring or curious? Same form.</p>
     </div>
     <form class="manifest-form" id="pf-access-form" novalidate>
       <div class="mf-row mf-row--two">
@@ -330,4 +307,5 @@
 
 {% block scripts %}
 <script type="module" src="/static/site/platform.js?v={{ now }}"></script>
+<script type="module" src="/static/site/platform/map.js?v={{ now }}"></script>
 {% endblock %}

@@ -3,6 +3,9 @@
 What this guards:
   · the page renders with NO database (the handler reads nothing; the Deal finder calls the existing
     public /deals/api/* endpoints from the browser);
+  · the hero stays almost wordless, the sections keep their order, and the copy never claims "all" sites
+    or a natural-language search that does not exist yet;
+  · GET /platform/api/sources is public, read-only, memoised, and answers names only when the read fails;
   · the two sample tabs are labelled as sample data in the server-rendered HTML, not only by JS;
   · it is reachable by direct URL only — not in the storefront nav/footer, not in the sitemap, noindex;
   · the sample JSON is invented and stays that way: no contact details, no private fields, and the same
@@ -21,7 +24,7 @@ from fastapi.testclient import TestClient
 
 from automation import channels, inventory
 from automation.web import auth as auth_svc
-from automation.web import public_deals
+from automation.web import public_deals, readcache
 from automation.web.app import app
 
 app_module = sys.modules["automation.web.app"]
@@ -50,6 +53,8 @@ def no_db(monkeypatch):
     monkeypatch.setattr(public_deals, "fetch_page", boom)
     monkeypatch.setattr(inventory, "list_public", boom)
     monkeypatch.setattr(inventory, "get", boom)
+    monkeypatch.setattr(app_module.db, "fetch_all", boom)
+    monkeypatch.setattr(app_module.db, "fetch_one", boom)
 
 
 def _client():
@@ -121,6 +126,147 @@ def test_copy_makes_no_price_or_customer_claims(no_db):
     # No number about the feed is baked into the template: those come from /deals/api/facets at runtime.
     stats = TEMPLATE.split('id="pf-deals-stats"', 1)[1].split("</span>", 1)[0]
     assert not re.search(r"\d", stats)
+
+
+# ───────────────────────── hero, order, words ─────────────────────────
+
+def _words(text: str) -> list[str]:
+    return re.sub(r"<[^>]+>", " ", text).split()
+
+
+def test_hero_is_almost_wordless_and_jumps_to_the_map(no_db):
+    html = _page()
+    hero = html.split('class="pf-hero"', 1)[1].split("</section>", 1)[0]
+    headline = hero.split('class="pf-headline">', 1)[1].split("</h1>", 1)[0]
+    sub = hero.split('class="pf-hero-sub">', 1)[1].split("</p>", 1)[0]
+    assert 1 <= len(_words(headline)) <= 6, headline
+    assert 1 <= len(_words(sub)) <= 14, sub
+    assert hero.count("<p") == 1, "one sub-line, no lede paragraphs"
+    assert hero.count('class="pf-cta"') == 1 and '<a class="pf-cta" href="#map">' in hero
+    # the hero must not depend on hero.jpg existing: a colour and gradients sit under it
+    css = (WEB / "static/site/platform.css").read_text()
+    rule = css.split(".pf-hero {", 1)[1].split("}", 1)[0]
+    assert "background-color" in rule and "url(/static/site/platform/hero.jpg)" in rule
+    assert "linear-gradient" in rule and "radial-gradient" in rule
+
+
+def test_sections_come_in_the_agreed_order(no_db):
+    html = _page()
+    marks = ['class="pf-hero"', 'id="sources"', 'id="map"', 'id="demo"', 'id="why"', 'id="access"']
+    at = [html.index(m) for m in marks]
+    assert at == sorted(at), dict(zip(marks, at))
+    # the map agent's three hooks stay in the template
+    assert '/static/site/platform/map.css' in html and '/static/site/platform/map.js' in html
+    assert '{% include "_platform_map.html" %}' in TEMPLATE
+    for h2 in re.findall(r"<h2[^>]*>(.*?)</h2>", TEMPLATE, re.S):
+        assert len(_words(h2)) <= 4, h2
+
+
+def test_copy_stays_inside_the_honesty_limits(no_db):
+    html = _page()
+    text = " ".join(_words(html.split('<main', 1)[1].split("</main>", 1)[0])).lower()
+    for banned in ("all surplus", "all sites", "all auction", "every site", "every auction", "every surplus"):
+        assert banned not in text, banned
+    # no count of sites is baked in: it comes from /platform/api/sources at runtime
+    strip = TEMPLATE.split('id="sources"', 1)[1].split("</section>", 1)[0]
+    assert not re.search(r"\d", " ".join(_words(re.sub(r"\{[#%].*?[#%]\}", "", strip, flags=re.S))))
+    # natural-language search does not exist yet: only ever labelled as coming
+    why = html.split('id="why"', 1)[1].split("</section>", 1)[0]
+    assert re.search(r"Coming</span>\s*Plain-English search", why)
+    assert "plain-english search" not in text.replace("coming plain-english search", "")
+
+
+def test_why_block_is_three_short_rows(no_db):
+    assert TEMPLATE.count("WHY LIQUIDATORS — COPY BLOCK") == 2, "start + end markers for the copy agent"
+    why = _page().split('id="why"', 1)[1].split("</section>", 1)[0]
+    pains = re.findall(r'class="pf-why-pain">(.*?)</span>', why)
+    fixes = re.findall(r'class="pf-why-fix">(.*?)</span>', why)
+    assert len(pains) == len(fixes) == 3
+    assert 25 <= sum(len(_words(t)) for t in pains + fixes) <= 45
+
+
+# ───────────────────────── the sources strip ─────────────────────────
+
+@pytest.fixture
+def fresh_cache():
+    readcache.invalidate_all()
+    yield
+    readcache.invalidate_all()
+
+
+def _snapshot_rows():
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    return [
+        {"source": "govdeals", "lots": 5349, "last_seen": now - timedelta(minutes=9)},
+        {"source": "purple_wave", "lots": 1119, "last_seen": now - timedelta(hours=23)},
+        {"source": "municibid", "lots": 582, "last_seen": now - timedelta(days=30)},
+    ]
+
+
+def test_sources_strip_renders_names_without_a_database(no_db):
+    strip = _page().split('id="sources"', 1)[1].split("</section>", 1)[0]
+    for name in app_module._PLATFORM_SOURCE_NAMES.values():
+        assert f'<span class="pf-source-name">{name}</span>' in strip
+
+
+def test_sources_endpoint_is_public_plain_def_and_read_only(monkeypatch, fresh_cache):
+    assert not inspect.iscoroutinefunction(app_module.public_platform_sources)
+    assert not "/platform/api/sources".startswith(auth_svc.PROTECTED_PREFIXES)
+    seen = []
+
+    def fake(sql, params=None):
+        seen.append(sql)
+        return _snapshot_rows()
+
+    monkeypatch.setattr(app_module.db, "fetch_all", fake)
+    monkeypatch.setenv("ADMIN_PASSWORD", "pw")      # auth on: the route must still answer without a login
+    auth_svc.reset_caches()
+    r = _client().get("/platform/api/sources")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True and body["tracked"] == len(body["sources"]) == 7 and body["live"] == 2
+    by = {s["key"]: s for s in body["sources"]}
+    assert by["govdeals"] == {"key": "govdeals", "name": "GovDeals", "live": True, "lots": 5349,
+                              "last_seen": by["govdeals"]["last_seen"]}
+    assert by["purple_wave"]["live"] is True                      # inside 24 h
+    assert by["municibid"]["live"] is False and by["municibid"]["lots"] == 582
+    assert by["mibid"] == {"key": "mibid", "name": "MiBid", "live": False, "lots": 0, "last_seen": None}
+    for s in body["sources"]:
+        assert set(s) == {"key", "name", "live", "lots", "last_seen"}
+    assert len(seen) == 1 and seen[0].lstrip().upper().startswith("SELECT") and "listing_snapshots" in seen[0]
+    # memoised: page views do not each hit the DB
+    for _ in range(3):
+        assert _client().get("/platform/api/sources").json()["tracked"] == 7
+    assert len(seen) == 1
+
+
+def test_sources_endpoint_failure_gives_names_only_and_is_not_cached(monkeypatch, fresh_cache):
+    calls = []
+
+    def boom(sql, params=None):
+        calls.append(sql)
+        raise RuntimeError("connection to server at db.internal failed: password authentication failed")
+
+    monkeypatch.setattr(app_module.db, "fetch_all", boom)
+    r = _client().get("/platform/api/sources")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is False and set(body) == {"ok", "sources"}
+    assert [s["name"] for s in body["sources"]] == list(app_module._PLATFORM_SOURCE_NAMES.values())
+    assert all(set(s) == {"key", "name"} for s in body["sources"])
+    assert "password" not in r.text and "db.internal" not in r.text and "RuntimeError" not in r.text
+    # a failed read is not memoised: the next call tries again and recovers
+    monkeypatch.setattr(app_module.db, "fetch_all", lambda sql, params=None: _snapshot_rows())
+    assert _client().get("/platform/api/sources").json()["ok"] is True
+    assert len(calls) == 1
+
+
+def test_script_fills_the_strip_from_the_public_endpoint_only():
+    assert "api('/platform/api/sources')" in JS
+    block = JS.split("async function initSources()", 1)[1].split("\n}\n", 1)[0]
+    assert "catch { return; }" in block, "a failed read leaves the server-rendered names alone"
+    assert "data.tracked" in block and "esc(s.name)" in block
 
 
 # ───────────────────────── the sample data ─────────────────────────

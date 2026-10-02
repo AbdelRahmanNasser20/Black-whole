@@ -1548,8 +1548,65 @@ def public_platform(request: Request):
     the request-access form posts to the existing `/contact`.
     """
     return templates.TemplateResponse(
-        request, "platform.html", _public_ctx({}),
+        request, "platform.html",
+        _public_ctx({"platform_sources": list(_PLATFORM_SOURCE_NAMES.values())}),
     )
+
+
+# Auction sites the recorder knows, in display order. The page renders these
+# names with no DB read; /platform/api/sources adds the live numbers.
+_PLATFORM_SOURCE_NAMES = {
+    "govdeals": "GovDeals",
+    "allsurplus": "AllSurplus",
+    "gsa": "GSA Auctions",
+    "purple_wave": "Purple Wave",
+    "public_surplus": "Public Surplus",
+    "municibid": "Municibid",
+    "mibid": "MiBid",
+}
+_PLATFORM_SOURCES_TTL = 300        # seconds; one grouped read per 5 min, not per page view
+_PLATFORM_LIVE_WINDOW_H = 24
+
+
+@readcache.cached(ttl=_PLATFORM_SOURCES_TTL)
+def _platform_source_rows() -> list[dict]:
+    """One grouped read of `listing_snapshots`. Raises on failure, so a failed
+    read is never memoised (readcache stores return values only)."""
+    return db.fetch_all(
+        "SELECT source, count(DISTINCT source_lot_id) AS lots, max(observed_at) AS last_seen "
+        "FROM listing_snapshots GROUP BY source"
+    )
+
+
+@app.get("/platform/api/sources")
+def public_platform_sources():
+    """Auction sites tracked, for the strip under the /platform hero. Public and
+    read-only (deliberately not under the auth-walled `/api/`). A site is `live`
+    when the recorder observed it in the last 24 hours; anything else is shown
+    as paused. A failed read answers names only — never error text."""
+    names = dict(_PLATFORM_SOURCE_NAMES)
+    try:
+        rows = {r["source"]: r for r in _platform_source_rows()}
+    except Exception:
+        log.warning("platform sources read failed", exc_info=True)
+        return {"ok": False, "sources": [{"key": k, "name": n} for k, n in names.items()]}
+    for key in rows:
+        names.setdefault(key, str(key).replace("_", " ").title())
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    out = []
+    for key, name in names.items():
+        row = rows.get(key) or {}
+        seen = row.get("last_seen")
+        if seen is not None and seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        live = bool(seen and now - seen <= timedelta(hours=_PLATFORM_LIVE_WINDOW_H))
+        out.append({
+            "key": key, "name": name, "live": live,
+            "lots": int(row.get("lots") or 0),
+            "last_seen": seen.isoformat() if seen else None,
+        })
+    return {"ok": True, "tracked": len(out), "live": sum(1 for s in out if s["live"]), "sources": out}
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)

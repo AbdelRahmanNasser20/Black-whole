@@ -5,6 +5,8 @@
 //                        Every number on the page comes from them; with no open auctions the tab says so.
 //   Inventory    SAMPLE  static/site/platform/inventory.sample.json — invented lots, filtered/sorted in memory.
 //   Buyer CRM    SAMPLE  static/site/platform/crm.sample.json — invented buyers and threads, in memory.
+//   Sources      LIVE    GET /platform/api/sources — count + freshness per auction site. The names are already
+//                        in the HTML; a failed read leaves the strip names-only and says nothing else.
 //
 // The one write on the page is the request-access form: POST /contact (existing endpoint, unchanged),
 // with the lead tagged in `message` because `inquiries` has no source column. Everything else — sorting,
@@ -82,7 +84,7 @@ function initTabs() {
     else if (e.key === 'End') next = TABS[TABS.length - 1];
     if (next) { e.preventDefault(); showTab(next, {focus: true}); }
   });
-  // The three headline lines are the index of the demo.
+  // Any [data-pf-jump] link opens its tab (none in the current hero; kept for deep links from copy).
   $$('[data-pf-jump]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
     showTab(a.dataset.pfJump, {scroll: true});
@@ -618,4 +620,26 @@ function initAccess() {
   });
 }
 
+// ═════════════════════════ sources strip (LIVE) ═════════════════════════
+// The server renders the names. This adds lots tracked + last seen for live sites and "Paused" for the rest.
+// "N tracked" is the endpoint's number — the page never says "all".
+async function initSources() {
+  const list = $('#pf-sources-list');
+  if (!list) return;
+  let data;
+  try { data = await api('/platform/api/sources'); } catch { return; }
+  if (!data || !data.ok || !Array.isArray(data.sources) || !data.sources.length) return;
+  list.innerHTML = data.sources.map(s => {
+    const mins = s.last_seen ? (Date.now() - new Date(s.last_seen).getTime()) / 60000 : null;
+    return s.live
+      ? `<li class="pf-source is-live"><span class="pf-source-name">${esc(s.name)}</span>
+           <span class="pf-source-n">${esc(fmt.int(s.lots))}</span>
+           <span class="pf-source-meta">lots · ${esc(ago(mins))}</span></li>`
+      : `<li class="pf-source is-paused"><span class="pf-source-name">${esc(s.name)}</span>
+           <span class="pf-source-meta">Paused</span></li>`;
+  }).join('');
+  $('#pf-sources-count').textContent = `${data.tracked} tracked · ${data.live} live now`;
+}
+
+initSources();
 if ($('#demo')) { initDeals(); initInv(); initCrm(); initTabs(); initAccess(); }
