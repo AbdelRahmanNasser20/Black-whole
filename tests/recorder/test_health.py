@@ -350,3 +350,21 @@ def test_health_file_fallback_persists_across_runs(monkeypatch, db_stubs, tmp_pa
     cli.cmd_run({"ps": src}, discover_stale_hours=6, now=NOW + timedelta(minutes=5))
     assert src.discover_calls == 3
     assert db_stubs == []
+
+
+def test_lock_connection_backs_off_when_pooler_is_full(monkeypatch):
+    import psycopg
+    calls = []
+
+    def connect(**k):
+        calls.append(1)
+        if len(calls) < 3:
+            raise psycopg.OperationalError("FATAL: (EMAXCONNSESSION) max clients reached in session mode")
+        return "conn"
+
+    monkeypatch.setattr(cli.db, "connect", connect)
+    monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+    assert cli._connect_lock_conn() == "conn" and len(calls) == 3
+    monkeypatch.setattr(cli.db, "connect", lambda **k: (_ for _ in ()).throw(psycopg.OperationalError("bad password")))
+    with pytest.raises(psycopg.OperationalError):
+        cli._connect_lock_conn()

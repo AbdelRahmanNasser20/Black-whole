@@ -608,6 +608,21 @@ def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
 _RUN_LOCK_KEY = "recorder_run"
 
 
+def _connect_lock_conn(attempts: int = 4, base_delay: float = 2.0):
+    """The run's private lock connection, backing off while the Supabase
+    session pooler is full ("max clients reached", 15-client cap) instead of
+    dying with a traceback (seen in the 2026-10-02 soak)."""
+    for i in range(attempts):
+        try:
+            return db.connect(pooled=False)
+        except psycopg.OperationalError as e:
+            if i == attempts - 1 or not any(m in str(e).lower() for m in store._POOL_FULL_MARKERS):
+                raise
+            delay = base_delay * (2 ** i)
+            print(f"recorder run: pooler full, retrying the lock connection in {delay:.0f}s")
+            time.sleep(delay)
+
+
 def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
     started = time.monotonic()
@@ -617,7 +632,7 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
     # opens. `pg_try_advisory_lock` never blocks: it returns False instantly
     # if another `run` already holds the lock, so an overrunning previous
     # invocation just makes this one a clean no-op exit(0), never a pile-up.
-    conn = db.connect(pooled=False)
+    conn = _connect_lock_conn()
     try:
         locked = conn.execute(
             "SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (_RUN_LOCK_KEY,)
