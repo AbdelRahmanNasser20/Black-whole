@@ -217,7 +217,7 @@ def test_sql_uses_postgres_word_boundaries_never_backslash_b():
 def test_currency_and_category_gates():
     plan = lot_analysis.match_plan("stacking chair", None, None, [], None)
     rows = [_row("Stacking chairs (10)", 100.0, "seating_furniture", i=1),
-            _row("Stacking chairs (10)", 90.0, "seating_furniture", cur="EUR", i=2),
+            dict(_row("Stacking chairs (10)", 90.0, "seating_furniture", cur="EUR", i=2), account_id=2),
             _row("Stacking chairs toy set", 5.0, "collectibles_jewelry", i=3),
             _row("Stacking chairs misc", 50.0, "general_merchandise", i=4)]
     kept, counts = lot_analysis.filter_comps(plan, rows, "seating_furniture")
@@ -237,3 +237,42 @@ def test_judge_decides_and_unavailable_judge_keeps_nothing():
     assert b["deal"]["judged"] is False and "503" in b["deal"]["judge_error"]
     assert not any(c["used"] for c in b["comps"])
     assert "not enough comps" in b["deal"]["verdict_label"]
+
+
+def test_relists_of_the_same_asset_are_never_its_comps_and_titles_dedupe():
+    plan = lot_analysis.match_plan("stacking chair", None, None, [], None)
+    relist = dict(_row("Lot of Approx. 150 Stacking Chairs", 823.0, "seating_furniture", i=5282),
+                  account_id=3780, auction_id=1, closed_at="2026-09-01T00:00:00+00:00")
+    a1 = dict(_row("Stacking chairs (10)", 100.0, "seating_furniture", i=11), account_id=77,
+              closed_at="2026-08-01T00:00:00+00:00")
+    a2 = dict(a1, asset_id=12, price=120.0, closed_at="2026-09-15T00:00:00+00:00")   # same seller+title
+    other = dict(_row("Stacking chairs (10)", 90.0, "seating_furniture", i=13), account_id=78)
+    sc_relist = {"title": "Stacking Chairs lot", "price": 50.0, "source": "govdeals",
+                 "source_lot_id": "5282/3780/1", "origin": "sold_comps:govdeals", "currency_code": "USD"}
+    kept, counts = lot_analysis.filter_comps(plan, [relist, a1, a2, other, sc_relist],
+                                             "seating_furniture", "5282/3780/2")
+    assert [(r["asset_id"], r["price"]) for r in kept] == [(12, 120.0), (13, 90.0)]
+    assert counts["same_asset"] == 2 and counts["duplicate"] == 1
+
+
+def test_comp_sql_excludes_every_auction_run_of_the_asset():
+    assert "NOT (asset_id = %s AND account_id = %s)" in lot_analysis._DEAL_LOT_COMPS_SQL
+    assert "auction_id = %s" not in lot_analysis._DEAL_LOT_COMPS_SQL
+    assert "split_part(c.source_lot_id, '/', 1)" in lot_analysis._SOLD_COMPS_SQL
+
+
+def test_old_version_cache_is_not_a_cache_hit(tmp_path, monkeypatch):
+    from recorder import cli
+    store = lot_archive.LocalStore(tmp_path)
+    store.put(lot_archive.analysis_key("5282/3780/2"),
+              json.dumps({"status": "ok", "version": 1}).encode(), "application/json")
+    ran = []
+    monkeypatch.setattr(lot_analysis, "analyze_and_store",
+                        lambda st, key, *a, **k: ran.append(key) or {"status": "ok"})
+    cli.cmd_archive_analyze(5, lot="5282/3780/2", archive_store=store)
+    assert ran == ["5282/3780/2"]
+    store.put(lot_archive.analysis_key("5282/3780/2"),
+              json.dumps({"status": "ok", "version": lot_analysis.ANALYSIS_VERSION}).encode(),
+              "application/json")
+    cli.cmd_archive_analyze(5, lot="5282/3780/2", archive_store=store)
+    assert ran == ["5282/3780/2"]

@@ -143,7 +143,7 @@ FROM deal_lots
 WHERE site = 'govdeals' AND outcome IN ('sold', 'low_bid') AND final_bid > 0
   AND currency_code = 'USD'
   AND (title ~* %s OR (%s <> '' AND title ~* %s AND title ~* %s))
-  AND NOT (asset_id = %s AND account_id = %s AND auction_id = %s)
+  AND NOT (asset_id = %s AND account_id = %s)   -- every auction run of THIS asset (relists)
 ORDER BY end_utc DESC
 LIMIT %s
 """
@@ -162,7 +162,8 @@ JOIN LATERAL (
       AND COALESCE(raw->>'assetShortDescription', raw->>'title', raw->>'name') IS NOT NULL
     ORDER BY s.observed_at DESC LIMIT 1
 ) t ON TRUE
-WHERE c.final_price > 0 AND c.source_lot_id <> %s
+WHERE c.final_price > 0
+  AND split_part(c.source_lot_id, '/', 1) || '/' || split_part(c.source_lot_id, '/', 2) <> %s
   AND COALESCE(t.currency, 'USD') = 'USD'
   AND (t.title ~* %s OR (%s <> '' AND t.title ~* %s AND t.title ~* %s))
 ORDER BY c.sold_at DESC NULLS LAST
@@ -208,7 +209,13 @@ def _word_alt(w: str) -> str:
 
 class MatchPlan:
     """What a comp's title must say. Pure; renders the same rule as a Python
-    regex (`\\b`) and a Postgres ARE (`\\y`)."""
+    regex (`\\b`) and a Postgres ARE (`\\y`).
+
+    Discriminators = the item type's other words + the brand/model words. They
+    only matter in the second tier (head noun present, phrase absent): one of
+    them must also appear, so "cover" alone ("Hard cover notebook") never
+    matches a "car cover" lot. They are deliberately NOT required in the
+    phrase tier — a "car cover" comp needn't say "Range Rover"."""
 
     def __init__(self, phrase: list[str], discriminators: list[str]):
         self.phrase = phrase
@@ -285,13 +292,13 @@ def auction_comps(plan: MatchPlan, lot_key: str) -> list[dict]:
     from automation import db
     from recorder.store import _read_with_backoff
 
-    a, b, c = (int(p) for p in lot_key.split("/"))
+    a, b, _c = (int(p) for p in lot_key.split("/"))
     params = plan.sql_params()
     rows = [dict(r, origin="deal_lots") for r in
-            _read_with_backoff(db.fetch_all, _DEAL_LOT_COMPS_SQL, (*params, a, b, c, MAX_COMPS))]
+            _read_with_backoff(db.fetch_all, _DEAL_LOT_COMPS_SQL, (*params, a, b, MAX_COMPS))]
     try:
         rows += [dict(r, origin=f"sold_comps:{r['source']}") for r in
-                 _read_with_backoff(db.fetch_all, _SOLD_COMPS_SQL, (lot_key, *params, 20))]
+                 _read_with_backoff(db.fetch_all, _SOLD_COMPS_SQL, (f"{a}/{b}", *params, 20))]
     except Exception as e:  # noqa: BLE001 - optional second source
         print(f"[lot_analysis] sold_comps unreadable: {e}", file=sys.stderr)
     return rows
@@ -306,12 +313,53 @@ def _category_of(canonical: str | None, llm: str | None) -> str | None:
     return None
 
 
-def filter_comps(plan: MatchPlan, rows: list[dict], our_category: str | None) -> tuple[list[dict], dict]:
-    """Pure. Title match + category gate + currency gate. Returns (candidates,
-    counts) — every candidate carries `match_method`."""
-    counts = {"rows": len(rows), "no_match": 0, "category": 0, "currency": 0}
+def _asset_account(r: dict) -> tuple[str, str] | None:
+    """(asset, account) of a comp row — deal_lots columns or a maestro
+    `a/b/c` source_lot_id. None for sources with no such key."""
+    if r.get("asset_id") is not None and r.get("account_id") is not None:
+        return str(r["asset_id"]), str(r["account_id"])
+    parts = str(r.get("source_lot_id") or "").split("/")
+    return (parts[0], parts[1]) if len(parts) == 3 else None
+
+
+def _close_ts(r: dict) -> float:
+    v = r.get("closed_at")
+    if isinstance(v, datetime):
+        return v.timestamp()
+    if isinstance(v, str) and v:
+        try:
+            return datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return 0.0
+    return 0.0
+
+
+def filter_comps(plan: MatchPlan, rows: list[dict], our_category: str | None,
+                 lot_key: str | None = None) -> tuple[list[dict], dict]:
+    """Pure. Relist exclusion + dedupe + title match + category gate +
+    currency gate. Returns (candidates, counts) — every candidate carries
+    `match_method`.
+
+    A relist is the same asset under a new auction id (5282/3780/1 vs /2):
+    it is the lot itself, never its comp. And one seller relisting the same
+    title N times is one comp, not N — dedupe on (seller account, lower
+    title), keeping the latest close."""
+    counts = {"rows": len(rows), "no_match": 0, "category": 0, "currency": 0,
+              "same_asset": 0, "duplicate": 0}
+    ours = tuple(lot_key.split("/")[:2]) if lot_key and lot_key.count("/") == 2 else None
+    seen: set[tuple[str, str]] = set()
     out = []
-    for r in rows:
+    for r in sorted(rows, key=_close_ts, reverse=True):
+        aa = _asset_account(r)
+        if ours and aa == ours:
+            counts["same_asset"] += 1
+            continue
+        dkey = ((aa[1] if aa else str(r.get("source") or r.get("origin") or "")),
+                (r.get("title") or "").strip().lower())
+        if dkey in seen:
+            counts["duplicate"] += 1
+            continue
+        seen.add(dkey)
         method = plan.match(r.get("title"))
         if method is None:
             counts["no_match"] += 1
@@ -468,7 +516,8 @@ def analyze(doc: dict, *, identity_fn: Callable | None = None, classify_fn: Call
     except Exception as e:  # noqa: BLE001 - DB trouble: say so, don't invent
         rows = []
         out["comps_error"] = str(e)[:200]
-    comps, gate_counts = filter_comps(plan, rows, our_cat) if plan else ([], {"rows": 0})
+    comps, gate_counts = (filter_comps(plan, rows, our_cat, doc["lot_key"]) if plan
+                          else ([], {"rows": 0}))
     comps = comps[:JUDGE_MAX]
 
     # The judge only runs when its answer can matter (≥ MIN_COMPS candidates).
