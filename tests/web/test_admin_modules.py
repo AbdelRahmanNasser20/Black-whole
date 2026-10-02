@@ -12,7 +12,7 @@ from automation.web import auth as auth_svc
 from automation.web.app import app
 
 ADMIN = Path("automation/web/static/admin")
-TABS = ["launcher", "drafts", "auctions", "inventory", "inquiries", "subscribers",
+TABS = ["launcher", "drafts", "auctions", "inventory", "quotes", "inquiries", "subscribers",
         "listings_db", "test_scrape", "deals", "tracking", "deposits", "channels", "archive"]
 
 

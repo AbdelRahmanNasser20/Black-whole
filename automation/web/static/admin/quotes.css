@@ -1,0 +1,95 @@
+/* static/admin/quotes.css — Sales › Quotes. Shared `.card` (components.css) + the `card--quote` modifier; status pill →
+   `.badge`; actions → `.card-chips`. Tokens only (tokens.css), radius 0. Loading/empty/error come from skeleton.css
+   (.sk-card / .ui-empty / .ui-error). */
+
+/* ── control row ─────────────────────────────────────────────── */
+.quote-controls { padding: 12px 0; border-bottom: 1px solid var(--border); margin: 0 0 var(--gap); }
+.quote-controls-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.quote-controls .seg { flex-wrap: wrap; max-width: 100%; }
+.quote-controls .seg-btn { border-bottom: 1px solid var(--border); margin-bottom: -1px; }
+.quote-controls .btn { margin-left: auto; }
+
+.quote-banner {
+  margin: 0 0 var(--gap); padding: 10px 14px;
+  border: 1px solid var(--warn); border-left-width: 3px; color: var(--text);
+  font: 400 var(--fs-xs)/1.6 var(--mono); overflow-wrap: anywhere;
+}
+.quote-banner[hidden] { display: none; }
+.quote-banner strong { color: var(--warn); font-weight: 500; }
+
+/* ── list ────────────────────────────────────────────────────── */
+.quote-list { display: flex; flex-direction: column; gap: 14px; padding: 0 0 40px; }
+.quote-list > * { min-width: 0; }
+.quote-list .sk-card { min-height: 190px; }   /* twin of a .card--quote: band + lane + contact + 2 price lines + note + actions */
+
+/* ── card ────────────────────────────────────────────────────── */
+.card--quote { border-left: 3px solid var(--border-strong); }
+.card--quote.is-new { border-left-color: var(--accent); }
+.card--quote.is-answered { border-left-color: var(--info); }
+.card--quote.is-won { border-left-color: var(--success); }
+.card--quote.is-lost, .card--quote.is-junk { border-left-color: var(--dim); opacity: .75; }
+.card--quote .card-band { margin-left: -3px; padding-left: calc(var(--pad) + 2px); }
+
+.quote-source {
+  flex: 0 0 auto; padding: 3px 8px; letter-spacing: .2em; font-size: 10px;
+  border: 1px solid var(--border-strong); color: var(--text);
+}
+.quote-source--storefront { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.quote-source--crm { background: var(--info); color: var(--bg); border-color: var(--info); }
+
+.quote-lot a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.quote-when { color: var(--muted); }
+.quote-status { flex: 0 0 auto; }
+.is-new .quote-status { color: var(--accent); border-color: var(--accent); }
+.is-answered .quote-status { color: var(--info); border-color: var(--info); }
+.is-won .quote-status { color: var(--success); border-color: var(--success); }
+.is-lost .quote-status, .is-junk .quote-status { color: var(--dim); }
+
+.quote-lane { font-size: 15px; -webkit-line-clamp: 3; }
+.quote-contact { display: flex; gap: 14px; flex-wrap: wrap; font-family: var(--mono); font-size: var(--fs-sm); }
+.quote-contact a { color: var(--text); text-decoration: underline; text-underline-offset: 3px; }
+.quote-nocontact { color: var(--warn); }
+
+.quote-line {
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+  font: 400 var(--fs-sm)/1.5 var(--mono); font-variant-numeric: tabular-nums;
+}
+.quote-k { flex: 0 0 22ch; white-space: nowrap; font: 500 10px/1.5 var(--mono); letter-spacing: .14em; color: var(--muted); }
+.quote-v { color: var(--text); font-weight: 700; }
+.quote-dim { color: var(--muted); }
+.quote-line--warn > span:not(.quote-k) { color: var(--warn); }
+.quote-why { flex-basis: 100%; padding-left: 142px; color: var(--muted); overflow-wrap: anywhere; }
+
+.quote-flag {
+  display: inline-block; padding: 2px 7px; font: 500 10px/1.4 var(--mono); letter-spacing: .14em;
+  border: 1px solid var(--border-strong); color: var(--text); vertical-align: middle;
+}
+.quote-flag--site_low { border-color: var(--danger); color: var(--danger); }
+.quote-flag--site_high { border-color: var(--info); color: var(--info); }
+.quote-flag--stock { border-color: var(--warn); color: var(--warn); }
+
+.quote-options { font: 400 var(--fs-xs)/1.6 var(--mono); color: var(--muted); padding-left: 142px; }
+.quote-options summary { cursor: pointer; }
+.quote-options ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.quote-options li { display: grid; grid-template-columns: minmax(0, 24ch) 8ch 5ch; gap: 10px; }
+.quote-options li span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+.quote-options li span:nth-child(2) { text-align: right; font-variant-numeric: tabular-nums; }
+
+.quote-note { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.quote-note input {
+  flex: 1 1 auto; min-width: 0; height: 30px; padding: 0 10px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border);
+  font: 400 var(--fs-sm)/1 var(--sans);
+}
+.quote-note input:focus { outline: none; border-color: var(--accent); }
+
+.quote-actions { gap: 8px; padding-top: 8px; }
+
+@media (max-width: 639px) {
+  .card--quote .card-band { height: auto; min-height: 28px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; row-gap: 6px; }
+  .quote-lot { flex-basis: 100%; }
+  .quote-k { flex-basis: 100%; }
+  .quote-why, .quote-options { padding-left: 0; }
+  .quote-note { flex-wrap: wrap; }
+  .quote-note input { flex-basis: 100%; }
+}

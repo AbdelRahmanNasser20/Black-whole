@@ -128,6 +128,16 @@
   padding: 2px 5px;
 }
 .inv-loc-input:focus { border-style: solid; outline: none; }
+/* chair data for freight (weight · frame · chairs per pallet · pallet height) — blank = the standard chair */
+.inv-chair { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 4px; }
+.inv-chair label { display: inline-flex; align-items: center; gap: 4px; font: 500 9px/1 var(--mono); letter-spacing: .1em; color: var(--dim); }
+.inv-chair input {
+  height: 22px; padding: 0 5px; background: transparent; color: var(--text);
+  border: 1px dashed var(--border); font: 400 var(--fs-xs)/1 var(--mono);
+}
+.inv-chair input:focus { border-style: solid; outline: none; }
+.inv-chair-num { width: 7ch; }
+.inv-chair-frame { width: 16ch; }
 .inv-extras {
   display: flex; flex-wrap: wrap; gap: 4px;
   margin-top: 4px;

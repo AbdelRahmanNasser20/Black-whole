@@ -91,10 +91,12 @@
            data-lot-id="{{ item.lot_id }}" data-default-qty="{{ freight.default_qty }}">
         <dt>FREIGHT TO YOUR ZIP</dt>
         <dd>
-          <form class="fw-form">
+          {#- One step: where it goes and who to answer. The price shows only once the request is
+              saved (POST /freight-estimate), so every estimate on screen is a lead on file. #}
+          <form class="fw-form" novalidate>
             <label class="fw-field">
               <span class="mono tiny">DEST ZIP</span>
-              <input class="fw-zip" name="dest_zip" inputmode="numeric" maxlength="5"
+              <input class="fw-zip" name="dest_zip" inputmode="numeric" maxlength="10"
                      placeholder="00000" autocomplete="postal-code" required>
             </label>
             <label class="fw-field">
@@ -102,17 +104,19 @@
               <input class="fw-qty" name="quantity" type="number" min="1" max="10000"
                      value="{{ freight.default_qty }}">
             </label>
-            <button type="submit" class="btn btn-primary btn-small">ESTIMATE →</button>
+            <label class="fw-field fw-field--grow">
+              <span class="mono tiny">EMAIL</span>
+              <input class="fw-email-input" name="email" type="email" maxlength="254"
+                     placeholder="you@company.com" autocomplete="email" required>
+            </label>
+            <label class="fw-field fw-field--phone">
+              <span class="mono tiny">PHONE</span>
+              <input class="fw-phone-input" name="phone" type="tel" maxlength="32"
+                     placeholder="(555) 555-0100" autocomplete="tel" required>
+            </label>
+            <button type="submit" class="btn btn-primary btn-small">GET ESTIMATE →</button>
           </form>
           <div class="fw-result mf-result" hidden></div>
-          <form class="fw-email" hidden>
-            <label class="fw-field fw-field--grow">
-              <span class="mono tiny">EMAIL ME THIS ESTIMATE</span>
-              <input class="fw-email-input" type="email" placeholder="you@company.com"
-                     autocomplete="email">
-            </label>
-            <button type="submit" class="btn btn-ghost btn-small">SEND</button>
-          </form>
           <div class="fw-framing mono tiny">
             ESTIMATE — FINALIZED AT SHIP TIME · INCLUDES RESIDENTIAL DELIVERY + LIFTGATE
             · CHAIR PRICE SEPARATE &amp; FIRM · LOCAL PICKUP ALWAYS FREE

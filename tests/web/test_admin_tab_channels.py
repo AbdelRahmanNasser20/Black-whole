@@ -37,7 +37,7 @@ def _pane(html: str) -> str:
 def test_rail_has_a_channels_tab_with_a_pane():
     html = TestClient(app).get("/admin").text
     assert re.search(r'<a class="rail-tab" data-tab="channels" href="\?tab=channels"[^>]*>'
-                     r'<span class="rail-tab-num">12</span><span class="rail-tab-label">Channels</span></a>', html)
+                     r'<span class="rail-tab-num">10</span><span class="rail-tab-label">Channels</span></a>', html)
     _pane(html)
 
 

@@ -11,8 +11,7 @@ branch tip (`freight_quote.py` + `config/chair_freight.py` + `state_zips.py` +
 `geo_utils.haversine_miles`), merged into this one self-contained module the way
 `lot_images.py` centralizes photo resolution. That branch is 50+ commits behind
 its own main and is NOT being rebased — this copy is the storefront's source of
-truth. The chair-count/linear-feet bug in `_map_carrier_rates` was already fixed
-on the branch tip and the fix is carried here, with its regression test.
+truth.
 
 **What changed on the way in** (deliberate, do not "restore"):
 
@@ -20,19 +19,17 @@ on the branch tip and the fix is carried here, with its regression test.
    numpy and downloads ~10 MB on first use. Here `zip_to_latlon` reads the
    committed 3-digit-prefix table in `automation.zip_centroids` — stdlib only,
    zero network, ±30 mi (≈ ±$10, inside the range spread).
-2. *Warp only, no Estes.* The Estes adapter needed a carrier account that was
-   rejected; it and its key-minting CLI are dropped. Provider precedence is
-   Warp (if `WARP_API_KEY`) → estimator.
-3. *A carrier failure falls back to the estimator instead of raising.* In the
-   CRM a Warp HTTP/parse error meant "hand off to the seller", which is right
-   for a DM thread with a human behind it. On the storefront a buyer typing a
-   ZIP into a web form must never lose a quotable lane to a flaky third-party
-   API, so `get_freight_estimate` retries with `EstimatorProvider` and reports
-   `provider == "estimator"`. **Lane failures still raise** — an unresolvable
-   ZIP, an international destination, an offshore/Alaska destination, or a
-   non-positive quantity all produce `FreightUnavailable` and the caller shows
-   "we'll quote this one by hand". The hard rule is unchanged: never fabricate
-   a number.
+2. *No carrier adapter at all.* The Estes adapter needed a carrier account that
+   was rejected. The Warp adapter that came across with it posted an old body
+   shape to an old host and never ran with a key; with one set it would have
+   failed on every estimate and added a 20 s wait before the fallback. Both are
+   gone (2026-10-02). **The estimator is the only provider**, and a
+   `WARP_API_KEY` in the environment changes nothing here. Real carrier prices
+   are fetched separately, for the operator only, by `automation.warp_rates`.
+3. *Lane failures raise.* An unresolvable ZIP, an international destination, an
+   offshore/Alaska destination, or a non-positive quantity all produce
+   `FreightUnavailable` and the caller shows "we'll quote this one by hand".
+   The hard rule is unchanged: never fabricate a number.
 4. *Alaska (`995`–`999`) joins the offshore set.* Ground-LTL math is simply
    wrong for AK (barge/air legs); those lanes get hand-quoted.
 
@@ -46,8 +43,7 @@ CLI:
 from __future__ import annotations
 
 import math
-import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from typing import Optional, Protocol
 
@@ -79,6 +75,15 @@ class LotCalibration:
     lbs_per_chair_estimated: bool = True       # True until a chair is actually weighed
     chairs_per_linear_foot: float = 23.0       # empirical (600 chairs ≈ 26' box-truck floor)
     cube_ft3_per_chair: float = 2.78           # empirical (600 chairs ≈ 1,670 ft³ box volume)
+    # LTL pallet facts — ESTIMATED 2026-10-02 from the Boise → Atlanta truck:
+    # 1,250 chairs stacked ~15 high filled a 53' trailer with ~2 rows spare
+    # (~47 of 52.5 ft ⇒ ~23.5 pallet positions ⇒ ~53 chairs per position). An
+    # LTL pallet tops out at 85 in, so a stack is ~10 high, not 15 ⇒ ~35 chairs.
+    # Not measured; the operator overrides both per lot on the Inventory tab.
+    # Neither feeds the price shown to a buyer — they size the pallet count for
+    # the operator-only carrier check (automation.warp_rates).
+    chairs_per_pallet: float = 35.0
+    pallet_height_in: int = 80
 
 
 # The Boise lot (inventory.lot_id = '31225', zip 83702) is the default standard.
@@ -107,6 +112,42 @@ def calibration_for_lot(lot_id: str | None) -> LotCalibration:
     if lot_id and str(lot_id) in LOT_CALIBRATIONS:
         return LOT_CALIBRATIONS[str(lot_id)]
     return DEFAULT_CALIBRATION
+
+
+def _positive(value) -> float | None:
+    try:
+        n = float(value)
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 and math.isfinite(n) else None
+
+
+def calibration_from_row(row: dict | None) -> LotCalibration:
+    """Calibration for an inventory ROW (a plain dict — this module never reads
+    the DB). The operator's per-lot chair data wins where it is set:
+
+      ``chair_weight_lb``    → ``lbs_per_chair`` (and marks it as measured)
+      ``chairs_per_pallet``  → ``chairs_per_pallet``
+      ``pallet_height_in``   → ``pallet_height_in``
+
+    Anything missing, blank or non-positive falls back to the standard chair,
+    so a lot nobody has measured quotes exactly as it did before these columns
+    existed (and a row from before migration 021 simply has none of the keys).
+    """
+    row = row or {}
+    cal = calibration_for_lot(row.get("lot_id"))
+    changes: dict = {}
+    weight = _positive(row.get("chair_weight_lb"))
+    if weight:
+        changes["lbs_per_chair"] = weight
+        changes["lbs_per_chair_estimated"] = False
+    per_pallet = _positive(row.get("chairs_per_pallet"))
+    if per_pallet:
+        changes["chairs_per_pallet"] = per_pallet
+    height = _positive(row.get("pallet_height_in"))
+    if height:
+        changes["pallet_height_in"] = int(round(height))
+    return replace(cal, **changes) if changes else cal
 
 
 # ---------------------------------------------------------------------------
@@ -232,10 +273,13 @@ def density_lb_ft3(quantity: int, cal: LotCalibration) -> float:
 
 
 def handling_units(quantity: int, cal: LotCalibration) -> int:
-    """Approx palletized handling units for a carrier API (~1 pallet / 4 linear ft)."""
-    if quantity <= 0:
+    """LTL pallets for a chair count, from the lot's chairs-per-pallet.
+
+    (Was "1 pallet per 4 linear feet", which packed up to 92 chairs on a pallet
+    — a full-height trailer row, not a pallet a carrier will take.)"""
+    if quantity <= 0 or cal.chairs_per_pallet <= 0:
         return 0
-    return max(1, math.ceil(linear_feet(quantity, cal) / 4.0))
+    return max(1, math.ceil(quantity / cal.chairs_per_pallet))
 
 
 def select_mode(linear_ft: float) -> str:
@@ -402,7 +446,8 @@ class FreightProvider(Protocol):
     name: str
 
     def quote(
-        self, origin_zip: str, dest_zip: str, quantity: int, delivery_env: str
+        self, origin_zip: str, dest_zip: str, quantity: int, delivery_env: str,
+        cal: Optional[LotCalibration] = None,
     ) -> dict:
         ...
 
@@ -428,8 +473,8 @@ class EstimatorProvider:
 
     name = "estimator"
 
-    def quote(self, origin_zip, dest_zip, quantity, delivery_env):
-        cal = calibration_for_lot(None)  # rack geometry standard (Boise)
+    def quote(self, origin_zip, dest_zip, quantity, delivery_env, cal=None):
+        cal = cal or calibration_for_lot(None)  # rack geometry standard (Boise)
         miles = lane_miles(origin_zip, dest_zip)
         acc = _accessorials(delivery_env)
         acc_fee = (RESIDENTIAL_FEE_USD if acc["residential"] else 0.0) + (
@@ -502,141 +547,12 @@ class EstimatorProvider:
         return _round10(point * RANGE_SPREAD_LOW), _round10(point * RANGE_SPREAD_HIGH)
 
 
-class _CarrierProviderBase:
-    """Shared HTTP plumbing for the real carrier adapters. Subclasses map the
-    carrier JSON into the same contract dict and raise FreightUnavailable on any
-    HTTP / parse error (never a half-filled quote)."""
-
-    name = "carrier"
-    timeout = 20
-
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-
-    def _post_json(self, url: str, headers: dict, payload: dict) -> dict:
-        try:
-            import json as _json
-            import urllib.request
-
-            req = urllib.request.Request(
-                url,
-                data=_json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json", **headers},
-                method="POST",
-            )
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
-                return _json.loads(resp.read().decode("utf-8"))
-        except Exception as e:  # noqa: BLE001 — any failure ⇒ estimator fallback
-            raise FreightUnavailable(f"{self.name} API error: {e}") from e
-
-
-class WarpProvider(_CarrierProviderBase):
-    """Warp multi-carrier freight API (LTL + partial/volume), the one real
-    adapter we keep. Endpoint POST /api/v1/ltl/quote, Bearer ``WARP_API_KEY``.
-
-    Sandbox vs production base URL switches on ``WARP_ENV`` (sandbox default).
-    The response shape is mapped to the contract dict; anything unexpected
-    raises FreightUnavailable, which on the storefront means "fall back to the
-    estimator" (see the module docstring), not "no quote".
-    """
-
-    name = "warp"
-    SANDBOX_BASE = "https://api.sandbox.wearewarp.com"
-    PROD_BASE = "https://api.wearewarp.com"
-
-    def __init__(self, api_key: str, env: Optional[str] = None):
-        super().__init__(api_key)
-        self.env = (env or os.environ.get("WARP_ENV") or "sandbox").lower()
-        self.base = self.PROD_BASE if self.env == "production" else self.SANDBOX_BASE
-
-    def quote(self, origin_zip, dest_zip, quantity, delivery_env):
-        cal = calibration_for_lot(None)
-        acc = _accessorials(delivery_env)
-        payload = {
-            "origin": {"zipcode": origin_zip},
-            "destination": {"zipcode": dest_zip, "residential": acc["residential"]},
-            "accessorials": [k for k in ("residential", "liftgate") if acc[k]],
-            "items": [
-                {
-                    "quantity": handling_units(quantity, cal),
-                    "packaging": "PALLET",
-                    "weight": total_weight_lb(quantity, cal),
-                    "length": 48,
-                    "width": 40,
-                    "height": 72,
-                    "freightClass": density_to_nmfc_class(
-                        density_lb_ft3(quantity, cal)
-                    ),
-                }
-            ],
-        }
-        data = self._post_json(
-            f"{self.base}/api/v1/ltl/quote",
-            {"Authorization": f"Bearer {self.api_key}"},
-            payload,
-        )
-        return _map_carrier_rates(self.name, data, origin_zip, dest_zip, quantity, acc)
-
-
-def _first_number(obj, keys):
-    """Best-effort scan for the first numeric value under any of ``keys`` in a
-    nested dict/list. Carrier JSON shapes drift; this keeps the adapter from
-    breaking on a renamed field (still raises upstream if nothing is found)."""
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if k in keys and isinstance(v, (int, float)):
-                return float(v)
-            found = _first_number(v, keys)
-            if found is not None:
-                return found
-    elif isinstance(obj, list):
-        for item in obj:
-            found = _first_number(item, keys)
-            if found is not None:
-                return found
-    return None
-
-
-def _map_carrier_rates(provider, data, origin_zip, dest_zip, quantity, acc) -> dict:
-    """Map a carrier response into the contract dict. Pulls a total charge and
-    spreads it into a ± range (carriers return a firm number; we still present a
-    range, re-confirmed at ship time). Raises FreightUnavailable if no rate."""
-    total = _first_number(
-        data,
-        {"totalCharge", "total", "netCharge", "amount", "rate", "price", "grandTotal"},
-    )
-    if total is None or total <= 0:
-        raise FreightUnavailable(f"{provider}: no usable rate in response")
-    miles = lane_miles(origin_zip, dest_zip)
-    # select_mode takes linear FEET of trailer, not the chair count.
-    cal = calibration_for_lot(None)
-    mode = select_mode(linear_feet(quantity, cal))
-    low = _round10(total * 0.95)
-    high = _round10(total * 1.15)
-    is_partial = mode == "partial"
-    return {
-        "ltl_low": None if is_partial else low,
-        "ltl_high": None if is_partial else high,
-        "partial_low": low if mode in ("partial", "both") else None,
-        "partial_high": high if mode in ("partial", "both") else None,
-        "recommended_mode": "partial" if is_partial else "ltl",
-        "mode": mode,
-        "miles": int(round(miles)),
-        "transit_days": transit_days(miles),
-        "valid_until": (date.today() + timedelta(days=QUOTE_VALID_DAYS)).isoformat(),
-        "accessorials": acc,
-        "raw": {"provider": provider, "carrier_total": total, "response": data},
-    }
-
-
 # ===========================================================================
 # Provider selection + public entry point
 # ===========================================================================
 def select_provider() -> FreightProvider:
-    """Pick the live provider by env, precedence Warp → estimator."""
-    warp = os.environ.get("WARP_API_KEY")
-    if warp:
-        return WarpProvider(warp)
+    """The estimator, always. Kept as a seam (and for the CRM's call sites);
+    no environment variable selects anything else — see the module docstring."""
     return EstimatorProvider()
 
 
@@ -645,6 +561,7 @@ def get_freight_estimate(
     dest_zip: str,
     quantity: int,
     delivery_env: str = "residential",
+    cal: Optional[LotCalibration] = None,
 ) -> dict:
     """Compute a freight cost RANGE for shipping ``quantity`` chairs origin→dest.
 
@@ -657,12 +574,12 @@ def get_freight_estimate(
     "dock" (forklift/dock confirmed → those accessorials dropped), or
     "storage" (self-storage unit → liftgate + limited-access, not residential).
 
+    ``cal`` is the lot's own chair data (:func:`calibration_from_row`); None
+    means the standard chair.
+
     Raises :class:`FreightUnavailable` for an international/offshore/Alaska
     destination, an unresolvable zip, or a non-positive quantity — the caller
-    offers a hand quote and never invents a number. A **carrier** failure is
-    different: it falls back to :class:`EstimatorProvider` (the returned
-    ``provider`` says which one answered) so a flaky third-party API can't cost
-    the storefront a quotable lane.
+    offers a hand quote and never invents a number.
     """
     if not quantity or quantity <= 0:
         raise FreightUnavailable("quantity must be a positive number of chairs")
@@ -673,13 +590,7 @@ def get_freight_estimate(
         raise FreightUnavailable(f"international/offshore destination {dest_zip!r}")
     d = _resolve_zip(dest_zip)
     provider = select_provider()
-    try:
-        quote = provider.quote(o, d, int(quantity), delivery_env)
-    except FreightUnavailable:
-        if isinstance(provider, EstimatorProvider):
-            raise           # the lane itself is unquotable — hand it off
-        provider = EstimatorProvider()
-        quote = provider.quote(o, d, int(quantity), delivery_env)
+    quote = provider.quote(o, d, int(quantity), delivery_env, cal)
     quote.setdefault("provider", provider.name)
     return quote
 

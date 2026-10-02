@@ -45,3 +45,51 @@ html[data-rail="closed"] .rail-tab-label { display: none; }
   html[data-rail="closed"] .rail-tab-label { display: inline; }
 }
 @media (prefers-reduced-motion: reduce) { .rail-tab { transition: none; } }
+
+/* ── Sales group: rail badge, key hints, view switch ─────────────── */
+/* The Sales rail tab stands for four views (quotes · inquiries · deposits · subscribers); the badge is how many of
+   them are waiting on the operator. Tokens only. */
+.rail-tab-badge {
+  margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--bg);
+  font: 700 10px/1 var(--mono); font-variant-numeric: tabular-nums;
+}
+.rail-tab-badge[hidden] { display: none; }
+html[data-rail="closed"] .rail-tab-badge { position: absolute; margin: -18px 0 0 22px; }
+
+.rail-keys {
+  margin-top: 12px; padding: 10px var(--pad) 0; border-top: 1px solid var(--border);
+  font: 400 10px/1.8 var(--mono); letter-spacing: .04em; color: var(--dim);
+}
+.rail-keys kbd, .sales-nav kbd {
+  display: inline-block; min-width: 15px; padding: 0 4px; text-align: center;
+  border: 1px solid var(--border); color: var(--muted);
+  font: 500 10px/15px var(--mono);
+}
+html[data-rail="closed"] .rail-keys { display: none; }
+
+.sales-nav {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 var(--gap); padding: 0 0 12px; border-bottom: 1px solid var(--border);
+}
+.sales-nav[hidden] { display: none; }
+.sales-nav-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.sales-nav .seg { flex-wrap: wrap; max-width: 100%; }
+.sales-nav .seg-btn {
+  display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--muted);
+  border-bottom: 1px solid var(--border); margin-bottom: -1px;
+}
+.sales-nav .seg-btn.is-active { color: var(--text); }
+.sales-count {
+  min-width: 16px; height: 16px; padding: 0 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--bg); font: 700 10px/1 var(--mono);
+}
+.sales-count[hidden] { display: none; }
+
+@media (max-width: 767px) {
+  .rail-keys { display: none; }          /* no keyboard on a phone */
+  .sales-nav kbd { display: none; }
+  html[data-rail="closed"] .rail-tab-badge { position: static; margin: 0 0 0 auto; }
+}
