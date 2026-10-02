@@ -1563,7 +1563,7 @@ def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
 def sitemap_xml():
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/map", "/sell"):
+    for path in ("/", "/listings", "/map", "/sell", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.
@@ -2526,6 +2526,23 @@ async def public_terms(request: Request):
     return templates.TemplateResponse(
         request, "terms.html",
         _public_ctx({"policy": stripe_gateway.REFUND_POLICY_SHORT}),
+    )
+
+
+@app.get("/privacy", response_class=HTMLResponse)
+async def public_privacy(request: Request):
+    """The privacy policy, on a stable URL.
+
+    Meta lead forms refuse to publish without a privacy-policy link, and the
+    same URL goes in Merchant Center and email footers. Static copy; the only
+    context is how to reach us.
+    """
+    return templates.TemplateResponse(
+        request, "privacy.html",
+        _public_ctx({
+            "postal_address": app_config.ALERTS_POSTAL_ADDRESS,
+            "contact_phone": app_config.PUBLIC_CONTACT_PHONE,
+        }),
     )
 
 
