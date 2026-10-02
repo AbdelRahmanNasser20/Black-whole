@@ -280,7 +280,7 @@ def test_run_without_table_uses_in_memory_breaker(monkeypatch, db_stubs, capsys)
     monkeypatch.setattr(store, "newest_observed_at", lambda s: NOW)
     monkeypatch.setattr(store, "load_source_health", lambda: None)
     assert cli.cmd_run({"ps": _Src("ps")}, now=NOW) == 0
-    assert "migration 018 PENDING" in capsys.readouterr().err
+    assert "migration 018 not applied" in capsys.readouterr().err
     assert db_stubs == []
 
 

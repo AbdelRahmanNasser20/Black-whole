@@ -129,7 +129,7 @@ def _discover_one(adapter) -> int:
 # --- source health (recorder/health.py) ---------------------------------------
 
 def _load_health() -> "health.Registry":
-    """Once per run. Table absent (018 PENDING) or unreadable → an in-memory
+    """Once per run. Table absent (018 not applied) or unreadable → an in-memory
     breaker for this run only, with a NOTE."""
     try:
         rows = store.load_source_health()
@@ -140,12 +140,12 @@ def _load_health() -> "health.Registry":
     if rows is None:
         path = health.state_file()
         if path:
-            print(f"RECORDER NOTE: recorder_source_health missing (migration 018 PENDING) — "
+            print(f"RECORDER NOTE: recorder_source_health missing (migration 018 not applied on this database) — "
                   f"breaker kept in {path} (RECORDER_HEALTH_FILE)", file=sys.stderr)
             reg = health.Registry(health.load_file(path), persisted=False)
             reg.file = path
             return reg
-        print("RECORDER NOTE: recorder_source_health missing (migration 018 PENDING) — "
+        print("RECORDER NOTE: recorder_source_health missing (migration 018 not applied on this database) — "
               "in-memory breaker this run", file=sys.stderr)
         return health.Registry(persisted=False)
     return health.Registry(rows)
@@ -716,9 +716,9 @@ def cmd_health(now: datetime | None = None) -> int:
     rows = store.load_source_health()
     if rows is None and health.state_file():
         rows = health.load_file(health.state_file())
-        print(f"(migration 018 PENDING — reading {health.state_file()})")
+        print(f"(migration 018 not applied — reading {health.state_file()})")
     if rows is None:
-        print("recorder_source_health missing — migration 018 is PENDING; the breaker is "
+        print("recorder_source_health missing — migration 018 is not applied on this database; the breaker is "
               "in-memory per run until it is applied.")
         return 0
     states = sorted((health.SourceHealth.from_row({**r, "source": s}) for s, r in rows.items()),
