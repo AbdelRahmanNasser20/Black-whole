@@ -453,6 +453,12 @@ def _corroborate_absence(adapter: GovDealsAdapter, asset_id: int, account_id: in
         return "unknown", None
 
     if not detail:
+        if getattr(adapter, "last_detail_status", None) == 204:
+            # Empty-body 204: the same tentative signal the JSONDecodeError
+            # path used to carry — still subject to the batch guard below.
+            print(f"[govdeals] RECORDER NOTE: corroboration 204 for {asset_id}/{account_id} — "
+                  "treating as gone (204 signal, unverified)")
+            return "gone_unverified", None
         return "gone", detail
     if _status_of(detail.get("assetStatusCd")) == "closed":
         return "closed", detail

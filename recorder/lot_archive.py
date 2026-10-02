@@ -533,7 +533,7 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
     res.requests += 1
     try:
         detail = adapter.fetch_detail(key[0], key[1])
-    except Exception as e:  # noqa: BLE001 - JSONDecodeError (204) included
+    except Exception as e:  # noqa: BLE001 - network/HTTP errors
         detail = None
         print(f"[lot_archive] detail read failed for {lk}: {e}", file=sys.stderr)
     too_thin = not detail or len(detail) < MIN_DETAIL_KEYS or not detail.get("assetId")

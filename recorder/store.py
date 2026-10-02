@@ -494,9 +494,9 @@ def lot_timeline(lot_key: str, source: str = "govdeals") -> tuple[list[dict], di
 _INDEX_UPSERT_SQL = """
 INSERT INTO lot_archive (source, lot_key, title, canonical_category, category_name, city, state,
                          seller, closed_at, final_price, bid_count, outcome, status_code,
-                         photo_count, completeness, archived_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-ON CONFLICT (source, lot_key) DO UPDATE SET
+                         photo_count, completeness, archived_at{currency_col})
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s{currency_val})
+ON CONFLICT (source, lot_key) DO UPDATE SET{currency_set}
     title = EXCLUDED.title, canonical_category = EXCLUDED.canonical_category,
     category_name = EXCLUDED.category_name, city = EXCLUDED.city, state = EXCLUDED.state,
     seller = EXCLUDED.seller, closed_at = EXCLUDED.closed_at, final_price = EXCLUDED.final_price,
@@ -506,15 +506,35 @@ ON CONFLICT (source, lot_key) DO UPDATE SET
 """
 
 
+_lot_archive_cols: dict[str, bool] = {}
+
+
+def lot_archive_has_currency() -> bool:
+    """lot_archive.currency arrives with migration 019 (PENDING). Checked once
+    per process; absent → the index row is written without it."""
+    if "currency" not in _lot_archive_cols:
+        row = _read_with_backoff(
+            db.fetch_one,
+            "SELECT 1 AS ok FROM information_schema.columns "
+            "WHERE table_name = 'lot_archive' AND column_name = 'currency'")
+        _lot_archive_cols["currency"] = bool(row)
+    return _lot_archive_cols["currency"]
+
+
 def upsert_archive_index(meta: dict) -> None:
     """Index row for one archived lot (migration 015). Only called when the
     table exists; R2 stays the record either way."""
-    db.execute(_INDEX_UPSERT_SQL, (
+    cur = lot_archive_has_currency()
+    sql = _INDEX_UPSERT_SQL.format(
+        currency_col=", currency" if cur else "", currency_val=", %s" if cur else "",
+        currency_set=" currency = EXCLUDED.currency," if cur else "")
+    extra = (meta.get("currency"),) if cur else ()
+    db.execute(sql, (
         meta.get("source") or "govdeals", meta["lot_key"], (meta.get("title") or "")[:300], meta.get("canonical_category"),
         meta.get("category_name"), meta.get("city"), meta.get("state"), meta.get("seller"),
         meta.get("closed_at"), meta.get("final_price"), meta.get("bid_count"),
         meta.get("outcome"), meta.get("status_code"), meta.get("photo_count"),
-        meta.get("completeness"), meta.get("archived_at")))
+        meta.get("completeness"), meta.get("archived_at"), *extra))
 
 
 def database_size_mb() -> float:

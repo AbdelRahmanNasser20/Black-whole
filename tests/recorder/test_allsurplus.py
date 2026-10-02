@@ -51,7 +51,7 @@ def test_allsurplus_body_detail_and_bidbox_use_gi(monkeypatch):
     seen = []
 
     class R:
-        content = b"{}"
+        status_code, content = 200, b"{}"
         def raise_for_status(self): pass
         def json(self): return {"assetSearchResults": []}
 
@@ -199,3 +199,30 @@ def test_non_usd_lot_is_never_compared_with_usd_comps():
         judge_fn=lambda i, c: [])
     assert called == [] and "EUR" in a["comps_note"]
     assert a["deal"]["verdict"] is None
+
+
+def test_fetch_detail_204_is_empty_dict_and_stays_an_unverified_gone(monkeypatch):
+    class R204:
+        status_code, content = 204, b""
+        def raise_for_status(self): pass
+        def json(self): raise AssertionError("must not parse an empty body")
+
+    monkeypatch.setattr(deals_gd.requests, "post", lambda *a, **k: R204())
+    a = deals_gd.GovDealsAdapter()
+    assert a.fetch_detail(1, 2) == {} and a.last_detail_status == 204
+    verdict, payload = govdeals._corroborate_absence(a, 1, 2)
+    assert verdict == "gone_unverified" and payload is None   # batch guard still applies
+
+
+def test_index_upsert_writes_currency_only_when_the_column_exists(monkeypatch):
+    from recorder import store
+    sent = []
+    monkeypatch.setattr(store.db, "execute", lambda sql, params: sent.append((sql, params)))
+    meta = {"source": "allsurplus", "lot_key": "257/20948/13", "currency": "EUR"}
+    for has in (False, True):
+        store._lot_archive_cols["currency"] = has
+        store.upsert_archive_index(meta)
+    store._lot_archive_cols.clear()
+    (sql0, p0), (sql1, p1) = sent
+    assert "currency" not in sql0 and len(p0) == sql0.count("%s") == 16
+    assert "currency = EXCLUDED.currency" in sql1 and p1[-1] == "EUR" and len(p1) == sql1.count("%s") == 17

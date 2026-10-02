@@ -118,10 +118,15 @@ def _metas_from_index() -> list[dict] | None:
     try:
         if not (db.fetch_one("SELECT to_regclass('lot_archive') AS reg") or {}).get("reg"):
             return None
+        # lot_archive.currency = migration 019 (PENDING); without it every
+        # row reads as USD-unknown (None) and the list shows no currency.
+        has_cur = bool(db.fetch_one(
+            "SELECT 1 AS ok FROM information_schema.columns "
+            "WHERE table_name = 'lot_archive' AND column_name = 'currency'"))
         rows = db.fetch_all(
             """SELECT source, lot_key, title, canonical_category, category_name, city, state, seller,
                       closed_at, final_price, bid_count, outcome, status_code, photo_count,
-                      completeness, archived_at
+                      completeness, archived_at""" + (", currency" if has_cur else "") + """
                FROM lot_archive WHERE source = ANY(%s)""", (list(SOURCES),))
     except Exception:  # noqa: BLE001 - index is optional; fall back to the store
         return None

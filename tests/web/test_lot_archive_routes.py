@@ -238,3 +238,34 @@ def test_list_has_a_source_facet_and_filter(store):
     only = c.get("/api/archive/lots?source=allsurplus").json()
     assert [m["lot_key"] for m in only["items"]] == ["257/20948/13"]
     assert only["items"][0]["currency"] == "EUR"
+
+
+def test_list_through_the_index_path_carries_currency(store, monkeypatch):
+    """migration 015 table present (+ 019's currency column): the list is
+    built from lot_archive rows and keeps each lot's currency."""
+    from automation import db
+    monkeypatch.undo()   # drop the store fixture's _metas_from_index stub…
+    monkeypatch.setenv("LOT_ARCHIVE_STORE", "local")
+    monkeypatch.setenv("LOT_ARCHIVE_LOCAL_DIR", str(store.root))
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    auth_svc.reset_caches()
+    lot_archive_view.reset()
+    readcache.invalidate_all()
+    seen = []
+
+    def fetch_one(sql, params=None):
+        return {"reg": "lot_archive"} if "to_regclass" in sql else {"ok": 1}
+
+    def fetch_all(sql, params=None):
+        seen.append(sql)
+        return [{"source": "allsurplus", "lot_key": "257/20948/13", "title": "Asher",
+                 "canonical_category": "lab_test_equipment", "category_name": None, "city": None,
+                 "state": None, "seller": None, "closed_at": None, "final_price": 2750,
+                 "bid_count": 3, "outcome": "sold", "status_code": "SOA", "photo_count": 0,
+                 "completeness": "full", "archived_at": None, "currency": "EUR"}]
+
+    monkeypatch.setattr(db, "fetch_one", fetch_one)
+    monkeypatch.setattr(db, "fetch_all", fetch_all)
+    b = TestClient(app).get("/api/archive/lots").json()
+    assert b["index"] == "table" and b["items"][0]["currency"] == "EUR"
+    assert ", currency" in seen[0]

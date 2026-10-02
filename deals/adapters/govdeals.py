@@ -22,6 +22,8 @@ class GovDealsAdapter:
 
     def __init__(self, business_id: str = "GD"):
         self.business_id = business_id
+        # HTTP status of the last fetch_detail (204 = purged / no such pair).
+        self.last_detail_status: int | None = None
 
     def _headers(self) -> dict:
         origin = _ORIGINS.get(self.business_id, _ORIGINS["GD"])
@@ -87,12 +89,17 @@ class GovDealsAdapter:
 
     def fetch_detail(self, asset_id: int, account_id: int) -> dict:
         """Per-lot detail from maestro. The body {businessId, siteId} is load-bearing:
-        without it the endpoint still 200s but returns assetPhotos=[]."""
+        without it the endpoint still 200s but returns assetPhotos=[].
+
+        A purged lot (or a wrong asset/account pair) answers 204 with no body:
+        returned as `{}` (like `fetch_bid_state`), with `last_detail_status`
+        = 204 so callers that must tell "purged" from "empty JSON" still can."""
         r = requests.post(f"{_g.MAESTRO_URL}/assets/{asset_id}/{account_id}/false",
                           json={"businessId": self.business_id, "siteId": 1},
                           headers=self._headers(), timeout=30)
+        self.last_detail_status = getattr(r, "status_code", None)
         r.raise_for_status()
-        return r.json()
+        return r.json() if r.content else {}
 
     def fetch_bid_state(self, asset_id: int, account_id: int, auction_id: int) -> dict:
         """Live bid state for one lot — the ONLY endpoint that names a bidder.

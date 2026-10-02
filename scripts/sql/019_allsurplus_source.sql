@@ -17,6 +17,14 @@
 -- append-only listing_snapshots (recorder code itself never UPDATEs).
 --
 -- Expected: UPDATE 212 (± lots that closed since). Re-running is a no-op.
+--
+-- Overlap (checked 2026-10-02, read-only): 3 of the 36 lots already have
+-- rows under source='allsurplus' (the live AllSurplus sweep saw them again).
+-- Their timelines simply merge: 0 collisions on (source_lot_id, observed_at),
+-- and tracked_active/coverage take the latest row per (source, lot) as always.
+--
+-- Also adds lot_archive.currency (the list page's index path showed "$" for
+-- EUR lots without it). The recorder writes it only once the column exists.
 
 BEGIN;
 
@@ -26,6 +34,8 @@ WHERE s.source = 'govdeals'
   AND s.source_lot_id IN (
       SELECT DISTINCT source_lot_id FROM listing_snapshots
       WHERE source = 'govdeals' AND raw->>'businessId' = 'GI');
+
+ALTER TABLE lot_archive ADD COLUMN IF NOT EXISTS currency text;
 
 -- The lot_archive index (015) keys on (source, lot_key); none of the 30
 -- archived lots is GI today, but keep the two tables consistent anyway.
