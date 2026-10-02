@@ -520,7 +520,7 @@ def database_size_mb() -> float:
     return row["b"] / 1e6 if row else 0.0
 
 
-# --- source health (migration 018, PENDING) -----------------------------------
+# --- source health (migration 018, APPLIED to prod 2026-10-02) -----------------
 #
 # One row per source: the circuit breaker in recorder/health.py. Loaded once
 # and saved once per run. Until 018 is applied every caller degrades to an
@@ -529,7 +529,8 @@ def database_size_mb() -> float:
 
 _HEALTH_COLS = ("source", "state", "consecutive_failures", "last_attempt_at",
                 "last_success_at", "next_attempt_at", "last_error", "updated_at")
-# Migration 020 (PENDING) adds this; until then it is neither read nor written.
+# Migration 020 (APPLIED to prod 2026-10-02) adds this; on a database without
+# it the column is neither read nor written.
 _HEALTH_OPTIONAL_COLS = ("last_discover_at",)
 
 
@@ -558,7 +559,7 @@ def source_health_table_exists() -> bool:
 
 def load_source_health() -> dict[str, dict] | None:
     """{source: row} from recorder_source_health, or None when the table
-    does not exist yet (migration 018 PENDING)."""
+    does not exist (migration 018 not applied on this database)."""
     if not source_health_table_exists():
         return None
     rows = _read_with_backoff(db.fetch_all, "SELECT * FROM recorder_source_health")
