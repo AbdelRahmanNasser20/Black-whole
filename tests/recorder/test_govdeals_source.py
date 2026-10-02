@@ -278,8 +278,16 @@ def test_corroborate_absence_unknown_on_http_error(monkeypatch, capsys):
 
 
 # --- discover() --------------------------------------------------------
+#
+# The furniture sweep tests pin RECORDER_GOVDEALS_SCOPE=furniture; the
+# whole-site default has its own tests below.
 
-def test_discover_calls_category_cluster_and_remaining_furniture_terms(monkeypatch, lots):
+@pytest.fixture
+def furniture_scope(monkeypatch):
+    monkeypatch.setenv("RECORDER_GOVDEALS_SCOPE", "furniture")
+
+
+def test_discover_calls_category_cluster_and_remaining_furniture_terms(furniture_scope, monkeypatch, lots):
     calls = []
 
     def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
@@ -303,7 +311,7 @@ def test_discover_calls_category_cluster_and_remaining_furniture_terms(monkeypat
     assert all(c["max_pages"] == govdeals.TERM_MAX_PAGES for c in term_calls)
 
 
-def test_discover_dedupes_across_sweeps(monkeypatch, lots):
+def test_discover_dedupes_across_sweeps(furniture_scope, monkeypatch, lots):
     def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
         # every sweep returns the SAME lots — must still dedupe to len(lots)
         return iter(lots)
@@ -315,7 +323,7 @@ def test_discover_dedupes_across_sweeps(monkeypatch, lots):
     assert len(ids) == len(lots)
 
 
-def test_discover_partial_failure_keeps_lots_collected_before_the_error(monkeypatch, lots, capsys):
+def test_discover_partial_failure_keeps_lots_collected_before_the_error(furniture_scope, monkeypatch, lots, capsys):
     def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
         if category_ids:  # the category+"chairs" sweep succeeds
             return iter(lots)
@@ -332,7 +340,7 @@ def test_discover_partial_failure_keeps_lots_collected_before_the_error(monkeypa
     assert "RECORDER ERROR" in out
 
 
-def test_discover_all_sweeps_fail_returns_empty_and_prints_loud_error(monkeypatch, capsys):
+def test_discover_all_sweeps_fail_returns_empty_and_prints_loud_error(furniture_scope, monkeypatch, capsys):
     def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
         def gen():
             raise requests.exceptions.ConnectionError("boom")
@@ -347,7 +355,7 @@ def test_discover_all_sweeps_fail_returns_empty_and_prints_loud_error(monkeypatc
     assert "govdeals" in out
 
 
-def test_discover_healthy_but_empty_warns_loudly(monkeypatch, capsys):
+def test_discover_healthy_but_empty_warns_loudly(furniture_scope, monkeypatch, capsys):
     def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
         return iter([])
 
@@ -357,6 +365,60 @@ def test_discover_healthy_but_empty_warns_loudly(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "WARNING" in out
     assert "0 lots" in out
+
+
+def test_scope_defaults_to_all(monkeypatch):
+    monkeypatch.delenv("RECORDER_GOVDEALS_SCOPE", raising=False)
+    assert govdeals.scope() == "all"
+    monkeypatch.setenv("RECORDER_GOVDEALS_SCOPE", "Furniture")
+    assert govdeals.scope() == "furniture"
+    monkeypatch.setenv("RECORDER_GOVDEALS_SCOPE", "bogus")
+    assert govdeals.scope() == "all"
+
+
+def test_discover_all_is_one_unfiltered_sweep(monkeypatch, lots):
+    monkeypatch.delenv("RECORDER_GOVDEALS_SCOPE", raising=False)
+    monkeypatch.setenv("RECORDER_GOVDEALS_ALL_MAX_PAGES", "7")
+    calls = []
+
+    def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
+        calls.append((category_ids, search_text, max_pages))
+        return iter(lots + lots)   # duplicates across pages still store once
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "discover", fake_discover)
+    obs = govdeals.GovDealsSource().discover()
+    assert calls == [("", "", 7)]
+    assert len(obs) == len(lots)
+
+
+def test_discover_all_failure_keeps_partial_sweep(monkeypatch, lots, capsys):
+    monkeypatch.delenv("RECORDER_GOVDEALS_SCOPE", raising=False)
+
+    def fake_discover(self, **kw):
+        def gen():
+            yield from lots[:2]
+            raise requests.exceptions.ConnectionError("boom")
+        return gen()
+
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "discover", fake_discover)
+    obs = govdeals.GovDealsSource().discover()
+    assert len(obs) == 2
+    assert "RECORDER ERROR" in capsys.readouterr().out
+
+
+def test_polite_adapter_throttles_counts_and_caps_pages(monkeypatch):
+    sleeps = []
+    monkeypatch.setattr(govdeals, "BIDBOX_MIN_INTERVAL_SECONDS", 1.0)
+    monkeypatch.setattr(govdeals.time, "sleep", lambda s: sleeps.append(s))
+    govdeals._bidbox_last_at[:] = []
+    served = []
+    monkeypatch.setattr(govdeals.GovDealsAdapter, "_search_page",
+                        lambda self, c, t, page, rows=120: served.append(page) or [{"page": page}])
+    a = govdeals.PoliteGovDealsAdapter(max_page=2)
+    assert a._search_page("", "", 1) and a._search_page("", "", 2)
+    assert a._search_page("", "", 3) == []     # past the ceiling: reads as "run dry"
+    assert served == [1, 2] and a.requests == 2
+    assert len(sleeps) == 1
 
 
 # --- poll() --------------------------------------------------------
