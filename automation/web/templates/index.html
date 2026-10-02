@@ -21,19 +21,22 @@
 
 {% block rail %}
 <nav class="rail-nav" aria-label="Admin tabs">
-  <a class="rail-tab is-active" data-tab="launcher" href="?tab=launcher" data-rail-close aria-current="page"><span class="rail-tab-num">01</span><span class="rail-tab-label">Launcher</span></a>
-  <a class="rail-tab" data-tab="drafts" href="?tab=drafts" data-rail-close><span class="rail-tab-num">02</span><span class="rail-tab-label">Drafts</span></a>
-  <a class="rail-tab" data-tab="auctions" href="?tab=auctions" data-rail-close><span class="rail-tab-num">03</span><span class="rail-tab-label">Auctions</span></a>
-  <a class="rail-tab" data-tab="inventory" href="?tab=inventory" data-rail-close><span class="rail-tab-num">04</span><span class="rail-tab-label">Inventory</span></a>
-  <a class="rail-tab" data-tab="inquiries" href="?tab=inquiries" data-rail-close><span class="rail-tab-num">05</span><span class="rail-tab-label">Inquiries</span></a>
-  <a class="rail-tab" data-tab="listings-db" href="?tab=listings-db" data-rail-close><span class="rail-tab-num">06</span><span class="rail-tab-label">Listings DB</span></a>
-  <a class="rail-tab" data-tab="test-scrape" href="?tab=test-scrape" data-rail-close><span class="rail-tab-num">07</span><span class="rail-tab-label">Test Scrape</span></a>
-  <a class="rail-tab" data-tab="subscribers" href="?tab=subscribers" data-rail-close><span class="rail-tab-num">08</span><span class="rail-tab-label">Subscribers</span></a>
-  <a class="rail-tab" data-tab="deals" href="?tab=deals" data-rail-close><span class="rail-tab-num">09</span><span class="rail-tab-label">Deals</span></a>
-  <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close><span class="rail-tab-num">10</span><span class="rail-tab-label">Tracking</span></a>
-  <a class="rail-tab" data-tab="deposits" href="?tab=deposits" data-rail-close><span class="rail-tab-num">11</span><span class="rail-tab-label">Deposits</span></a>
-  <a class="rail-tab" data-tab="channels" href="?tab=channels" data-rail-close><span class="rail-tab-num">12</span><span class="rail-tab-label">Channels</span></a>
-  <a class="rail-tab" data-tab="archive" href="?tab=archive" data-rail-close><span class="rail-tab-num">13</span><span class="rail-tab-label">Archive</span></a>
+  {#- 11 tabs. `sales` is a GROUP, not a pane: it opens one of four views (quotes · inquiries · deposits ·
+      subscribers), each still its own `data-pane` + `?tab=` value. shell.js owns the grouping and the keys:
+      [ ] step through the rail, 1–9/0 jump to tabs 1–10 (Archive, the 11th, is reached with ]),
+      q i d s pick the Sales view. -#}
+  <a class="rail-tab is-active" data-tab="launcher" href="?tab=launcher" data-rail-close aria-current="page" title="Press 1"><span class="rail-tab-num">01</span><span class="rail-tab-label">Launcher</span></a>
+  <a class="rail-tab" data-tab="drafts" href="?tab=drafts" data-rail-close title="Press 2"><span class="rail-tab-num">02</span><span class="rail-tab-label">Drafts</span></a>
+  <a class="rail-tab" data-tab="auctions" href="?tab=auctions" data-rail-close title="Press 3"><span class="rail-tab-num">03</span><span class="rail-tab-label">Auctions</span></a>
+  <a class="rail-tab" data-tab="inventory" href="?tab=inventory" data-rail-close title="Press 4"><span class="rail-tab-num">04</span><span class="rail-tab-label">Inventory</span></a>
+  <a class="rail-tab" data-tab="sales" href="?tab=quotes" data-rail-close title="Press 5"><span class="rail-tab-num">05</span><span class="rail-tab-label">Sales</span><span class="rail-tab-badge" id="sales-badge" hidden aria-label="waiting on you"></span></a>
+  <a class="rail-tab" data-tab="listings-db" href="?tab=listings-db" data-rail-close title="Press 6"><span class="rail-tab-num">06</span><span class="rail-tab-label">Listings DB</span></a>
+  <a class="rail-tab" data-tab="test-scrape" href="?tab=test-scrape" data-rail-close title="Press 7"><span class="rail-tab-num">07</span><span class="rail-tab-label">Test Scrape</span></a>
+  <a class="rail-tab" data-tab="deals" href="?tab=deals" data-rail-close title="Press 8"><span class="rail-tab-num">08</span><span class="rail-tab-label">Deals</span></a>
+  <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close title="Press 9"><span class="rail-tab-num">09</span><span class="rail-tab-label">Tracking</span></a>
+  <a class="rail-tab" data-tab="channels" href="?tab=channels" data-rail-close title="Press 0"><span class="rail-tab-num">10</span><span class="rail-tab-label">Channels</span></a>
+  <a class="rail-tab" data-tab="archive" href="?tab=archive" data-rail-close title="Press ] from Channels"><span class="rail-tab-num">11</span><span class="rail-tab-label">Archive</span></a>
+  <div class="rail-keys" aria-hidden="true"><kbd>[</kbd> <kbd>]</kbd> switch · <kbd>1</kbd>–<kbd>0</kbd> jump</div>
 </nav>
 {% endblock %}
 
@@ -362,6 +365,58 @@
   <div class="inv-wrap" id="inv-wrap" data-state="loading" aria-busy="true">
     {{ skeleton_rows(10) }}
   </div>
+</section>
+
+
+<!-- ───────────── Sales (group nav) ───────────── -->
+{#- Shown by shell.js while any of the four Sales views is active. Links, not buttons, so cmd-click opens a view in a
+    new browser tab; shell.js intercepts the plain click. -#}
+<nav class="sales-nav" id="sales-nav" aria-label="Sales views" hidden>
+  <span class="sales-nav-label">SALES</span>
+  <div class="seg" role="group">
+    <a class="seg-btn" data-sales-view="quotes" href="?tab=quotes">Quotes<span class="sales-count" id="sales-count-quotes" hidden></span><kbd>q</kbd></a>
+    <a class="seg-btn" data-sales-view="inquiries" href="?tab=inquiries">Inquiries<span class="sales-count" id="sales-count-inquiries" hidden></span><kbd>i</kbd></a>
+    <a class="seg-btn" data-sales-view="deposits" href="?tab=deposits">Deposits<kbd>d</kbd></a>
+    <a class="seg-btn" data-sales-view="subscribers" href="?tab=subscribers">Subscribers<kbd>s</kbd></a>
+  </div>
+</nav>
+
+<!-- ───────────── Sales › Quotes ───────────── -->
+<section class="panel" data-pane="quotes" hidden>
+  {#- Sales › Quotes: this pane's CSS lives in static/admin/quotes.css; the shared .controls/.seg/.card/.badge come
+      from static/ui/components.css. skeleton_cards(n) (_ui/macros.html) is skeleton('card', n) from state.js. -#}
+  {% from "_ui/macros.html" import skeleton_cards %}
+  <link rel="stylesheet" href="/static/admin/quotes.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">SALES / FREIGHT QUOTES</div>
+    <h1 class="hero-title">Everyone who asked what freight would cost.</h1>
+    <p class="hero-sub">
+      From the freight box on a lot page. Each one left an email and a phone. Move it
+      <span class="lex running">new</span> → <span class="lex done">answered</span> →
+      <span class="lex done">won</span> or <span class="lex pending">lost</span> once you've replied.
+      The carrier price is for you only — the buyer saw the site's range.
+    </p>
+  </div>
+
+  {#- status filter mirrors ?qstatus= (static/admin/quotes.js owns the key; absent = open) -#}
+  <div class="controls quote-controls">
+    <span class="quote-controls-label">STATUS</span>
+    <div class="seg" id="quo-status-filter" role="group" aria-label="Filter by status">
+      <button type="button" class="seg-btn is-active" data-value="open" aria-pressed="true">open</button>
+      <button type="button" class="seg-btn" data-value="new">new</button>
+      <button type="button" class="seg-btn" data-value="answered">answered</button>
+      <button type="button" class="seg-btn" data-value="won">won</button>
+      <button type="button" class="seg-btn" data-value="lost">lost</button>
+      <button type="button" class="seg-btn" data-value="junk">junk</button>
+      <button type="button" class="seg-btn" data-value="all">all</button>
+    </div>
+    <button type="button" class="btn btn-small" id="quo-refresh">↻ refresh</button>
+  </div>
+
+  <div class="quote-banner" id="quo-banner" role="status" hidden></div>
+
+  {#- skeleton twin ships in the HTML; static/admin/quotes.js (UI.load) swaps it for cards / empty / error -#}
+  <div class="quote-list" id="quo-list" data-state="loading">{{ skeleton_cards(5) }}</div>
 </section>
 
 
@@ -767,7 +822,7 @@
 
 <!-- ───────────── Deposits ───────────── -->
 <section class="panel" data-pane="deposits" hidden>
-  {#- Deposits (11): this pane's CSS lives in static/admin/deposits.css; the shared .controls/.seg/.card/.badge
+  {#- Sales › Deposits: this pane's CSS lives in static/admin/deposits.css; the shared .controls/.seg/.card/.badge
       come from static/ui/components.css. skeleton_cards(n) (_ui/macros.html) is skeleton('card', n) from state.js. -#}
   {% from "_ui/macros.html" import skeleton_cards %}
   <link rel="stylesheet" href="/static/admin/deposits.css?v={{ asset_v }}">
@@ -823,7 +878,7 @@
 
 <!-- ───────────── Channels ───────────── -->
 <section class="panel" data-pane="channels" hidden>
-  {#- Channels (12, multichannel master plan Phase 1.6): this pane's CSS lives in static/admin/channels.css; the
+  {#- Channels (10, multichannel master plan Phase 1.6): this pane's CSS lives in static/admin/channels.css; the
       shared .controls/.table/.badge/.btn come from static/ui/components.css. skeleton_rows(n) (_ui/macros.html) is
       byte-for-byte skeleton('row', n) from state.js. The switches are rendered here, one per
       automation.channels.CHANNELS, so a channel can never be missing from the admin — channels.js only paints
@@ -928,10 +983,16 @@
   var panes = document.querySelectorAll('[data-pane]'), hit = false;
   panes.forEach(function (p) { if (p.dataset.pane === t) hit = true; }); if (!hit) return;
   panes.forEach(function (p) { p.hidden = p.dataset.pane !== t; });
+  var sales = ['quotes', 'inquiries', 'deposits', 'subscribers'].indexOf(t) !== -1, r = sales ? 'sales' : t;
   document.querySelectorAll('.rail-tab').forEach(function (a) {
-    var on = a.dataset.tab === t; a.classList.toggle('is-active', on);
+    var on = a.dataset.tab === r; a.classList.toggle('is-active', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');
   });
+  var nav = document.getElementById('sales-nav');
+  if (nav) {
+    nav.hidden = !sales;
+    nav.querySelectorAll('[data-sales-view]').forEach(function (b) { b.classList.toggle('is-active', b.dataset.salesView === t); });
+  }
 } catch (e) {} })();
 </script>
 <script src="/static/admin_map.js?v={{ asset_v }}"></script>

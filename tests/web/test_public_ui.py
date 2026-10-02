@@ -78,6 +78,12 @@ def test_freight_widget_renders_on_a_locatable_lot(lot):
     assert "LOCAL PICKUP ALWAYS FREE" in r.text
     # The plain fallback row must NOT also be there.
     assert "freight quoted on request" not in r.text
+    # One step: ZIP, chairs, email and phone are all asked BEFORE the price.
+    widget = r.text.split('id="freight-widget"')[1].split("fw-framing")[0]
+    for field in ('name="dest_zip"', 'name="quantity"', 'name="email"', 'name="phone"'):
+        assert field in widget, field
+    assert widget.count("<form") == 1          # no second "email me this" step
+    assert 'type="tel"' in widget and 'type="email"' in widget
 
 
 @pytest.mark.parametrize(

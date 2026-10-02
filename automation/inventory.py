@@ -549,6 +549,16 @@ def set_platform_url(
     return get(lot_id)
 
 
+# field → (min, max, cast, unit). See `set_fields`.
+_CHAIR_NUMERIC: dict[str, tuple[float, float, Any, str]] = {
+    "chair_weight_lb": (1, 100, lambda v: round(v, 2), "lb"),
+    "chairs_per_pallet": (1, 200, lambda v: int(round(v)), "chairs"),
+    "pallet_height_in": (12, 110, lambda v: int(round(v)), "in"),
+}
+CHAIR_FRAME_MAX_LEN = 60
+CHAIR_FIELDS = frozenset(_CHAIR_NUMERIC) | {"chair_frame"}
+
+
 def set_fields(lot_id: str, **fields: Any) -> dict | None:
     """Admin inline-edit path. Whitelisted columns only.
 
@@ -561,6 +571,9 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         "zip_code", "contact_name", "contact_email", "contact_phone",
         "govdeals_username", "govdeals_password",
         "locations", "fake_sold_out", "sold_at", "deposit_pct_override",
+        # Chair data per lot (migration 021). Operator-entered, and never
+        # written by `upsert_from_run`, so a re-run cannot stomp them.
+        "chair_weight_lb", "chair_frame", "chairs_per_pallet", "pallet_height_in",
         # A relisted lot points at a NEW auction under the same asset, so the
         # stored URL has to be re-stampable through the ledger rather than by
         # raw UPDATE (automation/auction_sync.py).
@@ -589,6 +602,28 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
                     "use 0.15 for 15%"
                 )
             clean["deposit_pct_override"] = pct
+    # Chair data. Blank clears a field back to the standard chair. The bounds
+    # are sanity limits, not physics: they exist so a slipped decimal (130 for
+    # 13.0 lb, 3500 for 35 per pallet) is a 400, not a freight quote.
+    for key, (low, high, cast, unit) in _CHAIR_NUMERIC.items():
+        if key not in clean:
+            continue
+        raw = clean[key]
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            clean[key] = None
+            continue
+        try:
+            if isinstance(raw, bool):       # float(True) == 1.0 — a 1 lb chair
+                raise TypeError
+            value = float(raw)
+        except (TypeError, ValueError):
+            raise ValueError(f"{key} must be a number") from None
+        if not low <= value <= high:
+            raise ValueError(f"{key} must be between {low:g} and {high:g} {unit}")
+        clean[key] = cast(value)
+    if "chair_frame" in clean:
+        frame = str(clean["chair_frame"] or "").strip()
+        clean["chair_frame"] = frame[:CHAIR_FRAME_MAX_LEN] or None
     # Auto-sold-out rule
     if (
         "quantity_remaining" in clean

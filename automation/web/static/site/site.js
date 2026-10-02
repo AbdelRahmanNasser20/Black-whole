@@ -118,9 +118,9 @@ function bindCaptureForm(form) {
 })();
 
 // ─── freight estimate widget (detail page) ──────────────────────────────
-// Two steps on purpose: ZIP first (zero friction, always answers), and only
-// once a number is on screen do we ask for an email. An unquotable lane is a
-// normal answer — it hands the buyer to the contact form, never a guess.
+// One step: destination ZIP + email + phone, then the range. The server stores the request BEFORE it
+// answers, so a number on screen always has a lead on file behind it. An unquotable lane is a normal
+// answer (we already have the contact details and follow up by hand) — never a guess.
 (function initFreightWidget() {
   const widget = document.getElementById('freight-widget');
   if (!widget) return;
@@ -129,9 +129,8 @@ function bindCaptureForm(form) {
   if (!form || !result) return;
   const zipEl = widget.querySelector('.fw-zip');
   const qtyEl = widget.querySelector('.fw-qty');
-  const emailRow = widget.querySelector('.fw-email');
   const emailEl = widget.querySelector('.fw-email-input');
-  let quoteId = null;
+  const phoneEl = widget.querySelector('.fw-phone-input');
 
   const money = (n) => '$' + Math.round(Number(n)).toLocaleString('en-US');
   const num = (n) => Number(n).toLocaleString('en-US');
@@ -143,6 +142,22 @@ function bindCaptureForm(form) {
     result.hidden = false;
   }
 
+  function flag(el, bad) { if (el) el.classList.toggle('is-bad', !!bad); }
+
+  // "30033-1234" / "30033 1234" → "30033". Anything else goes to the server untouched: it refuses
+  // the lane, stores the request, and we follow up by hand.
+  function cleanZip(raw) {
+    const m = /^(\d{5})(?:[-\s]?\d{4})$/.exec(raw);
+    return m ? m[1] : raw;
+  }
+
+  // Mirror of the server's rule (app.py `_clean_phone`): 10 US digits, optional leading 1.
+  function phoneOk(raw) {
+    let d = raw.replace(/\D/g, '');
+    if (d.length === 11 && d[0] === '1') d = d.slice(1);
+    return d.length === 10 && !'01'.includes(d[0]) && !'01'.includes(d[3]);
+  }
+
   function rangeFor(est, mode) {
     return est[mode] || null;
   }
@@ -152,8 +167,8 @@ function bindCaptureForm(form) {
     const mode = est.recommended_mode || est.mode || 'ltl';
     const primary = rangeFor(est, mode) || rangeFor(est, 'ltl') || rangeFor(est, 'partial');
     if (!primary) {
-      show('WE’LL QUOTE THIS LANE BY HAND — <a href="#contact-form">SEND THE REQUEST BELOW</a>', 'mf-result--err');
-      return false;
+      show('WE’LL QUOTE THIS LANE BY HAND AND GET BACK TO YOU.', 'mf-result--ok');
+      return;
     }
     const bits = ['◉ EST. ' + money(primary.low) + '–' + money(primary.high)];
     if (est.miles) bits.push('~' + num(est.miles) + ' MI');
@@ -167,26 +182,36 @@ function bindCaptureForm(form) {
           money(alt.low) + '–' + money(alt.high) + '</span>';
       }
     }
+    if (data.available) {
+      html += '<span class="fw-alt">NOTE: ' + num(data.available) + ' AVAILABLE ON THIS LOT</span>';
+    }
+    html += '<span class="fw-alt">REQUEST SAVED — WE’LL FOLLOW UP.</span>';
     show(html, 'mf-result--ok');
-    return true;
   }
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const dest = (zipEl.value || '').trim();
-    if (!/^\d{5}$/.test(dest)) {
-      show('✗ ENTER A 5-DIGIT US ZIP CODE.', 'mf-result--err');
-      return;
-    }
-    const payload = {lot_id: widget.dataset.lotId, dest_zip: dest};
+    const dest = cleanZip((zipEl.value || '').trim());
+    const email = (emailEl.value || '').trim();
+    const phone = (phoneEl.value || '').trim();
+
+    // All digits but not 5 (or ZIP+4, already trimmed) is a typo — catch it here. The server would
+    // refuse to price it anyway (it never pads "3003" into 03003). Anything non-numeric (a Canadian
+    // postal code) is sent as typed: no price, but the request is stored and answered by hand.
+    const zipBad = !dest || (/^\d+$/.test(dest) && dest.length !== 5);
+    const emailBad = !/^\S+@\S+\.\S+$/.test(email);
+    const phoneBad = !phoneOk(phone);
+    flag(zipEl, zipBad); flag(emailEl, emailBad); flag(phoneEl, phoneBad);
+    if (zipBad) { show('✗ ENTER A 5-DIGIT DELIVERY ZIP CODE.', 'mf-result--err'); return; }
+    if (emailBad) { show('✗ ENTER AN EMAIL WE CAN SEND THE QUOTE TO.', 'mf-result--err'); return; }
+    if (phoneBad) { show('✗ ENTER A 10-DIGIT US PHONE NUMBER.', 'mf-result--err'); return; }
+
+    const payload = {lot_id: widget.dataset.lotId, dest_zip: dest, email: email, phone: phone};
     const qty = parseInt(qtyEl && qtyEl.value, 10);
     if (qty > 0) payload.quantity = qty;
 
-    if (emailRow) emailRow.hidden = true;
-    quoteId = null;
-
     // UI.api throws on non-2xx with .status + the server's `detail` as .message; an unquotable
-    // lane is a 200 carrying {ok: false}, so it is a normal answer, not an error branch.
+    // lane and a failed save are 200s carrying {ok: false, reason}, so they are normal answers.
     await pending(form.querySelector('button[type="submit"]'), 'PRICING…', async () => {
       try {
         const data = await api('/freight-estimate', {
@@ -195,35 +220,29 @@ function bindCaptureForm(form) {
           body: JSON.stringify(payload),
         });
         if (data.ok === false) {
-          show('WE’LL QUOTE THIS LANE BY HAND — <a href="#contact-form">SEND THE REQUEST BELOW</a>', 'mf-result--err');
+          if (data.reason === 'not_saved') {
+            show('✗ WE COULDN’T SAVE YOUR REQUEST — TRY AGAIN IN A MINUTE, OR <a href="#contact-form">USE THE FORM BELOW</a>.', 'mf-result--err');
+          } else if (data.saved === false) {
+            // Unquotable AND not on file: the contact form below is the durable path.
+            show('WE CAN’T PRICE THIS LANE AUTOMATICALLY — <a href="#contact-form">SEND THE REQUEST BELOW</a> AND WE’LL QUOTE IT BY HAND.', 'mf-result--err');
+          } else {
+            show('GOT IT — WE’LL QUOTE THIS LANE BY HAND AND GET BACK TO YOU.', 'mf-result--ok');
+          }
           return;
         }
-        if (renderEstimate(data) && emailRow && data.quote_id) {
-          quoteId = data.quote_id;
-          emailRow.hidden = false;
+        renderEstimate(data);
+      } catch (err) {
+        if (err.status === 429) {
+          show('TOO MANY ESTIMATES — GIVE IT A MINUTE.', 'mf-result--err');
+        } else if (err.status === 400 && /phone/i.test(err.message || '')) {
+          flag(phoneEl, true);
+          show('✗ ENTER A 10-DIGIT US PHONE NUMBER.', 'mf-result--err');
+        } else if (err.status === 400 && /email/i.test(err.message || '')) {
+          flag(emailEl, true);
+          show('✗ ENTER AN EMAIL WE CAN SEND THE QUOTE TO.', 'mf-result--err');
+        } else {
+          show('✗ COULDN’T REACH THE PRICER — TRY THAT AGAIN IN A MOMENT.', 'mf-result--err');
         }
-      } catch (err) {
-        if (err.status === 429) show('TOO MANY ESTIMATES — GIVE IT A MINUTE.', 'mf-result--err');
-        else show('✗ COULDN’T REACH THE PRICER — TRY THAT AGAIN IN A MOMENT.', 'mf-result--err');
-      }
-    });
-  });
-
-  emailRow?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const email = (emailEl.value || '').trim();
-    if (!quoteId || !email) return;
-    await pending(emailRow.querySelector('button[type="submit"]'), 'SENDING…', async () => {
-      try {
-        await api('/freight-estimate/email', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({quote_id: quoteId, email: email}),
-        });
-        emailRow.hidden = true;
-        show('SENT — WE’LL FOLLOW UP.', 'mf-result--ok');
-      } catch (err) {
-        show('✗ COULDN’T SAVE THAT EMAIL — TRY AGAIN OR USE THE FORM BELOW.', 'mf-result--err');
       }
     });
   });

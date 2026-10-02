@@ -170,55 +170,26 @@ def test_unlocatable_origin_zip_raises():
 
 
 # --------------------------------------------------------------------------- #
-# Carrier mapping
+# Provider: the estimator, always
 # --------------------------------------------------------------------------- #
-def test_map_carrier_rates_selects_mode_by_linear_feet():
-    """Regression (BWCRM-19 parked bug, fixed on the branch tip):
-    _map_carrier_rates passed the raw chair COUNT to select_mode(), which takes
-    linear feet — 300 chairs (~13 lf, gray zone) misclassified as 'partial'-by-
-    count on every carrier response. 150 chairs ≈ 6.5 lf must rate as LTL;
-    600 chairs ≈ 26 lf as partial."""
-    cal = fq.calibration_for_lot(None)
-    data = {"totalCharge": 1500}
-
-    small = fq._map_carrier_rates("warp", data, "01608", "83702", 150, {})
-    assert small["mode"] == fq.select_mode(fq.linear_feet(150, cal))
-    assert small["ltl_low"] is not None  # 150 chairs is an LTL-sized load
-
-    big = fq._map_carrier_rates("warp", data, "01608", "83702", 600, {})
-    assert big["mode"] == fq.select_mode(fq.linear_feet(600, cal))
-    assert big["recommended_mode"] == "partial"  # full box truck of chairs
-
-
-def test_map_carrier_rates_without_a_rate_raises():
-    with pytest.raises(fq.FreightUnavailable):
-        fq._map_carrier_rates("warp", {"messages": ["no service"]},
-                              "01608", "83702", 150, {})
-
-
-# --------------------------------------------------------------------------- #
-# Provider precedence: Warp -> estimator (Estes dropped on vendoring)
-# --------------------------------------------------------------------------- #
-def test_provider_precedence(monkeypatch):
+def test_no_environment_variable_selects_a_carrier(monkeypatch):
+    """The Warp adapter that used to live here never matched Warp's API. With a
+    key set it would have failed on every estimate and added a 20 s wait. It is
+    gone: real carrier prices come from `automation.warp_rates`, for the
+    operator only, and never drive the number a buyer sees."""
     assert isinstance(fq.select_provider(), fq.EstimatorProvider)
-
-    # The CRM's Estes key must no longer select anything — that adapter is gone.
     monkeypatch.setenv("FREIGHT_API_KEY", "estes-key")
-    assert isinstance(fq.select_provider(), fq.EstimatorProvider)
-
     monkeypatch.setenv("WARP_API_KEY", "wak_live_x")
-    assert isinstance(fq.select_provider(), fq.WarpProvider)
+    assert isinstance(fq.select_provider(), fq.EstimatorProvider)
+    assert not hasattr(fq, "WarpProvider")
 
 
-def test_carrier_error_falls_back_to_estimator(monkeypatch):
-    """DIVERGENCE from the CRM: a carrier HTTP failure must NOT lose the lane.
-    The CRM raised FreightUnavailable (seller hand-off, fine in a DM thread);
-    a buyer typing a ZIP into the storefront gets the estimator's range instead."""
+def test_a_warp_key_never_touches_the_network(monkeypatch):
     monkeypatch.setenv("WARP_API_KEY", "wak_live_x")
     import urllib.request
 
     def boom(*a, **k):
-        raise OSError("HTTP 503")
+        raise AssertionError("the estimator must not open a connection")
 
     monkeypatch.setattr(urllib.request, "urlopen", boom)
     q = fq.get_freight_estimate("01608", "83702", 150, "residential")
@@ -226,14 +197,55 @@ def test_carrier_error_falls_back_to_estimator(monkeypatch):
     assert 1000 <= q["ltl_low"] <= 1300
 
 
-def test_carrier_error_still_raises_on_a_bad_lane(monkeypatch):
-    """The fallback is for carrier failures only — an unquotable lane stays
-    unquotable no matter which provider is configured."""
-    monkeypatch.setenv("WARP_API_KEY", "wak_live_x")
-    import urllib.request
+# --------------------------------------------------------------------------- #
+# Per-lot chair data
+# --------------------------------------------------------------------------- #
+def test_a_row_without_chair_data_is_the_standard_chair():
+    std = fq.calibration_for_lot(None)
+    for row in (None, {}, {"lot_id": "x"}, {"chair_weight_lb": None, "chairs_per_pallet": ""},
+                {"chair_weight_lb": 0, "chairs_per_pallet": -3, "pallet_height_in": "tall"}):
+        assert fq.calibration_from_row(row) == std
 
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda *a, **k: (_ for _ in ()).throw(OSError("503"))
+
+def test_lot_chair_data_overrides_the_standard():
+    cal = fq.calibration_from_row(
+        {"lot_id": "9006", "chair_weight_lb": "17.5", "chairs_per_pallet": 40, "pallet_height_in": 72}
     )
-    with pytest.raises(fq.FreightUnavailable):
-        fq.get_freight_estimate("83702", "00601", 150, "residential")
+    assert cal.lbs_per_chair == 17.5
+    assert cal.lbs_per_chair_estimated is False      # somebody weighed it
+    assert cal.chairs_per_pallet == 40
+    assert cal.pallet_height_in == 72
+    # geometry nobody entered stays the standard
+    assert cal.chairs_per_linear_foot == fq.calibration_for_lot(None).chairs_per_linear_foot
+
+
+def test_a_heavier_chair_raises_the_ltl_range():
+    base = fq.get_freight_estimate("83702", "01608", 150, "residential")
+    heavy = fq.get_freight_estimate(
+        "83702", "01608", 150, "residential",
+        cal=fq.calibration_from_row({"chair_weight_lb": 20}),
+    )
+    assert heavy["ltl_low"] > base["ltl_low"]
+    assert heavy["raw"]["lbs_per_chair"] == 20
+    assert heavy["raw"]["lbs_per_chair_estimated"] is False
+
+
+def test_pallet_data_alone_does_not_move_the_price():
+    """chairs_per_pallet / pallet_height_in size the carrier check, not the
+    estimate a buyer sees."""
+    base = fq.get_freight_estimate("83702", "01608", 150, "residential")
+    other = fq.get_freight_estimate(
+        "83702", "01608", 150, "residential",
+        cal=fq.calibration_from_row({"chairs_per_pallet": 20, "pallet_height_in": 60}),
+    )
+    for key in ("ltl_low", "ltl_high", "partial_low", "partial_high", "mode"):
+        assert other[key] == base[key]
+
+
+def test_handling_units_follow_chairs_per_pallet():
+    std = fq.calibration_for_lot(None)
+    assert std.chairs_per_pallet == 35
+    assert fq.handling_units(160, std) == 5        # was 2 at "1 pallet per 4 linear ft"
+    assert fq.handling_units(35, std) == 1
+    assert fq.handling_units(36, std) == 2
+    assert fq.handling_units(0, std) == 0

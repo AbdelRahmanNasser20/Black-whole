@@ -160,6 +160,16 @@ function rowHtml(item) {
                  placeholder="extra locations — Baltimore, MD x1200; Orlando, FL"
                  title="Every place this lot sits. Blank = single location (uses the city above).">
         </div>
+        <div class="inv-sub inv-chair" title="Chair data for freight. Blank = the standard (Idaho) chair: 13 lb, 35 per pallet, 80 in.">
+          <label>LB/CHAIR <input type="number" class="inv-chair-num" data-field="chair_weight_lb" min="1" max="100" step="0.1"
+                 value="${item.chair_weight_lb ?? ''}" placeholder="13" aria-label="Chair weight in pounds"></label>
+          <label>FRAME <input type="text" class="inv-chair-frame" data-field="chair_frame" maxlength="60"
+                 value="${escapeAttr(item.chair_frame || '')}" placeholder="steel / aluminum" aria-label="Chair frame"></label>
+          <label>PER PALLET <input type="number" class="inv-chair-num" data-field="chairs_per_pallet" min="1" max="200" step="1"
+                 value="${item.chairs_per_pallet ?? ''}" placeholder="35" aria-label="Chairs per pallet"></label>
+          <label>PALLET IN <input type="number" class="inv-chair-num" data-field="pallet_height_in" min="12" max="110" step="1"
+                 value="${item.pallet_height_in ?? ''}" placeholder="80" aria-label="Pallet height in inches"></label>
+        </div>
         <div class="inv-sub inv-extras">
           <button type="button" class="btn btn-small btn-ghost inv-acct" data-act="acct" title="Set the GovDeals login that owns this lot">
             🔐 ${item.govdeals_username
@@ -231,6 +241,10 @@ const jsonOpts = (method, body) => ({method, headers: {'Content-Type': 'applicat
 
 // ───────── inline edits (#24) ─────────
 
+// Sent as numbers (blank = null = "clear"); everything else goes as the typed string.
+const NUMERIC_FIELDS = new Set(['quantity_remaining', 'quantity_original', 'price_per_chair',
+                                'chair_weight_lb', 'chairs_per_pallet', 'pallet_height_in']);
+
 async function onFieldChange(e) {
   const input = e.target.closest('[data-field]');
   if (!input) return;
@@ -238,7 +252,14 @@ async function onFieldChange(e) {
   const lotId = tr.dataset.lotId;
   const field = input.dataset.field;
   let value = input.value;
-  if (field === 'quantity_remaining' || field === 'quantity_original' || field === 'price_per_chair') {
+  if (input.validity && input.validity.badInput) {
+    // A number box holding "13,5" reads back as '' — which would be sent as null and silently CLEAR the stored
+    // value. Refuse instead.
+    flashRow(tr, 'err');
+    toast('That is not a number — nothing was changed.', 'err');
+    return;
+  }
+  if (NUMERIC_FIELDS.has(field)) {
     value = value === '' ? null : Number(value);
   }
   await pendingRow(tr, async () => {

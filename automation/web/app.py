@@ -17,12 +17,14 @@ Streams stdout from run.py as Server-Sent Events. Parses
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 import os
 import re
 import signal
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -63,6 +65,7 @@ from ..channels import sync as channel_sync
 from .. import stripe_gateway
 from .. import freight_estimate
 from .. import freight_log
+from .. import warp_rates
 from ..alerts import blast as alerts_blast
 from . import deals_query
 from . import public_deals
@@ -1774,22 +1777,53 @@ async def public_subscribe(payload: dict):
 
 
 # ── Freight estimate (public, self-serve) ────────────────────────────────────
-# A buyer types their ZIP on a lot page and gets an honest RANGE. Public paths,
-# deliberately outside `/api/` (auth.py's PROTECTED_PREFIXES), same as /contact
-# and /reserve.
+# A buyer gives a ZIP, an email and a phone on a lot page and gets an honest
+# RANGE. Public paths, deliberately outside `/api/` (auth.py's
+# PROTECTED_PREFIXES), same as /contact and /reserve.
 #
 # THE HARD RULE: never invent a number. An unquotable lane (international,
 # offshore/Alaska, unresolvable ZIP, or a lot whose origin we can't locate)
-# returns HTTP 200 with `ok: false` and hands the buyer to the contact form. It
-# does NOT guess, and it does not 500 — a lane we can't price is a normal
-# outcome of a public form, not an error.
+# returns HTTP 200 with `ok: false`. It does NOT guess, and it does not 500 — a
+# lane we can't price is a normal outcome of a public form, not an error.
+#
+# EVERY REQUEST IS A LEAD. Contact details come first and the request is written
+# to `freight_quotes` whether or not it could be priced, so the Sales tab shows
+# it and nothing depends on somebody reading a Telegram ping. (Before 2026-10
+# the email was an optional second step and 4 of 5 requests were anonymous.)
+#
+# The number the buyer sees is the in-house estimator's. Real carrier prices
+# (automation/warp_rates.py) are fetched afterwards, in the background, for the
+# operator only.
 
 FREIGHT_UNQUOTABLE = {
     "ok": False,
     "reason": "unquotable",
+    "saved": True,
     "message": (
-        "We'll quote this lane by hand — send the request below and we'll come "
-        "back with a real number."
+        "We'll quote this lane by hand and come back to you with a real number "
+        "at the email and phone you gave us."
+    ),
+}
+
+# The same lane, but nothing was written (pre-021 schema, or the insert failed).
+# The buyer must NOT be told "got it": the contact form below is the durable
+# path (it writes `inquiries`), so send them there.
+FREIGHT_UNQUOTABLE_NOT_SAVED = {
+    "ok": False,
+    "reason": "unquotable",
+    "saved": False,
+    "message": (
+        "We can't price this lane automatically. Send the request with the form "
+        "below and we'll come back with a real number."
+    ),
+}
+
+FREIGHT_NOT_SAVED = {
+    "ok": False,
+    "reason": "not_saved",
+    "message": (
+        "We couldn't save your request just now. Please try again in a minute, "
+        "or send it with the form below."
     ),
 }
 
@@ -1806,6 +1840,87 @@ FREIGHT_FRAMING = {
 # to date is ~4,900) and small enough that a fat-fingered 9-digit number can't
 # turn into a nonsense weight.
 FREIGHT_MAX_QTY = 10_000
+
+# Strong refs for fire-and-forget work. The event loop only holds a WEAK
+# reference to a task, so a bare `create_task(...)` can be collected mid-flight
+# — a real risk for the carrier check, which waits ~20-45 s on Warp.
+_FREIGHT_TASKS: set[asyncio.Task] = set()
+
+
+def _spawn(coro) -> None:
+    task = asyncio.create_task(coro)
+    _FREIGHT_TASKS.add(task)
+    task.add_done_callback(_FREIGHT_TASKS.discard)
+
+
+# ── carrier-check plumbing ──
+# A Warp call blocks a thread for ~20-45 s. On asyncio's DEFAULT executor that
+# would compete with every `asyncio.to_thread` DB hop in this file (the pool is
+# min(32, cpu+4) threads), so 20 quotes from one caller could stall the whole
+# app. Carrier checks get their own two threads instead, a short queue, an
+# hourly budget, and a per-lane memo — the worst a flood can do is leave rows
+# "not checked yet" (the Sales tab has a button for that).
+_CARRIER_POOL = concurrent.futures.ThreadPoolExecutor(
+    max_workers=2, thread_name_prefix="carrier-check"
+)
+CARRIER_QUEUE_MAX = 8          # background checks waiting or running; more are skipped
+# Warp allows 60 keyless calls an hour. Stay under it so a burst of quotes can
+# never burn the whole hour and leave real leads without prices. Raise it with
+# `WARP_RATES_PER_HOUR` once a key (10,000/h) is in place.
+CARRIER_CALLS_PER_HOUR = int(os.getenv("WARP_RATES_PER_HOUR", "40"))
+CARRIER_LANE_TTL_SEC = 6 * 3600
+CARRIER_LANE_CACHE_MAX = 200
+_carrier_lock = threading.Lock()
+_carrier_pending = 0
+_carrier_lane_cache: dict[tuple, tuple[float, dict]] = {}
+_carrier_budget = [0.0, 0]     # [window_end_epoch, calls_in_window]
+
+
+class CarrierBudgetExceeded(Exception):
+    """This hour's outbound Warp calls are used up."""
+
+
+def _carrier_lane_get(key: tuple) -> dict | None:
+    with _carrier_lock:
+        hit = _carrier_lane_cache.get(key)
+        if hit and hit[0] > time.time():
+            return dict(hit[1])
+        _carrier_lane_cache.pop(key, None)
+        return None
+
+
+def _carrier_lane_put(key: tuple, summary: dict) -> None:
+    with _carrier_lock:
+        if len(_carrier_lane_cache) >= CARRIER_LANE_CACHE_MAX:
+            oldest = min(_carrier_lane_cache, key=lambda k: _carrier_lane_cache[k][0])
+            _carrier_lane_cache.pop(oldest, None)
+        _carrier_lane_cache[key] = (time.time() + CARRIER_LANE_TTL_SEC, dict(summary))
+
+
+def _carrier_budget_take() -> bool:
+    """Count one outbound Warp call; False when this hour's budget is spent.
+
+    Its own locked counter rather than `rate_limit.allow`: this runs on worker
+    threads, and that module's dict is only safe from the event loop.
+    """
+    now = time.time()
+    with _carrier_lock:
+        if now >= _carrier_budget[0]:
+            _carrier_budget[0] = (now // 3600 + 1) * 3600
+            _carrier_budget[1] = 0
+        if _carrier_budget[1] >= CARRIER_CALLS_PER_HOUR:
+            return False
+        _carrier_budget[1] += 1
+        return True
+
+
+def _carrier_reset() -> None:
+    """Tests only: forget the lane memo, the queue depth and the hour's count."""
+    global _carrier_pending
+    with _carrier_lock:
+        _carrier_lane_cache.clear()
+        _carrier_pending = 0
+        _carrier_budget[0], _carrier_budget[1] = 0.0, 0
 
 
 def _freight_origin_zip(row: dict) -> str | None:
@@ -1843,8 +1958,10 @@ def _freight_rate_ok(request: Request) -> None:
     """429 unless this caller (and the site as a whole) is under the hour's cap."""
     ip = rate_limit.client_ip(request)
     if not rate_limit.allow(f"freight:{ip}", limit=rate_limit.FREIGHT_PER_IP_LIMIT):
+        log.warning("freight estimate rate-limited (per-ip) ip=%s", ip)
         raise HTTPException(429, "rate_limited")
     if not rate_limit.allow("freight:global", limit=rate_limit.FREIGHT_GLOBAL_LIMIT):
+        log.warning("freight estimate rate-limited (global) ip=%s", ip)
         raise HTTPException(429, "rate_limited")
 
 
@@ -1858,9 +1975,9 @@ def _freight_range(quote: dict, low_key: str, high_key: str) -> dict | None:
 def _freight_public_estimate(quote: dict) -> dict:
     """The subset of the estimator's dict a browser may see.
 
-    `raw` (calibration constants, NMFC class, the carrier's own response) stays
-    server-side: it's the audit trail for a quote, not a spec sheet for a
-    competitor, and every one of those knobs is tunable-by-us guesswork.
+    `raw` (calibration constants, NMFC class) stays server-side: it's the audit
+    trail for a quote, not a spec sheet for a competitor, and every one of
+    those knobs is tunable-by-us guesswork.
     """
     return {
         "mode": quote.get("mode"),
@@ -1883,49 +2000,267 @@ def _freight_range_str(quote: dict) -> str:
     return f"${rng['low']:,.0f}–${rng['high']:,.0f} ({mode})"
 
 
-async def _notify_freight_estimate(
-    row: dict, quote: dict, *, dest_zip: str, quantity: int, quote_id: int | None
-) -> None:
-    """Someone priced a real lane — that's a warm lead even without an email.
+def _looks_like_email(value: str) -> bool:
+    """Cheap plausibility check — the real validation is whether it bounces."""
+    if not value or len(value) > 254 or any(c.isspace() for c in value):
+        return False
+    if any(c in value for c in '?#<>"'):
+        # `a@b.co?bcc=x@evil.io` would pre-fill a bcc when the operator clicks
+        # the mailto: link on the Sales tab. (An apostrophe stays legal —
+        # o'brien@… is a real address.)
+        return False
+    local, _, domain = value.partition("@")
+    return bool(local) and "." in domain and not domain.startswith(".") \
+        and not domain.endswith(".")
 
-    Best-effort, exactly like `_notify_new_inquiry`: a dead Telegram must never
-    surface as a failed estimate.
+
+def _clean_phone(value: Any) -> str:
+    """A US phone as 10 bare digits, or ValueError.
+
+    Takes whatever a person types — ``(404) 555-0100``, ``+1 404.555.0100``,
+    ``404 555 0100 x12`` is rejected (extension digits make it 12) — strips
+    everything that isn't a digit, drops a leading country ``1``, and insists
+    on a real NANP shape: ten digits, area code and exchange not starting with
+    0 or 1. Same spirit as `_looks_like_email`: plausibility, not proof.
+    """
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) == 11 and digits.startswith("1"):
+        digits = digits[1:]
+    if len(digits) != 10 or digits[0] in "01" or digits[3] in "01":
+        raise ValueError("invalid phone")
+    return digits
+
+
+def _safe_int(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _pretty_phone(digits: str | None) -> str:
+    d = digits or ""
+    return f"({d[:3]}) {d[3:6]}-{d[6:]}" if len(d) == 10 and d.isdigit() else d
+
+
+_ZIP_PLUS4 = re.compile(r"^(\d{5})(?:[-\s]?\d{4})$")
+
+
+def _freight_dest_zip(value: Any) -> str:
+    """The buyer's destination as typed, with ZIP+4 trimmed to the 5-digit ZIP.
+
+    Anything else is passed through untouched — a Canadian postal code or a typo
+    is for the estimator to refuse (and for the row to record), not for this
+    function to silently "fix".
+    """
+    raw = str(value or "").strip()
+    m = _ZIP_PLUS4.match(raw)
+    return m.group(1) if m else raw[:32]
+
+
+_ZIP5 = re.compile(r"^\d{5}$")
+
+
+async def _notify_freight_estimate(
+    row: dict,
+    quote: dict | None,
+    *,
+    dest_zip: str,
+    quantity: int,
+    quote_id: int | None,
+    email: str | None = None,
+    phone: str | None = None,
+    reason: str | None = None,
+    available: int | None = None,
+) -> None:
+    """One ping per request, carrying everything needed to answer it.
+
+    The contact details ride in the message on purpose: if the row could not be
+    written (`quote_id` is None) this ping is the only record of the lead.
+    Best-effort like `_notify_new_inquiry` — a dead Telegram must never surface
+    as a failed estimate — but a failed send is LOGGED, not swallowed.
     """
     try:
         lot_id = row.get("lot_id") or "—"
-        bits = [f"🚚 FREIGHT ESTIMATE · lot {lot_id}"]
-        bits.append(
-            f"{quantity} chairs → {dest_zip} · {_freight_range_str(quote)}"
+        head = f"🚚 FREIGHT REQUEST · lot {lot_id}"
+        if quote_id:
+            head += f" · #{quote_id}"
+        bits = [head]
+        if quote:
+            bits.append(f"{quantity} chairs → {dest_zip} · {_freight_range_str(quote)}")
+            bits.append(
+                f"~{quote.get('miles')} mi · ~{quote.get('transit_days')} days · "
+                f"via {quote.get('provider') or 'estimator'}"
+            )
+        else:
+            bits.append(f"{quantity} chairs → {dest_zip or '—'} · NO PRICE — quote by hand")
+            if reason:
+                bits.append(f"why: {reason}")
+        contact = " · ".join(x for x in (email, _pretty_phone(phone)) if x)
+        if contact:
+            bits.append(f"📇 {contact}")
+        if available is not None:
+            bits.append(f"⚠ asked for {quantity}, lot has {available}")
+        if not quote_id:
+            bits.append("⚠ NOT SAVED to the database — this message is the only record")
+        bits.append(f"→ {PUBLIC_BASE_URL}/admin?tab=quotes")
+        ok, err = await telegram_alerts.send_message("\n".join(bits), topic="leads")
+        if not ok:
+            _log_unsent_alert(err, lot_id, quote_id, dest_zip, quantity, email, phone)
+    except Exception as e:
+        _log_unsent_alert(
+            repr(e), row.get("lot_id"), quote_id, dest_zip, quantity, email, phone
         )
-        bits.append(
-            f"~{quote.get('miles')} mi · ~{quote.get('transit_days')} days · "
-            f"via {quote.get('provider') or 'estimator'}"
-            + (f" · quote #{quote_id}" if quote_id else "")
+
+
+def _log_unsent_alert(err, lot_id, quote_id, dest_zip, quantity, email, phone) -> None:
+    """The alert did not go out. If the row was not written either, this log
+    line is the ONLY place the lead exists — so it carries the contact details.
+    With a row on file the Sales tab has them, and they stay out of the log."""
+    if quote_id:
+        log.warning(
+            "freight request alert not sent (%s): lot=%s quote_id=%s", err, lot_id, quote_id
         )
-        bits.append(f"→ {PUBLIC_BASE_URL}/listings/{lot_id}")
-        await telegram_alerts.send_message("\n".join(bits), topic="leads")
-    except Exception:
-        pass
+    else:
+        log.error(
+            "FREIGHT LEAD NOT SAVED AND NOT ALERTED (%s): lot=%s dest=%s qty=%s "
+            "email=%s phone=%s", err, lot_id, dest_zip, quantity, email, phone,
+        )
 
 
 async def _notify_freight_email(quote_id: int, email: str) -> None:
-    """The buyer traded their email for the estimate — that's the hot signal."""
+    """Legacy second step (see `/freight-estimate/email`)."""
     try:
-        await telegram_alerts.send_message(
+        ok, err = await telegram_alerts.send_message(
             f"📧 FREIGHT LEAD · quote #{quote_id} → {email}", topic="leads"
         )
+        if not ok:
+            log.warning("freight email alert not sent (%s): quote_id=%s", err, quote_id)
     except Exception:
-        pass
+        log.warning("freight email alert failed", exc_info=True)
+
+
+def _run_carrier_check(quote_id: int) -> dict | None:
+    """Fetch real carrier prices for one stored request and save the summary.
+
+    Blocking (a DB read, a ~20-45 s HTTP call, a DB write) — callers run it in a
+    worker thread. Returns the summary that was stored, or None when there was
+    nothing to check (unknown id, or a request with no priced lane).
+    """
+    if not freight_log.schema_ready():
+        # Nowhere to store the answer before migration 021 — don't spend a
+        # 20-45 s Warp call (and one of this hour's calls) on a result we drop.
+        return None
+    quote = freight_log.get_quote(quote_id)
+    if not quote or quote.get("unquotable_reason") or not quote.get("origin_zip"):
+        return None
+    if not _ZIP5.match(str(quote.get("dest_zip") or "")):
+        return None
+    lot = inventory.get(quote["lot_id"]) if quote.get("lot_id") else None
+    cal = freight_estimate.calibration_from_row(lot)
+    quantity = int(quote.get("quantity") or 0)
+    pallets = warp_rates.pallets_for(quantity, cal.chairs_per_pallet)
+    if pallets <= 0:
+        return None
+    if pallets > warp_rates.MAX_LTL_PALLETS:
+        summary = warp_rates.unavailable("too_big")
+    else:
+        weight = warp_rates.weight_per_pallet(quantity, pallets, cal.lbs_per_chair)
+        lane = (quote["origin_zip"], quote["dest_zip"], pallets, weight, cal.pallet_height_in)
+        summary = _carrier_lane_get(lane)
+        if summary is None:
+            # One shared hourly budget for automatic AND manual checks.
+            if not _carrier_budget_take():
+                raise CarrierBudgetExceeded(
+                    f"{CARRIER_CALLS_PER_HOUR} carrier checks used this hour"
+                )
+            try:
+                summary = warp_rates.summarize(warp_rates.market_options(
+                    quote["origin_zip"],
+                    quote["dest_zip"],
+                    pallets=pallets,
+                    weight_lbs_per_pallet=weight,
+                    height_in=cal.pallet_height_in,
+                ))
+            except warp_rates.WarpUnavailable as e:
+                log.warning("carrier check failed for quote %s: %s", quote_id, e)
+                summary = warp_rates.unavailable("error")
+            if summary.get("carrier_status") == "ok":
+                _carrier_lane_put(lane, summary)   # same lane again ⇒ no second call
+    freight_log.set_carrier_result(quote_id, summary)
+    readcache.invalidate_all()   # the Sales tab memo may hold the row without prices
+    return summary
+
+
+async def _carrier_check_task(quote_id: int) -> None:
+    """Background wrapper: never raises, never blocks the event loop, never
+    touches the default executor, and gives up rather than queue without bound
+    (the row stays "not checked yet"; the Sales tab can re-run it)."""
+    global _carrier_pending
+    if not warp_rates.enabled():
+        return
+    with _carrier_lock:
+        if _carrier_pending >= CARRIER_QUEUE_MAX:
+            log.warning("carrier check skipped for quote %s: queue full", quote_id)
+            return
+        _carrier_pending += 1
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            _CARRIER_POOL, _run_carrier_check, quote_id
+        )
+    except CarrierBudgetExceeded as e:
+        log.warning("carrier check skipped for quote %s: %s", quote_id, e)
+    except Exception:
+        log.warning("carrier check crashed for quote %s", quote_id, exc_info=True)
+    finally:
+        with _carrier_lock:
+            _carrier_pending -= 1
 
 
 @app.post("/freight-estimate")
 async def public_freight_estimate(payload: dict, request: Request):
-    """`{lot_id, dest_zip, quantity?}` → a freight cost range for that lane."""
+    """`{lot_id, dest_zip, quantity?, email, phone}` → a freight range for the lane.
+
+    Email and phone are required: this is a quote request, and a request nobody
+    can answer is not worth storing.
+    """
     _freight_rate_ok(request)
     payload = payload or {}
-
     lot_id = str(payload.get("lot_id") or "").strip()
-    row = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    dest_zip = _freight_dest_zip(payload.get("dest_zip"))
+
+    # Contact details first: pure checks, no I/O. Everything after this point
+    # has a way to reach the buyer, so every failure below can still be a lead.
+    email = str(payload.get("email") or "").strip()
+    try:
+        if not _looks_like_email(email):
+            raise ValueError("valid email required")
+        phone = _clean_phone(payload.get("phone"))
+    except ValueError as e:
+        # Also what a lot page left open across the deploy gets (its old script
+        # posts no contact details): leave a trace of the attempt.
+        log.warning(
+            "freight request refused (no usable contact): lot=%s dest=%s qty=%s",
+            lot_id, dest_zip, payload.get("quantity"),
+        )
+        raise HTTPException(
+            400, "valid email required" if "email" in str(e) else "valid phone required"
+        )
+
+    try:
+        row = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    except Exception:
+        # The database did not answer. The buyer's details exist only in this
+        # request — page the operator with them rather than answering 500.
+        log.warning("freight request: lot lookup failed for %s", lot_id, exc_info=True)
+        _spawn(
+            _notify_freight_estimate(
+                {"lot_id": lot_id}, None, dest_zip=dest_zip,
+                quantity=_safe_int(payload.get("quantity")), quote_id=None,
+                email=email, phone=phone, reason="database unavailable",
+            )
+        )
+        return dict(FREIGHT_NOT_SAVED)
     if not row or row.get("status") == "hidden" or inventory.is_sold(row):
         # A sold lot has nothing to ship; quoting freight on it would be a
         # promise we can't keep.
@@ -1940,21 +2275,37 @@ async def public_freight_estimate(payload: dict, request: Request):
             raise HTTPException(400, "quantity must be a number")
         quantity = max(1, min(quantity, FREIGHT_MAX_QTY))
 
-    dest_zip = str(payload.get("dest_zip") or "").strip()
     origin_zip = _freight_origin_zip(row)
+
+    quote: dict | None = None
+    reason: str | None = None
     if not origin_zip:
         # We don't know where the lot is. Better a hand quote than a lane
         # measured from nowhere.
-        return dict(FREIGHT_UNQUOTABLE)
+        reason = "lot has no origin ZIP or state"
+    elif not _ZIP5.match(dest_zip):
+        # The estimator zero-pads short ZIPs (right for an origin stored as a
+        # number, wrong for a buyer's typo): "3003" would be priced as 03003,
+        # New Hampshire. Not exactly five digits ⇒ not priced.
+        reason = f"destination {dest_zip!r} is not a 5-digit US ZIP"
+    else:
+        try:
+            # Pure arithmetic over a committed lookup table — microseconds, no
+            # I/O, so it runs inline rather than paying for a thread hop.
+            quote = freight_estimate.get_freight_estimate(
+                origin_zip, dest_zip, quantity,
+                cal=freight_estimate.calibration_from_row(row),
+            )
+        except freight_estimate.FreightUnavailable as e:
+            reason = str(e)[:200]
 
+    # Asking for more than the lot holds is still a lead — quote what was asked,
+    # record the stock at that moment, and tell both sides.
     try:
-        # Pure arithmetic over a committed lookup table — microseconds, no I/O,
-        # so it runs inline rather than paying for a thread hop. (A configured
-        # WarpProvider would add a network call; it falls back to the estimator
-        # on failure and is not wired on the storefront today.)
-        quote = freight_estimate.get_freight_estimate(origin_zip, dest_zip, quantity)
-    except freight_estimate.FreightUnavailable:
-        return dict(FREIGHT_UNQUOTABLE)
+        remaining = int(row.get("quantity_remaining"))
+    except (TypeError, ValueError):
+        remaining = None
+    available = remaining if (remaining is not None and 0 < remaining < quantity) else None
 
     quote_id = await asyncio.to_thread(
         freight_log.insert_storefront_quote,
@@ -1963,36 +2314,49 @@ async def public_freight_estimate(payload: dict, request: Request):
         dest_zip=dest_zip,
         quantity=quantity,
         quote=quote,
+        buyer_email=email,
+        buyer_phone=phone,
         client_ip=rate_limit.client_ip(request),
+        unquotable_reason=reason,
+        lot_quantity_remaining=remaining,
     )
-    asyncio.create_task(
+    _spawn(
         _notify_freight_estimate(
-            row, quote, dest_zip=dest_zip, quantity=quantity, quote_id=quote_id
+            row, quote, dest_zip=dest_zip, quantity=quantity, quote_id=quote_id,
+            email=email, phone=phone, reason=reason, available=available,
         )
     )
+    if quote_id:
+        readcache.invalidate_all()   # this path is outside /api/: drop the memo by hand
+
+    if quote is None:
+        # "We'll follow up" only when the request is actually on file. If it
+        # was not written (pre-021 schema, or the insert failed) the alert is a
+        # best-effort ping, not a record — hand the buyer to the contact form.
+        return dict(FREIGHT_UNQUOTABLE if quote_id else FREIGHT_UNQUOTABLE_NOT_SAVED)
+    if quote_id is None:
+        # The row is the product here. No row ⇒ no price on screen, so the buyer
+        # retries or uses the form instead of walking away with a number we
+        # have no record of having given.
+        return dict(FREIGHT_NOT_SAVED)
+
+    _spawn(_carrier_check_task(quote_id))
     return {
         "ok": True,
         "quote_id": quote_id,
         "estimate": _freight_public_estimate(quote),
         "framing": dict(FREIGHT_FRAMING),
+        "available": available,
     }
-
-
-def _looks_like_email(value: str) -> bool:
-    """Cheap plausibility check — the real validation is whether it bounces."""
-    if not value or len(value) > 254 or any(c.isspace() for c in value):
-        return False
-    local, _, domain = value.partition("@")
-    return bool(local) and "." in domain and not domain.startswith(".") \
-        and not domain.endswith(".")
 
 
 @app.post("/freight-estimate/email")
 async def public_freight_estimate_email(payload: dict, request: Request):
-    """Step two: attach an email to a quote the buyer already has on screen.
+    """LEGACY second step: attach an email to a quote already on screen.
 
-    Split from the estimate itself on purpose — asking for an email before
-    showing a number costs more quotes than the addresses are worth.
+    The widget now asks for contact details before the estimate, so nothing we
+    serve calls this. It stays for lot pages that were open in a browser across
+    the deploy; remove it once those have aged out.
     """
     _freight_rate_ok(request)
     payload = payload or {}
@@ -2005,8 +2369,11 @@ async def public_freight_estimate_email(payload: dict, request: Request):
     if not _looks_like_email(email):
         raise HTTPException(400, "valid email required")
 
-    await asyncio.to_thread(freight_log.set_quote_email, quote_id, email)
-    asyncio.create_task(_notify_freight_email(quote_id, email))
+    saved = await asyncio.to_thread(freight_log.set_quote_email, quote_id, email)
+    _spawn(_notify_freight_email(quote_id, email))
+    if not saved:
+        # Don't tell the buyer "sent" when nothing was written.
+        raise HTTPException(503, "could not save that email — try again")
     return {"ok": True}
 
 
@@ -3643,6 +4010,12 @@ def inv_update(lot_id: str, payload: dict):
         row = inventory.set_fields(lot_id, **payload)
     except ValueError as e:
         raise HTTPException(400, str(e))
+    except Exception as e:
+        # The chair-data inputs always render; before migration 021 their
+        # columns don't exist. Say which command adds them instead of a bare 500.
+        if type(e).__name__ == "UndefinedColumn" and (set(payload) & inventory.CHAIR_FIELDS):
+            raise HTTPException(409, freight_log.MIGRATION_HINT)
+        raise
     if not row:
         raise HTTPException(404, "not found")
     return _inventory_to_public(row)
@@ -3907,6 +4280,109 @@ def inq_delete(inquiry_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+# ─────────────────────────── freight quotes API ───────────────────────────
+# The Sales tab's Quotes view: every storefront (and CRM) freight request with a
+# follow-up status and, where one was fetched, the cheapest real carrier price
+# beside the range we showed. Admin-only by construction — everything here is
+# under /api/. `raw_response` (calibration internals + the caller's IP) is never
+# selected by `freight_log`, so it cannot leak through these routes.
+
+def _freight_quote_view(row: dict) -> dict:
+    """A stored request plus the two things the tab derives from it."""
+    out = dict(row)
+    mode = "partial" if out.get("mode") == "partial" else "ltl"
+    if out.get("mode") == "both" and None not in (
+        out.get("ltl_low"), out.get("ltl_high"), out.get("partial_low"), out.get("partial_high")
+    ):
+        # `recommended_mode` is not stored; re-derive it the way the estimator
+        # does — the range with the cheaper midpoint is the one shown first.
+        ltl_mid = (out["ltl_low"] + out["ltl_high"]) / 2
+        partial_mid = (out["partial_low"] + out["partial_high"]) / 2
+        mode = "ltl" if ltl_mid <= partial_mid else "partial"
+    low, high = out.get(f"{mode}_low"), out.get(f"{mode}_high")
+    if low is None or high is None:
+        low, high = out.get("ltl_low"), out.get("ltl_high")
+    out["shown_low"], out["shown_high"] = low, high
+    out["price_check"] = warp_rates.price_check(low, high, out.get("carrier_low"))
+    # Stock to compare the ask against: what the lot held when the buyer asked
+    # (recorded since migration 021), else what it holds now — an older row has
+    # no snapshot, and "asked 160, lot has 100" is still worth seeing.
+    at_request = out.get("lot_quantity_remaining")
+    stock = at_request if at_request is not None else out.get("lot_quantity_now")
+    out["stock_compared"] = stock
+    out["stock_is_current"] = at_request is None and stock is not None
+    out["over_stock"] = bool(
+        stock is not None and out.get("quantity") and stock > 0
+        and out["quantity"] > stock
+    )
+    return out
+
+
+@app.get("/api/freight-quotes")
+@readcache.cached()
+def freight_quotes_list(status: str | None = None):
+    # sync handler → FastAPI threadpool; memoised (readcache.py)
+    try:
+        items = freight_log.list_quotes(status or None)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {
+        "items": [_freight_quote_view(r) for r in items],
+        "schema_ready": freight_log.schema_ready(),
+        "migration_hint": freight_log.MIGRATION_HINT,
+        "statuses": list(freight_log.QUOTE_STATUSES),
+    }
+
+
+@app.patch("/api/freight-quotes/{quote_id}")
+def freight_quote_update(quote_id: int, payload: dict):
+    payload = payload or {}
+    if "status" not in payload and "note" not in payload:
+        raise HTTPException(400, "nothing to update")
+    try:
+        row = freight_log.set_quote_status(
+            quote_id,
+            status=payload.get("status") if "status" in payload else None,
+            note=("" if payload.get("note") is None else str(payload["note"]))
+            if "note" in payload else None,
+        )
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except freight_log.SchemaNotReady as e:
+        raise HTTPException(409, str(e))
+    if row is None:
+        raise HTTPException(404, "not found")
+    return _freight_quote_view(row)
+
+
+@app.post("/api/freight-quotes/{quote_id}/carrier-check")
+def freight_quote_carrier_check(quote_id: int):
+    """Ask Warp again for this lane (~20-45 s). Sync handler → threadpool."""
+    if not freight_log.schema_ready():
+        raise HTTPException(409, freight_log.MIGRATION_HINT)
+    if not warp_rates.enabled():
+        raise HTTPException(409, "carrier checks are switched off (WARP_RATES_ENABLED=0)")
+    if freight_log.get_quote(quote_id) is None:
+        raise HTTPException(404, "not found")
+    try:
+        summary = _run_carrier_check(quote_id)
+    except CarrierBudgetExceeded as e:
+        raise HTTPException(429, f"{e} — try again next hour")
+    if summary is None:
+        raise HTTPException(409, "this request has no priced lane to check")
+    return _freight_quote_view(freight_log.get_quote(quote_id) or {})
+
+
+@app.get("/api/sales/counts")
+@readcache.cached()
+def sales_counts():
+    """What is waiting on the operator — the badge on the Sales rail tab."""
+    return {
+        "quotes_new": freight_log.count_new(),
+        "inquiries_new": len(inventory.list_inquiries("new")),
+    }
 
 
 # ───────────────────────────── deposits API ─────────────────────────────
