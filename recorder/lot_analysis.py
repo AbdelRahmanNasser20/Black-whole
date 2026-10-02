@@ -1,4 +1,4 @@
-"""LLM analysis of an archived lot — run once, cached next to the archive.
+r"""LLM analysis of an archived lot — run once, cached next to the archive.
 
 Reuses the deals analyzer rather than a new prompt:
 - `deals.llm_steps.extract_identity` — brand/model/item type, quantity,
@@ -8,11 +8,30 @@ Reuses the deals analyzer rather than a new prompt:
 - `deals.comps` + `deals.llm_steps.judge_comps` + `deals.valuation` — eBay sold
   comps, when the Pi comps service is configured (`COMPS_URL`/`COMPS_KEY`).
 - Auction comps from OUR data: `deal_lots` closes (whole site, ~110k priced) and
-  `sold_comps` (the recorder's view), matched on the identity's keywords.
+  `sold_comps` (the recorder's view).
 
 "Was the final price a deal?" compares the lot's final per-unit price with the
 auction comps' median per-unit price. Fewer than 3 comps is "not enough comps",
 never a guess.
+
+Comp matching (v2, 2026-10-02). v1 matched `title ILIKE '%car%'`, narrowing to
+ONE keyword until 3 rows matched — "Lot of (2) Range Rover car covers" priced
+against "2016 Range Rover Sport". Now:
+1. **Phrase first.** The identity's `item_type` ("car cover") as a phrase with
+   Postgres word boundaries (`\y`, never `\b` — Postgres reads that as
+   backspace — and never a bare substring).
+2. Else **head noun + a discriminating word**: the item type's last word
+   ("cover") AND another of its words or the brand/model ("car", "range
+   rover"). A head noun alone ("Hard cover notebook") is not a match.
+3. **Gates**: same canonical category (a general/other side is "unknown" — the
+   judge decides); USD only (`deal_lots.currency_code`; `sold_comps` via the
+   snapshot's `currencyCode` until migration 019 adds a column) — final prices
+   are never compared across currencies.
+4. **Judge**: ≤ 40 candidates go to an LLM "same item?" pass (the
+   `judge_comps` idea, for auction titles). Used = kept ∧ `usable_for_per_unit`.
+   An unavailable judge keeps nothing (→ "not enough comps"), never "all".
+Fewer than MIN_COMPS left is "not enough comps" — there is no 1-keyword
+fallback any more.
 
 **A failure is never an answer** (deals.md). If the identity call fails the
 analysis is stored as `status: unavailable` with the error — the page says so
@@ -33,7 +52,11 @@ from recorder import lot_archive
 
 MIN_COMPS = 3
 MAX_COMPS = 60
-ANALYSIS_VERSION = 1
+JUDGE_MAX = 40
+ANALYSIS_VERSION = 2
+
+# A side whose category is one of these is "unknown", not a mismatch.
+GENERAL_CATEGORIES = frozenset({"general_merchandise", "other", "general", ""})
 
 _STOP = {"lot", "of", "the", "and", "with", "for", "used", "misc", "miscellaneous", "assorted",
          "various", "set", "sets", "pcs", "pc", "qty", "approx", "each", "new", "old", "unit",
@@ -110,55 +133,232 @@ def deal_verdict(final_per_unit: float | None, comp_per_units: list[float], outc
 
 # ─────────────────────────── auction comps (our DB) ───────────────────────────
 
+# Candidates only: the SQL narrows with the same regexes the pure matcher
+# applies (phrase, or head + discriminator); `filter_comps` then re-checks every
+# row in Python, gates category + currency, and the judge decides.
 _DEAL_LOT_COMPS_SQL = """
 SELECT asset_id, account_id, auction_id, title, final_bid AS price, final_bid_count AS bids,
-       closed_at, state
+       closed_at, state, canonical_category, llm_category, currency_code
 FROM deal_lots
 WHERE site = 'govdeals' AND outcome IN ('sold', 'low_bid') AND final_bid > 0
-  AND title ILIKE ALL(%s)
+  AND currency_code = 'USD'
+  AND (title ~* %s OR (%s <> '' AND title ~* %s AND title ~* %s))
   AND NOT (asset_id = %s AND account_id = %s AND auction_id = %s)
 ORDER BY end_utc DESC
 LIMIT %s
 """
 
-# sold_comps has no title; the recorder kept the search asset in raw.
+# sold_comps has no title or currency; the recorder kept the search asset in
+# raw. Non-maestro sources carry no currencyCode and are US sites → USD.
 _SOLD_COMPS_SQL = """
 SELECT c.source, c.source_lot_id, c.final_price AS price, c.bid_count AS bids, c.sold_at AS closed_at,
-       t.title
+       t.title, COALESCE(t.currency, 'USD') AS currency_code
 FROM sold_comps c
 JOIN LATERAL (
-    SELECT COALESCE(raw->>'assetShortDescription', raw->>'title', raw->>'name') AS title
+    SELECT COALESCE(raw->>'assetShortDescription', raw->>'title', raw->>'name') AS title,
+           raw->>'currencyCode' AS currency
     FROM listing_snapshots s
     WHERE s.source = c.source AND s.source_lot_id = c.source_lot_id
       AND COALESCE(raw->>'assetShortDescription', raw->>'title', raw->>'name') IS NOT NULL
     ORDER BY s.observed_at DESC LIMIT 1
 ) t ON TRUE
-WHERE c.final_price > 0 AND t.title ILIKE ALL(%s) AND c.source_lot_id <> %s
+WHERE c.final_price > 0 AND c.source_lot_id <> %s
+  AND COALESCE(t.currency, 'USD') = 'USD'
+  AND (t.title ~* %s OR (%s <> '' AND t.title ~* %s AND t.title ~* %s))
 ORDER BY c.sold_at DESC NULLS LAST
 LIMIT %s
 """
 
 
-def auction_comps(words: list[str], lot_key: str) -> tuple[list[dict], list[str]]:
-    """Similar closes from our own tables. Narrows from all keywords down to
-    the first one until at least MIN_COMPS match. Returns (comps, words used)."""
+def _singular(w: str) -> str:
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith("es") and len(w) > 4 and w[-3] in "sxz":
+        return w[:-2]
+    if w.endswith("s") and not w.endswith("ss") and len(w) > 3:
+        return w[:-1]
+    return w
+
+
+def _tokens(text: str | None) -> list[str]:
+    out: list[str] = []
+    for w in re.findall(r"[a-z0-9][a-z0-9\-]*", (text or "").lower()):
+        w = w.strip("-")
+        if not w or w in _STOP:
+            continue
+        if not (len(w) >= 3 or (len(w) >= 2 and any(ch.isdigit() for ch in w))):
+            continue
+        if w.isdigit():
+            continue
+        w = _singular(w)
+        if w not in out:
+            out.append(w)
+    return out
+
+
+def _word_alt(w: str) -> str:
+    """Regex body for one singular word that also matches its plural."""
+    e = re.escape(w)
+    if w.endswith("y") and len(w) > 2:
+        return re.escape(w[:-1]) + "(?:y|ies)"
+    if w[-1:] in ("s", "x", "z"):
+        return e + "(?:es)?"
+    return e + "s?"
+
+
+class MatchPlan:
+    """What a comp's title must say. Pure; renders the same rule as a Python
+    regex (`\\b`) and a Postgres ARE (`\\y`)."""
+
+    def __init__(self, phrase: list[str], discriminators: list[str]):
+        self.phrase = phrase
+        self.head = phrase[-1]
+        self.discriminators = list(dict.fromkeys(d for d in discriminators if d != self.head))
+
+    def regexes(self, b: str) -> tuple[str, str, str]:
+        phrase = b + r"(?:\s|-)+".join(_word_alt(w) for w in self.phrase) + b
+        head = b + _word_alt(self.head) + b
+        disc = (b + "(?:" + "|".join(_word_alt(d) for d in self.discriminators) + ")" + b
+                if self.discriminators else "")
+        return phrase, head, disc
+
+    def sql_params(self) -> tuple[str, str, str, str]:
+        phrase, head, disc = self.regexes(r"\y")
+        return phrase, disc, head, disc
+
+    def match(self, title: str | None) -> str | None:
+        """'phrase' | 'head+discriminator' | None."""
+        t = title or ""
+        phrase, head, disc = self.regexes(r"\b")
+        if re.search(phrase, t, re.I):
+            return "phrase"
+        if disc and re.search(head, t, re.I) and re.search(disc, t, re.I):
+            return "head+discriminator"
+        return None
+
+    def singular_unit(self, title: str | None) -> bool:
+        """A count-less title that names ONE of the thing ("Car cover fitted
+        sedan") is one unit; a plural or bulk title ("Bulk Stacking Chairs")
+        stays unknown. Pure."""
+        t = (title or "").lower()
+        if re.search(r"\b(?:lot|lots|bulk|assorted|set|sets|pallet|box|boxes|qty|pcs)\b", t):
+            return False
+        one = re.search(r"\b" + re.escape(self.head) + r"\b", t)
+        many = re.search(r"\b" + _word_alt(self.head) + r"\b", t)
+        return bool(one) and (many is None or many.group(0) == one.group(0))
+
+    def as_dict(self) -> dict:
+        return {"phrase": " ".join(self.phrase), "head": self.head,
+                "discriminators": self.discriminators}
+
+
+def match_plan(item_type: str | None, brand: str | None = None, model: str | None = None,
+               queries: list[str] | None = None, title: str | None = None) -> MatchPlan | None:
+    """The identity → MatchPlan. `item_type` names the thing ("car cover");
+    an unknown item type falls back to the first eBay query, then the title.
+    None = nothing specific enough to match on (→ no comps)."""
+    phrase: list[str] = []
+    it = (item_type or "").strip()
+    for src in ([it] if it and it.lower() != "unknown" else []) + list(queries or [])[:1] + [title or ""]:
+        phrase = [w for w in _tokens(src) if not w.isdigit()]
+        if phrase:
+            break
+    if not phrase:
+        return None
+    phrase = phrase[-3:]           # "black leather executive office chair" → last 3 words
+    disc = phrase[:-1] + _tokens(brand) + _tokens(model)
+    return MatchPlan(phrase, disc)
+
+
+def keywords(item_type: str | None, queries: list[str] | None, title: str | None = None,
+             limit: int = 3) -> list[str]:
+    """The plan's words (phrase + discriminators), for display."""
+    plan = match_plan(item_type, queries=queries, title=title)
+    if plan is None:
+        return []
+    return list(dict.fromkeys(plan.phrase + plan.discriminators))[:limit]
+
+
+def auction_comps(plan: MatchPlan, lot_key: str) -> list[dict]:
+    """Candidate closes from our own tables (≤ MAX_COMPS + 20), USD only.
+    Matching/gating/judging happens in `filter_comps` + the judge."""
     from automation import db
     from recorder.store import _read_with_backoff
 
     a, b, c = (int(p) for p in lot_key.split("/"))
-    for n in range(len(words), 0, -1):
-        use = words[:n]
-        pats = [f"%{w}%" for w in use]
-        rows = [dict(r, origin="deal_lots") for r in
-                _read_with_backoff(db.fetch_all, _DEAL_LOT_COMPS_SQL, (pats, a, b, c, MAX_COMPS))]
-        try:
-            rows += [dict(r, origin=f"sold_comps:{r['source']}") for r in
-                     _read_with_backoff(db.fetch_all, _SOLD_COMPS_SQL, (pats, lot_key, 20))]
-        except Exception as e:  # noqa: BLE001 - optional second source
-            print(f"[lot_analysis] sold_comps unreadable: {e}", file=sys.stderr)
-        if len(rows) >= MIN_COMPS or n == 1:
-            return rows, use
-    return [], []
+    params = plan.sql_params()
+    rows = [dict(r, origin="deal_lots") for r in
+            _read_with_backoff(db.fetch_all, _DEAL_LOT_COMPS_SQL, (*params, a, b, c, MAX_COMPS))]
+    try:
+        rows += [dict(r, origin=f"sold_comps:{r['source']}") for r in
+                 _read_with_backoff(db.fetch_all, _SOLD_COMPS_SQL, (lot_key, *params, 20))]
+    except Exception as e:  # noqa: BLE001 - optional second source
+        print(f"[lot_analysis] sold_comps unreadable: {e}", file=sys.stderr)
+    return rows
+
+
+def _category_of(canonical: str | None, llm: str | None) -> str | None:
+    """A side's specific category, or None when it is general/other/unknown."""
+    for v in (canonical, llm):
+        v = (v or "").strip().lower()
+        if v and v not in GENERAL_CATEGORIES:
+            return v
+    return None
+
+
+def filter_comps(plan: MatchPlan, rows: list[dict], our_category: str | None) -> tuple[list[dict], dict]:
+    """Pure. Title match + category gate + currency gate. Returns (candidates,
+    counts) — every candidate carries `match_method`."""
+    counts = {"rows": len(rows), "no_match": 0, "category": 0, "currency": 0}
+    out = []
+    for r in rows:
+        method = plan.match(r.get("title"))
+        if method is None:
+            counts["no_match"] += 1
+            continue
+        cur = (r.get("currency_code") or "USD").upper()
+        if cur != "USD":
+            counts["currency"] += 1
+            continue
+        theirs = _category_of(r.get("canonical_category"), r.get("llm_category"))
+        if our_category and theirs and theirs != our_category:
+            counts["category"] += 1
+            continue
+        out.append(dict(r, match_method=method))
+    # phrase matches first — they are the stronger evidence
+    out.sort(key=lambda r: r["match_method"] != "phrase")
+    return out, counts
+
+
+_AUCTION_JUDGE_PROMPT = """A surplus auction lot was identified as: {identity}
+Below are OTHER closed surplus auction lots, as "index: title ($final price)".
+Keep ONLY lots that are the same kind of item, sold as the same kind of unit
+(not a vehicle when the lot is a vehicle accessory, not parts, not a
+different product that merely shares a word).
+Respond ONLY as compact JSON: {{"keep": [<index>, ...]}}
+{listings}"""
+
+# Local reply budget until Track A's REPLY_TOKENS lands (then drop this): the
+# default model is a reasoning model and spends max_tokens on hidden reasoning.
+JUDGE_MAX_TOKENS = 2000   # 600 came back EMPTY on a 40-listing judge (2026-10-02)
+
+
+def judge_auction_comps(ident, comps: list[dict]) -> list[int]:
+    """Indices of `comps` (≤ JUDGE_MAX) the LLM says are the same item.
+    Raises LlmUnavailable / ValueError on an unreachable or unparseable judge
+    — the caller keeps nothing then."""
+    from deals.llm_provider import chat
+    from deals.llm_steps import _strip
+    listings = "\n".join(f"{i}: {(c.get('title') or '')[:140]} (${float(c['price']):.0f})"
+                         for i, c in enumerate(comps[:JUDGE_MAX]))
+    ident_str = " ".join(filter(None, [ident.brand, ident.model, ident.item_type]))
+    text = chat(_AUCTION_JUDGE_PROMPT.format(identity=ident_str, listings=listings),
+                max_tokens=JUDGE_MAX_TOKENS)
+    try:
+        keep = json.loads(_strip(text)).get("keep", [])
+    except (json.JSONDecodeError, TypeError, AttributeError) as e:
+        raise ValueError(f"unparseable judge response: {(text or '')[:120]!r}") from e
+    return [i for i in keep if isinstance(i, int) and 0 <= i < min(len(comps), JUDGE_MAX)]
 
 
 # ─────────────────────────────── the analysis ───────────────────────────────
@@ -210,8 +410,8 @@ def _identity_lot(summary: dict) -> SimpleNamespace:
 
 
 def analyze(doc: dict, *, identity_fn: Callable | None = None, classify_fn: Callable | None = None,
-            comps_fn: Callable = auction_comps, ebay_provider=None, fees=None,
-            now: datetime | None = None) -> dict:
+            comps_fn: Callable = auction_comps, judge_fn: Callable | None = None,
+            ebay_provider=None, fees=None, now: datetime | None = None) -> dict:
     """One archived lot → analysis dict. Never raises for an LLM problem:
     returns `status: unavailable` with the error instead."""
     from deals.llm_steps import LlmStepError, judge_comps
@@ -222,6 +422,7 @@ def analyze(doc: dict, *, identity_fn: Callable | None = None, classify_fn: Call
 
     identity_fn = identity_fn or identity
     classify_fn = classify_fn or classify
+    judge_fn = judge_fn or judge_auction_comps
     now = now or datetime.now(timezone.utc)
     s = doc.get("summary") or {}
     out: dict = {"version": ANALYSIS_VERSION, "lot_key": doc["lot_key"],
@@ -260,30 +461,60 @@ def analyze(doc: dict, *, identity_fn: Callable | None = None, classify_fn: Call
     final_pu = unit_price(final, qty) if final is not None else None
 
     # Auction comps (what similar surplus closed for) → "was it a deal?"
-    words = keywords(ident.item_type, ident.queries, lot.title)
+    plan = match_plan(ident.item_type, ident.brand, ident.model, ident.queries, lot.title)
+    our_cat = _category_of(s.get("canonical_category"), category.get("llm"))
     try:
-        comps, used = comps_fn(words, doc["lot_key"]) if words else ([], [])
+        rows = comps_fn(plan, doc["lot_key"]) if plan else []
     except Exception as e:  # noqa: BLE001 - DB trouble: say so, don't invent
-        comps, used = [], []
+        rows = []
         out["comps_error"] = str(e)[:200]
+    comps, gate_counts = filter_comps(plan, rows, our_cat) if plan else ([], {"rows": 0})
+    comps = comps[:JUDGE_MAX]
+
+    # The judge only runs when its answer can matter (≥ MIN_COMPS candidates).
+    judged, judge_error = False, None
+    if len(comps) >= MIN_COMPS:
+        try:
+            kept_idx = set(judge_fn(ident, comps))
+            judged = True
+        except Exception as e:  # noqa: BLE001 - unavailable/unparseable judge keeps nothing
+            kept_idx, judge_error = set(), str(e)[:200]
+    else:
+        kept_idx = set(range(len(comps)))   # unvetted, and too few to verdict anyway
+
     pus = []
     excluded = 0
-    for c in comps:
+    for i, c in enumerate(comps):
         cq, src = lot_quantity(c.get("title"), None)
+        if src == "default" and plan.singular_unit(c.get("title")):
+            src = "singular_title"      # "Car cover fitted sedan" = one cover
         pu = unit_price(float(c["price"]), cq)
         c["quantity"], c["per_unit"] = cq, pu
-        c["used"] = bool(pu) and usable_for_per_unit(qty, src)
+        c["kept"] = i in kept_idx
+        usable = bool(pu) and usable_for_per_unit(qty, src)
+        if c["kept"] and not usable:
+            excluded += 1
+        c["used"] = c["kept"] and usable
         if c["used"]:
             pus.append(pu)
-        else:
-            excluded += 1
     out["deal"] = deal_verdict(final_pu, pus, s.get("outcome"))
-    out["deal"]["keywords"] = used
+    out["deal"]["keywords"] = keywords(ident.item_type, ident.queries, lot.title)
     out["deal"]["excluded_unknown_count"] = excluded
+    methods = {c["match_method"] for c in comps if c.get("used")}
+    out["deal"]["match_method"] = ("phrase" if methods == {"phrase"} else
+                                   "head+discriminator" if methods else None)
+    out["deal"]["match_plan"] = plan.as_dict() if plan else None
+    out["deal"]["judged"] = judged
+    out["deal"]["candidates"] = len(comps)
+    out["deal"]["gates"] = gate_counts
+    if judge_error:
+        out["deal"]["judge_error"] = judge_error
     comps.sort(key=lambda c: not c.get("used"))
     out["comps"] = [{"title": (c.get("title") or "")[:120], "price": float(c["price"]),
                      "per_unit": c.get("per_unit"), "quantity": c.get("quantity"),
-                     "used": c.get("used"),
+                     "used": c.get("used"), "kept": c.get("kept"),
+                     "match_method": c.get("match_method"),
+                     "category": c.get("canonical_category"),
                      "closed_at": c.get("closed_at"), "origin": c.get("origin"),
                      "lot_key": (f"{c['asset_id']}/{c['account_id']}/{c['auction_id']}"
                                  if c.get("asset_id") is not None else c.get("source_lot_id"))}
