@@ -531,18 +531,26 @@ def database_size_mb() -> float:
 
 _HEALTH_COLS = ("source", "state", "consecutive_failures", "last_attempt_at",
                 "last_success_at", "next_attempt_at", "last_error", "updated_at")
+# Migration 020 (PENDING) adds this; until then it is neither read nor written.
+_HEALTH_OPTIONAL_COLS = ("last_discover_at",)
 
-_HEALTH_UPSERT_SQL = """
-INSERT INTO recorder_source_health
-    (source, state, consecutive_failures, last_attempt_at, last_success_at,
-     next_attempt_at, last_error, updated_at)
-VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
-ON CONFLICT (source) DO UPDATE SET
-    state = EXCLUDED.state, consecutive_failures = EXCLUDED.consecutive_failures,
-    last_attempt_at = EXCLUDED.last_attempt_at, last_success_at = EXCLUDED.last_success_at,
-    next_attempt_at = EXCLUDED.next_attempt_at, last_error = EXCLUDED.last_error,
-    updated_at = EXCLUDED.updated_at
-"""
+
+def _health_upsert_sql(cols: tuple[str, ...]) -> str:
+    """Upsert over a fixed, code-owned column list (never caller input)."""
+    vals = ", ".join("COALESCE(%s, now())" if c == "updated_at" else "%s" for c in cols)
+    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "source")
+    return (f"INSERT INTO recorder_source_health ({', '.join(cols)}) VALUES ({vals}) "
+            f"ON CONFLICT (source) DO UPDATE SET {sets}")
+
+
+def _health_cols() -> tuple[str, ...]:
+    rows = _read_with_backoff(
+        db.fetch_all,
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'recorder_source_health' AND column_name = ANY(%s)",
+        (list(_HEALTH_OPTIONAL_COLS),))
+    have = {r["column_name"] for r in rows}
+    return _HEALTH_COLS + tuple(c for c in _HEALTH_OPTIONAL_COLS if c in have)
 
 
 def source_health_table_exists() -> bool:
@@ -555,15 +563,14 @@ def load_source_health() -> dict[str, dict] | None:
     does not exist yet (migration 018 PENDING)."""
     if not source_health_table_exists():
         return None
-    rows = _read_with_backoff(
-        db.fetch_all, f"SELECT {', '.join(_HEALTH_COLS)} FROM recorder_source_health")
+    rows = _read_with_backoff(db.fetch_all, "SELECT * FROM recorder_source_health")
     return {r["source"]: dict(r) for r in rows}
 
 
 def save_source_health(rows: list[dict]) -> int:
     """Upsert the changed breaker rows (one executemany)."""
-    params = [tuple(r.get(c) for c in _HEALTH_COLS) for r in rows]
-    if not params:
+    if not rows:
         return 0
-    db.executemany(_HEALTH_UPSERT_SQL, params)
-    return len(params)
+    cols = _health_cols()
+    db.executemany(_health_upsert_sql(cols), [tuple(r.get(c) for c in cols) for r in rows])
+    return len(rows)

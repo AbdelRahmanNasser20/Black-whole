@@ -28,6 +28,12 @@ USER_AGENT = (
 
 MIN_HOST_INTERVAL_SECONDS = 1.0
 
+# Batch-level "this looks systemic, not per-lot" thresholds, shared by
+# public_surplus's 401 block guard and the source breaker (recorder/health.py):
+# at least this many lots AND at least this fraction of the batch.
+BLOCK_SUSPECT_MIN_COUNT = 3
+BLOCK_SUSPECT_MIN_FRACTION = 0.8
+
 # (connect, read). A dead host used to cost 30 s per lot on the CONNECT alone
 # (~46k Public Surplus connect timeouts in the recorder log); 10 s is plenty
 # for a TLS handshake to a healthy host.

@@ -206,7 +206,7 @@ def cmd_discover(registry: dict, source: str | None = None,
             continue
         if health_reg is not None:
             if seen:
-                health_reg.record_success(name, t)
+                health_reg.record_success(name, t, kind="discover")
             else:
                 # Every adapter "aborts" by printing a RECORDER ERROR and
                 # returning [] — that is a failed attempt, not a quiet day.
@@ -607,7 +607,8 @@ def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
         if not key:
             continue
         cached = lot_analysis.load(archive_store, key, source)
-        if cached and cached.get("status") == "ok" and not force:
+        if (cached and cached.get("status") == "ok" and not force
+                and (cached.get("version") or 0) >= lot_analysis.ANALYSIS_VERSION):
             counts["cached"] += 1
             continue
         a = lot_analysis.analyze_and_store(archive_store, key, source)
@@ -627,6 +628,15 @@ def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
 # a slow run (network hiccups, a stuck source) must never overlap the next
 # invocation and double-poll/double-discover concurrently.
 _RUN_LOCK_KEY = "recorder_run"
+
+
+def _run_budget_s() -> float:
+    """RECORDER_RUN_BUDGET_S (default 0 = off): once a run has spent this long,
+    the remaining stale discovers wait for the next run — polls (closes) first."""
+    try:
+        return max(0.0, float(os.getenv("RECORDER_RUN_BUDGET_S") or 0))
+    except ValueError:
+        return 0.0
 
 
 def _connect_lock_conn(attempts: int = 4, base_delay: float = 2.0):
@@ -669,22 +679,29 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
             poll_rc = cmd_recheck_finals(registry) or poll_rc
             poll_rc = cmd_archive_pending(registry) or poll_rc
 
-            # Stale = no new row AND no clean discover for H hours. A discover
+            # Stale = no new row AND no clean DISCOVER for H hours. A discover
             # that saw every lot unchanged inserts nothing (change-gating), so
             # newest_observed_at alone re-fired discover for a quiet source on
-            # every 5-minute run.
+            # every 5-minute run. Poll successes do NOT count: clean polls
+            # that insert nothing must not hold discover off forever.
             stale: list[str] = []
             for name in registry:
                 newest = store.newest_observed_at(name)
-                last_ok = health_reg.get(name).last_success_at
-                ref = max((t for t in (newest, last_ok) if t is not None), default=None)
+                last_disc = health_reg.get(name).last_discover_at
+                ref = max((t for t in (newest, last_disc) if t is not None), default=None)
                 if ref is None or (now - ref) >= timedelta(hours=discover_stale_hours):
                     stale.append(name)
 
             discover_rc = 0
+            budget_s = _run_budget_s()
             if stale:
                 print(f"run: discover due for stale source(s): {','.join(stale)}")
                 for name in stale:
+                    spent = time.monotonic() - started
+                    if budget_s and spent > budget_s:
+                        print(f"discover source={name} skipped: run budget spent "
+                              f"({spent:.0f}s > RECORDER_RUN_BUDGET_S={budget_s:.0f})")
+                        continue
                     rc = cmd_discover(registry, source=name, health_reg=health_reg, now=now)
                     discover_rc = discover_rc or rc
             else:
