@@ -33,6 +33,7 @@
   <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close><span class="rail-tab-num">10</span><span class="rail-tab-label">Tracking</span></a>
   <a class="rail-tab" data-tab="deposits" href="?tab=deposits" data-rail-close><span class="rail-tab-num">11</span><span class="rail-tab-label">Deposits</span></a>
   <a class="rail-tab" data-tab="channels" href="?tab=channels" data-rail-close><span class="rail-tab-num">12</span><span class="rail-tab-label">Channels</span></a>
+  <a class="rail-tab" data-tab="archive" href="?tab=archive" data-rail-close><span class="rail-tab-num">13</span><span class="rail-tab-label">Archive</span></a>
 </nav>
 {% endblock %}
 
@@ -875,6 +876,37 @@
     <span class="ch-hint">one row per lot, one cell per channel · hover a red cell for the error</span>
   </div>
   <div class="table-wrap ch-matrix" id="ch-matrix" data-state="loading">{{ skeleton_rows(6) }}</div>
+</section>
+
+{#- ─────────────────────────── 13 Archive (private lot archive) ─────────────────────────── -#}
+<section class="panel" data-pane="archive" hidden>
+  {#- E-archive owns this block: its stylesheet rides inside it. ADMIN-ONLY data (undisguised GovDeals photos). -#}
+  <link rel="stylesheet" href="/static/admin/archive.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">LOT ARCHIVE / EVERY CLOSED GOVDEALS LOT, KEPT</div>
+    <h1 class="hero-title">The listing, after GovDeals forgets it.</h1>
+    <p class="hero-sub">
+      At close the recorder keeps the whole listing — description, photos, the bidbox final and our own
+      price history — in private R2 storage. Open a lot to see the page rebuilt from that archive, with
+      the LLM analyzer's read on whether the final price was a deal.
+    </p>
+  </div>
+  <form class="arc-bar" id="arc-form">
+    <label class="arc-field arc-grow">Search<input type="search" name="q" placeholder="title, seller or 5282/3780/2"></label>
+    <label class="arc-field">Category<select name="category"><option value="">all</option></select></label>
+    <label class="arc-field">Outcome<select name="outcome"><option value="">all</option></select></label>
+    <label class="arc-field">Min $<input type="number" name="min_price" min="0" step="1" inputmode="decimal"></label>
+    <label class="arc-field">Max $<input type="number" name="max_price" min="0" step="1" inputmode="decimal"></label>
+    <label class="arc-field">Closed from<input type="date" name="since"></label>
+    <label class="arc-field">Closed to<input type="date" name="until"></label>
+    <div class="arc-bar-actions">
+      <button type="submit" class="btn btn-primary btn-small">filter</button>
+      <button type="button" class="btn btn-small" id="arc-clear">clear</button>
+    </div>
+  </form>
+  <p class="arc-summary" id="arc-summary"></p>
+  {% from "_ui/macros.html" import skeleton_rows %}
+  <div class="table-wrap arc-list" id="arc-list" data-state="loading">{{ skeleton_rows(6) }}</div>
 </section>
 {% endblock %}
 

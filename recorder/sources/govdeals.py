@@ -199,6 +199,7 @@ exercise this module's own mapping functions on them — no network calls.
 """
 from __future__ import annotations
 
+import os
 import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
@@ -209,6 +210,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from deals.adapters.govdeals import GovDealsAdapter
+from deals.mapping import asset_to_lot
 from deals.models import Lot, Snapshot, lot_key
 from deals.tracking import CLOSE_GRACE, LIVE_STATUS
 
@@ -229,6 +231,61 @@ FURNITURE_CATEGORY_IDS = "372,47B,47C,47A,46,47D,28E,266"
 # single-term sweeps.
 CATEGORY_MAX_PAGES = 20
 TERM_MAX_PAGES = 10
+
+# --- scope switch (2026-09-29, "track everything") ---------------------------
+#
+# `RECORDER_GOVDEALS_SCOPE=all` (the default) sweeps the WHOLE site: one
+# empty-`categoryIds`, empty-`searchText` search sorted by close time, paged
+# until the feed runs dry (≤ `RECORDER_GOVDEALS_ALL_MAX_PAGES`, 120 lots a
+# page). Measured 2026-09-29: see recorder/README.md "Scope". `furniture` is the
+# old chairs/seating sweep, kept for a cheap rollback.
+SCOPE_ALL = "all"
+SCOPE_FURNITURE = "furniture"
+ALL_MAX_PAGES_DEFAULT = 300   # 27,578 live lots = 230 pages on 2026-09-29
+
+
+def scope() -> str:
+    v = (os.getenv("RECORDER_GOVDEALS_SCOPE") or SCOPE_ALL).strip().lower()
+    return SCOPE_FURNITURE if v == SCOPE_FURNITURE else SCOPE_ALL
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name) or default)
+    except ValueError:
+        return default
+
+
+def all_max_pages() -> int:
+    return _env_int("RECORDER_GOVDEALS_ALL_MAX_PAGES", ALL_MAX_PAGES_DEFAULT)
+
+
+# --- per-run bounds for poll() (a 5-minute cron must finish in 5 minutes) -----
+#
+# Whole-site GovDeals closes ~4,200 lots/day (deal_lots, Jul-Aug 2026: ~29k a
+# week), bunched at popular close times. Two caps keep one run bounded:
+#
+# - `RECORDER_GOVDEALS_BIDBOX_MAX_PER_RUN` (default 120): past-end lots read
+#   from the bidbox per poll, **just-closed first**; the rest stay due and go
+#   next run. The bidbox keeps answering for weeks, so a late read loses
+#   nothing — but the freshest closes are the ones a soft-close may still move.
+# - `RECORDER_GOVDEALS_REFETCH_HORIZON_HOURS` (default 24): only lots closing
+#   inside this horizon (or with no clock) join the search refetch. Far lots are
+#   re-observed by `discover` anyway; letting them into the refetch made it
+#   walk its full page budget every run looking for lots hundreds of pages deep.
+#   `RECORDER_GOVDEALS_REFETCH_MAX_PAGES` (default 40) caps that walk.
+BIDBOX_MAX_PER_RUN_DEFAULT = 120
+REFETCH_HORIZON_HOURS_DEFAULT = 24
+REFETCH_MAX_PAGES_DEFAULT = 40
+
+
+def bidbox_max_per_run() -> int:
+    return _env_int("RECORDER_GOVDEALS_BIDBOX_MAX_PER_RUN", BIDBOX_MAX_PER_RUN_DEFAULT)
+
+
+def refetch_horizon() -> timedelta:
+    return timedelta(hours=_env_int("RECORDER_GOVDEALS_REFETCH_HORIZON_HOURS",
+                                    REFETCH_HORIZON_HOURS_DEFAULT))
 
 # Cap on per-lot `fetch_detail` corroboration calls per `poll()` invocation
 # (fix round 1, review finding #2) — loud WARNING if truncated; any
@@ -428,6 +485,30 @@ def _bidbox_throttle() -> None:
         if wait > 0:
             time.sleep(wait)
     _bidbox_last_at[:] = [time.monotonic()]
+
+
+class PoliteGovDealsAdapter(GovDealsAdapter):
+    """`GovDealsAdapter` with every search page throttled (≤1 request/s on the
+    maestro host, shared with the bidbox throttle) and counted, and an optional
+    page ceiling. `deals/` is import-only here, so the politeness lives in this
+    subclass; `discover()`/`refetch()` are inherited and page through
+    `self._search_page`, so both are throttled without being copied."""
+
+    def __init__(self, max_page: int | None = None):
+        super().__init__()
+        self.max_page = max_page
+        self.requests = 0
+
+    def _search_page(self, category_ids: str, search_text: str, page: int, rows: int = 120) -> list[dict]:
+        if self.max_page is not None and page > self.max_page:
+            return []   # the inherited loops read an empty page as "run dry"
+        _bidbox_throttle()
+        self.requests += 1
+        return super()._search_page(category_ids, search_text, page, rows)
+
+
+def _adapter(max_page: int | None = None) -> GovDealsAdapter:
+    return PoliteGovDealsAdapter(max_page=max_page)
 
 
 def close_outcome(status_code: str | None, bid_count: int | None) -> str:
@@ -640,8 +721,34 @@ def _safe_discover(
 class GovDealsSource:
     SOURCE = SOURCE
 
-    def discover(self) -> list[Observation]:
-        adapter = GovDealsAdapter()
+    def discover(self, scope_override: str | None = None) -> list[Observation]:
+        adapter = _adapter()
+        if (scope_override or scope()) == SCOPE_ALL:
+            return self._discover_all(adapter)
+        return self._discover_furniture(adapter)
+
+    def _discover_all(self, adapter: GovDealsAdapter) -> list[Observation]:
+        """Whole site: the close-time-sorted firehose, paged until it runs dry."""
+        pages = all_max_pages()
+        lots, ok = _safe_discover(adapter, category_ids="", search_text="",
+                                  max_pages=pages, label="whole-site sweep")
+        by_key = {lot_key(l.asset_id, l.account_id, l.auction_id): l for l in lots}
+        if not ok and not by_key:
+            print("[govdeals] RECORDER ERROR: discover() aborted — whole-site sweep failed, 0 observations")
+            return []
+        if not by_key:
+            print("[govdeals] WARNING: discover() found 0 lots in the whole-site sweep — "
+                  "check the maestro search for drift")
+            return []
+        reqs = getattr(adapter, "requests", None)
+        print(f"[govdeals] discover scope=all lots={len(by_key)} "
+              f"requests={reqs if reqs is not None else '?'} max_pages={pages}")
+        if len(lots) >= pages * 120:
+            print(f"[govdeals] WARNING: whole-site sweep hit RECORDER_GOVDEALS_ALL_MAX_PAGES={pages} — "
+                  "lots closing latest were not seen this sweep; raise the cap")
+        return [_lot_to_observation(lot) for lot in by_key.values()]
+
+    def _discover_furniture(self, adapter: GovDealsAdapter) -> list[Observation]:
         by_key: dict[str, Lot] = {}
         any_ok = False
 
@@ -696,10 +803,14 @@ class GovDealsSource:
         if not lots:
             return []
         now = datetime.now(timezone.utc)
-        adapter = GovDealsAdapter()
+        adapter = _adapter(max_page=_env_int("RECORDER_GOVDEALS_REFETCH_MAX_PAGES",
+                                             REFETCH_MAX_PAGES_DEFAULT))
         observations: list[Observation] = []
         upcoming: list[tuple[str, tuple[int, int, int]]] = []
+        past_end: list[tuple[datetime, tuple[int, int, int]]] = []
         purged: list[tuple[str, tuple[int, int, int]]] = []
+        horizon = now + refetch_horizon()
+        far = 0
 
         for lot in lots:
             lot_id = str(lot["source_lot_id"])
@@ -712,8 +823,23 @@ class GovDealsSource:
                 continue
             end_date = lot.get("end_date")
             if end_date is None or end_date > now:
+                if end_date is not None and end_date > horizon:
+                    far += 1          # discover re-observes it; keep the refetch shallow
+                    continue
                 upcoming.append((lot_id, parsed))
                 continue
+            past_end.append((end_date, parsed))
+
+        # Just-closed first, capped: the rest stay due and go next run.
+        past_end.sort(key=lambda t: t[0], reverse=True)
+        cap = bidbox_max_per_run()
+        if len(past_end) > cap:
+            print(f"[govdeals] RECORDER INFO: {len(past_end)} past-end lot(s) due, bidbox cap "
+                  f"{cap} this run — the {len(past_end) - cap} oldest wait for the next run")
+        if far:
+            print(f"[govdeals] RECORDER INFO: {far} lot(s) closing beyond the "
+                  f"{refetch_horizon()} refetch horizon left to discover")
+        for _end, parsed in past_end[:cap]:
             result, obs = resolve_with_bidbox(adapter, parsed, now)
             if obs is not None:
                 observations.append(obs)
@@ -752,7 +878,7 @@ class GovDealsSource:
     def recheck_finals(self, rows: list[dict]) -> list[Observation]:
         """The 7-day SOA re-check: one bidbox read per row from
         `store.soa_recheck_due()`; returns the re-check rows to insert."""
-        adapter = GovDealsAdapter()
+        adapter = _adapter()
         out: list[Observation] = []
         for row in rows:
             parsed = _parse_lot_key(str(row["source_lot_id"]))

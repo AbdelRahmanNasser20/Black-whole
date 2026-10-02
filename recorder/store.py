@@ -354,3 +354,167 @@ def finals_backfill_candidates(source: str, since_days: int, limit: int) -> list
     return list(_read_with_backoff(
         db.fetch_all, _FINALS_BACKFILL_SQL,
         (source, source, source, since_days, source, limit)))
+
+
+# --- lot archive (2026-09-29) -------------------------------------------------
+#
+# Reads only. The archive itself lives in R2 (recorder/lot_archive.py); the
+# optional `lot_archive` index table is migration 015 (PENDING) — every caller
+# here degrades to "no index" until it is applied.
+
+# GovDeals lots whose last known clock fell in the window and has passed, that
+# are closed/gone — or still 'active' a day after their clock (a missed
+# confirming poll) — newest close first. `bidbox` is the recorder's own stored
+# bidbox payload when the lot has a bidbox_final row, so the archiver can skip
+# that read.
+_ARCHIVE_CANDIDATES_SQL = """
+WITH latest AS (
+    SELECT DISTINCT ON (source_lot_id) source_lot_id, status
+    FROM listing_snapshots WHERE source = 'govdeals'
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+), ends AS (
+    SELECT DISTINCT ON (source_lot_id) source_lot_id, end_date
+    FROM listing_snapshots WHERE source = 'govdeals' AND end_date IS NOT NULL
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+), finals AS (
+    SELECT DISTINCT ON (source_lot_id) source_lot_id, raw->'bidbox' AS bidbox
+    FROM listing_snapshots
+    WHERE source = 'govdeals' AND status = 'closed'
+      AND raw->'recorder_capture'->>'method' IN ('bidbox_final', 'bidbox_recheck')
+      AND raw ? 'bidbox'
+    ORDER BY source_lot_id, observed_at DESC, id DESC
+)
+SELECT l.source_lot_id, l.status, e.end_date, f.bidbox
+FROM latest l
+JOIN ends e USING (source_lot_id)
+LEFT JOIN finals f USING (source_lot_id)
+WHERE e.end_date >= now() - make_interval(days => %s)
+  AND e.end_date < now() - make_interval(secs => %s)
+  AND (l.status IN ('closed', 'gone') OR e.end_date < now() - interval '1 day')
+  {not_indexed}
+ORDER BY e.end_date DESC
+LIMIT %s
+"""
+
+_NOT_INDEXED = """AND NOT EXISTS (SELECT 1 FROM lot_archive a
+                   WHERE a.source = 'govdeals' AND a.lot_key = l.source_lot_id)"""
+
+
+def lot_archive_index_exists() -> bool:
+    row = _read_with_backoff(db.fetch_one, "SELECT to_regclass('lot_archive') AS reg")
+    return bool(row and row.get("reg"))
+
+
+def archive_candidates(since_days: int, limit: int, min_age_seconds: float = 3600,
+                       use_index: bool | None = None) -> list[dict]:
+    if use_index is None:
+        use_index = lot_archive_index_exists()
+    sql = _ARCHIVE_CANDIDATES_SQL.format(not_indexed=_NOT_INDEXED if use_index else "")
+    return list(_read_with_backoff(db.fetch_all, sql, (since_days, min_age_seconds, limit)))
+
+
+_LOT_TIMELINE_SQL = """
+SELECT observed_at, status, current_bid, bid_count, end_date,
+       raw->'recorder_capture'->>'method' AS method,
+       raw->'recorder_capture'->>'status_code' AS status_code
+FROM listing_snapshots
+WHERE source = 'govdeals' AND source_lot_id = %s
+ORDER BY observed_at, id
+"""
+
+# The richest maestro search payload we kept for the lot (discover rows carry
+# the untouched search asset; poll rows carry a Snapshot asdict).
+_LOT_SEARCH_RAW_SQL = """
+SELECT raw FROM listing_snapshots
+WHERE source = 'govdeals' AND source_lot_id = %s AND raw ? 'assetShortDescription'
+ORDER BY observed_at DESC, id DESC LIMIT 1
+"""
+
+_LOT_BID_OBS_SQL = """
+SELECT observed_at, bid_count, current_bid, high_bidder_username, visitors, hits,
+       watcher_count, end_utc, status
+FROM deal_bid_observations
+WHERE asset_id = %s AND account_id = %s AND auction_id = %s
+ORDER BY observed_at
+"""
+
+_DEAL_LOT_SQL = """
+SELECT title, description, native_category_id, native_category_name, seller, city,
+       state, zip, lat, lng, end_utc, opening_bid, currency_code, first_seen_at
+FROM deal_lots WHERE site = 'govdeals' AND asset_id = %s AND account_id = %s AND auction_id = %s
+"""
+
+
+def _num(v):
+    return None if v is None else float(v)
+
+
+def lot_timeline(lot_key: str) -> tuple[list[dict], dict | None]:
+    """(timeline, search_raw) for one GovDeals lot from our own tables.
+    Timeline points: {t, source, status, current_bid, bid_count, end_date,
+    method, high_bidder}. search_raw falls back to a maestro-shaped dict
+    rebuilt from `deal_lots` scalars when no snapshot kept the search asset."""
+    a, b, c = (int(p) for p in lot_key.split("/"))
+    points: list[dict] = []
+    for r in _read_with_backoff(db.fetch_all, _LOT_TIMELINE_SQL, (lot_key,)):
+        points.append({"t": r["observed_at"], "source": "recorder", "status": r["status"],
+                       "current_bid": _num(r["current_bid"]), "bid_count": r["bid_count"],
+                       "end_date": r["end_date"], "method": r["method"],
+                       "status_code": r["status_code"]})
+    try:
+        for r in _read_with_backoff(db.fetch_all, _LOT_BID_OBS_SQL, (a, b, c)):
+            points.append({"t": r["observed_at"], "source": "bidbox_sample", "status": r["status"],
+                           "current_bid": _num(r["current_bid"]), "bid_count": r["bid_count"],
+                           "end_date": r["end_utc"], "high_bidder": r["high_bidder_username"],
+                           "visitors": r["visitors"], "hits": r["hits"],
+                           "watchers": r["watcher_count"]})
+    except psycopg.Error as e:   # optional table — never lose the lot over it
+        print(f"recorder.store: deal_bid_observations unreadable ({e})")
+    points.sort(key=lambda p: p["t"])
+
+    row = _read_with_backoff(db.fetch_one, _LOT_SEARCH_RAW_SQL, (lot_key,))
+    search_raw = row["raw"] if row else None
+    if search_raw is None:
+        d = _read_with_backoff(db.fetch_one, _DEAL_LOT_SQL, (a, b, c))
+        if d:
+            search_raw = {
+                "assetShortDescription": d["title"], "assetLongDescription": d["description"],
+                "assetCategory": d["native_category_id"], "categoryDescription": d["native_category_name"],
+                "companyName": d["seller"], "locationCity": d["city"], "locationState": d["state"],
+                "locationZip": d["zip"], "latitude": d["lat"], "longitude": d["lng"],
+                "assetAuctionEndDateUtc": d["end_utc"].isoformat() if d["end_utc"] else None,
+                "assetBidPrice": _num(d["opening_bid"]), "currencyCode": d["currency_code"],
+                "_rebuilt_from": "deal_lots",
+            }
+    return points, search_raw
+
+
+_INDEX_UPSERT_SQL = """
+INSERT INTO lot_archive (source, lot_key, title, canonical_category, category_name, city, state,
+                         seller, closed_at, final_price, bid_count, outcome, status_code,
+                         photo_count, completeness, archived_at)
+VALUES ('govdeals', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+ON CONFLICT (source, lot_key) DO UPDATE SET
+    title = EXCLUDED.title, canonical_category = EXCLUDED.canonical_category,
+    category_name = EXCLUDED.category_name, city = EXCLUDED.city, state = EXCLUDED.state,
+    seller = EXCLUDED.seller, closed_at = EXCLUDED.closed_at, final_price = EXCLUDED.final_price,
+    bid_count = EXCLUDED.bid_count, outcome = EXCLUDED.outcome, status_code = EXCLUDED.status_code,
+    photo_count = EXCLUDED.photo_count, completeness = EXCLUDED.completeness,
+    archived_at = EXCLUDED.archived_at
+"""
+
+
+def upsert_archive_index(meta: dict) -> None:
+    """Index row for one archived lot (migration 015). Only called when the
+    table exists; R2 stays the record either way."""
+    db.execute(_INDEX_UPSERT_SQL, (
+        meta["lot_key"], (meta.get("title") or "")[:300], meta.get("canonical_category"),
+        meta.get("category_name"), meta.get("city"), meta.get("state"), meta.get("seller"),
+        meta.get("closed_at"), meta.get("final_price"), meta.get("bid_count"),
+        meta.get("outcome"), meta.get("status_code"), meta.get("photo_count"),
+        meta.get("completeness"), meta.get("archived_at")))
+
+
+def database_size_mb() -> float:
+    row = _read_with_backoff(db.fetch_one, "SELECT pg_database_size(current_database()) AS b")
+    return row["b"] / 1e6 if row else 0.0

@@ -8,6 +8,13 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+
+@pytest.fixture(autouse=True)
+def _no_lot_archive(monkeypatch):
+    """`run` now archives just-closed lots; these tests are about poll/discover,
+    and must never reach a real store (R2 may be configured on this machine)."""
+    monkeypatch.setenv("RECORDER_ARCHIVE_ENABLED", "0")
+
 from recorder import cli
 from recorder.models import Observation
 

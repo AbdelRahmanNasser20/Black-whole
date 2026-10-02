@@ -22,3 +22,6 @@ catalog/*.csv
 _fb_*.png
 facebook_catalog_phoenix.csv
 scripts/backups/
+
+# lot-archive screenshots carry undisguised GovDeals photos — never commit
+docs/screenshots/

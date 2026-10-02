@@ -15,6 +15,12 @@
 - `finals-backfill --source govdeals [--since-days N] [--limit N] [--apply]`
   — read the bidbox for recently-ended GovDeals lots that never got a
   bidbox final; dry-run by default.
+- `archive-backfill --source govdeals [--since-days 30] [--limit N] [--apply]`
+  — permanent private archive (detail + gallery + bidbox + our timeline +
+  photos) of recently closed GovDeals lots into R2; dry-run by default.
+  `run` archives a bounded batch of just-closed lots every tick.
+- `archive-analyze [--limit N] [--lot a/b/c] [--force]` — the LLM analysis
+  of archived lots, cached next to each archive (runs once per lot).
 
 Every command (except `--help`, which argparse short-circuits before any of
 our code runs) starts with a startup guard: if `listing_snapshots` doesn't
@@ -24,6 +30,7 @@ logs should read "schema not applied", not a psycopg traceback.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -43,7 +50,7 @@ import psycopg
 from automation import config  # noqa: F401
 from automation import db
 
-from recorder import schedule, store
+from recorder import lot_archive, schedule, store
 from recorder.sources import govdeals as govdeals_source
 from recorder.sources.govdeals import GovDealsSource
 from recorder.sources.gsa import GSASource
@@ -73,10 +80,41 @@ def build_registry() -> dict:
 
 # --- discover ----------------------------------------------------------
 
+# Whole-site GovDeals is ~27.6k live lots (2026-09-29) and ~125k new lots a
+# month, each stored with its sacred ~2.7 KB search `raw` — hundreds of MB a
+# month into `listing_snapshots`. The project moved to Supabase Pro on
+# 2026-09-29 (8 GB disk included, $0.125/GB after), so the whole-site sweep
+# refuses to run above 6 GB — headroom before the included disk runs out —
+# and falls back to the furniture scope, loudly.
+DB_MAX_MB_FOR_SCOPE_ALL_DEFAULT = 6000
+
+
+def _govdeals_scope_for_run() -> str:
+    want = govdeals_source.scope()
+    if want != govdeals_source.SCOPE_ALL:
+        return want
+    try:
+        cap = float(os.getenv("RECORDER_DB_MAX_MB_FOR_SCOPE_ALL") or DB_MAX_MB_FOR_SCOPE_ALL_DEFAULT)
+    except ValueError:
+        cap = DB_MAX_MB_FOR_SCOPE_ALL_DEFAULT
+    size = store.database_size_mb()
+    if size > cap:
+        print(f"RECORDER ERROR source=govdeals scope=all refused: database is {size:.0f} MB "
+              f"(> RECORDER_DB_MAX_MB_FOR_SCOPE_ALL={cap:.0f}) — sweeping furniture only. "
+              "Reclaim space (scripts/reclaim_db_space.py) or archive listing_snapshots.raw first.",
+              file=sys.stderr)
+        return govdeals_source.SCOPE_FURNITURE
+    return want
+
+
 def _discover_one(adapter) -> int:
     """discover() + sold_sweep() for one source, inserted as one batch.
     Raises on failure — the caller isolates per-source."""
-    observations = list(adapter.discover()) + list(adapter.sold_sweep())
+    if getattr(adapter, "SOURCE", None) == "govdeals" and isinstance(adapter, GovDealsSource):
+        found = adapter.discover(scope_override=_govdeals_scope_for_run())
+    else:
+        found = adapter.discover()
+    observations = list(found) + list(adapter.sold_sweep())
     # discover() re-reports every active lot on every sweep; without this the
     # table grew ~2/3 pure duplicates (recorder/README.md "Storage").
     return store.insert_observations(store.filter_changed(observations))
@@ -271,6 +309,172 @@ def cmd_finals_backfill(source: str, since_days: int, limit: int, apply: bool,
     return 0
 
 
+# --- lot archive -------------------------------------------------------------
+
+ARCHIVE_SINCE_DAYS = 30
+ARCHIVE_PER_RUN_DEFAULT = 15
+ARCHIVE_TIME_BUDGET_S_DEFAULT = 90.0
+# Whole-site GovDeals closes, for the storage projection: ~29k/week measured in
+# deal_lots (Jul-Aug 2026) ≈ 125k/month.
+MONTHLY_LOTS_ALL_SCOPE = 125_000
+R2_FREE_GB = 10.0
+R2_USD_PER_GB_MONTH = 0.015
+
+
+def _index_fn():
+    """The lot_archive index writer, or None until migration 015 is applied."""
+    try:
+        return store.upsert_archive_index if store.lot_archive_index_exists() else None
+    except Exception as exc:  # noqa: BLE001 - the index is optional
+        print(f"lot archive: index check failed ({exc}) — archiving without it", file=sys.stderr)
+        return None
+
+
+def _archive_http_get(url, timeout=30):
+    from recorder.sources.base import polite_get
+    return polite_get(url, timeout=timeout)
+
+
+def storage_projection(bytes_per_lot: float, monthly_lots: int = MONTHLY_LOTS_ALL_SCOPE,
+                       months: int = 12) -> dict:
+    """Pure. Cumulative R2 GB and monthly bill after `months` of archiving."""
+    gb_month = bytes_per_lot * monthly_lots / 1e9
+    stored = gb_month * months
+    bill = max(0.0, stored - R2_FREE_GB) * R2_USD_PER_GB_MONTH
+    total = sum(max(0.0, gb_month * m - R2_FREE_GB) * R2_USD_PER_GB_MONTH
+                for m in range(1, months + 1))
+    return {"gb_per_month": round(gb_month, 2), "gb_after": round(stored, 1),
+            "usd_per_month_after": round(bill, 2), "usd_total": round(total, 2),
+            "months": months, "monthly_lots": monthly_lots}
+
+
+def _print_archive_meter(meter: dict, mode: str, source: str, since_days: int, limit: int) -> None:
+    print(f"archive-backfill [{mode}] source={source} since_days={since_days} limit={limit}")
+    print(f"  considered={meter['considered']} archived={meter['archived']} "
+          f"already={meter['skipped_exists']} not_ready={meter['not_ready']} "
+          f"errors={meter['error']} would_archive={meter['would_archive']}")
+    if meter["archived"]:
+        n = meter["archived"]
+        per = (meter["doc_bytes"] + meter["photo_bytes"]) / n
+        print(f"  bytes: docs={meter['doc_bytes']:,} photos={meter['photo_bytes']:,} "
+              f"({meter['photos']} photos) — {per / 1e3:,.0f} KB/lot, "
+              f"doc {meter['doc_bytes'] / n / 1e3:,.1f} KB/lot, requests={meter['requests']}")
+        print("  outcomes: " + ", ".join(f"{k}={v}" for k, v in sorted(meter["outcomes"].items())))
+        p = storage_projection(per)
+        print(f"  projection (whole site, ~{p['monthly_lots']:,} lots/month): "
+              f"{p['gb_per_month']} GB/month; after {p['months']} months {p['gb_after']} GB "
+              f"→ ${p['usd_per_month_after']}/month (${p['usd_total']} over the year; "
+              f"first {R2_FREE_GB:.0f} GB free, ${R2_USD_PER_GB_MONTH}/GB-mo)")
+    for r in meter["results"][:40]:
+        if r.result == "archived":
+            price = "—" if r.final_price is None else f"${r.final_price:,.2f}"
+            print(f"    {r.lot_key:<20} {r.outcome or '?':<16} {price:>12}  "
+                  f"{r.photos} photo(s)  {r.total_bytes / 1e3:,.0f} KB")
+        elif r.result != "skipped_exists":
+            print(f"    {r.lot_key:<20} {r.result}: {r.reason}")
+
+
+def cmd_archive_backfill(source: str, since_days: int, limit: int, apply: bool,
+                         lots: list[str] | None = None, archive_store=None, adapter=None,
+                         http_get=None, force: bool = False) -> int:
+    if source != "govdeals":
+        print(f"archive-backfill: only govdeals is archived (got {source!r})", file=sys.stderr)
+        return 2
+    if apply:
+        try:
+            archive_store = lot_archive.require_store(archive_store)
+        except lot_archive.StoreNotConfigured as exc:
+            print(f"RECORDER ERROR: {exc}", file=sys.stderr)
+            return 1
+    else:
+        archive_store = archive_store or lot_archive.store_from_env()
+    if lots:
+        rows = [{"source_lot_id": k, "end_date": None} for k in lots]
+    else:
+        use_index = False
+        try:
+            use_index = store.lot_archive_index_exists()
+        except Exception:  # noqa: BLE001
+            pass
+        rows = store.archive_candidates(since_days, max(limit * 4, limit + 50),
+                                        lot_archive.MIN_AGE.total_seconds(), use_index=use_index)
+    already = lot_archive.archived_slugs(archive_store) if archive_store else set()
+    meter = lot_archive.run_archive(
+        rows, store=archive_store, adapter=adapter or govdeals_source._adapter(),
+        http_get=http_get or _archive_http_get, timeline_fn=store.lot_timeline,
+        limit=limit, apply=apply, already=already,
+        index_fn=_index_fn() if apply else None, force=bool(force and lots))
+    _print_archive_meter(meter, "APPLY" if apply else "DRY-RUN", source, since_days, limit)
+    print(f"  store={getattr(archive_store, 'kind', 'none')}")
+    if not apply:
+        print("  (dry-run: no request sent — re-run with --apply to archive)")
+    return 0
+
+
+def cmd_archive_pending(registry: dict) -> int:
+    """The per-tick "archive at close" pass inside `run`: a bounded batch of
+    just-closed lots. No store → loud note, never a failed run (nothing is lost
+    yet; GovDeals keeps the page for weeks)."""
+    if (os.getenv("RECORDER_ARCHIVE_ENABLED") or "1").strip().lower() in ("0", "false", "no", "off"):
+        return 0
+    archive_store = lot_archive.store_from_env()
+    if archive_store is None:
+        print("RECORDER NOTE: lot archive skipped — R2 not configured", file=sys.stderr)
+        return 0
+    limit = lot_archive.env_int("RECORDER_ARCHIVE_MAX_PER_RUN", ARCHIVE_PER_RUN_DEFAULT)
+    try:
+        budget = float(os.getenv("RECORDER_ARCHIVE_TIME_BUDGET_S") or ARCHIVE_TIME_BUDGET_S_DEFAULT)
+    except ValueError:
+        budget = ARCHIVE_TIME_BUDGET_S_DEFAULT
+    try:
+        index_fn = _index_fn()
+        rows = store.archive_candidates(ARCHIVE_SINCE_DAYS, limit * 4,
+                                        lot_archive.MIN_AGE.total_seconds(),
+                                        use_index=index_fn is not None)
+        meter = lot_archive.run_archive(
+            rows, store=archive_store, adapter=govdeals_source._adapter(),
+            http_get=_archive_http_get, timeline_fn=store.lot_timeline, limit=limit,
+            apply=True, time_budget_s=budget, index_fn=index_fn)
+    except Exception as exc:  # noqa: BLE001 - never kill the run over the archive
+        print(f"RECORDER ERROR source=govdeals archive failed: {exc!r}", file=sys.stderr)
+        return 1
+    print(f"archive source=govdeals archived={meter['archived']} not_ready={meter['not_ready']} "
+          f"errors={meter['error']} bytes={meter['doc_bytes'] + meter['photo_bytes']:,}")
+    return 1 if meter["error"] else 0
+
+
+def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
+                        archive_store=None) -> int:
+    from recorder import lot_analysis
+    try:
+        archive_store = lot_archive.require_store(archive_store)
+    except lot_archive.StoreNotConfigured as exc:
+        print(f"RECORDER ERROR: {exc}", file=sys.stderr)
+        return 1
+    keys = [lot] if lot else sorted(lot_archive.archived_slugs(archive_store), reverse=True)
+    counts = {"ok": 0, "unavailable": 0, "cached": 0}
+    done = 0
+    for k in keys:
+        if done >= limit:
+            break
+        key = k if "/" in k else "/".join(map(str, lot_archive.parse_slug(k) or ()))
+        if not key:
+            continue
+        cached = lot_analysis.load(archive_store, key)
+        if cached and cached.get("status") == "ok" and not force:
+            counts["cached"] += 1
+            continue
+        a = lot_analysis.analyze_and_store(archive_store, key)
+        done += 1
+        counts[a["status"]] = counts.get(a["status"], 0) + 1
+        v = a.get("deal") or {}
+        print(f"  {key:<20} {a['status']:<12} {(a.get('category') or {}).get('llm') or '—':<22} "
+              f"qty={(a.get('quantity') or {}).get('value')} verdict={v.get('verdict') or '—'} "
+              f"{a.get('error') or ''}")
+    print("archive-analyze: " + ", ".join(f"{k}={v}" for k, v in counts.items()))
+    return 0
+
+
 # --- run (the cron entrypoint) ---------------------------------------------
 
 # Advisory lock key for `run` (IMPORTANT 3). Render cron fires every 5 min;
@@ -299,6 +503,7 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
 
         poll_rc = cmd_poll_once(registry, now=now)
         poll_rc = cmd_recheck_finals(registry) or poll_rc
+        poll_rc = cmd_archive_pending(registry) or poll_rc
 
         stale: list[str] = []
         for name in registry:
@@ -388,6 +593,25 @@ def build_parser() -> argparse.ArgumentParser:
     p_backfill.add_argument("--apply", action="store_true",
                             help="write the terminal observations (default: print only)")
 
+    p_arch = sub.add_parser(
+        "archive-backfill",
+        help="archive recently closed GovDeals lots (detail, photos, bidbox, timeline) to R2; "
+             "dry-run unless --apply",
+    )
+    p_arch.add_argument("--source", default="govdeals", choices=["govdeals"])
+    p_arch.add_argument("--since-days", type=int, default=ARCHIVE_SINCE_DAYS)
+    p_arch.add_argument("--limit", type=int, default=100)
+    p_arch.add_argument("--lot", action="append", default=None, metavar="ASSET/ACCOUNT/AUCTION",
+                        help="archive these lots instead of the window (repeatable)")
+    p_arch.add_argument("--apply", action="store_true", help="write to the store (default: count only)")
+    p_arch.add_argument("--force", action="store_true",
+                        help="with --lot: re-archive even if a document exists (overwrites it)")
+
+    p_an = sub.add_parser("archive-analyze", help="LLM analysis of archived lots, cached per lot")
+    p_an.add_argument("--limit", type=int, default=30)
+    p_an.add_argument("--lot", default=None, metavar="ASSET/ACCOUNT/AUCTION")
+    p_an.add_argument("--force", action="store_true", help="re-run even when a cached analysis exists")
+
     return parser
 
 
@@ -411,6 +635,11 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_run(registry, discover_stale_hours=args.discover_stale_hours)
     if args.cmd == "finals-backfill":
         return cmd_finals_backfill(args.source, args.since_days, args.limit, args.apply)
+    if args.cmd == "archive-backfill":
+        return cmd_archive_backfill(args.source, args.since_days, args.limit, args.apply,
+                                    lots=args.lot, force=args.force)
+    if args.cmd == "archive-analyze":
+        return cmd_archive_analyze(args.limit, lot=args.lot, force=args.force)
 
     parser.error(f"unknown command {args.cmd!r}")  # pragma: no cover - argparse prevents this
     return 2  # pragma: no cover
