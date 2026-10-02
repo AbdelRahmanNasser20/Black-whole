@@ -218,6 +218,22 @@ from recorder.models import Observation
 from recorder.sources.base import FURNITURE_TERMS
 
 SOURCE = "govdeals"
+ALLSURPLUS_SOURCE = "allsurplus"
+
+# maestro businessId → recorder source. One maestro host and key serve both
+# GovDeals ("GD") and AllSurplus ("GI"); "AD" lots are US GovDeals lots (the
+# bidbox calls them GD). A GI lot that turns up in the GovDeals sweep is
+# recorded as allsurplus — never under govdeals (its currency is often not USD).
+BUSINESS_SOURCES = {"GD": SOURCE, "AD": SOURCE, "GI": ALLSURPLUS_SOURCE}
+MAESTRO_SOURCES = (SOURCE, ALLSURPLUS_SOURCE)
+
+
+def source_for_business(business_id: str | None) -> str:
+    return BUSINESS_SOURCES.get((business_id or "").strip().upper(), SOURCE)
+
+
+def business_for_source(source: str) -> str:
+    return "GI" if source == ALLSURPLUS_SOURCE else "GD"
 
 # The furniture category cluster `deals/`'s own CLI default sweeps
 # (docs/superpowers plan; also the literal default in deals.cli's
@@ -494,8 +510,8 @@ class PoliteGovDealsAdapter(GovDealsAdapter):
     subclass; `discover()`/`refetch()` are inherited and page through
     `self._search_page`, so both are throttled without being copied."""
 
-    def __init__(self, max_page: int | None = None):
-        super().__init__()
+    def __init__(self, max_page: int | None = None, business_id: str = "GD"):
+        super().__init__(business_id=business_id)
         self.max_page = max_page
         self.requests = 0
 
@@ -507,8 +523,16 @@ class PoliteGovDealsAdapter(GovDealsAdapter):
         return super()._search_page(category_ids, search_text, page, rows)
 
 
-def _adapter(max_page: int | None = None) -> GovDealsAdapter:
-    return PoliteGovDealsAdapter(max_page=max_page)
+def _adapter(max_page: int | None = None, business_id: str = "GD") -> GovDealsAdapter:
+    return PoliteGovDealsAdapter(max_page=max_page, business_id=business_id)
+
+
+def adapter_for_source(source: str, max_page: int | None = None) -> GovDealsAdapter:
+    return _adapter(max_page=max_page, business_id=business_for_source(source))
+
+
+def _adapter_source(adapter) -> str:
+    return source_for_business(getattr(adapter, "business_id", "GD"))
 
 
 def close_outcome(status_code: str | None, bid_count: int | None) -> str:
@@ -586,7 +610,7 @@ def classify_bidbox(raw: dict, now: datetime) -> str:
 
 
 def bidbox_observation(key: str, raw: dict, *, method: str, url: str | None = None,
-                       extra: dict | None = None) -> Observation:
+                       extra: dict | None = None, source: str = SOURCE) -> Observation:
     """Observation from a bidbox payload. `raw` stays untouched under
     `"bidbox"`; the recorder's own verdict sits beside it under
     `"recorder_capture"` (read by `sold_comps`, migration 014)."""
@@ -596,14 +620,14 @@ def bidbox_observation(key: str, raw: dict, *, method: str, url: str | None = No
         "method": method,
         "status_code": code,
         "http_status": 200,
-        "url": url or f"govdeals-maestro-bidbox/{key}",
+        "url": url or f"{source}-maestro-bidbox/{key}",
     }
     if method != CAPTURE_BIDBOX_LIVE:
         capture["outcome"] = close_outcome(code, bids)
     if extra:
         capture.update(extra)
     return Observation(
-        source=SOURCE,
+        source=source,
         source_lot_id=key,
         status="active" if method == CAPTURE_BIDBOX_LIVE else "closed",
         raw={"recorder_capture": capture, "bidbox": raw},
@@ -620,18 +644,20 @@ def resolve_with_bidbox(adapter: GovDealsAdapter, parsed: tuple[int, int, int],
     (retry next run); `purged` carries None (caller falls back to the old
     absence path, i.e. `last_snapshot`)."""
     k = lot_key(*parsed)
+    src = _adapter_source(adapter)
     result, raw = fetch_bidbox(adapter, parsed)
     if result != "ok":
         return result, None
     verdict = classify_bidbox(raw, now)
     if verdict == "extended":
-        return "extended", bidbox_observation(k, raw, method=CAPTURE_BIDBOX_LIVE)
+        return "extended", bidbox_observation(k, raw, method=CAPTURE_BIDBOX_LIVE, source=src)
     if verdict == "grace":
         return "grace", None
-    return "final", bidbox_observation(k, raw, method=CAPTURE_BIDBOX_FINAL)
+    return "final", bidbox_observation(k, raw, method=CAPTURE_BIDBOX_FINAL, source=src)
 
 
-def recheck_observation(key: str, prior: dict, result: str, raw: dict | None) -> Observation | None:
+def recheck_observation(key: str, prior: dict, result: str, raw: dict | None,
+                        source: str = SOURCE) -> Observation | None:
     """The 7-day SOA re-check row. `prior` is the SOA final's stored row
     (`current_bid`, `bid_count`, `end_date`, `status_code`).
 
@@ -645,17 +671,17 @@ def recheck_observation(key: str, prior: dict, result: str, raw: dict | None) ->
         return None
     if result == "purged" or raw is None:
         return Observation(
-            source=SOURCE, source_lot_id=key, status="closed",
+            source=source, source_lot_id=key, status="closed",
             raw={"recorder_capture": {
                 "method": CAPTURE_BIDBOX_RECHECK, "result": "purged", "http_status": 204,
                 "status_code": prior.get("status_code"),
                 "outcome": close_outcome(prior.get("status_code"), prior.get("bid_count")),
-                "changed": None, "url": f"govdeals-maestro-bidbox/{key}",
+                "changed": None, "url": f"{source}-maestro-bidbox/{key}",
             }},
             current_bid=prior.get("current_bid"), bid_count=prior.get("bid_count"),
             end_date=prior.get("end_date"),
         )
-    obs = bidbox_observation(key, raw, method=CAPTURE_BIDBOX_RECHECK)
+    obs = bidbox_observation(key, raw, method=CAPTURE_BIDBOX_RECHECK, source=source)
     changed = (
         raw.get("assetStatusCd") != prior.get("status_code")
         or obs.current_bid != prior.get("current_bid")
@@ -667,8 +693,10 @@ def recheck_observation(key: str, prior: dict, result: str, raw: dict | None) ->
 
 
 def _lot_to_observation(lot: Lot) -> Observation:
+    """Search asset → Observation. The source follows the asset's own
+    `businessId`: a GI lot is `allsurplus` whichever sweep found it."""
     return Observation(
-        source=SOURCE,
+        source=source_for_business((lot.raw or {}).get("businessId")),
         source_lot_id=lot_key(lot.asset_id, lot.account_id, lot.auction_id),
         status=_status_of(lot.status),
         raw=lot.raw,
@@ -678,7 +706,7 @@ def _lot_to_observation(lot: Lot) -> Observation:
     )
 
 
-def _snapshot_to_observation(key: str, snapshot: Snapshot) -> Observation:
+def _snapshot_to_observation(key: str, snapshot: Snapshot, source: str = SOURCE) -> Observation:
     """`Snapshot` has no `.raw` — `raw` is `dataclasses.asdict(snapshot)`
     itself (the brief's instruction). See module docstring: this asdict
     output IS the full payload for a poll()-sourced row, nothing richer to
@@ -686,7 +714,7 @@ def _snapshot_to_observation(key: str, snapshot: Snapshot) -> Observation:
     """
     raw = asdict(snapshot)
     return Observation(
-        source=SOURCE,
+        source=source,
         source_lot_id=key,
         status=_status_of(snapshot.status),
         raw=raw,
@@ -720,9 +748,13 @@ def _safe_discover(
 
 class GovDealsSource:
     SOURCE = SOURCE
+    BUSINESS_ID = "GD"
+
+    def _make_adapter(self, max_page: int | None = None) -> GovDealsAdapter:
+        return _adapter(max_page=max_page, business_id=self.BUSINESS_ID)
 
     def discover(self, scope_override: str | None = None) -> list[Observation]:
-        adapter = _adapter()
+        adapter = self._make_adapter()
         if (scope_override or scope()) == SCOPE_ALL:
             return self._discover_all(adapter)
         return self._discover_furniture(adapter)
@@ -803,8 +835,8 @@ class GovDealsSource:
         if not lots:
             return []
         now = datetime.now(timezone.utc)
-        adapter = _adapter(max_page=_env_int("RECORDER_GOVDEALS_REFETCH_MAX_PAGES",
-                                             REFETCH_MAX_PAGES_DEFAULT))
+        adapter = self._make_adapter(max_page=_env_int("RECORDER_GOVDEALS_REFETCH_MAX_PAGES",
+                                                       REFETCH_MAX_PAGES_DEFAULT))
         observations: list[Observation] = []
         upcoming: list[tuple[str, tuple[int, int, int]]] = []
         past_end: list[tuple[datetime, tuple[int, int, int]]] = []
@@ -869,7 +901,7 @@ class GovDealsSource:
                     k = lot_key(*parsed)
                     snapshot = snapshots.get(k)
                     if snapshot is not None:
-                        observations.append(_snapshot_to_observation(k, snapshot))
+                        observations.append(_snapshot_to_observation(k, snapshot, self.SOURCE))
                     # absent but not yet past end_date (or unknown) — retried later.
 
         observations.extend(self._absence_observations(adapter, purged))
@@ -878,14 +910,14 @@ class GovDealsSource:
     def recheck_finals(self, rows: list[dict]) -> list[Observation]:
         """The 7-day SOA re-check: one bidbox read per row from
         `store.soa_recheck_due()`; returns the re-check rows to insert."""
-        adapter = _adapter()
+        adapter = self._make_adapter()
         out: list[Observation] = []
         for row in rows:
             parsed = _parse_lot_key(str(row["source_lot_id"]))
             if parsed is None:
                 continue
             result, raw = fetch_bidbox(adapter, parsed)
-            obs = recheck_observation(lot_key(*parsed), row, result, raw)
+            obs = recheck_observation(lot_key(*parsed), row, result, raw, source=self.SOURCE)
             if obs is not None:
                 out.append(obs)
         return out
@@ -916,7 +948,7 @@ class GovDealsSource:
                     )
                     corroboration_cap_warned = True
                 observations.append(Observation(
-                    source=SOURCE,
+                    source=self.SOURCE,
                     source_lot_id=k,
                     status="gone",
                     raw={"recorder_probe": {
@@ -962,7 +994,7 @@ class GovDealsSource:
         for k, verdict, payload, asset_id, account_id in pending:
             if verdict == "active":
                 observations.append(Observation(
-                    source=SOURCE,
+                    source=self.SOURCE,
                     source_lot_id=k,
                     status="active",
                     raw=payload,
@@ -972,7 +1004,7 @@ class GovDealsSource:
                 ))
             elif verdict == "closed":
                 observations.append(Observation(
-                    source=SOURCE,
+                    source=self.SOURCE,
                     source_lot_id=k,
                     status="closed",
                     raw=payload,
@@ -982,7 +1014,7 @@ class GovDealsSource:
                 ))
             elif verdict == "gone":
                 observations.append(Observation(
-                    source=SOURCE,
+                    source=self.SOURCE,
                     source_lot_id=k,
                     status="gone",
                     raw={"recorder_probe": {
@@ -995,7 +1027,7 @@ class GovDealsSource:
                 if suspected_event:
                     continue  # suppressed — see the batch-level warning above
                 observations.append(Observation(
-                    source=SOURCE,
+                    source=self.SOURCE,
                     source_lot_id=k,
                     status="gone",
                     raw={"recorder_probe": {

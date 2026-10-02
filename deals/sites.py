@@ -4,7 +4,9 @@ Every lot-page URL in deals/ is built here — call-sites must never rebuild the
 f-string by hand (GovDeals arg order is asset-then-account; swapped = HTTP 204).
 Ordinals are permanent (they feed synth_ids account_id = -ordinal):
 1=govdeals, 2=publicsurplus, 3=bidspotter (reserved), 4=marknet,
-5=gsa, 6=hibid, 7=municibid, 8=purplewave (assigned in the Phase 2 plan).
+5=gsa, 6=hibid, 7=municibid, 8=purplewave (assigned in the Phase 2 plan),
+9=allsurplus (same maestro API as GovDeals, businessId "GI"; recorder-only
+for now — enabled=False keeps it out of the deals crons).
 """
 from dataclasses import dataclass
 from types import SimpleNamespace
@@ -26,6 +28,11 @@ def _govdeals():
     return GovDealsAdapter()
 
 
+def _allsurplus():
+    from deals.adapters.govdeals import GovDealsAdapter
+    return GovDealsAdapter(business_id="GI")
+
+
 def _publicsurplus():
     from deals.adapters.publicsurplus import PublicSurplusAdapter
     return PublicSurplusAdapter()
@@ -36,6 +43,8 @@ SITES: dict[str, SiteSpec] = {
         lambda l: f"https://www.govdeals.com/en/asset/{l.asset_id}/{l.account_id}", enabled=True),
     "publicsurplus": SiteSpec("publicsurplus", "Public Surplus", 2, _publicsurplus,
         lambda l: f"https://www.publicsurplus.com/sms/auction/view?auc={l.native_id}", enabled=False),
+    "allsurplus": SiteSpec("allsurplus", "AllSurplus", 9, _allsurplus,
+        lambda l: f"https://www.allsurplus.com/en/asset/{l.asset_id}/{l.account_id}", enabled=False),
 }
 
 

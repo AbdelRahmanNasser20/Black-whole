@@ -120,11 +120,11 @@ def _patch_lock(monkeypatch, locked=True):
 
 # --- registry completeness --------------------------------------------------
 
-def test_registry_has_all_six_sources():
+def test_registry_has_all_seven_sources():
     registry = cli.build_registry()
     assert set(registry.keys()) == set(cli.SOURCE_NAMES)
     assert set(cli.SOURCE_NAMES) == {
-        "govdeals", "public_surplus", "purple_wave", "municibid", "mibid", "gsa",
+        "govdeals", "allsurplus", "public_surplus", "purple_wave", "municibid", "mibid", "gsa",
     }
 
 

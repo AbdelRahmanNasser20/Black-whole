@@ -66,7 +66,7 @@ def store(tmp_path):
     return lot_archive.LocalStore(tmp_path)
 
 
-def _timeline(lk):
+def _timeline(lk, source="govdeals"):
     return ([{"t": "2026-09-02T11:49:44+00:00", "source": "recorder", "status": "active",
               "current_bid": 270.0, "bid_count": 14},
              {"t": "2026-09-02T23:10:23+00:00", "source": "recorder", "status": "active",
@@ -239,7 +239,7 @@ def test_run_archive_isolates_a_failing_lot(store):
     boom = FakeAdapter()
     boom.fetch_detail = lambda a, b: (_ for _ in ()).throw(RuntimeError("boom"))
     m = lot_archive.run_archive(rows, store=store, adapter=boom, http_get=_http,
-                                timeline_fn=lambda lk: (_ for _ in ()).throw(RuntimeError("db down")),
+                                timeline_fn=lambda lk, source="govdeals": (_ for _ in ()).throw(RuntimeError("db down")),
                                 limit=10, apply=True)
     assert m["error"] == 1
 
@@ -353,7 +353,7 @@ def test_purged_detail_falls_back_to_the_sweep_cover_photo(store):
     seen = []
     r = lot_archive.archive_lot((8, 32408, 4), store=store, adapter=FakeAdapter(detail={}, bidbox=rnm),
                                 http_get=lambda u, timeout=30: seen.append(u) or _Resp(_jpeg()),
-                                timeline_fn=lambda lk: ([], {"photo": "abc.jpg", "assetShortDescription": "Desk"}),
+                                timeline_fn=lambda lk, source="govdeals": ([], {"photo": "abc.jpg", "assetShortDescription": "Desk"}),
                                 end_date=NOW - timedelta(hours=6), now=NOW)
     assert r.photos == 1 and seen == ["https://webassets.lqdt1.com/assets/photos/32408/abc.jpg"]
 

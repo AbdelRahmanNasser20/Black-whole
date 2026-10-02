@@ -298,7 +298,7 @@ SELECT source_lot_id, observed_at, current_bid, bid_count, end_date,
 FROM (
     SELECT DISTINCT ON (source_lot_id) *
     FROM listing_snapshots
-    WHERE source = 'govdeals'
+    WHERE source = %s
     ORDER BY source_lot_id, observed_at DESC, id DESC
 ) latest
 WHERE status = 'closed'
@@ -310,9 +310,10 @@ LIMIT %s
 """
 
 
-def soa_recheck_due(codes: list[str], older_than_seconds: float, limit: int) -> list[dict]:
+def soa_recheck_due(codes: list[str], older_than_seconds: float, limit: int,
+                    source: str = "govdeals") -> list[dict]:
     return list(_read_with_backoff(
-        db.fetch_all, _SOA_RECHECK_DUE_SQL, (list(codes), older_than_seconds, limit)))
+        db.fetch_all, _SOA_RECHECK_DUE_SQL, (source, list(codes), older_than_seconds, limit)))
 
 
 # GovDeals lots whose last known clock fell in the window, that are no longer
@@ -370,16 +371,16 @@ def finals_backfill_candidates(source: str, since_days: int, limit: int) -> list
 _ARCHIVE_CANDIDATES_SQL = """
 WITH latest AS (
     SELECT DISTINCT ON (source_lot_id) source_lot_id, status
-    FROM listing_snapshots WHERE source = 'govdeals'
+    FROM listing_snapshots WHERE source = %(source)s
     ORDER BY source_lot_id, observed_at DESC, id DESC
 ), ends AS (
     SELECT DISTINCT ON (source_lot_id) source_lot_id, end_date
-    FROM listing_snapshots WHERE source = 'govdeals' AND end_date IS NOT NULL
+    FROM listing_snapshots WHERE source = %(source)s AND end_date IS NOT NULL
     ORDER BY source_lot_id, observed_at DESC, id DESC
 ), finals AS (
     SELECT DISTINCT ON (source_lot_id) source_lot_id, raw->'bidbox' AS bidbox
     FROM listing_snapshots
-    WHERE source = 'govdeals' AND status = 'closed'
+    WHERE source = %(source)s AND status = 'closed'
       AND raw->'recorder_capture'->>'method' IN ('bidbox_final', 'bidbox_recheck')
       AND raw ? 'bidbox'
     ORDER BY source_lot_id, observed_at DESC, id DESC
@@ -388,16 +389,16 @@ SELECT l.source_lot_id, l.status, e.end_date, f.bidbox
 FROM latest l
 JOIN ends e USING (source_lot_id)
 LEFT JOIN finals f USING (source_lot_id)
-WHERE e.end_date >= now() - make_interval(days => %s)
-  AND e.end_date < now() - make_interval(secs => %s)
+WHERE e.end_date >= now() - make_interval(days => %(since_days)s)
+  AND e.end_date < now() - make_interval(secs => %(min_age)s)
   AND (l.status IN ('closed', 'gone') OR e.end_date < now() - interval '1 day')
   {not_indexed}
 ORDER BY e.end_date DESC
-LIMIT %s
+LIMIT %(limit)s
 """
 
 _NOT_INDEXED = """AND NOT EXISTS (SELECT 1 FROM lot_archive a
-                   WHERE a.source = 'govdeals' AND a.lot_key = l.source_lot_id)"""
+                   WHERE a.source = %(source)s AND a.lot_key = l.source_lot_id)"""
 
 
 def lot_archive_index_exists() -> bool:
@@ -406,11 +407,12 @@ def lot_archive_index_exists() -> bool:
 
 
 def archive_candidates(since_days: int, limit: int, min_age_seconds: float = 3600,
-                       use_index: bool | None = None) -> list[dict]:
+                       use_index: bool | None = None, source: str = "govdeals") -> list[dict]:
     if use_index is None:
         use_index = lot_archive_index_exists()
     sql = _ARCHIVE_CANDIDATES_SQL.format(not_indexed=_NOT_INDEXED if use_index else "")
-    return list(_read_with_backoff(db.fetch_all, sql, (since_days, min_age_seconds, limit)))
+    return list(_read_with_backoff(db.fetch_all, sql, {
+        "source": source, "since_days": since_days, "min_age": min_age_seconds, "limit": limit}))
 
 
 _LOT_TIMELINE_SQL = """
@@ -418,7 +420,7 @@ SELECT observed_at, status, current_bid, bid_count, end_date,
        raw->'recorder_capture'->>'method' AS method,
        raw->'recorder_capture'->>'status_code' AS status_code
 FROM listing_snapshots
-WHERE source = 'govdeals' AND source_lot_id = %s
+WHERE source = %s AND source_lot_id = %s
 ORDER BY observed_at, id
 """
 
@@ -426,7 +428,7 @@ ORDER BY observed_at, id
 # the untouched search asset; poll rows carry a Snapshot asdict).
 _LOT_SEARCH_RAW_SQL = """
 SELECT raw FROM listing_snapshots
-WHERE source = 'govdeals' AND source_lot_id = %s AND raw ? 'assetShortDescription'
+WHERE source = %s AND source_lot_id = %s AND raw ? 'assetShortDescription'
 ORDER BY observed_at DESC, id DESC LIMIT 1
 """
 
@@ -449,14 +451,14 @@ def _num(v):
     return None if v is None else float(v)
 
 
-def lot_timeline(lot_key: str) -> tuple[list[dict], dict | None]:
+def lot_timeline(lot_key: str, source: str = "govdeals") -> tuple[list[dict], dict | None]:
     """(timeline, search_raw) for one GovDeals lot from our own tables.
     Timeline points: {t, source, status, current_bid, bid_count, end_date,
     method, high_bidder}. search_raw falls back to a maestro-shaped dict
     rebuilt from `deal_lots` scalars when no snapshot kept the search asset."""
     a, b, c = (int(p) for p in lot_key.split("/"))
     points: list[dict] = []
-    for r in _read_with_backoff(db.fetch_all, _LOT_TIMELINE_SQL, (lot_key,)):
+    for r in _read_with_backoff(db.fetch_all, _LOT_TIMELINE_SQL, (source, lot_key)):
         points.append({"t": r["observed_at"], "source": "recorder", "status": r["status"],
                        "current_bid": _num(r["current_bid"]), "bid_count": r["bid_count"],
                        "end_date": r["end_date"], "method": r["method"],
@@ -472,7 +474,7 @@ def lot_timeline(lot_key: str) -> tuple[list[dict], dict | None]:
         print(f"recorder.store: deal_bid_observations unreadable ({e})")
     points.sort(key=lambda p: p["t"])
 
-    row = _read_with_backoff(db.fetch_one, _LOT_SEARCH_RAW_SQL, (lot_key,))
+    row = _read_with_backoff(db.fetch_one, _LOT_SEARCH_RAW_SQL, (source, lot_key))
     search_raw = row["raw"] if row else None
     if search_raw is None:
         d = _read_with_backoff(db.fetch_one, _DEAL_LOT_SQL, (a, b, c))
@@ -493,7 +495,7 @@ _INDEX_UPSERT_SQL = """
 INSERT INTO lot_archive (source, lot_key, title, canonical_category, category_name, city, state,
                          seller, closed_at, final_price, bid_count, outcome, status_code,
                          photo_count, completeness, archived_at)
-VALUES ('govdeals', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
 ON CONFLICT (source, lot_key) DO UPDATE SET
     title = EXCLUDED.title, canonical_category = EXCLUDED.canonical_category,
     category_name = EXCLUDED.category_name, city = EXCLUDED.city, state = EXCLUDED.state,
@@ -508,7 +510,7 @@ def upsert_archive_index(meta: dict) -> None:
     """Index row for one archived lot (migration 015). Only called when the
     table exists; R2 stays the record either way."""
     db.execute(_INDEX_UPSERT_SQL, (
-        meta["lot_key"], (meta.get("title") or "")[:300], meta.get("canonical_category"),
+        meta.get("source") or "govdeals", meta["lot_key"], (meta.get("title") or "")[:300], meta.get("canonical_category"),
         meta.get("category_name"), meta.get("city"), meta.get("state"), meta.get("seller"),
         meta.get("closed_at"), meta.get("final_price"), meta.get("bid_count"),
         meta.get("outcome"), meta.get("status_code"), meta.get("photo_count"),

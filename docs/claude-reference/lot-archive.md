@@ -12,6 +12,10 @@
   - Reserve-not-met / no-bid lots: detail is **already 204** hours to days after close (9 of 9 sampled). The bidbox still answers; the sweep's cover photo is often still on the CDN. So non-sales are archived `partial` at once, from the bidbox + our snapshots.
   - `listing_snapshots` keeps prices only. The archive keeps the listing.
 
+### Sources (2026-10-02)
+
+- `govdeals` and `allsurplus` (maestro `businessId` GI — same API, own prefix `archive/lots/allsurplus/…`). `lot_archive.SOURCES` is the whitelist; routes are `/admin/archive/{source}/{a}/{b}/{c}` and `/api/archive/{source}/…`, any other source = 404. The list page has a Source facet; `run` archives both under one time budget. AllSurplus prices are often EUR/GBP/ZAR: the page shows the lot's currency, and the analyzer never compares a non-USD final with (USD) comps.
+
 ### R2 layout (`slug` = `{asset}_{account}_{auction}`)
 
 | Key | What |

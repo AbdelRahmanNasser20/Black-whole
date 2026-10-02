@@ -47,6 +47,15 @@ from typing import Any, Callable, Iterable
 
 SOURCE = "govdeals"
 PREFIX = "archive/lots/govdeals"
+# Maestro-family sources the archive keeps, each under its own prefix
+# (archive/lots/{source}/…). Anything else is refused, never guessed.
+SOURCES = ("govdeals", "allsurplus")
+
+
+def prefix(source: str = SOURCE) -> str:
+    if source not in SOURCES:
+        raise ValueError(f"lot archive: unknown source {source!r}")
+    return f"archive/lots/{source}"
 SCHEMA_VERSION = 1
 
 PHOTOS_DEFAULT = 6
@@ -93,20 +102,20 @@ def parse_slug(s: str) -> tuple[int, int, int] | None:
         return None
 
 
-def doc_key(key) -> str:
-    return f"{PREFIX}/{slug(key)}.json.gz"
+def doc_key(key, source: str = SOURCE) -> str:
+    return f"{prefix(source)}/{slug(key)}.json.gz"
 
 
-def photo_key(key, i: int) -> str:
-    return f"{PREFIX}/{slug(key)}/{i}.jpg"
+def photo_key(key, i: int, source: str = SOURCE) -> str:
+    return f"{prefix(source)}/{slug(key)}/{i}.jpg"
 
 
-def meta_key(key) -> str:
-    return f"{PREFIX}/_meta/{slug(key)}.json"
+def meta_key(key, source: str = SOURCE) -> str:
+    return f"{prefix(source)}/_meta/{slug(key)}.json"
 
 
-def analysis_key(key) -> str:
-    return f"{PREFIX}/_analysis/{slug(key)}.json"
+def analysis_key(key, source: str = SOURCE) -> str:
+    return f"{prefix(source)}/_analysis/{slug(key)}.json"
 
 
 # ─────────────────────────────── stores ───────────────────────────────
@@ -405,10 +414,10 @@ def summarize(detail: dict | None, bidbox: dict | None, search_raw: dict | None,
 def build_document(key: tuple[int, int, int], *, detail: dict | None, gallery: list[str],
                    bidbox: dict | None, bidbox_result: str, search_raw: dict | None,
                    timeline: list[dict], photos: list[dict], completeness: str,
-                   archived_at: datetime | None = None) -> dict:
+                   archived_at: datetime | None = None, source: str = SOURCE) -> dict:
     return {
         "schema": SCHEMA_VERSION,
-        "source": SOURCE,
+        "source": source,
         "lot_key": f"{key[0]}/{key[1]}/{key[2]}",
         "archived_at": (archived_at or datetime.now(timezone.utc)).isoformat(),
         "completeness": completeness,
@@ -431,6 +440,8 @@ def meta_of(doc: dict) -> dict:
     s = doc.get("summary") or {}
     m = {k: s.get(k) for k in META_FIELDS}
     m.update({"lot_key": doc["lot_key"], "archived_at": doc.get("archived_at"),
+              "source": doc.get("source") or SOURCE,
+              "currency": s.get("currency"),
               "photo_count": len(doc.get("photos") or []),
               "completeness": doc.get("completeness")})
     return m
@@ -478,7 +489,8 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
                 timeline_fn: Callable[[str], tuple[list[dict], dict | None]],
                 end_date: datetime | None = None, bidbox: dict | None = None,
                 max_photos: int | None = None, now: datetime | None = None,
-                index_fn: Callable[[dict], None] | None = None, force: bool = False) -> ArchiveResult:
+                index_fn: Callable[[dict], None] | None = None, force: bool = False,
+                source: str = SOURCE) -> ArchiveResult:
     """Archive one closed lot. Never raises for a lot-level problem: returns an
     ArchiveResult whose `result` says what happened."""
     from recorder.sources import govdeals as gd
@@ -488,7 +500,8 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
     res = ArchiveResult(lk, "error")
     max_photos = photos_per_lot() if max_photos is None else max_photos
 
-    if not force and store.exists(doc_key(key)):
+    prefix(source)   # unknown source → ValueError before any request
+    if not force and store.exists(doc_key(key, source)):
         res.result = "skipped_exists"
         return res
     if end_date is not None and now - end_date < MIN_AGE:
@@ -541,7 +554,7 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
     gallery = photo_paths_to_urls((detail or {}).get("assetPhotos") or [])
 
     # 3. our own history of the lot (DB, read-only)
-    timeline, search_raw = timeline_fn(lk)
+    timeline, search_raw = timeline_fn(lk, source)
     if not gallery and (search_raw or {}).get("photo"):
         # purged detail: the sweep's cover photo is often still on the CDN
         gallery = [_hero_url(key[1], search_raw["photo"])]
@@ -560,7 +573,7 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
             continue
         data, w, h = out
         i = len(photos)
-        k = photo_key(key, i)
+        k = photo_key(key, i, source)
         _verify_put(store, k, data, "image/jpeg")
         photos.append({"i": i, "key": k, "bytes": len(data), "w": w, "h": h, "src": url})
         res.photo_bytes += len(data)
@@ -568,15 +581,15 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
     doc = build_document(key, detail=detail, gallery=gallery, bidbox=bidbox,
                          bidbox_result=bidbox_result, search_raw=search_raw,
                          timeline=timeline, photos=photos, completeness=completeness,
-                         archived_at=now)
+                         archived_at=now, source=source)
     meta = meta_of(doc)
-    _verify_put(store, meta_key(key), json.dumps(meta, default=str).encode(), "application/json")
+    _verify_put(store, meta_key(key, source), json.dumps(meta, default=str).encode(), "application/json")
 
     blob = serialize(doc)
-    store.put(doc_key(key), blob, "application/gzip")
-    got = store.get(doc_key(key))
+    store.put(doc_key(key, source), blob, "application/gzip")
+    got = store.get(doc_key(key, source))
     if got is None or parse(got).get("lot_key") != lk or len(parse(got).get("photos") or []) != len(photos):
-        raise RuntimeError(f"readback mismatch for {doc_key(key)!r}")
+        raise RuntimeError(f"readback mismatch for {doc_key(key, source)!r}")
 
     if index_fn is not None:
         try:
@@ -592,11 +605,11 @@ def archive_lot(key: tuple[int, int, int], *, store, adapter, http_get: Callable
     return res
 
 
-def load(store, key) -> dict | None:
+def load(store, key, source: str = SOURCE) -> dict | None:
     """The stored document with its `summary` re-derived from the untouched
     payloads — like `sold_comps`, a fix to the derivation reaches every lot
     already archived without re-fetching anything."""
-    blob = store.get(doc_key(key))
+    blob = store.get(doc_key(key, source))
     if not blob:
         return None
     doc = parse(blob)
@@ -608,10 +621,10 @@ def load(store, key) -> dict | None:
     return doc
 
 
-def archived_slugs(store) -> set[str]:
+def archived_slugs(store, source: str = SOURCE) -> set[str]:
     """Every lot with a document. One LIST call per 1,000 lots."""
     out = set()
-    for k in store.list(PREFIX + "/"):
+    for k in store.list(prefix(source) + "/"):
         name = k.rsplit("/", 1)[-1]
         if name.endswith(".json.gz"):
             out.add(name[: -len(".json.gz")])
@@ -621,13 +634,13 @@ def archived_slugs(store) -> set[str]:
 def run_archive(candidates: Iterable[dict], *, store, adapter, http_get: Callable,
                 timeline_fn, limit: int, apply: bool, time_budget_s: float | None = None,
                 already: set[str] | None = None, index_fn=None, force: bool = False,
-                log: Callable[[str], None] = print) -> dict:
+                log: Callable[[str], None] = print, source: str = SOURCE) -> dict:
     """Archive up to `limit` candidates (rows with `source_lot_id`, `end_date`,
     optional `bidbox`). Dry-run (`apply=False`) makes no request at all."""
     from recorder.sources.govdeals import _parse_lot_key
 
     t0 = time.monotonic()
-    already = already if already is not None else archived_slugs(store)
+    already = already if already is not None else archived_slugs(store, source)
     meter = {"considered": 0, "archived": 0, "skipped_exists": 0, "not_ready": 0,
              "error": 0, "would_archive": 0, "doc_bytes": 0, "photo_bytes": 0, "photos": 0,
              "requests": 0, "outcomes": {}, "results": []}
@@ -650,7 +663,8 @@ def run_archive(candidates: Iterable[dict], *, store, adapter, http_get: Callabl
         try:
             r = archive_lot(parsed, store=store, adapter=adapter, http_get=http_get,
                             timeline_fn=timeline_fn, end_date=row.get("end_date"),
-                            bidbox=row.get("bidbox"), index_fn=index_fn, force=force)
+                            bidbox=row.get("bidbox"), index_fn=index_fn, force=force,
+                            source=source)
         except Exception as e:  # noqa: BLE001 - one lot never kills the pass
             log(f"[lot_archive] RECORDER ERROR archive failed for {row['source_lot_id']}: {e!r}")
             meter["error"] += 1

@@ -8,19 +8,39 @@ from deals.mapping import asset_to_lot, photo_paths_to_urls
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "auction_extractors"))
 import govdeals_chairs_extraction as _g   # noqa: E402
 
+# Liquidity Services runs GovDeals ("GD") and AllSurplus ("GI") on the same
+# maestro host and key. Verified live 2026-10-02: a search body with top-level
+# "businessId": "GI" returns only AllSurplus lots (~1,470 live, USD/EUR/GBP/
+# ZAR/...); the detail endpoint needs {"businessId": "GI"} for a GI lot (GD →
+# empty shell); the bidbox ignores its business segment. "AD" lots are US
+# GovDeals lots — there is no separate AD sweep.
+_ORIGINS = {"GD": "https://www.govdeals.com", "GI": "https://www.allsurplus.com"}
+
+
 class GovDealsAdapter:
     site = "govdeals"
 
+    def __init__(self, business_id: str = "GD"):
+        self.business_id = business_id
+
     def _headers(self) -> dict:
+        origin = _ORIGINS.get(self.business_id, _ORIGINS["GD"])
         return {"x-api-key": _g._resolve_maestro_key(), "x-user-id": "-1",
                 "x-api-correlation-id": str(uuid.uuid4()), "Content-Type": "application/json",
-                "Origin": "https://www.govdeals.com", "Referer": "https://www.govdeals.com/",
+                "Origin": origin, "Referer": origin + "/",
                 "User-Agent": _g._BROWSER_UA}
 
-    def _search_page(self, category_ids: str, search_text: str, page: int, rows: int = 120) -> list[dict]:
+    def _search_body(self, category_ids: str, search_text: str, page: int, rows: int = 120) -> dict:
         body = {"categoryIds": category_ids, "searchText": search_text, "isQAL": False,
                 "page": page, "displayRows": rows, "sortField": "auctionclose", "sortOrder": "asc",
                 "requestType": "search", "responseStyle": "fullResponse", "facets": [], "facetsFilter": ""}
+        if self.business_id != "GD":
+            # GD keeps the exact body it has always sent (tested byte-identical).
+            body["businessId"] = self.business_id
+        return body
+
+    def _search_page(self, category_ids: str, search_text: str, page: int, rows: int = 120) -> list[dict]:
+        body = self._search_body(category_ids, search_text, page, rows)
         r = requests.post(f"{_g.MAESTRO_URL}{_g.MAESTRO_SEARCH_PATH}", json=body,
                           headers=self._headers(), timeout=30)
         r.raise_for_status()
@@ -69,7 +89,7 @@ class GovDealsAdapter:
         """Per-lot detail from maestro. The body {businessId, siteId} is load-bearing:
         without it the endpoint still 200s but returns assetPhotos=[]."""
         r = requests.post(f"{_g.MAESTRO_URL}/assets/{asset_id}/{account_id}/false",
-                          json={"businessId": "GD", "siteId": 1},
+                          json={"businessId": self.business_id, "siteId": 1},
                           headers=self._headers(), timeout=30)
         r.raise_for_status()
         return r.json()
@@ -86,7 +106,7 @@ class GovDealsAdapter:
         Same asset-then-account arg order as the lot URL and `fetch_detail` —
         swapped args return an empty body, not an error.
         """
-        r = requests.get(f"{_g.MAESTRO_URL}/bids/bidbox/GD/{asset_id}/{account_id}/{auction_id}",
+        r = requests.get(f"{_g.MAESTRO_URL}/bids/bidbox/{self.business_id}/{asset_id}/{account_id}/{auction_id}",
                          headers=self._headers(), timeout=30)
         r.raise_for_status()
         return r.json() if r.content else {}
