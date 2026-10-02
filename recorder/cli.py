@@ -586,7 +586,8 @@ def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
         if not key:
             continue
         cached = lot_analysis.load(archive_store, key)
-        if cached and cached.get("status") == "ok" and not force:
+        if (cached and cached.get("status") == "ok" and not force
+                and (cached.get("version") or 0) >= lot_analysis.ANALYSIS_VERSION):
             counts["cached"] += 1
             continue
         a = lot_analysis.analyze_and_store(archive_store, key)
