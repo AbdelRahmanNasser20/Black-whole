@@ -45,8 +45,8 @@ MAX_H_DEFAULT = 24.0
 
 # A poll batch is a failed attempt when at least this many lots AND at least
 # this fraction of the batch failed — the same thresholds as
-# recorder/sources/public_surplus.py's BLOCK_SUSPECT_* (reused, not copied).
-from recorder.sources.public_surplus import (  # noqa: E402
+# recorder/sources/base.py's BLOCK_SUSPECT_* (shared with public_surplus).
+from recorder.sources.base import (  # noqa: E402
     BLOCK_SUSPECT_MIN_COUNT as POLL_FAIL_MIN_COUNT,
     BLOCK_SUSPECT_MIN_FRACTION as POLL_FAIL_MIN_FRACTION,
 )
@@ -87,6 +87,11 @@ class SourceHealth:
     next_attempt_at: datetime | None = None
     last_error: str | None = None
     updated_at: datetime | None = None
+    # Last clean DISCOVER (not poll): `run`'s staleness reference. Poll
+    # successes refresh last_success_at too, so using that for staleness kept
+    # a source with clean, quiet polls from ever being re-discovered.
+    # Column = migration 020 (PENDING); absent → not persisted, nothing breaks.
+    last_discover_at: datetime | None = None
 
     @classmethod
     def from_row(cls, row: dict) -> "SourceHealth":
@@ -153,8 +158,11 @@ class Registry:
             self._set_state(h, HALF_OPEN, now)
         return True
 
-    def record_success(self, source: str, now: datetime) -> None:
+    def record_success(self, source: str, now: datetime, kind: str = "poll") -> None:
+        """kind = "poll" | "discover"; only a discover moves last_discover_at."""
         h = self.get(source)
+        if kind == "discover":
+            h.last_discover_at = now
         h.consecutive_failures = 0
         h.last_attempt_at = now
         h.last_success_at = now
@@ -219,10 +227,17 @@ def telegram_enabled() -> bool:
         "0", "false", "no", "off")
 
 
+def pingworthy(t: Transition) -> bool:
+    """closed → open (a source just broke) and any → closed (it recovered).
+    A failed half-open probe (half_open → open) is the same outage still
+    going on — not worth a ping every backoff window."""
+    return (t.old == CLOSED and t.new == OPEN) or (t.new == CLOSED and t.old != CLOSED)
+
+
 def notify(transitions: list[Transition], send=None) -> int:
-    """Best-effort Telegram "health" ping per open/close transition (half_open
-    is just a probe — not worth a ping). Never raises. Returns pings sent."""
-    wanted = [t for t in transitions if t.new in (OPEN, CLOSED) and t.old != t.new]
+    """Best-effort Telegram "health" ping per `pingworthy` transition. Never
+    raises. Returns pings sent."""
+    wanted = [t for t in transitions if pingworthy(t)]
     if not wanted or not telegram_enabled():
         return 0
     sent = 0
@@ -258,7 +273,8 @@ def _ts(v):
     return datetime.fromisoformat(v) if isinstance(v, str) else v
 
 
-_TS_FIELDS = ("last_attempt_at", "last_success_at", "next_attempt_at", "updated_at")
+_TS_FIELDS = ("last_attempt_at", "last_success_at", "next_attempt_at", "updated_at",
+              "last_discover_at")
 
 
 def load_file(path: str) -> dict[str, dict]:

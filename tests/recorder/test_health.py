@@ -108,7 +108,7 @@ def test_notify_only_on_open_and_close_and_never_raises(monkeypatch):
     reg.begin_attempt("ps", NOW + timedelta(hours=1))
     reg.record_success("ps", NOW + timedelta(hours=1))
     sent = []
-    assert health.notify(reg.transitions, send=sent.append) == 2
+    assert health.notify(reg.transitions, send=sent.append) == 2   # closed→open, half_open→closed
     assert "OPEN" in sent[0] and "recovered" in sent[1]
 
     def boom(text):
@@ -246,12 +246,12 @@ def test_poll_skips_open_source_and_records_failures(monkeypatch, db_stubs, caps
     assert "poll source=ps skipped: circuit open until 2026-10-02T12:10:00Z" in capsys.readouterr().out
 
 
-def test_run_skips_discover_for_open_source_and_uses_last_success_for_staleness(monkeypatch, db_stubs, capsys):
+def test_run_skips_discover_for_open_source_and_uses_last_discover_for_staleness(monkeypatch, db_stubs, capsys):
     monkeypatch.setattr(store, "tracked_active", lambda: [])
     monkeypatch.setattr(store, "newest_observed_at", lambda s: NOW - timedelta(days=3))
     monkeypatch.setattr(store, "load_source_health", lambda: {
         "ps": {"state": "open", "consecutive_failures": 4, "next_attempt_at": NOW + timedelta(hours=2)},
-        "quiet": {"state": "closed", "consecutive_failures": 0, "last_success_at": NOW - timedelta(hours=1)},
+        "quiet": {"state": "closed", "consecutive_failures": 0, "last_discover_at": NOW - timedelta(hours=1)},
     })
     ps, quiet, mibid = _Src("ps"), _Src("quiet"), _Src("mibid", discover_obs=[
         Observation(source="mibid", source_lot_id="g", status="active", raw={})])
@@ -368,3 +368,75 @@ def test_lock_connection_backs_off_when_pooler_is_full(monkeypatch):
     monkeypatch.setattr(cli.db, "connect", lambda **k: (_ for _ in ()).throw(psycopg.OperationalError("bad password")))
     with pytest.raises(psycopg.OperationalError):
         cli._connect_lock_conn()
+
+
+
+# --- review fixes (2026-10-02) -------------------------------------------------------
+
+def test_clean_quiet_polls_never_hold_discover_off(monkeypatch, db_stubs):
+    """Polls succeed every run (refreshing last_success_at) but insert nothing;
+    the newest row is 3 days old → discover must still fire once 6 h pass."""
+    monkeypatch.setattr(store, "tracked_active", lambda: [_row("ps", "1", NOW + timedelta(days=2))])
+    monkeypatch.setattr(store, "newest_observed_at", lambda s: NOW - timedelta(days=3))
+    monkeypatch.setattr(store, "filter_changed", lambda obs: [])        # nothing new
+    rows = {}
+    monkeypatch.setattr(store, "load_source_health", lambda: dict(rows))
+    monkeypatch.setattr(store, "save_source_health",
+                        lambda rs: rows.update({r["source"]: r for r in rs}) or len(rs))
+    obs = [Observation(source="ps", source_lot_id="1", status="active", raw={})]
+    src = _Src("ps", poll_obs=obs, discover_obs=obs,
+               stats={"attempted": 1, "failed": 0, "aborted": False, "skipped": 0})
+    cli.cmd_run({"ps": src}, discover_stale_hours=6, now=NOW)
+    assert src.discover_calls == 1                       # newest row 3 d old → stale
+    assert rows["ps"]["last_discover_at"] == NOW
+    cli.cmd_run({"ps": src}, discover_stale_hours=6, now=NOW + timedelta(hours=1))
+    assert src.discover_calls == 1                       # discovered 1 h ago
+    assert rows["ps"]["last_success_at"] == NOW + timedelta(hours=1)   # poll success
+    cli.cmd_run({"ps": src}, discover_stale_hours=6, now=NOW + timedelta(hours=6, minutes=1))
+    assert src.discover_calls == 2                       # clean polls did not hold it off
+
+
+def test_failed_half_open_probe_is_not_pinged(monkeypatch):
+    monkeypatch.setenv("RECORDER_HEALTH_TELEGRAM", "1")
+    reg = health.Registry({})
+    for _ in range(3):
+        reg.record_failure("ps", NOW, "down")
+    for k in range(1, 4):                       # three failed probes
+        t = NOW + timedelta(hours=k * 10)
+        reg.begin_attempt("ps", t)
+        reg.record_failure("ps", t, "still down")
+    sent = []
+    assert health.notify(reg.transitions, send=sent.append) == 1 and "OPEN" in sent[0]
+
+
+def test_public_surplus_discover_stops_after_a_connect_failure(monkeypatch):
+    import requests
+    calls = []
+
+    def dead(url, **k):
+        calls.append(k["params"]["keyWord"])
+        raise requests.exceptions.ConnectTimeout("connect timeout=10")
+
+    monkeypatch.setattr(public_surplus, "polite_get", dead)
+    assert public_surplus.PublicSurplusSource().discover() == []
+    assert len(calls) == 1
+
+
+def test_run_budget_skips_remaining_discovers(monkeypatch, db_stubs, capsys):
+    monkeypatch.setenv("RECORDER_RUN_BUDGET_S", "5")
+    monkeypatch.setattr(store, "tracked_active", lambda: [])
+    monkeypatch.setattr(store, "newest_observed_at", lambda s: None)
+    monkeypatch.setattr(store, "load_source_health", lambda: {})
+    clock = iter([0.0, 100.0, 100.0, 100.0, 100.0])
+    monkeypatch.setattr(cli.time, "monotonic", lambda: next(clock, 100.0))
+    a = _Src("a")
+    cli.cmd_run({"a": a}, discover_stale_hours=6, now=NOW)
+    assert a.discover_calls == 0
+    assert "skipped: run budget spent" in capsys.readouterr().out
+
+
+def test_health_upsert_sql_with_and_without_last_discover_at():
+    base_sql = store._health_upsert_sql(store._HEALTH_COLS)
+    assert "last_discover_at" not in base_sql and base_sql.count("%s") == len(store._HEALTH_COLS)
+    full = store._health_upsert_sql(store._HEALTH_COLS + ("last_discover_at",))
+    assert "last_discover_at = EXCLUDED.last_discover_at" in full
