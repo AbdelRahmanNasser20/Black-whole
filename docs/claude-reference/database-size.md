@@ -22,8 +22,18 @@ moves to Cloudflare R2 (10 GB free, **zero egress**) once a lot closes:
   close continuously (125 did during one run), and a blanket predicate
   re-evaluates at execution time, so a lot closing mid-purge would otherwise be
   nulled with its blob nowhere.
-- `scripts/query_cold_archive.py` reads it back: DuckDB over HTTPS, in place,
-  nothing downloaded whole, nothing restored into Postgres.
+- `scripts/query_cold_archive.py` reads it back: DuckDB over the R2 S3 API
+  (`CREATE SECRET (TYPE r2 …)`, `r2://` paths), in place, nothing downloaded
+  whole, nothing restored into Postgres.
+- **The archive lives in the PRIVATE bucket** `LOT_ARCHIVE_R2_BUCKET`
+  (`blackwhole-archive`), never the public image bucket `R2_BUCKET`. Every
+  writer goes through `r2_images.private_bucket()` / `put_private_object()`,
+  which raise `PrivateBucketNotConfigured` when the var is unset or equals
+  `R2_BUCKET` — no fallback. On 2026-10-02 the 26 objects (72.5 MB) that had
+  been written under the public `archive/` prefix were moved with
+  `scripts/migrate_r2_prefix_private.py` (copy → stream size+sha256 both →
+  manifest `~/.blackwhole/backups/r2_migrate_20261002T060444Z.json` → delete →
+  public HEAD 404).
 
   ```bash
   ./.venv/bin/python scripts/query_cold_archive.py --like "banquet chair" --zero-bid

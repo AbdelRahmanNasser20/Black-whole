@@ -145,6 +145,7 @@ def heal_missing(missing: list[tuple[int, int, int]]) -> str:
     cfg = r2_images.env_config()
     if not cfg:
         sys.exit("R2 is not configured — cannot archive the delta")
+    bucket = r2_images.private_bucket()   # raises; never the public bucket
     s3 = r2_images.client(cfg)
 
     want, rows = set(missing), []
@@ -159,11 +160,11 @@ def heal_missing(missing: list[tuple[int, int, int]]) -> str:
     blob = serialize_batch(rows)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     path = f"{ARCHIVE_PREFIX}/heal_{stamp}_{len(rows)}.jsonl.gz"
-    if not r2_images.put_object(s3, bucket=cfg["bucket"], path=path, data=blob,
-                                content_type="application/gzip"):
+    if not r2_images.put_private_object(s3, bucket=bucket, path=path, data=blob,
+                                        content_type="application/gzip"):
         sys.exit(f"R2 upload failed for {path!r} — nothing purged")
 
-    got = s3.get_object(Bucket=cfg["bucket"], Key=path)["Body"].read()
+    got = s3.get_object(Bucket=bucket, Key=path)["Body"].read()
     if parse_batch(got) != [(r["asset_id"], r["account_id"], r["auction_id"]) for r in rows]:
         sys.exit(f"readback mismatch for {path!r} — nothing purged")
 
