@@ -287,10 +287,13 @@ Backoff once open = min(`RECORDER_BREAKER_BASE_MIN` (10) min × 2^k,
   last_success_at / next_attempt_at / last_error; **exit 1** if a source has
   been open with no success for > 24 h.
 - State table `recorder_source_health` = `scripts/sql/018_recorder_source_health.sql`
-  (**PENDING**) + `020_recorder_source_health_discover.sql` (`last_discover_at`,
-  **PENDING**; code reads/writes the column only when it exists). Until it is: in-memory per run + a
+  + `020_recorder_source_health_discover.sql` (`last_discover_at`) — both
+  **APPLIED to prod 2026-10-02**. The code reads/writes `last_discover_at`
+  only when the column exists. A database without 018: in-memory per run + a
   `RECORDER NOTE`; `RECORDER_HEALTH_FILE=/path.json` keeps it across runs on
   one machine (laptop/dev only — Render disks are ephemeral).
+- **Restart the web and recorder processes after a deploy** — column-presence
+  checks are cached for the process lifetime.
 
 ## Coverage metric (the Phase-0 done-measure)
 

@@ -90,7 +90,7 @@ class SourceHealth:
     # Last clean DISCOVER (not poll): `run`'s staleness reference. Poll
     # successes refresh last_success_at too, so using that for staleness kept
     # a source with clean, quiet polls from ever being re-discovered.
-    # Column = migration 020 (PENDING); absent → not persisted, nothing breaks.
+    # Column = migration 020 (APPLIED to prod 2026-10-02); absent → not persisted.
     last_discover_at: datetime | None = None
 
     @classmethod
@@ -258,7 +258,7 @@ def notify(transitions: list[Transition], send=None) -> int:
     return sent
 
 
-# --- dev fallback while migration 018 is PENDING --------------------------------
+# --- dev fallback for a database without migration 018 ---------------------------
 #
 # RECORDER_HEALTH_FILE=/path.json keeps the breaker across runs on ONE machine
 # (the laptop soak) when the table is missing. Render cron disks are

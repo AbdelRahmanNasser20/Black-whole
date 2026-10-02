@@ -1,9 +1,9 @@
 -- 018_recorder_source_health.sql — per-source circuit breaker for the recorder.
 --
--- STATUS: PENDING — NOT applied to prod. Apply in the Supabase SQL Editor
--- (or `.venv/bin/python scripts/apply_sql.py scripts/sql/018_recorder_source_health.sql`)
--- after review. Until it is applied the recorder keeps the breaker in memory
--- for one run and prints a RECORDER NOTE; nothing fails.
+-- STATUS: APPLIED to prod 2026-10-02 (main session, Supabase). Re-apply
+-- elsewhere with `.venv/bin/python scripts/apply_sql.py scripts/sql/018_recorder_source_health.sql`.
+-- Where it is absent the recorder keeps the breaker in memory for one run and
+-- prints a RECORDER NOTE; nothing fails.
 --
 -- One row per source, written once per `recorder run` (recorder/health.py,
 -- recorder/store.py::save_source_health). ~8 rows total; no growth.
