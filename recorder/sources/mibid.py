@@ -156,7 +156,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, polite_get
+from recorder.sources.base import FURNITURE_TERMS, PollBudget, polite_get
 
 SOURCE = "mibid"
 
@@ -396,9 +396,16 @@ class MiBidSource:
             return []
         now = datetime.now(timezone.utc)
         observations: list[Observation] = []
+        budget = PollBudget()  # ten failures in a row ends the batch (source health)
         for lot in lots:
+            if budget.exhausted:
+                print(f"[mibid] RECORDER ERROR: poll() batch aborted after "
+                      f"{budget.consecutive} consecutive failures — "
+                      f"{len(lots) - budget.attempted} lot(s) left for the next run")
+                break
             guid = str(lot["source_lot_id"])
             detail = _fetch_detail_page(guid)
+            budget.record(detail is not None)
             if detail is None:
                 continue  # fetch failure for this lot — loud error already printed, skip
             if detail["not_found"]:
@@ -439,6 +446,7 @@ class MiBidSource:
                 bid_count=bid_count,
                 end_date=end_date,
             ))
+        self.last_poll_stats = budget.stats(len(lots))
         return observations
 
     def sold_sweep(self) -> list[Observation]:

@@ -115,6 +115,27 @@ class StoreNotConfigured(RuntimeError):
     pass
 
 
+class PrivateBucketNotConfigured(StoreNotConfigured):
+    """LOT_ARCHIVE_R2_BUCKET is unset, or names the public R2_BUCKET.
+
+    Local guard until Track A's `automation.r2_images.private_bucket()` lands;
+    then R2Store switches to it. Same rule: NEVER fall back to the public
+    bucket — its r2.dev base serves any key to anyone who guesses it."""
+
+
+def private_bucket(cfg: dict) -> str:
+    bucket = (os.getenv("LOT_ARCHIVE_R2_BUCKET") or "").strip()
+    if not bucket:
+        raise PrivateBucketNotConfigured(
+            "LOT_ARCHIVE_R2_BUCKET is not set — the lot archive only writes to a private "
+            "bucket (blackwhole-archive), never to the public R2_BUCKET")
+    if bucket == (cfg.get("bucket") or "").strip():
+        raise PrivateBucketNotConfigured(
+            f"LOT_ARCHIVE_R2_BUCKET={bucket!r} is the public R2_BUCKET — set it to the "
+            "private archive bucket (blackwhole-archive)")
+    return bucket
+
+
 class R2Store:
     """The canonical backend. Objects are read back through the S3 API — the
     archive is never linked by its public r2.dev URL."""
@@ -130,7 +151,7 @@ class R2Store:
         # A dedicated bucket with no public access is the stronger form of
         # "private": the shared bucket's r2.dev base serves ANY key to anyone
         # who guesses it, and these keys spell the GovDeals ids.
-        self.bucket = (os.getenv("LOT_ARCHIVE_R2_BUCKET") or "").strip() or self.cfg["bucket"]
+        self.bucket = private_bucket(self.cfg)
         self._s3 = s3 or r2_images.client(self.cfg)
 
     def put(self, key: str, data: bytes, content_type: str) -> None:
@@ -214,17 +235,27 @@ class LocalStore:
 
 DEFAULT_LOCAL_DIR = "~/.listing_automation/lot_archive"
 
+_last_store_error: str | None = None
+
+
+def last_store_error() -> str | None:
+    """Why the last `store_from_env()` returned None (for the run's NOTE)."""
+    return _last_store_error
+
 
 def store_from_env():
     """The configured store, or None. `LOT_ARCHIVE_STORE=local` → LocalStore;
     otherwise R2 when configured; otherwise None (callers decide: a writer
     raises, a reader shows "not configured")."""
+    global _last_store_error
+    _last_store_error = None
     kind = (os.getenv("LOT_ARCHIVE_STORE") or "r2").strip().lower()
     if kind == "local":
         return LocalStore(os.getenv("LOT_ARCHIVE_LOCAL_DIR") or DEFAULT_LOCAL_DIR)
     try:
         return R2Store()
-    except StoreNotConfigured:
+    except StoreNotConfigured as e:
+        _last_store_error = str(e)
         return None
 
 
@@ -233,7 +264,8 @@ def require_store(store=None):
     if store is None:
         raise StoreNotConfigured(
             "lot archive: R2 is not configured — refusing to archive without a destination. "
-            "Set R2_* (production) or LOT_ARCHIVE_STORE=local for a local dev store.")
+            "Set R2_* + LOT_ARCHIVE_R2_BUCKET (production) or LOT_ARCHIVE_STORE=local for a "
+            "local dev store." + (f" ({_last_store_error})" if _last_store_error else ""))
     return store
 
 

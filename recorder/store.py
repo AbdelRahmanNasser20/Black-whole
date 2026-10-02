@@ -518,3 +518,58 @@ def upsert_archive_index(meta: dict) -> None:
 def database_size_mb() -> float:
     row = _read_with_backoff(db.fetch_one, "SELECT pg_database_size(current_database()) AS b")
     return row["b"] / 1e6 if row else 0.0
+
+
+# --- source health (migration 018, APPLIED to prod 2026-10-02) -----------------
+#
+# One row per source: the circuit breaker in recorder/health.py. Loaded once
+# and saved once per run. Until 018 is applied every caller degrades to an
+# in-memory breaker (a NOTE, never a failed run) — the run still caps a dead
+# source through PollBudget and the faster connect timeout.
+
+_HEALTH_COLS = ("source", "state", "consecutive_failures", "last_attempt_at",
+                "last_success_at", "next_attempt_at", "last_error", "updated_at")
+# Migration 020 (APPLIED to prod 2026-10-02) adds this; on a database without
+# it the column is neither read nor written.
+_HEALTH_OPTIONAL_COLS = ("last_discover_at",)
+
+
+def _health_upsert_sql(cols: tuple[str, ...]) -> str:
+    """Upsert over a fixed, code-owned column list (never caller input)."""
+    vals = ", ".join("COALESCE(%s, now())" if c == "updated_at" else "%s" for c in cols)
+    sets = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "source")
+    return (f"INSERT INTO recorder_source_health ({', '.join(cols)}) VALUES ({vals}) "
+            f"ON CONFLICT (source) DO UPDATE SET {sets}")
+
+
+def _health_cols() -> tuple[str, ...]:
+    rows = _read_with_backoff(
+        db.fetch_all,
+        "SELECT column_name FROM information_schema.columns "
+        "WHERE table_name = 'recorder_source_health' AND column_name = ANY(%s)",
+        (list(_HEALTH_OPTIONAL_COLS),))
+    have = {r["column_name"] for r in rows}
+    return _HEALTH_COLS + tuple(c for c in _HEALTH_OPTIONAL_COLS if c in have)
+
+
+def source_health_table_exists() -> bool:
+    row = _read_with_backoff(db.fetch_one, "SELECT to_regclass('recorder_source_health') AS reg")
+    return bool(row and row.get("reg"))
+
+
+def load_source_health() -> dict[str, dict] | None:
+    """{source: row} from recorder_source_health, or None when the table
+    does not exist (migration 018 not applied on this database)."""
+    if not source_health_table_exists():
+        return None
+    rows = _read_with_backoff(db.fetch_all, "SELECT * FROM recorder_source_health")
+    return {r["source"]: dict(r) for r in rows}
+
+
+def save_source_health(rows: list[dict]) -> int:
+    """Upsert the changed breaker rows (one executemany)."""
+    if not rows:
+        return 0
+    cols = _health_cols()
+    db.executemany(_health_upsert_sql(cols), [tuple(r.get(c) for c in cols) for r in rows])
+    return len(rows)

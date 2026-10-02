@@ -139,7 +139,13 @@ from typing import Any
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, polite_get
+from recorder.sources.base import (
+    BLOCK_SUSPECT_MIN_COUNT,
+    BLOCK_SUSPECT_MIN_FRACTION,
+    FURNITURE_TERMS,
+    PollBudget,
+    polite_get,
+)
 
 SOURCE = "public_surplus"
 
@@ -162,8 +168,7 @@ MAX_SEARCH_PAGES = 20
 # see module docstring. A poll() batch is only treated as a suspected
 # session-wide block when AT LEAST this many lots AND AT LEAST this fraction
 # of the whole batch both came back 401-not-found in the same round.
-BLOCK_SUSPECT_MIN_COUNT = 3
-BLOCK_SUSPECT_MIN_FRACTION = 0.8
+# (Defined in recorder/sources/base.py, shared with the source breaker.)
 
 _GRID_CARD_RE = re.compile(r'<div class="auction-item" id="(\d+)searchGrid">')
 _LOCATION_RE = re.compile(r'auction-item-state[^>]*>\s*([^<]*)')
@@ -312,6 +317,8 @@ def _fetch_search_page(term: str, page: int) -> list[dict] | None:
         resp = polite_get(SEARCH_URL, params={"posting": "y", "keyWord": term, "page": page})
     except requests.exceptions.RequestException as e:
         print(f"[public_surplus] RECORDER ERROR: request failed ({term!r}, page={page}): {e}")
+        if isinstance(e, (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError)):
+            _sweep_state["host_down"] = True
         return None
     if resp.status_code in (403, 429):
         print(
@@ -357,6 +364,9 @@ def _sweep_term(term: str, max_pages: int = MAX_SEARCH_PAGES) -> tuple[list[dict
     return cards, True
 
 
+_sweep_state = {"host_down": False}
+
+
 def _sweep_all_terms() -> tuple[dict[str, dict], bool]:
     """Sweep FURNITURE_TERMS, merging/deduping by auc_id across terms (a lot
     matching two terms is fetched twice, stored once). Returns
@@ -364,8 +374,17 @@ def _sweep_all_terms() -> tuple[dict[str, dict], bool]:
     failed outright."""
     cards_by_id: dict[str, dict] = {}
     any_ok = False
-    for term in FURNITURE_TERMS:
+    _sweep_state["host_down"] = False
+    for i, term in enumerate(FURNITURE_TERMS):
         cards, ok = _sweep_term(term)
+        if not ok and _sweep_state["host_down"]:
+            # The host would not even accept a connection: the other terms
+            # would each wait out the same connect timeout (6 × 10 s).
+            rest = len(FURNITURE_TERMS) - i - 1
+            if rest:
+                print(f"[public_surplus] RECORDER ERROR: host unreachable — skipping the "
+                      f"remaining {rest} term(s) this sweep")
+            break
         any_ok = any_ok or ok
         for c in cards:
             cards_by_id[c["auc_id"]] = c
@@ -453,9 +472,21 @@ class PublicSurplusSource:
         # Fetch every lot's detail FIRST — the batch-level suspected-block
         # check (fix round 1, review finding #1; see module docstring) needs
         # to see the whole batch's outcome before any 'gone' is decided.
-        fetched: list[tuple[dict, dict | None]] = [
-            (lot, _fetch_detail(str(lot["source_lot_id"]))) for lot in lots
-        ]
+        # PollBudget: ten failures in a row (a dead host, a block) ends the
+        # batch — the remaining lots wait for the next run instead of each
+        # burning a timeout. `last_poll_stats` feeds the source breaker.
+        budget = PollBudget()
+        fetched: list[tuple[dict, dict | None]] = []
+        for lot in lots:
+            if budget.exhausted:
+                print(f"[public_surplus] RECORDER ERROR: poll() batch aborted after "
+                      f"{budget.consecutive} consecutive failures — {len(lots) - budget.attempted} "
+                      "lot(s) left for the next run")
+                break
+            detail = _fetch_detail(str(lot["source_lot_id"]))
+            budget.record(detail is not None)
+            fetched.append((lot, detail))
+        self.last_poll_stats = budget.stats(len(lots))
 
         not_found_401_count = sum(
             1 for _, detail in fetched
@@ -463,12 +494,12 @@ class PublicSurplusSource:
         )
         suspected_block = (
             not_found_401_count >= BLOCK_SUSPECT_MIN_COUNT
-            and (not_found_401_count / len(lots)) >= BLOCK_SUSPECT_MIN_FRACTION
+            and (not_found_401_count / len(fetched)) >= BLOCK_SUSPECT_MIN_FRACTION
         )
         if suspected_block:
             print(
                 f"[public_surplus] RECORDER ERROR: poll() suspects a session-wide block — "
-                f"{not_found_401_count}/{len(lots)} tracked lots returned HTTP 401 in this "
+                f"{not_found_401_count}/{len(fetched)} tracked lots returned HTTP 401 in this "
                 f"single batch (threshold: >= {BLOCK_SUSPECT_MIN_COUNT} lots AND "
                 f">= {BLOCK_SUSPECT_MIN_FRACTION:.0%} of the batch). A real PS closed-"
                 "auction 401 only ever affects one lot at a time (see module docstring) — "

@@ -76,6 +76,9 @@ python -m recorder.cli archive-backfill --source govdeals --since-days 30 [--lim
 
 # LLM analysis of archived lots, cached per lot (runs once; --force re-runs)
 python -m recorder.cli archive-analyze [--limit 30] [--lot a/b/c] [--force]
+
+# per-source circuit breaker table; exit 1 if any source is open > 24 h
+python -m recorder.cli health
 ```
 
 `python -m recorder` is an equivalent shorthand for `python -m recorder.cli`
@@ -230,6 +233,66 @@ the admin page streams it behind the session cookie.
   `docs/claude-reference/lot-archive.md`.
 - Index table `scripts/sql/015_lot_archive_index.sql` is **PENDING**; until it
   is applied the list reads `_meta/` sidecars from R2.
+
+## Source health (circuit breaker, 2026-10-02)
+
+**Problem.** A dead source cost every run: ~46k Public Surplus 30 s connect
+timeouts, ~74k "unrecognized page shape", 5.9k Municibid 403s; `discover`
+for public_surplus/municibid/mibid re-fired on every 5-minute run because an
+aborted discover inserts nothing, so the source never looked fresh. One PS
+poll batch could burn ~1 h → the run overran → the advisory lock turned the
+next ticks into no-ops → GovDeals closes were missed.
+
+**Fix** (`recorder/health.py`, pure): one breaker per source.
+`closed → open` after `RECORDER_BREAKER_FAILURES` (3) failed attempts;
+`open → half_open` (one probe) at `next_attempt_at`; success closes it.
+Backoff once open = min(`RECORDER_BREAKER_BASE_MIN` (10) min × 2^k,
+`RECORDER_BREAKER_MAX_H` (24) h).
+
+| Counts as | |
+|---|---|
+| failed attempt | discover raised or returned 0 observations (every adapter "aborts" that way); a poll batch that raised, was aborted by its `PollBudget`, or had ≥ 80 % of ≥ 3 lots fail (the `BLOCK_SUSPECT_*` thresholds) |
+| success | discover returned observations; a poll batch that inserted ≥ 1 row or had no failed lot |
+| neither | a few lots failed, nothing new — no change |
+
+- `run` loads the breaker once, skips open sources (`poll source=X skipped:
+  circuit open until …`, `discover source=X skipped: …`), records every
+  outcome and saves once. Ends with `run: elapsed=…s`.
+- Discover staleness = newest row **or** last clean *discover*
+  (`last_discover_at`, migration 020), whichever is newer — a quiet source no
+  longer re-discovers every run, and clean polls never hold discover off.
+- `RECORDER_RUN_BUDGET_S` (default 0 = off): once a run has spent this long,
+  remaining stale discovers wait for the next run (polls/closes come first).
+- Public Surplus discover stops after the first term whose connection fails
+  (host down = one 10 s timeout, not six).
+- **"≤ 2 discovers per hour" for a dead source:** keep
+  `RECORDER_BREAKER_FAILURES=3`; set `RECORDER_BREAKER_BASE_MIN=30`. A
+  discover-only source (municibid, mibid) then opens after its 3rd failed
+  run and probes at +30 / +60 / +120 min. With the default 10 the first hour
+  still sees ~5–6 attempts.
+- `poll-once` abandons lots whose `end_date` is more than
+  `RECORDER_POLL_ABANDON_DAYS` (14) days past (no row written; reported
+  `abandoned=n`).
+- `PollBudget` (`sources/base.py`): a per-lot poller (public_surplus,
+  municibid, mibid) stops its batch after
+  `RECORDER_POLL_MAX_CONSECUTIVE_FAILURES` (10) failures in a row.
+- HTTP: `polite_get/post` timeout is `(10, 30)` (connect, read). A 429 is
+  returned at once, and the host then fails fast (`RateLimited`, no request)
+  until `Retry-After` (default 60 s) has passed.
+- Telegram `health` topic pings on closed → open and on recovery (→ closed)
+  only — a failed half-open probe is the same outage, no ping. Best-effort,
+  never raises. `RECORDER_HEALTH_TELEGRAM=0` silences it.
+- `python -m recorder health` prints state / consecutive_failures /
+  last_success_at / next_attempt_at / last_error; **exit 1** if a source has
+  been open with no success for > 24 h.
+- State table `recorder_source_health` = `scripts/sql/018_recorder_source_health.sql`
+  + `020_recorder_source_health_discover.sql` (`last_discover_at`) — both
+  **APPLIED to prod 2026-10-02**. The code reads/writes `last_discover_at`
+  only when the column exists. A database without 018: in-memory per run + a
+  `RECORDER NOTE`; `RECORDER_HEALTH_FILE=/path.json` keeps it across runs on
+  one machine (laptop/dev only — Render disks are ephemeral).
+- **Restart the web and recorder processes after a deploy** — column-presence
+  checks are cached for the process lifetime.
 
 ## Coverage metric (the Phase-0 done-measure)
 

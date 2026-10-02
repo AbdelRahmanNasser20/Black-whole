@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 
 import psycopg
@@ -50,7 +51,7 @@ import psycopg
 from automation import config  # noqa: F401
 from automation import db
 
-from recorder import lot_archive, schedule, store
+from recorder import health, lot_archive, schedule, store
 from recorder.sources import govdeals as govdeals_source
 from recorder.sources.govdeals import GovDealsSource
 from recorder.sources.gsa import GSASource
@@ -107,9 +108,10 @@ def _govdeals_scope_for_run() -> str:
     return want
 
 
-def _discover_one(adapter) -> int:
+def _discover_counts(adapter) -> tuple[int, int]:
     """discover() + sold_sweep() for one source, inserted as one batch.
-    Raises on failure — the caller isolates per-source."""
+    Returns (inserted, observed). Raises on failure — the caller isolates
+    per-source."""
     if getattr(adapter, "SOURCE", None) == "govdeals" and isinstance(adapter, GovDealsSource):
         found = adapter.discover(scope_override=_govdeals_scope_for_run())
     else:
@@ -117,10 +119,67 @@ def _discover_one(adapter) -> int:
     observations = list(found) + list(adapter.sold_sweep())
     # discover() re-reports every active lot on every sweep; without this the
     # table grew ~2/3 pure duplicates (recorder/README.md "Storage").
-    return store.insert_observations(store.filter_changed(observations))
+    return store.insert_observations(store.filter_changed(observations)), len(observations)
 
 
-def cmd_discover(registry: dict, source: str | None = None) -> int:
+def _discover_one(adapter) -> int:
+    return _discover_counts(adapter)[0]
+
+
+# --- source health (recorder/health.py) ---------------------------------------
+
+def _load_health() -> "health.Registry":
+    """Once per run. Table absent (018 not applied) or unreadable → an in-memory
+    breaker for this run only, with a NOTE."""
+    try:
+        rows = store.load_source_health()
+    except Exception as exc:  # noqa: BLE001 - health is never a reason to skip a run
+        print(f"RECORDER NOTE: source health unreadable ({exc!r}) — in-memory breaker this run",
+              file=sys.stderr)
+        return health.Registry(persisted=False)
+    if rows is None:
+        path = health.state_file()
+        if path:
+            print(f"RECORDER NOTE: recorder_source_health missing (migration 018 not applied on this database) — "
+                  f"breaker kept in {path} (RECORDER_HEALTH_FILE)", file=sys.stderr)
+            reg = health.Registry(health.load_file(path), persisted=False)
+            reg.file = path
+            return reg
+        print("RECORDER NOTE: recorder_source_health missing (migration 018 not applied on this database) — "
+              "in-memory breaker this run", file=sys.stderr)
+        return health.Registry(persisted=False)
+    return health.Registry(rows)
+
+
+def _save_health(reg: "health.Registry") -> None:
+    """Once per run: persist changed rows, then ping Telegram on open/close
+    transitions. Never raises."""
+    if reg.persisted and reg.dirty:
+        try:
+            store.save_source_health(reg.dirty_rows())
+        except Exception as exc:  # noqa: BLE001
+            print(f"RECORDER NOTE: source health not saved ({exc!r})", file=sys.stderr)
+    elif getattr(reg, "file", None) and reg.dirty:
+        try:
+            health.save_file(reg.file, reg)
+        except Exception as exc:  # noqa: BLE001
+            print(f"RECORDER NOTE: source health file not saved ({exc!r})", file=sys.stderr)
+    for t in reg.transitions:
+        print(f"health: {health.format_transition(t)}")
+    health.notify(reg.transitions)
+
+
+def _open_until(reg: "health.Registry", name: str) -> str:
+    nxt = reg.get(name).next_attempt_at
+    return nxt.strftime("%Y-%m-%dT%H:%M:%SZ") if nxt else "?"
+
+
+def cmd_discover(registry: dict, source: str | None = None,
+                 health_reg: "health.Registry | None" = None,
+                 now: datetime | None = None) -> int:
+    """`health_reg` given (from `run`): open sources are skipped and every
+    outcome is recorded. Standalone `discover` passes none — an operator
+    asking for a source by name always gets it."""
     names = [source] if source else list(registry.keys())
     failed: list[str] = []
     for name in names:
@@ -129,13 +188,26 @@ def cmd_discover(registry: dict, source: str | None = None) -> int:
             print(f"RECORDER ERROR source={name} discover failed: unknown source", file=sys.stderr)
             failed.append(name)
             continue
+        t = now or datetime.now(timezone.utc)
+        if health_reg is not None and not health_reg.begin_attempt(name, t):
+            print(f"discover source={name} skipped: circuit open until {_open_until(health_reg, name)}")
+            continue
         try:
-            n = _discover_one(adapter)
+            n, seen = _discover_counts(adapter)
         except Exception as exc:  # noqa: BLE001 - one bad source must never kill the sweep
             print(f"RECORDER ERROR source={name} discover failed: {exc!r}", file=sys.stderr)
             failed.append(name)
+            if health_reg is not None:
+                health_reg.record_failure(name, t, f"discover raised: {exc!r}")
             continue
-        print(f"discover source={name} inserted={n}")
+        if health_reg is not None:
+            if seen:
+                health_reg.record_success(name, t, kind="discover")
+            else:
+                # Every adapter "aborts" by printing a RECORDER ERROR and
+                # returning [] — that is a failed attempt, not a quiet day.
+                health_reg.record_failure(name, t, "discover returned 0 observations (aborted)")
+        print(f"discover source={name} inserted={n} observed={seen}")
     if failed:
         print(f"discover: {len(failed)} source(s) failed: {','.join(failed)}", file=sys.stderr)
         return 1
@@ -144,10 +216,37 @@ def cmd_discover(registry: dict, source: str | None = None) -> int:
 
 # --- poll-once -----------------------------------------------------------
 
-def cmd_poll_once(registry: dict, now: datetime | None = None) -> int:
+POLL_ABANDON_DAYS_DEFAULT = 14.0
+
+
+def _abandon_after() -> timedelta:
+    try:
+        days = float(os.getenv("RECORDER_POLL_ABANDON_DAYS") or POLL_ABANDON_DAYS_DEFAULT)
+    except ValueError:
+        days = POLL_ABANDON_DAYS_DEFAULT
+    return timedelta(days=days)
+
+
+def cmd_poll_once(registry: dict, now: datetime | None = None,
+                  health_reg: "health.Registry | None" = None) -> int:
     now = now or datetime.now(timezone.utc)
     tracked = store.tracked_active()
     due = [row for row in tracked if schedule.is_due(now, row["observed_at"], row["end_date"])]
+
+    # A lot still 'active' two weeks past its clock is not going to answer:
+    # every source purges or walls it long before. Polling it forever was most
+    # of the Public Surplus/Municibid timeout storm. No row is written — the
+    # lot just stops costing a request; its last snapshot stays the record.
+    cutoff = now - _abandon_after()
+    abandoned: dict[str, int] = {}
+    kept = []
+    for row in due:
+        end = row.get("end_date")
+        if end is not None and end < cutoff:
+            abandoned[row["source"]] = abandoned.get(row["source"], 0) + 1
+        else:
+            kept.append(row)
+    due = kept
 
     # IMPORTANT 3: sort by end_date ascending, NULLs last, BEFORE grouping by
     # source — final-hour/confirming lots (soonest end_date, or already past)
@@ -166,24 +265,49 @@ def cmd_poll_once(registry: dict, now: datetime | None = None) -> int:
             print(f"RECORDER ERROR source={name} poll failed: unknown source", file=sys.stderr)
             failed.append(name)
             continue
+        if health_reg is not None and not health_reg.begin_attempt(name, now):
+            print(f"poll source={name} skipped: circuit open until {_open_until(health_reg, name)} "
+                  f"(due={len(rows)})")
+            continue
+        if hasattr(adapter, "last_poll_stats"):
+            adapter.last_poll_stats = None
         try:
             observations = adapter.poll(rows)
             n = store.insert_observations(store.filter_changed(observations))
         except Exception as exc:  # noqa: BLE001 - one bad source must never kill the poll
             print(f"RECORDER ERROR source={name} poll failed: {exc!r}", file=sys.stderr)
             failed.append(name)
+            if health_reg is not None:
+                health_reg.record_failure(name, now, f"poll raised: {exc!r}")
             continue
+        stats = getattr(adapter, "last_poll_stats", None) or {}
+        lot_failed = int(stats.get("failed") or 0)
+        aborted = bool(stats.get("aborted"))
+        if health_reg is not None:
+            outcome = health.poll_outcome(int(stats.get("attempted") or len(rows)), lot_failed,
+                                          aborted, n)
+            if outcome == "failure":
+                health_reg.record_failure(
+                    name, now, f"poll batch: {lot_failed}/{stats.get('attempted')} lots failed"
+                    + (" (aborted)" if aborted else ""))
+            elif outcome == "success":
+                health_reg.record_success(name, now)
+            else:
+                health_reg.record_neutral(name, now)
         gone = sum(1 for o in observations if o.status == "gone")
         closed = sum(1 for o in observations if o.status == "closed")
         total_polled += len(rows)
         total_inserted += n
         total_gone += gone
         total_closed += closed
-        print(f"poll source={name} due={len(rows)} inserted={n} gone={gone} closed={closed}")
+        extra = f" failed={lot_failed}" + (" aborted=1" if aborted else "") if stats else ""
+        print(f"poll source={name} due={len(rows)} inserted={n} gone={gone} closed={closed}{extra}")
 
+    for name, k in sorted(abandoned.items()):
+        print(f"poll source={name} abandoned={k} (past end_date > {_abandon_after().days} d, not polled)")
     print(
         f"poll-once polled={total_polled} inserted={total_inserted} "
-        f"gone={total_gone} closed={total_closed}"
+        f"gone={total_gone} closed={total_closed} abandoned={sum(abandoned.values())}"
     )
     if failed:
         print(f"poll-once: {len(failed)} source(s) failed: {','.join(failed)}", file=sys.stderr)
@@ -419,7 +543,8 @@ def cmd_archive_pending(registry: dict) -> int:
         return 0
     archive_store = lot_archive.store_from_env()
     if archive_store is None:
-        print("RECORDER NOTE: lot archive skipped — R2 not configured", file=sys.stderr)
+        why = lot_archive.last_store_error() or "R2 not configured"
+        print(f"RECORDER NOTE: lot archive skipped — {why}", file=sys.stderr)
         return 0
     limit = lot_archive.env_int("RECORDER_ARCHIVE_MAX_PER_RUN", ARCHIVE_PER_RUN_DEFAULT)
     try:
@@ -483,15 +608,40 @@ def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
 _RUN_LOCK_KEY = "recorder_run"
 
 
+def _run_budget_s() -> float:
+    """RECORDER_RUN_BUDGET_S (default 0 = off): once a run has spent this long,
+    the remaining stale discovers wait for the next run — polls (closes) first."""
+    try:
+        return max(0.0, float(os.getenv("RECORDER_RUN_BUDGET_S") or 0))
+    except ValueError:
+        return 0.0
+
+
+def _connect_lock_conn(attempts: int = 4, base_delay: float = 2.0):
+    """The run's private lock connection, backing off while the Supabase
+    session pooler is full ("max clients reached", 15-client cap) instead of
+    dying with a traceback (seen in the 2026-10-02 soak)."""
+    for i in range(attempts):
+        try:
+            return db.connect(pooled=False)
+        except psycopg.OperationalError as e:
+            if i == attempts - 1 or not any(m in str(e).lower() for m in store._POOL_FULL_MARKERS):
+                raise
+            delay = base_delay * (2 ** i)
+            print(f"recorder run: pooler full, retrying the lock connection in {delay:.0f}s")
+            time.sleep(delay)
+
+
 def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | None = None) -> int:
     now = now or datetime.now(timezone.utc)
+    started = time.monotonic()
 
     # Session-level advisory lock on a dedicated connection held for the
     # whole run — NOT the short-lived per-query connections `db.fetch_*`
     # opens. `pg_try_advisory_lock` never blocks: it returns False instantly
     # if another `run` already holds the lock, so an overrunning previous
     # invocation just makes this one a clean no-op exit(0), never a pile-up.
-    conn = db.connect(pooled=False)
+    conn = _connect_lock_conn()
     try:
         locked = conn.execute(
             "SELECT pg_try_advisory_lock(hashtext(%s)) AS locked", (_RUN_LOCK_KEY,)
@@ -501,26 +651,44 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
             print("recorder run skipped — previous run still active")
             return 0
 
-        poll_rc = cmd_poll_once(registry, now=now)
-        poll_rc = cmd_recheck_finals(registry) or poll_rc
-        poll_rc = cmd_archive_pending(registry) or poll_rc
+        health_reg = _load_health()
+        try:
+            poll_rc = cmd_poll_once(registry, now=now, health_reg=health_reg)
+            poll_rc = cmd_recheck_finals(registry) or poll_rc
+            poll_rc = cmd_archive_pending(registry) or poll_rc
 
-        stale: list[str] = []
-        for name in registry:
-            newest = store.newest_observed_at(name)
-            if newest is None or (now - newest) >= timedelta(hours=discover_stale_hours):
-                stale.append(name)
+            # Stale = no new row AND no clean DISCOVER for H hours. A discover
+            # that saw every lot unchanged inserts nothing (change-gating), so
+            # newest_observed_at alone re-fired discover for a quiet source on
+            # every 5-minute run. Poll successes do NOT count: clean polls
+            # that insert nothing must not hold discover off forever.
+            stale: list[str] = []
+            for name in registry:
+                newest = store.newest_observed_at(name)
+                last_disc = health_reg.get(name).last_discover_at
+                ref = max((t for t in (newest, last_disc) if t is not None), default=None)
+                if ref is None or (now - ref) >= timedelta(hours=discover_stale_hours):
+                    stale.append(name)
 
-        discover_rc = 0
-        if stale:
-            print(f"run: discover due for stale source(s): {','.join(stale)}")
-            for name in stale:
-                rc = cmd_discover(registry, source=name)
-                discover_rc = discover_rc or rc
-        else:
-            print("run: no source is stale, skipping discover")
+            discover_rc = 0
+            budget_s = _run_budget_s()
+            if stale:
+                print(f"run: discover due for stale source(s): {','.join(stale)}")
+                for name in stale:
+                    spent = time.monotonic() - started
+                    if budget_s and spent > budget_s:
+                        print(f"discover source={name} skipped: run budget spent "
+                              f"({spent:.0f}s > RECORDER_RUN_BUDGET_S={budget_s:.0f})")
+                        continue
+                    rc = cmd_discover(registry, source=name, health_reg=health_reg, now=now)
+                    discover_rc = discover_rc or rc
+            else:
+                print("run: no source is stale, skipping discover")
 
-        return 1 if (poll_rc or discover_rc) else 0
+            return 1 if (poll_rc or discover_rc) else 0
+        finally:
+            _save_health(health_reg)
+            print(f"run: elapsed={time.monotonic() - started:.1f}s")
     finally:
         try:
             conn.execute("SELECT pg_advisory_unlock(hashtext(%s))", (_RUN_LOCK_KEY,))
@@ -528,6 +696,47 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
         except Exception:  # noqa: BLE001 - best-effort release; connection close below is the backstop
             pass
         conn.close()
+
+
+# --- health -----------------------------------------------------------------
+
+_HEALTH_COLUMNS = ("source", "state", "consecutive_failures", "last_success_at",
+                   "next_attempt_at", "last_error")
+
+
+def _fmt_ts(v) -> str:
+    return v.strftime("%Y-%m-%d %H:%M") if isinstance(v, datetime) else ("—" if v is None else str(v))
+
+
+def cmd_health(now: datetime | None = None) -> int:
+    """The breaker table. Exit 1 when any source has been open (no success)
+    for more than 24 h — that one needs a human."""
+    now = now or datetime.now(timezone.utc)
+    rows = store.load_source_health()
+    if rows is None and health.state_file():
+        rows = health.load_file(health.state_file())
+        print(f"(migration 018 not applied — reading {health.state_file()})")
+    if rows is None:
+        print("recorder_source_health missing — migration 018 is not applied on this database; the breaker is "
+              "in-memory per run until it is applied.")
+        return 0
+    states = sorted((health.SourceHealth.from_row({**r, "source": s}) for s, r in rows.items()),
+                    key=lambda h: h.source)
+    if not states:
+        print("(no source health recorded yet)")
+        return 0
+    cells = [[h.source, h.state, str(h.consecutive_failures), _fmt_ts(h.last_success_at),
+              _fmt_ts(h.next_attempt_at), (h.last_error or "—")[:80]] for h in states]
+    widths = [max(len(c), *(len(r[i]) for r in cells)) for i, c in enumerate(_HEALTH_COLUMNS)]
+    print("  ".join(c.upper().ljust(widths[i]) for i, c in enumerate(_HEALTH_COLUMNS)))
+    print("  ".join("-" * w for w in widths))
+    for r in cells:
+        print("  ".join(v.ljust(widths[i]) for i, v in enumerate(r)))
+    stuck = [h.source for h in states if health.open_too_long(h, now)]
+    if stuck:
+        print(f"health: open > 24h: {','.join(stuck)}", file=sys.stderr)
+        return 1
+    return 0
 
 
 # --- startup guard + argparse wiring ----------------------------------------
@@ -572,6 +781,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_discover.add_argument("--source", default=None, choices=sorted(SOURCE_NAMES))
 
     sub.add_parser("poll-once", help="re-check tracked lots due for a poll right now")
+
+    sub.add_parser("health", help="per-source circuit breaker table (exit 1 if any open > 24h)")
 
     p_coverage = sub.add_parser(
         "coverage", help="print the coverage report (Phase-0 done-metric: >90%% target)"
@@ -628,7 +839,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "discover":
         return cmd_discover(registry, source=args.source)
     if args.cmd == "poll-once":
-        return cmd_poll_once(registry)
+        health_reg = _load_health()
+        try:
+            return cmd_poll_once(registry, health_reg=health_reg)
+        finally:
+            _save_health(health_reg)
+    if args.cmd == "health":
+        return cmd_health()
     if args.cmd == "coverage":
         return cmd_coverage(args.days)
     if args.cmd == "run":

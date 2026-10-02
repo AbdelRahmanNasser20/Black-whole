@@ -15,6 +15,16 @@ def _no_lot_archive(monkeypatch):
     and must never reach a real store (R2 may be configured on this machine)."""
     monkeypatch.setenv("RECORDER_ARCHIVE_ENABLED", "0")
 
+
+@pytest.fixture(autouse=True)
+def _no_health_db(monkeypatch):
+    """`run` loads/saves the source breaker once per run; keep it off the DB
+    and never ping Telegram from a test."""
+    from recorder import store as _store
+    monkeypatch.setenv("RECORDER_HEALTH_TELEGRAM", "0")
+    monkeypatch.setattr(_store, "load_source_health", lambda: {})
+    monkeypatch.setattr(_store, "save_source_health", lambda rows: len(rows))
+
 from recorder import cli
 from recorder.models import Observation
 
