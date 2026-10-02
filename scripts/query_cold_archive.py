@@ -6,9 +6,11 @@
 database past the free tier's 500 MB read-only ceiling. The data is not gone —
 it is 11x smaller and one HTTP range-request away. This is the reader.
 
-DuckDB queries the objects **in place** over HTTPS; nothing is downloaded whole
-and nothing is restored into Postgres. R2 charges no egress, so scanning the
-whole archive costs nothing but time (~1-8s).
+DuckDB queries the objects **in place** in the PRIVATE bucket
+(`LOT_ARCHIVE_R2_BUCKET`) through an R2 secret (`CREATE SECRET (TYPE r2 …)`,
+`r2://` paths); nothing is downloaded whole and nothing is restored into
+Postgres. The archive is never on the public image bucket — it is the moat.
+R2 charges no egress, so scanning the whole archive costs nothing but time.
 
 Two shapes live under the same prefix and both are readable:
   * `closed_2026-08-23.parquet` — the one-off bulk export, with the maestro
@@ -27,24 +29,24 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from automation import config  # noqa: E402,F401  (loads .env -> R2_PUBLIC_BASE)
+from automation import config, r2_images  # noqa: E402,F401  (config loads .env)
 
 PARQUET = "archive/deal_lots_raw/closed_2026-08-23.parquet"
 INCREMENTAL = "archive/deal_lots_raw/incremental/*.jsonl.gz"
 
 
 def _base() -> str:
-    b = os.getenv("R2_PUBLIC_BASE")
-    if not b:
-        sys.exit("R2_PUBLIC_BASE is not set — see .env")
-    return b.rstrip("/")
+    """`r2://<private bucket>` — raises if the private bucket is unset/public."""
+    try:
+        return f"r2://{r2_images.private_bucket()}"
+    except r2_images.PrivateBucketNotConfigured as e:
+        sys.exit(str(e))
 
 
 def _connect():
@@ -52,8 +54,21 @@ def _connect():
         import duckdb
     except ImportError:
         sys.exit("pip install duckdb")
+    major, minor = (int(x) for x in duckdb.__version__.split(".")[:2])
+    if (major, minor) < (0, 10):
+        sys.exit(f"duckdb {duckdb.__version__} lacks CREATE SECRET (TYPE r2); need >= 0.10")
+    cfg = r2_images.env_config()
+    if not cfg:
+        sys.exit("R2 is not configured (R2_ACCOUNT_ID/ACCESS_KEY_ID/SECRET_ACCESS_KEY) — see .env")
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
+    # Parameters are not allowed in CREATE SECRET; the values come from our own
+    # env, are quoted, and any embedded quote is doubled.
+    q = lambda v: "'" + str(v).replace("'", "''") + "'"  # noqa: E731
+    con.execute(
+        "CREATE TEMPORARY SECRET bw_r2 (TYPE r2, "
+        f"KEY_ID {q(cfg['access_key'])}, SECRET {q(cfg['secret_key'])}, "
+        f"ACCOUNT_ID {q(cfg['account'])})")
     return con
 
 
