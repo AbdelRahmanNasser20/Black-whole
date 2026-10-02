@@ -15,8 +15,8 @@ a fake label is a wrong answer nobody will ever go back and check.
 """
 import json
 
-from deals.llm_provider import (LlmUnavailable, active_provider, breaker_state,  # noqa: F401
-                                chat, reset_breaker)
+from deals.llm_provider import (REPLY_TOKENS, LlmUnavailable, active_provider,  # noqa: F401
+                                breaker_state, chat, reset_breaker)
 from deals.models import Lot
 
 CANONICAL_LABELS = ["seating_furniture", "general_merchandise", "vehicles",
@@ -86,7 +86,7 @@ def classify_category(title: str, description: str) -> tuple[str, float]:
     """Place a lot in our taxonomy. Raises `ClassificationUnavailable` on any
     provider problem — the caller decides what an absent answer means."""
     try:
-        text = chat(build_prompt(title, description), max_tokens=64)
+        text = chat(build_prompt(title, description), max_tokens=REPLY_TOKENS["classify"])
     except LlmUnavailable as e:
         raise ClassificationUnavailable(str(e)) from e
     return parse_response(text)

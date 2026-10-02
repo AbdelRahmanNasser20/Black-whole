@@ -18,7 +18,7 @@ the module docstring there.
 import json
 from dataclasses import dataclass, field
 from deals.comps import Comp
-from deals.llm_provider import LlmUnavailable, chat
+from deals.llm_provider import REPLY_TOKENS, LlmUnavailable, chat
 from deals.models import Lot
 
 class LlmStepError(Exception):
@@ -83,11 +83,12 @@ def parse_judge_response(text: str, comps: list[Comp]) -> list[Comp]:
             if isinstance(i, int) and 0 <= i < len(comps)]
 
 def extract_identity(lot: Lot) -> LotIdentity:
-    # 300 output tokens: the reply carries up to three search queries plus the
-    # identity fields, and a truncated JSON object parses as a hard failure.
+    # Shared budget: the reply carries up to three search queries plus the
+    # identity fields AND gpt-oss reasoning; a truncated reply is LlmUnavailable.
     try:
         text = chat(_IDENTITY_PROMPT.format(
-            title=lot.title[:200], desc=(lot.description or "")[:1500]), max_tokens=300)
+            title=lot.title[:200], desc=(lot.description or "")[:1500]),
+            max_tokens=REPLY_TOKENS["identity"])
     except LlmUnavailable as e:
         raise LlmStepError(f"identity call failed: {e}") from e
     return parse_identity_response(text)
@@ -99,7 +100,7 @@ def judge_comps(identity: LotIdentity, comps: list[Comp]) -> list[Comp]:
     ident_str = " ".join(filter(None, [identity.brand, identity.model, identity.item_type]))
     try:
         text = chat(_JUDGE_PROMPT.format(identity=ident_str, listings=listings),
-                    max_tokens=200)
+                    max_tokens=REPLY_TOKENS["judge"])
     except LlmUnavailable:
         # Keeping nothing is the safe read: downstream falls back to the
         # estimate path at confidence='low' rather than valuing off unvetted
