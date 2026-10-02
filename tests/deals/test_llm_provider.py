@@ -112,9 +112,9 @@ class TestAnalyzeUsesTheSharedProvider:
         ident = llm_steps.extract_identity(
             type("L", (), {"title": "9 chairs", "description": "used"})())
         assert ident.quantity == 9 and ident.queries == ["hon banquet chair"]
-        # Room for three queries plus the identity fields; a truncated JSON
-        # object is a hard parse failure.
-        assert seen["max_tokens"] == 300
+        # The shared budget: three queries + identity fields + gpt-oss
+        # reasoning. A truncated reply is LlmUnavailable, not a parse.
+        assert seen["max_tokens"] == llm_provider.REPLY_TOKENS["identity"] == 600
 
     def test_unreachable_provider_raises_a_step_error(self, monkeypatch):
         def dead(prompt, *, max_tokens=64):
@@ -134,3 +134,86 @@ class TestAnalyzeUsesTheSharedProvider:
         monkeypatch.setattr(llm_steps, "chat", dead)
         comps = [Comp(listing_id="1", title="chair", price=20.0, condition="used", url="u")]
         assert llm_steps.judge_comps(llm_steps.LotIdentity(item_type="chair"), comps) == []
+
+
+class _Resp:
+    def __init__(self, payload, status=200):
+        self.status_code, self._payload, self.headers, self.text = status, payload, {}, ""
+
+    def json(self):
+        return self._payload
+
+
+def _ok(content="{}", finish="stop"):
+    return _Resp({"choices": [{"finish_reason": finish,
+                               "message": {"content": content}}]})
+
+
+class TestReasoningBudget:
+    """gpt-oss bills hidden reasoning against max_tokens: at 64 it ended
+    finish_reason="length" with EMPTY content on every classify call."""
+
+    def _capture(self, monkeypatch, resp):
+        import requests
+        sent = []
+
+        def fake_post(url, headers=None, json=None, timeout=None):
+            sent.append(json)
+            return resp
+
+        monkeypatch.setattr(requests, "post", fake_post)
+        return sent
+
+    def test_reasoning_effort_low_sent_for_gpt_oss(self, monkeypatch):
+        monkeypatch.delenv("DEALS_LLM_MODEL", raising=False)
+        monkeypatch.delenv("DEALS_LLM_REASONING_EFFORT", raising=False)
+        sent = self._capture(monkeypatch, _ok())
+        llm_provider._chat_openai_compatible("groq", "k", "p", 256)
+        assert sent[0]["model"] == "openai/gpt-oss-120b"
+        assert sent[0]["reasoning_effort"] == "low"
+
+    def test_reasoning_effort_env_override(self, monkeypatch):
+        monkeypatch.delenv("DEALS_LLM_MODEL", raising=False)
+        monkeypatch.setenv("DEALS_LLM_REASONING_EFFORT", "medium")
+        sent = self._capture(monkeypatch, _ok())
+        llm_provider._chat_openai_compatible("cerebras", "k", "p", 256)
+        assert sent[0]["reasoning_effort"] == "medium"
+
+    def test_no_reasoning_effort_for_other_models(self, monkeypatch):
+        monkeypatch.setenv("DEALS_LLM_MODEL", "llama-3.1-8b-instant")
+        sent = self._capture(monkeypatch, _ok())
+        llm_provider._chat_openai_compatible("groq", "k", "p", 256)
+        assert "reasoning_effort" not in sent[0]
+
+    def test_length_finish_is_unavailable_and_counted_by_breaker(self, monkeypatch):
+        monkeypatch.setenv("GROQ_API_KEY", "k")
+        monkeypatch.setenv("DEALS_LLM_PROVIDER", "groq")
+        self._capture(monkeypatch, _ok(content="", finish="length"))
+        for _ in range(llm_provider._BREAKER_THRESHOLD):
+            with pytest.raises(LlmUnavailable, match="truncated"):
+                llm_provider.chat("p")
+        assert llm_provider.breaker_state()["tripped"] is True
+
+    def test_classify_uses_the_shared_budget(self, monkeypatch):
+        from deals import classify
+        seen = {}
+
+        def fake_chat(prompt, *, max_tokens):
+            seen["max_tokens"] = max_tokens
+            return '{"label":"vehicles","confidence":0.9}'
+
+        monkeypatch.setattr(classify, "chat", fake_chat)
+        assert classify.classify_category("truck", "d") == ("vehicles", 0.9)
+        assert seen["max_tokens"] == llm_provider.REPLY_TOKENS["classify"] == 256
+
+    def test_judge_uses_the_shared_budget(self, monkeypatch):
+        seen = {}
+
+        def fake_chat(prompt, *, max_tokens):
+            seen["max_tokens"] = max_tokens
+            return "[0]"
+
+        monkeypatch.setattr(llm_steps, "chat", fake_chat)
+        comps = [Comp(listing_id="1", title="chair", price=20.0, condition="used", url="u")]
+        llm_steps.judge_comps(llm_steps.LotIdentity(item_type="chair"), comps)
+        assert seen["max_tokens"] == llm_provider.REPLY_TOKENS["judge"] == 400

@@ -19,7 +19,16 @@ throttles big ones exactly as much as they deserve. Overlapping cron services
 (discover, analyze, backfill) can't see each other's usage, so a 429 is still
 possible — hence the Retry-After honouring retry underneath.
 
-Env: `DEALS_LLM_PROVIDER`, `DEALS_LLM_MODEL`, `DEALS_LLM_TPM`, `DEALS_LLM_RPM`.
+**Reply budgets are shared** (`REPLY_TOKENS`). gpt-oss is a reasoning model:
+its hidden reasoning is billed against `max_tokens`, so a 64-token cap ends in
+`finish_reason: "length"` with EMPTY content — every classify call on Groq was
+silently unavailable that way. We send `reasoning_effort` (default `low`) to
+gpt-oss models only, size the caps for reasoning + answer, and treat a
+truncated reply as `LlmUnavailable` (counted by the breaker), never as an
+answer.
+
+Env: `DEALS_LLM_PROVIDER`, `DEALS_LLM_MODEL`, `DEALS_LLM_TPM`, `DEALS_LLM_RPM`,
+`DEALS_LLM_REASONING_EFFORT` (gpt-oss only; default `low`).
 """
 import os
 import sys
@@ -60,6 +69,21 @@ _OPENAI_COMPATIBLE = {
 _GEMINI_MODEL = "gemini-2.5-flash-lite"
 
 _BREAKER_THRESHOLD = 5
+
+# Output-token caps per workload, shared by classify.py and llm_steps.py. Sized
+# for reasoning + the JSON answer: measured on Groq gpt-oss-120b, classify at 64
+# ends "length" with empty content; at 256 with reasoning_effort=low it stops.
+REPLY_TOKENS = {"classify": 256, "identity": 600, "judge": 400}
+
+_DEFAULT_REASONING_EFFORT = "low"
+
+
+def _reasoning_effort(model: str) -> str | None:
+    """`reasoning_effort` for gpt-oss models; None (omit) for everything else —
+    non-reasoning models reject or ignore the parameter."""
+    if "gpt-oss" not in (model or "").lower():
+        return None
+    return (os.getenv("DEALS_LLM_REASONING_EFFORT") or _DEFAULT_REASONING_EFFORT).strip() or None
 
 # Default ceilings sit just under Groq's free tier (6,000 tok/min, 14,400/day)
 # so that a burst never spends the whole minute's budget on one call.
@@ -172,13 +196,16 @@ def _chat_openai_compatible(provider: str, api_key: str, prompt: str,
     import requests
     _, base_url, default_model = _OPENAI_COMPATIBLE[provider]
     model = os.getenv("DEALS_LLM_MODEL") or default_model
+    body = {"model": model, "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0, "max_tokens": max_tokens}
+    effort = _reasoning_effort(model)
+    if effort:
+        body["reasoning_effort"] = effort
     for attempt in range(3):
         r = requests.post(
             f"{base_url}/chat/completions",
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json={"model": model, "messages": [{"role": "user", "content": prompt}],
-                  "temperature": 0, "max_tokens": max_tokens},
-            timeout=60)
+            json=body, timeout=60)
         if r.status_code == 429 and attempt < 2:
             # Sibling crons share the quota and can't see each other's pacing.
             # The provider tells us exactly how long to wait; believe it.
@@ -191,7 +218,14 @@ def _chat_openai_compatible(provider: str, api_key: str, prompt: str,
             # from "your balance is gone", and that decides whether we wait or
             # switch providers.
             raise LlmUnavailable(f"{provider} HTTP {r.status_code}: {r.text[:200]}")
-        return r.json()["choices"][0]["message"]["content"]
+        choice = r.json()["choices"][0]
+        if choice.get("finish_reason") == "length":
+            # Ran out of budget (often mid-reasoning, with empty content). A
+            # cut-off answer is not an answer — surface it so it's counted.
+            raise LlmUnavailable(
+                f"{provider}: truncated at max_tokens={max_tokens} "
+                f"(finish_reason=length, model={model})")
+        return choice["message"]["content"] or ""
     raise LlmUnavailable(f"{provider}: rate limited after 3 attempts")
 
 
@@ -202,7 +236,7 @@ def _chat_gemini(api_key: str, prompt: str) -> str:
     return resp.text or ""
 
 
-def chat(prompt: str, *, max_tokens: int = 64) -> str:
+def chat(prompt: str, *, max_tokens: int = REPLY_TOKENS["classify"]) -> str:
     """Send one prompt, paced and breaker-guarded. Raises `LlmUnavailable`."""
     if _breaker.tripped:
         raise LlmUnavailable("circuit breaker open for this run")
