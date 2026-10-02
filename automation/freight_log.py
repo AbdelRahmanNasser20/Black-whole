@@ -96,22 +96,33 @@ def insert_storefront_quote(
         return None
 
 
-def set_quote_email(quote_id: int, email: str) -> bool:
-    """Attach an email to a previously logged quote (the optional second step).
+def set_quote_email(quote_id: int, email: str, phone: str | None = None) -> bool:
+    """Attach an email (and optional phone) to a logged quote (the second step).
 
     Scoped to ``source='storefront'`` so a guessed id can never touch a CRM row
     — the id is handed to the browser, which makes it attacker-controlled.
+
+    ``phone`` has no column of its own: it is merged into ``raw_response`` as
+    ``buyer_phone`` (same home as ``client_ip``), so no migration on the shared
+    table. A blank phone leaves ``raw_response`` untouched.
     """
     try:
         clean = (email or "").strip()
         if not clean:
             return False
+        clean_phone = (phone or "").strip() or None
         return db.execute(
             """
-            UPDATE freight_quotes SET buyer_email = %s
+            UPDATE freight_quotes SET
+                buyer_email = %s,
+                raw_response = CASE
+                    WHEN %s::text IS NULL THEN raw_response
+                    ELSE COALESCE(raw_response, '{}'::jsonb)
+                         || jsonb_build_object('buyer_phone', %s::text)
+                END
             WHERE id = %s AND source = 'storefront'
             """,
-            (clean, int(quote_id)),
+            (clean, clean_phone, clean_phone, int(quote_id)),
         ) > 0
     except Exception:  # noqa: BLE001 — same contract as the insert
         log.warning("freight quote email attach failed", exc_info=True)

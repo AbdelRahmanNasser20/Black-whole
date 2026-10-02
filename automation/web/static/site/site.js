@@ -131,6 +131,7 @@ function bindCaptureForm(form) {
   const qtyEl = widget.querySelector('.fw-qty');
   const emailRow = widget.querySelector('.fw-email');
   const emailEl = widget.querySelector('.fw-email-input');
+  const phoneEl = widget.querySelector('.fw-phone-input');
   let quoteId = null;
 
   const money = (n) => '$' + Math.round(Number(n)).toLocaleString('en-US');
@@ -212,18 +213,28 @@ function bindCaptureForm(form) {
   emailRow?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const email = (emailEl.value || '').trim();
+    const phone = ((phoneEl && phoneEl.value) || '').trim();
     if (!quoteId || !email) return;
+    if (phone && (phone.length > 32 || !/^[0-9 +().-]+$/.test(phone) || !/\d/.test(phone))) {
+      show('✗ THAT PHONE NUMBER LOOKS OFF — DIGITS, SPACES AND + ( ) - . ONLY.', 'mf-result--err');
+      return;
+    }
     await pending(emailRow.querySelector('button[type="submit"]'), 'SENDING…', async () => {
       try {
         await api('/freight-estimate/email', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({quote_id: quoteId, email: email}),
+          body: JSON.stringify(phone ? {quote_id: quoteId, email: email, phone: phone}
+                                     : {quote_id: quoteId, email: email}),
         });
         emailRow.hidden = true;
         show('SENT — WE’LL FOLLOW UP.', 'mf-result--ok');
       } catch (err) {
-        show('✗ COULDN’T SAVE THAT EMAIL — TRY AGAIN OR USE THE FORM BELOW.', 'mf-result--err');
+        if (err.status === 400 && /phone/i.test(err.message || '')) {
+          show('✗ THAT PHONE NUMBER LOOKS OFF — DIGITS, SPACES AND + ( ) - . ONLY.', 'mf-result--err');
+        } else {
+          show('✗ COULDN’T SAVE THAT EMAIL — TRY AGAIN OR USE THE FORM BELOW.', 'mf-result--err');
+        }
       }
     });
   });

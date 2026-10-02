@@ -1804,11 +1804,14 @@ async def _notify_freight_estimate(
         pass
 
 
-async def _notify_freight_email(quote_id: int, email: str) -> None:
+async def _notify_freight_email(
+    quote_id: int, email: str, phone: str | None = None
+) -> None:
     """The buyer traded their email for the estimate — that's the hot signal."""
     try:
+        contact = " / ".join(x for x in (email, phone) if x)
         await telegram_alerts.send_message(
-            f"📧 FREIGHT LEAD · quote #{quote_id} → {email}", topic="leads"
+            f"📧 FREIGHT LEAD · quote #{quote_id} → {contact}", topic="leads"
         )
     except Exception:
         pass
@@ -1883,6 +1886,29 @@ def _looks_like_email(value: str) -> bool:
         and not domain.endswith(".")
 
 
+PHONE_MAX_LEN = 32
+_PHONE_ALLOWED = frozenset("0123456789 +()-.")
+
+
+def _clean_phone(value: Any) -> str | None:
+    """Optional buyer phone: trimmed, or None when blank.
+
+    Raises ValueError on anything that isn't digits plus ``space + ( ) - .``,
+    has no digit at all, or runs past ``PHONE_MAX_LEN`` — cheap plausibility,
+    same spirit as `_looks_like_email`. Never shown publicly.
+    """
+    clean = str(value or "").strip()
+    if not clean:
+        return None
+    if (
+        len(clean) > PHONE_MAX_LEN
+        or any(c not in _PHONE_ALLOWED for c in clean)
+        or not any(c.isdigit() for c in clean)
+    ):
+        raise ValueError("invalid phone")
+    return clean
+
+
 @app.post("/freight-estimate/email")
 async def public_freight_estimate_email(payload: dict, request: Request):
     """Step two: attach an email to a quote the buyer already has on screen.
@@ -1900,9 +1926,13 @@ async def public_freight_estimate_email(payload: dict, request: Request):
     email = str(payload.get("email") or "").strip()
     if not _looks_like_email(email):
         raise HTTPException(400, "valid email required")
+    try:
+        phone = _clean_phone(payload.get("phone"))
+    except ValueError:
+        raise HTTPException(400, "valid phone required")
 
-    await asyncio.to_thread(freight_log.set_quote_email, quote_id, email)
-    asyncio.create_task(_notify_freight_email(quote_id, email))
+    await asyncio.to_thread(freight_log.set_quote_email, quote_id, email, phone)
+    asyncio.create_task(_notify_freight_email(quote_id, email, phone))
     return {"ok": True}
 
 

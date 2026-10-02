@@ -35,6 +35,10 @@ from automation.web.app import app
 # through sys.modules rather than an import statement.
 app_module = sys.modules["automation.web.app"]
 
+# Captured before any fixture swaps them for spies.
+_REAL_NOTIFY_EMAIL = app_module._notify_freight_email
+_REAL_SET_EMAIL = freight_log.set_quote_email
+
 # The pinned lane, same one tests/test_freight_estimate.py holds the estimator
 # to: Boise ID 83702 → Worcester MA 01608, 150 chairs.
 DEST_WORCESTER = "01608"
@@ -86,14 +90,15 @@ def lot(monkeypatch):
 @pytest.fixture
 def logged(monkeypatch):
     """Capture what would have been written to `freight_quotes`."""
-    calls = {"inserts": [], "emails": []}
+    calls = {"inserts": [], "emails": [], "phones": []}
 
     def fake_insert(**kw):
         calls["inserts"].append(kw)
         return 4242
 
-    def fake_set_email(quote_id, email):
+    def fake_set_email(quote_id, email, phone=None):
         calls["emails"].append((quote_id, email))
+        calls["phones"].append(phone)
         return True
 
     monkeypatch.setattr(freight_log, "insert_storefront_quote", fake_insert)
@@ -105,7 +110,7 @@ def logged(monkeypatch):
 def notified(monkeypatch):
     """Count Telegram pings. The spy records SYNCHRONOUSLY (at create_task
     time) so the assertion doesn't depend on the task getting scheduled."""
-    seen = {"estimates": [], "emails": []}
+    seen = {"estimates": [], "emails": [], "phones": []}
 
     async def _noop():
         return None
@@ -114,8 +119,9 @@ def notified(monkeypatch):
         seen["estimates"].append((row, quote, dest_zip, quantity, quote_id))
         return _noop()
 
-    def spy_email(quote_id, email):
+    def spy_email(quote_id, email, phone=None):
         seen["emails"].append((quote_id, email))
+        seen["phones"].append(phone)
         return _noop()
 
     monkeypatch.setattr(app_module, "_notify_freight_estimate", spy_estimate)
@@ -442,6 +448,95 @@ def test_junk_email_or_missing_quote_id_is_a_400(logged, notified, body):
     assert _client().post("/freight-estimate/email", json=body).status_code == 400
     assert logged["emails"] == []
     assert notified["emails"] == []
+
+
+# ─────────────────────────────── phone capture ──────────────────────────────
+
+def test_email_without_phone_still_works(lot, logged, notified):
+    r = _client().post(
+        "/freight-estimate/email",
+        json={"quote_id": 4242, "email": "buyer@example.com", "phone": "   "},
+    )
+    assert r.status_code == 200
+    assert logged["phones"] == [None]
+    assert notified["phones"] == [None]
+
+
+def test_phone_rides_along_to_the_db_and_the_ping(lot, logged, notified):
+    r = _client().post(
+        "/freight-estimate/email",
+        json={
+            "quote_id": 4242,
+            "email": "buyer@example.com",
+            "phone": "  +1 (404) 555-0100  ",
+        },
+    )
+    assert r.status_code == 200
+    assert logged["emails"] == [(4242, "buyer@example.com")]
+    assert logged["phones"] == ["+1 (404) 555-0100"]
+    assert notified["phones"] == ["+1 (404) 555-0100"]
+
+
+@pytest.mark.parametrize(
+    "phone",
+    [
+        "call me maybe",
+        "404-555-0100 ext 2",
+        "<script>",
+        "1" * 33,
+        "+() -.",          # no digit at all
+    ],
+)
+def test_bad_phone_is_a_400_and_nothing_is_written(lot, logged, notified, phone):
+    r = _client().post(
+        "/freight-estimate/email",
+        json={"quote_id": 4242, "email": "buyer@example.com", "phone": phone},
+    )
+    assert r.status_code == 400
+    assert "phone" in r.json()["detail"]
+    assert logged["emails"] == []
+    assert notified["emails"] == []
+
+
+def test_phone_at_the_32_char_cap_is_accepted(lot, logged, notified):
+    phone = "1" * 32
+    r = _client().post(
+        "/freight-estimate/email",
+        json={"quote_id": 4242, "email": "buyer@example.com", "phone": phone},
+    )
+    assert r.status_code == 200
+    assert logged["phones"] == [phone]
+
+
+def test_freight_email_ping_includes_phone(monkeypatch):
+    import asyncio
+
+    sent = []
+
+    async def fake_send(text, topic=None):
+        sent.append((text, topic))
+
+    monkeypatch.setattr(app_module.telegram_alerts, "send_message", fake_send)
+    asyncio.run(_REAL_NOTIFY_EMAIL(7, "b@example.com", "404 555 0100"))
+    asyncio.run(_REAL_NOTIFY_EMAIL(8, "c@example.com"))
+    assert sent[0] == ("📧 FREIGHT LEAD · quote #7 → b@example.com / 404 555 0100", "leads")
+    assert sent[1] == ("📧 FREIGHT LEAD · quote #8 → c@example.com", "leads")
+
+
+def test_set_quote_email_merges_phone_into_raw_response(monkeypatch):
+    seen = []
+
+    def fake_execute(sql, params):
+        seen.append((sql, params))
+        return 1
+
+    monkeypatch.setattr(freight_log.db, "execute", fake_execute)
+    assert _REAL_SET_EMAIL(5, " a@b.co ", " 404 555 0100 ") is True
+    assert _REAL_SET_EMAIL(6, "a@b.co") is True
+    sql, params = seen[0]
+    assert "buyer_phone" in sql and "raw_response" in sql
+    assert params == ("a@b.co", "404 555 0100", "404 555 0100", 5)
+    assert seen[1][1] == ("a@b.co", None, None, 6)
 
 
 def test_email_endpoint_shares_the_freight_rate_bucket(monkeypatch, lot, logged):

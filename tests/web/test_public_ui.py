@@ -80,6 +80,21 @@ def test_freight_widget_renders_on_a_locatable_lot(lot):
     assert "freight quoted on request" not in r.text
 
 
+def test_freight_email_step_has_an_optional_phone_field(lot):
+    r = _client().get("/listings/31225")
+    assert r.status_code == 200
+    html = r.text
+    assert "Phone (optional)" in html
+    assert 'class="fw-phone-input"' in html
+    tag = html[html.index('class="fw-phone-input"'):]
+    tag = tag[:tag.index(">")]
+    assert 'type="tel"' in tag
+    assert 'autocomplete="tel"' in tag
+    assert "required" not in tag
+    # After the email input, inside the email step.
+    assert html.index("fw-email-input") < html.index("fw-phone-input")
+
+
 @pytest.mark.parametrize(
     "patch", [{"zip_code": None, "state": None}, {"status": "sold_out"}]
 )
