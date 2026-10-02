@@ -43,6 +43,11 @@ envVarGroups:
         sync: false
       - key: R2_PUBLIC_BASE         # https://pub-<hash>.r2.dev (or custom domain)
         sync: false
+      # PRIVATE R2 bucket for scraped data (deal_lots raw archive, snapshot
+      # backups, lot archives). Never the public R2_BUCKET above: the
+      # archive-raw cron REFUSES to run while this is unset (no fallback).
+      - key: LOT_ARCHIVE_R2_BUCKET  # blackwhole-archive
+        sync: false
       - key: TELEGRAM_BOT_TOKEN     # deals digests + margin/relist alerts
         sync: false
       - key: TELEGRAM_CHAT_ID       # -100… "BlackWhole Alerts" supergroup id (BLACKWHOLE-24)

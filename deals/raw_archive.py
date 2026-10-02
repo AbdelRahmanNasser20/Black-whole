@@ -12,9 +12,9 @@ But "nothing reads it *today*" is not "we will never want it": the operator
 mines closed-auction history for pricing patterns, and a closed GovDeals page
 cannot be re-scraped. So this does not delete — it *moves*. Blobs go to
 Cloudflare R2 (10 GB free, zero egress) as gzipped JSONL, one object per run,
-queryable in place with DuckDB:
-
-    SELECT * FROM read_json_auto('https://<base>/archive/deal_lots_raw/incremental/*.jsonl.gz')
+in the PRIVATE bucket (`LOT_ARCHIVE_R2_BUCKET`, never the public image bucket —
+this dataset is the moat). Query it in place with
+`scripts/query_cold_archive.py` (DuckDB, `r2://` + an R2 secret).
 
 Gzip JSONL rather than Parquet on purpose: `pyarrow` is not a dependency and
 would bloat the Docker image for every Render service. DuckDB reads either.
@@ -112,6 +112,8 @@ def run_archive_raw(*, limit: int = 6000, lag_hours: int = 48,
         raise RuntimeError(
             "R2 is not configured (R2_ACCOUNT_ID/ACCESS_KEY_ID/SECRET_ACCESS_KEY/"
             "BUCKET/PUBLIC_BASE) — refusing to archive without a destination")
+    # Raises PrivateBucketNotConfigured — never falls back to the public bucket.
+    bucket = r2_images.private_bucket()
 
     meter["pending"] = pending_count(lag_hours)
     rows = db.fetch_all(PENDING_SQL, (lag_hours, limit))
@@ -125,14 +127,14 @@ def run_archive_raw(*, limit: int = 6000, lag_hours: int = 48,
     path = f"{ARCHIVE_PREFIX}/{stamp}_{len(rows)}.jsonl.gz"
 
     s3 = r2_images.client(cfg)
-    if not r2_images.put_object(s3, bucket=cfg["bucket"], path=path,
-                                data=blob, content_type="application/gzip"):
+    if not r2_images.put_private_object(s3, bucket=bucket, path=path,
+                                        data=blob, content_type="application/gzip"):
         raise RuntimeError(f"R2 upload failed for {path!r} — nothing nulled")
 
     # Read it back. An upload that "succeeded" but stored truncated or
     # unreadable bytes is exactly the failure that would make the null
     # unrecoverable, and it is invisible without this step.
-    got = s3.get_object(Bucket=cfg["bucket"], Key=path)["Body"].read()
+    got = s3.get_object(Bucket=bucket, Key=path)["Body"].read()
     if parse_batch(got) != keys:
         raise RuntimeError(
             f"readback mismatch for {path!r} — nothing nulled "
