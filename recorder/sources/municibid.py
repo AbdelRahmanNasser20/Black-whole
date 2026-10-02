@@ -174,7 +174,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, polite_get
+from recorder.sources.base import FURNITURE_TERMS, PollBudget, polite_get
 
 SOURCE = "municibid"
 
@@ -526,9 +526,16 @@ class MunicibidSource:
             return []
         now = datetime.now(timezone.utc)
         observations: list[Observation] = []
+        budget = PollBudget()  # ten failures in a row ends the batch (source health)
         for lot in lots:
+            if budget.exhausted:
+                print(f"[municibid] RECORDER ERROR: poll() batch aborted after "
+                      f"{budget.consecutive} consecutive failures — "
+                      f"{len(lots) - budget.attempted} lot(s) left for the next run")
+                break
             lot_id = str(lot["source_lot_id"])
             detail = _fetch_detail(lot_id)
+            budget.record(detail is not None)
             if detail is None:
                 continue  # fetch failure for this lot — loud error already printed, skip
             if detail["not_found"]:
@@ -564,6 +571,7 @@ class MunicibidSource:
                 bid_count=detail["bid_count"],
                 end_date=detail["end_date"],
             ))
+        self.last_poll_stats = budget.stats(len(lots))
         return observations
 
     def sold_sweep(self) -> list[Observation]:

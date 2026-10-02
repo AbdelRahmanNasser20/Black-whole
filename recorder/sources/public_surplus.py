@@ -139,7 +139,7 @@ from typing import Any
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, polite_get
+from recorder.sources.base import FURNITURE_TERMS, PollBudget, polite_get
 
 SOURCE = "public_surplus"
 
@@ -453,9 +453,21 @@ class PublicSurplusSource:
         # Fetch every lot's detail FIRST — the batch-level suspected-block
         # check (fix round 1, review finding #1; see module docstring) needs
         # to see the whole batch's outcome before any 'gone' is decided.
-        fetched: list[tuple[dict, dict | None]] = [
-            (lot, _fetch_detail(str(lot["source_lot_id"]))) for lot in lots
-        ]
+        # PollBudget: ten failures in a row (a dead host, a block) ends the
+        # batch — the remaining lots wait for the next run instead of each
+        # burning a timeout. `last_poll_stats` feeds the source breaker.
+        budget = PollBudget()
+        fetched: list[tuple[dict, dict | None]] = []
+        for lot in lots:
+            if budget.exhausted:
+                print(f"[public_surplus] RECORDER ERROR: poll() batch aborted after "
+                      f"{budget.consecutive} consecutive failures — {len(lots) - budget.attempted} "
+                      "lot(s) left for the next run")
+                break
+            detail = _fetch_detail(str(lot["source_lot_id"]))
+            budget.record(detail is not None)
+            fetched.append((lot, detail))
+        self.last_poll_stats = budget.stats(len(lots))
 
         not_found_401_count = sum(
             1 for _, detail in fetched
@@ -463,12 +475,12 @@ class PublicSurplusSource:
         )
         suspected_block = (
             not_found_401_count >= BLOCK_SUSPECT_MIN_COUNT
-            and (not_found_401_count / len(lots)) >= BLOCK_SUSPECT_MIN_FRACTION
+            and (not_found_401_count / len(fetched)) >= BLOCK_SUSPECT_MIN_FRACTION
         )
         if suspected_block:
             print(
                 f"[public_surplus] RECORDER ERROR: poll() suspects a session-wide block — "
-                f"{not_found_401_count}/{len(lots)} tracked lots returned HTTP 401 in this "
+                f"{not_found_401_count}/{len(fetched)} tracked lots returned HTTP 401 in this "
                 f"single batch (threshold: >= {BLOCK_SUSPECT_MIN_COUNT} lots AND "
                 f">= {BLOCK_SUSPECT_MIN_FRACTION:.0%} of the batch). A real PS closed-"
                 "auction 401 only ever affects one lot at a time (see module docstring) — "

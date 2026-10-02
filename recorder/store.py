@@ -518,3 +518,50 @@ def upsert_archive_index(meta: dict) -> None:
 def database_size_mb() -> float:
     row = _read_with_backoff(db.fetch_one, "SELECT pg_database_size(current_database()) AS b")
     return row["b"] / 1e6 if row else 0.0
+
+
+# --- source health (migration 018, PENDING) -----------------------------------
+#
+# One row per source: the circuit breaker in recorder/health.py. Loaded once
+# and saved once per run. Until 018 is applied every caller degrades to an
+# in-memory breaker (a NOTE, never a failed run) — the run still caps a dead
+# source through PollBudget and the faster connect timeout.
+
+_HEALTH_COLS = ("source", "state", "consecutive_failures", "last_attempt_at",
+                "last_success_at", "next_attempt_at", "last_error", "updated_at")
+
+_HEALTH_UPSERT_SQL = """
+INSERT INTO recorder_source_health
+    (source, state, consecutive_failures, last_attempt_at, last_success_at,
+     next_attempt_at, last_error, updated_at)
+VALUES (%s, %s, %s, %s, %s, %s, %s, COALESCE(%s, now()))
+ON CONFLICT (source) DO UPDATE SET
+    state = EXCLUDED.state, consecutive_failures = EXCLUDED.consecutive_failures,
+    last_attempt_at = EXCLUDED.last_attempt_at, last_success_at = EXCLUDED.last_success_at,
+    next_attempt_at = EXCLUDED.next_attempt_at, last_error = EXCLUDED.last_error,
+    updated_at = EXCLUDED.updated_at
+"""
+
+
+def source_health_table_exists() -> bool:
+    row = _read_with_backoff(db.fetch_one, "SELECT to_regclass('recorder_source_health') AS reg")
+    return bool(row and row.get("reg"))
+
+
+def load_source_health() -> dict[str, dict] | None:
+    """{source: row} from recorder_source_health, or None when the table
+    does not exist yet (migration 018 PENDING)."""
+    if not source_health_table_exists():
+        return None
+    rows = _read_with_backoff(
+        db.fetch_all, f"SELECT {', '.join(_HEALTH_COLS)} FROM recorder_source_health")
+    return {r["source"]: dict(r) for r in rows}
+
+
+def save_source_health(rows: list[dict]) -> int:
+    """Upsert the changed breaker rows (one executemany)."""
+    params = [tuple(r.get(c) for c in _HEALTH_COLS) for r in rows]
+    if not params:
+        return 0
+    db.executemany(_HEALTH_UPSERT_SQL, params)
+    return len(params)
