@@ -55,7 +55,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Render's `healthCheckPath` is `/api/health` (a constant). Don't point it at `/` — that route reads the DB.
 - All DB code goes through vendored `automation/db.py` (psycopg over Supabase). Schema lives in Supabase (managed via migrations), not created at runtime. RLS is **disabled** on all tables — enabling it is a still-open task.
 - `auction_extractors/state/listings.db` stays SQLite-only and read-only to this repo.
-- **Supabase free tier goes READ-ONLY at 500 MB** (hit 2026-08-28). **The rule going forward:** any new column that stores a provider response, a description, or any other unbounded blob needs an archival path *before* it ships, not after it fills the disk.
+- **Supabase is on the Pro plan** (verified 2026-10-02: 617 MB used, writable). The free tier went READ-ONLY at 500 MB on 2026-08-28; that limit no longer applies — Pro includes 8 GB of disk per Supabase's pricing and bills per GB above it, so size is now a cost, not an outage. **The rule stays:** any new column that stores a provider response, a description, or any other unbounded blob needs an archival path *before* it ships, not after it fills the disk.
 - `archive-raw`: export → read the object back → compare keys → only then null. R2 unconfigured is a hard error, never a silent skip.
 - **Scraped data goes to the PRIVATE R2 bucket only** (`LOT_ARCHIVE_R2_BUCKET` via `r2_images.private_bucket()`/`put_private_object()`). Unset or equal to `R2_BUCKET` raises — never fall back to the public image bucket.
 - `VACUUM FULL` takes an ACCESS EXCLUSIVE lock — suspend the Render crons first if a blocked run would matter.
