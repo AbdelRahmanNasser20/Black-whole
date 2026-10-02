@@ -11,8 +11,13 @@ contract with zero egress fees. `listing_images.upload_lot_images()` already
 dispatches to `r2_images` whenever R2 is configured, so the *upload* path needs
 no thought — but **never write a new Supabase Storage URL into `inventory`**,
 and treat any row still carrying one as broken. `lot_images.storage_backend(url)`
-answers which backend a URL belongs to; `deals/archive.py` still uploads to
-Supabase and is the one module that hasn't been moved over.
+answers which backend a URL belongs to. `deals/archive.py` (scraped auction
+photos — the seller's, undisguised) uploads to the **PRIVATE** bucket
+(`LOT_ARCHIVE_R2_BUCKET`, `put_private_object`) and stores the session-walled
+proxy path `/api/deal-photos/<site>/<a>_<b>_<c>/<hash>.webp?v=…`, never a
+public URL. The proxy only accepts that exact key shape, so it can't read the
+raw archive or lot archives sitting in the same bucket. The 302 rows archived
+before this still carry dead Supabase URLs.
 
 **Resolving is centralized in `automation/lot_images.py`.** Don't hand-roll
 `DOWNLOAD_ROOT / folder_name` again. The bug that motivated this: the CRM poller

@@ -58,6 +58,44 @@ def _download(url: str) -> bytes | None:
         return None
 
 
+# Scraped auction photos are the SELLER's images, undisguised — the moat, and
+# not ours to republish. They live in the PRIVATE bucket and are served to the
+# operator only through the session-walled proxy below (`/api/` is gated by
+# auth.PROTECTED_PREFIXES). The stored URL is that relative proxy path, so the
+# admin deals tab, DealCard and the operator view of /deals/{…} keep working.
+PHOTO_PROXY_PREFIX = "/api/deal-photos/"
+
+# Exactly the shape `_storage_path` mints. The proxy refuses anything else, so
+# it can never be used to read other private objects (raw archive, lot archive).
+PHOTO_KEY_RE = re.compile(r"^[a-z0-9_-]{1,32}/\d+_\d+_\d+/[0-9a-f]{10}\.(?:webp|jpg|png)$")
+
+
+def photo_proxy_url(path: str, version: str | None = None) -> str:
+    url = PHOTO_PROXY_PREFIX + path
+    return f"{url}?v={version}" if version else url
+
+
+def fetch_private_photo(path: str) -> tuple[bytes, str] | None:
+    """(bytes, content type) of one archived photo from the private bucket, or
+    None when the key is malformed or absent. Raises when R2 / the private
+    bucket is not configured (the route turns that into a 503)."""
+    if not PHOTO_KEY_RE.match(path or ""):
+        return None
+    r2 = _r2()
+    if not r2:
+        raise RuntimeError("R2 is not configured")
+    s3, _ = r2
+    bucket = r2_images.private_bucket()
+    try:
+        obj = s3.get_object(Bucket=bucket, Key=path)
+    except Exception as e:  # noqa: BLE001 - NoSuchKey and friends
+        code = getattr(e, "response", {}).get("Error", {}).get("Code")
+        if code in ("NoSuchKey", "404", "NotFound"):
+            return None
+        raise
+    return obj["Body"].read(), _content_type(path)
+
+
 _R2: dict = {}
 
 
@@ -76,18 +114,20 @@ def _r2():
 
 
 def _upload(path: str, data: bytes) -> str:
-    """Upload one image; return its durable public URL.
+    """Upload one image; return its durable admin-proxy URL.
 
-    R2 first. Supabase Storage is 402-restricted on the shared free project —
+    R2 first, into the PRIVATE bucket (`r2_images.private_bucket()` raises when
+    unset — never the public image bucket). Supabase Storage is 402-restricted on the shared free project —
     every URL it ever minted returns Payment Required, not an image — so it
     survives only as a fallback for installs with no R2 credentials. See
     CLAUDE.md "Lot photos": never write a new Supabase Storage URL.
     """
     r2 = _r2()
     if r2:
-        s3, cfg = r2
-        if not r2_images.put_object(s3, bucket=cfg["bucket"], path=path,
-                                    data=data, content_type=_content_type(path)):
+        s3, _cfg = r2
+        bucket = r2_images.private_bucket()
+        if not r2_images.put_private_object(s3, bucket=bucket, path=path,
+                                            data=data, content_type=_content_type(path)):
             # Deliberately do NOT fall back here. The 402 is on *serving*, so a
             # Supabase write can still succeed — and then set_archived_images()
             # stamps images_archived=true over a URL that will never load, and
@@ -98,9 +138,7 @@ def _upload(path: str, data: bytes) -> str:
             # idempotently.
             raise RuntimeError(
                 f"R2 upload failed for {path!r}; refusing Supabase fallback")
-        return r2_images.public_url(
-            path, public_base=cfg["public_base"],
-            version=r2_images.content_version(data))
+        return photo_proxy_url(path, r2_images.content_version(data))
     base = os.environ["SUPABASE_STORAGE_URL"].rstrip("/")
     key = os.environ["SUPABASE_STORAGE_KEY"]
     httpx.post(f"{base}/storage/v1/object/{BUCKET}/{path}", content=data,

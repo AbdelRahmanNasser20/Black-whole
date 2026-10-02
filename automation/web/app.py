@@ -1398,9 +1398,27 @@ async def tracking_sync_now():
     return {"adopted_favorites": adopted, **report}
 
 
+@app.get("/api/deal-photos/{path:path}")
+def deal_photo(path: str):
+    """Operator-only proxy for scraped auction photos in the PRIVATE bucket
+    (deals/archive.py). /api/ is session-walled; the key must match the exact
+    shape the archiver mints, so nothing else in the bucket is reachable."""
+    from deals import archive as deals_archive
+    try:
+        got = deals_archive.fetch_private_photo(path)
+    except Exception as e:  # noqa: BLE001 - unconfigured / R2 down
+        raise HTTPException(503, f"photo store unavailable: {type(e).__name__}")
+    if got is None:
+        raise HTTPException(404, "no such photo")
+    data, ctype = got
+    return Response(data, media_type=ctype,
+                    headers={"Cache-Control": "private, max-age=604800",
+                             "X-Robots-Tag": "noindex"})
+
+
 def _deal_images(row: dict) -> list[str]:
     """Ordered image list for a lot: archived copies when we have them
-    (durable Supabase URLs), else the GovDeals CDN hero."""
+    (admin-proxy URLs into the private bucket), else the GovDeals CDN hero."""
     imgs = [row.get("archived_hero_url") or row.get("hero_image_url")]
     imgs += row.get("gallery_urls") or []
     return [u for u in imgs if u]
