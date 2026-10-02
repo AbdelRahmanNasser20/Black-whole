@@ -1,53 +1,34 @@
-{#- templates/_platform_map.html — the combined map on GET /platform (included right after the hero).
-    · Auctions = REAL, read in the browser from the existing public /deals/api/pins (policy: public_deals.py).
-    · Lots + Buyers = SAMPLE, invented, city-level: static/site/platform/{inventory,crm,map}.sample.json.
+{#- templates/_platform_map.html — the lot → buyers-in-radius map, inside the Buyers section of the
+    /platform window. Lots + Buyers = SAMPLE, invented, city-level:
+    static/site/platform/{inventory,crm,map}.sample.json. (Real auctions have their own map in the
+    Auctions section: static/site/platform/auctions.js.)
     Behaviour lives in static/site/platform/map.js, styles in map.css. Every class is prefixed pf-map-. -#}
-<section class="pf-map-section" id="map" aria-label="Map">
-  <div class="pf-map-shell" data-theme="dark">
-    <div class="pf-map-head">
-      <h2 class="pf-map-title">Everything on one map</h2>
-      <label class="pf-map-search">
-        <span class="pf-map-sr">Search the map</span>
-        <input type="search" id="pf-map-q" placeholder="Search: tables, Ohio, L-2041" autocomplete="off">
-      </label>
+<div class="pf-map-shell" id="pf-map-shell">
+  <div class="pf-map-bar">
+    <h3 class="pf-map-title">Buyers near a lot</h3>
+    {# the toggles are the legend: swatch, name, sample tag, count #}
+    <div class="pf-map-layers" role="group" aria-label="Map layers">
+      <button class="pf-map-layer is-on" type="button" data-layer="lots" aria-pressed="true">
+        <i class="pf-map-dot pf-map-dot--lots" aria-hidden="true"></i>Lots
+        <span class="pf-map-tag">sample</span>
+        <span class="pf-map-n" data-n="lots"></span>
+      </button>
+      <button class="pf-map-layer is-on" type="button" data-layer="buyers" aria-pressed="true">
+        <i class="pf-map-dot pf-map-dot--buyers" aria-hidden="true"></i>Buyers
+        <span class="pf-map-tag">sample</span>
+        <span class="pf-map-n" data-n="buyers"></span>
+      </button>
     </div>
-
-    <div class="pf-map-bar">
-      {# the toggles are the legend: swatch, name, real/sample tag, count #}
-      <div class="pf-map-layers" role="group" aria-label="Map layers">
-        <button class="pf-map-layer is-on" type="button" data-layer="auctions" aria-pressed="true">
-          <i class="pf-map-dot pf-map-dot--auctions" aria-hidden="true"></i>Auctions
-          <span class="pf-map-tag pf-map-tag--real">real</span>
-          <span class="pf-map-n" data-n="auctions"></span>
-        </button>
-        <button class="pf-map-layer is-on" type="button" data-layer="lots" aria-pressed="true">
-          <i class="pf-map-dot pf-map-dot--lots" aria-hidden="true"></i>Lots
-          <span class="pf-map-tag">sample</span>
-          <span class="pf-map-n" data-n="lots"></span>
-        </button>
-        <button class="pf-map-layer is-on" type="button" data-layer="buyers" aria-pressed="true">
-          <i class="pf-map-dot pf-map-dot--buyers" aria-hidden="true"></i>Buyers
-          <span class="pf-map-tag">sample</span>
-          <span class="pf-map-n" data-n="buyers"></span>
-        </button>
-      </div>
-      <button class="pf-map-deals" type="button" id="pf-map-deals" aria-pressed="false" disabled
-              title="Open auctions with no bids yet">Great deals</button>
+    <div class="pf-map-radius" role="group" aria-label="Match radius">
+      <button class="pf-map-r" type="button" data-mi="150" aria-pressed="false">150 mi</button>
+      <button class="pf-map-r is-on" type="button" data-mi="300" aria-pressed="true">300 mi</button>
+      <button class="pf-map-r" type="button" data-mi="500" aria-pressed="false">500 mi</button>
     </div>
-
-    <div class="pf-map" data-pf-map role="region" aria-label="Map of auctions, sample lots and sample buyers"></div>
-
-    <div class="pf-map-foot">
-      <div class="pf-map-match" id="pf-map-match" aria-live="polite">Click a lot to see buyers in range.</div>
-      <div class="pf-map-radius" role="group" aria-label="Match radius">
-        <button class="pf-map-r" type="button" data-mi="150" aria-pressed="false">150 mi</button>
-        <button class="pf-map-r is-on" type="button" data-mi="300" aria-pressed="true">300 mi</button>
-        <button class="pf-map-r" type="button" data-mi="500" aria-pressed="false">500 mi</button>
-      </div>
-    </div>
-    <p class="pf-map-note">
-      <span id="pf-map-status" aria-live="polite"></span>
-      <span class="pf-map-note-sample">Lots and buyers are sample data, city-level.</span>
-    </p>
   </div>
-</section>
+
+  <div class="pf-map" data-pf-map role="region" aria-label="Map of sample lots and sample buyers"></div>
+
+  <div class="pf-map-foot">
+    <div class="pf-map-match" id="pf-map-match" aria-live="polite">Click a lot to see buyers in range.</div>
+  </div>
+</div>

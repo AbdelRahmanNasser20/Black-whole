@@ -1,23 +1,25 @@
-{#- templates/platform.html — GET /platform: surplus-auction finder + operator desk, with a read-only demo.
+{#- templates/platform.html — GET /platform: one product window over a dark backdrop, then why + access.
     Reached by direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex.
-    Order: hero → sources strip → map (include) → console → why → access. Few words on purpose.
-    · Sources strip    = names render server-side (no DB read); platform.js adds counts + freshness from
-                         GET /platform/api/sources. If that fails the strip stays names-only.
-                         Never say "all sites": the number tracked comes from that endpoint.
-    · AI               = today it sorts lots into categories and checks comparable sold prices.
-                         Plain-English search does NOT exist yet; it is only ever labelled "coming".
-    · Deal finder tab  = LIVE, read through the existing public endpoints (/deals/api/lots, /deals/api/facets);
-                         automation/web/public_deals.py owns every exclusion, nothing is filtered here.
-                         The tab's tag says "Real data" until the feed reports open auctions, then "Live data":
-                         platform.js never claims "open right now" unless the endpoint says so.
-    · Inventory + CRM  = SAMPLE data, invented, shipped as static JSON (static/site/platform/*.sample.json).
-                         No real lot, cost, buyer, message, phone or address; inventory.storage_note never renders.
-    · Request access   = POST /contact (existing endpoint, unchanged). The lead is tagged in `message` with
-                         "[PLATFORM PAGE]" because `inquiries` has no source column (no schema change).
-    The demo console is a dark island: <div data-theme="dark"> re-declares the operator palette from tokens.css. -#}
+    Order: backdrop (hero → app window) → why → access. Few words on purpose.
+    The window is the product: a sidebar of sections, a top bar with one search field, one pane on screen.
+    · Auctions   = REAL. static/site/platform/auctions.js reads GET /platform/api/auctions and, when that
+                   route is missing, the public /deals/api/lots + /deals/api/pins. List and map stay in sync.
+                   The tag says "Real data" until the feed reports open auctions, then "Live data".
+    · Favorites  = the VISITOR's own stars, kept in this browser (localStorage, try/catch). The operator's
+                   real favorites are private and never reach this page.
+    · Inventory  = SAMPLE, invented (static/site/platform/inventory.sample.json).
+    · Buyers     = SAMPLE, invented (crm.sample.json) + the lot → buyers-in-radius map (_platform_map.html).
+                   No real lot, cost, buyer, message, phone or address; inventory.storage_note never renders.
+    · Sites      = names render server-side (no DB read); platform.js adds each site's TRUE status —
+                   Live, Paused or Planned — from /platform/api/sites (fallback /platform/api/sources).
+                   A planned site is never shown as scraped. The page never says "all sites".
+    · AI         = plain-English search does NOT exist yet; it is only ever labelled "Coming".
+    · Request access = POST /contact (existing endpoint, unchanged). The lead is tagged in `message` with
+                   "[PLATFORM PAGE]" because `inquiries` has no source column (no schema change).
+    The backdrop is a dark island: data-theme="dark" re-declares the operator palette from tokens.css. -#}
 {% extends "_public_base.html" %}
 {% block title %}Surplus auctions in one place | Black Whole{% endblock %}
-{% block meta_description %}Government surplus auction sites in one feed, plus the operator desk for inventory, listings and buyers. Read-only demo, no signup.{% endblock %}
+{% block meta_description %}Surplus auction sites in one feed, plus the operator desk for inventory, listings and buyers. Read-only demo, no signup.{% endblock %}
 {% block body_class %}page-platform{% endblock %}
 {% block head_extra %}
   <meta name="robots" content="noindex,nofollow">
@@ -27,220 +29,223 @@
 {% endblock %}
 
 {% block content %}
-<section class="pf-hero" id="top" data-theme="dark">
-  <nav class="pf-nav" aria-label="Page">
-    <a class="pf-nav-brand" href="/">◉ BLACK&nbsp;WHOLE</a>
-    <span class="pf-nav-links">
-      <a href="#map">Finder</a>
-      <a href="#demo">Desk</a>
-      <a href="#why">Why</a>
-      <a href="#access">Access</a>
-    </span>
-  </nav>
-  <div class="pf-hero-body">
-    <h1 class="pf-headline">Surplus auctions, in one place.</h1>
-    <p class="pf-hero-sub">Government surplus sites in one feed, sorted by AI, checked against sold prices.</p>
-    <a class="pf-cta" href="#map">Try it. No signup.</a>
-  </div>
-</section>
-
-{# Sources strip. Names come from the handler (a constant, no DB); platform.js fills counts + freshness. #}
-<section class="pf-sources" id="sources" data-theme="dark" aria-labelledby="pf-sources-title">
-  <div class="pf-sources-head">
-    <h2 class="pf-eyebrow" id="pf-sources-title">Sites we track</h2>
-    <span class="pf-sources-count" id="pf-sources-count" aria-live="polite"></span>
-  </div>
-  <ul class="pf-sources-list" id="pf-sources-list">
-    {% for name in platform_sources %}
-    <li class="pf-source"><span class="pf-source-name">{{ name }}</span></li>
-    {% endfor %}
-  </ul>
-</section>
-
-{# The combined map lives in its own partial + static/site/platform/map.{js,css}; keep this include. #}
-{% include "_platform_map.html" %}
-
-<section class="pf-demo" id="demo" aria-labelledby="pf-demo-title">
-  <h2 class="pf-h2" id="pf-demo-title">The operator desk</h2>
-  <div class="pf-console" data-theme="dark">
-    <div class="pf-console-bar">
-      <span class="pf-console-name">Operator console</span>
-      <span class="pf-console-mode">Read-only demo. Nothing is saved.</span>
+<div class="pf-backdrop" data-theme="dark">
+  <section class="pf-hero" id="top">
+    <nav class="pf-nav" aria-label="Page">
+      <a class="pf-nav-brand" href="/">◉ BLACK&nbsp;WHOLE</a>
+      <span class="pf-nav-links">
+        <a href="#app">Demo</a>
+        <a href="#why">Why</a>
+        <a href="#access">Access</a>
+      </span>
+    </nav>
+    <div class="pf-hero-body">
+      <h1 class="pf-headline">Surplus auctions, in one place.</h1>
+      <p class="pf-hero-sub">One feed of auctions. One desk for stock, listings and buyers.</p>
+      <a class="pf-cta" href="#app">Try it. No signup.</a>
     </div>
+  </section>
 
-    <div class="pf-tabs" role="tablist" aria-label="Demo sections">
-      <button class="pf-tab is-active" type="button" role="tab" id="pf-tab-deals"
-              aria-controls="pf-pane-deals" aria-selected="true" data-tab="deals">
-        <span class="pf-tab-name">Deal finder</span>
-        <span class="pf-tag pf-tag--live" id="pf-deals-tag">Real data</span>
-      </button>
-      <button class="pf-tab" type="button" role="tab" id="pf-tab-inventory"
-              aria-controls="pf-pane-inventory" aria-selected="false" tabindex="-1" data-tab="inventory">
-        <span class="pf-tab-name">Inventory &amp; listings</span>
-        <span class="pf-tag pf-tag--sample">Sample data</span>
-      </button>
-      <button class="pf-tab" type="button" role="tab" id="pf-tab-crm"
-              aria-controls="pf-pane-crm" aria-selected="false" tabindex="-1" data-tab="crm">
-        <span class="pf-tab-name">Buyer CRM</span>
-        <span class="pf-tag pf-tag--sample">Sample data</span>
-      </button>
-    </div>
-
-    {# ───────────── Deal finder — LIVE ───────────── #}
-    <div class="pf-pane" role="tabpanel" id="pf-pane-deals" aria-labelledby="pf-tab-deals" data-source="live">
-      <p class="pf-pane-note">
-        <strong>Real data.</strong> GovDeals auctions from the scanner's database.
-        <span id="pf-deals-stats" aria-live="polite"></span>
-      </p>
-      <form class="pf-toolbar" id="pf-deals-form" role="search" autocomplete="off">
-        <div class="pf-seg" role="group" aria-label="Auction status" id="pf-deals-status">
-          <button class="pf-seg-btn is-active" type="button" data-status="active" aria-pressed="true">Open now</button>
-          <button class="pf-seg-btn" type="button" data-status="closed" aria-pressed="false">Closed</button>
+  <section class="pf-app" id="app" aria-label="Product demo">
+    <div class="pf-win" id="pf-win">
+      <aside class="pf-side">
+        <div class="pf-side-brand">◉ Black Whole</div>
+        <div class="pf-side-nav" role="tablist" aria-label="Sections" aria-orientation="vertical">
+          <button class="pf-side-item is-active" type="button" role="tab" id="pf-tab-auctions"
+                  aria-controls="pf-pane-auctions" aria-selected="true" data-tab="auctions">
+            <i class="pf-glyph pf-glyph--auctions" aria-hidden="true"></i>
+            <span class="pf-side-name">Auctions</span>
+            <span class="pf-side-n" id="pf-n-auctions"></span>
+          </button>
+          <button class="pf-side-item" type="button" role="tab" id="pf-tab-favorites"
+                  aria-controls="pf-pane-favorites" aria-selected="false" tabindex="-1" data-tab="favorites">
+            <i class="pf-glyph pf-glyph--favorites" aria-hidden="true">★</i>
+            <span class="pf-side-name">Favorites</span>
+            <span class="pf-side-n" id="pf-n-favorites"></span>
+          </button>
+          <button class="pf-side-item" type="button" role="tab" id="pf-tab-inventory"
+                  aria-controls="pf-pane-inventory" aria-selected="false" tabindex="-1" data-tab="inventory">
+            <i class="pf-glyph pf-glyph--inventory" aria-hidden="true"></i>
+            <span class="pf-side-name">Inventory</span>
+            <span class="pf-side-tag">Sample</span>
+          </button>
+          <button class="pf-side-item" type="button" role="tab" id="pf-tab-buyers"
+                  aria-controls="pf-pane-buyers" aria-selected="false" tabindex="-1" data-tab="buyers">
+            <i class="pf-glyph pf-glyph--buyers" aria-hidden="true"></i>
+            <span class="pf-side-name">Buyers</span>
+            <span class="pf-side-tag">Sample</span>
+          </button>
+          <button class="pf-side-item" type="button" role="tab" id="pf-tab-sites"
+                  aria-controls="pf-pane-sites" aria-selected="false" tabindex="-1" data-tab="sites">
+            <i class="pf-glyph pf-glyph--sites" aria-hidden="true"></i>
+            <span class="pf-side-name">Sites</span>
+            <span class="pf-side-n" id="pf-n-sites"></span>
+          </button>
         </div>
-        <label class="pf-field pf-field--grow">
-          <span>Search titles</span>
-          <input type="search" id="pf-deals-q" placeholder="forklift, laptops, fryer">
-        </label>
-        <label class="pf-field">
-          <span>State</span>
-          <select id="pf-deals-state"><option value="">All states</option></select>
-        </label>
-        <label class="pf-field">
-          <span>Sort by</span>
-          <select id="pf-deals-sort"></select>
-        </label>
-        <label class="pf-check">
-          <input type="checkbox" id="pf-deals-nobids">
-          <span>No bids</span>
-        </label>
-      </form>
-      <div class="pf-chips" id="pf-deals-cats" role="group" aria-label="Category"></div>
-      <div class="pf-table-wrap">
-        <table class="pf-table pf-table--deals">
-          <thead>
-            <tr>
-              <th scope="col">Lot</th>
-              <th scope="col">Category</th>
-              <th scope="col" class="num" id="pf-deals-th-bid">Current bid</th>
-              <th scope="col" class="num">Per unit</th>
-              <th scope="col" class="num" title="Current bid plus the auction site's buyer's premium. Tax, pickup and freight are extra.">Est. all-in</th>
-              <th scope="col" class="num">Bids</th>
-              <th scope="col" class="num" id="pf-deals-th-end">Ends in</th>
-            </tr>
-          </thead>
-          <tbody id="pf-deals-rows" aria-live="polite">
-            <tr class="pf-row-msg"><td colspan="7">Loading auctions…</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="pf-pager">
-        <span class="pf-pager-count" id="pf-deals-count"></span>
-        <span class="pf-pager-btns">
-          <button class="pf-btn" type="button" id="pf-deals-prev" disabled>Previous</button>
-          <button class="pf-btn" type="button" id="pf-deals-next" disabled>Next</button>
-        </span>
-      </div>
-    </div>
+        <span class="pf-side-foot">Read-only demo</span>
+      </aside>
 
-    {# ───────────── Inventory & listings — SAMPLE ───────────── #}
-    <div class="pf-pane" role="tabpanel" id="pf-pane-inventory" aria-labelledby="pf-tab-inventory" data-source="sample" hidden>
-      <p class="pf-pane-note pf-pane-note--sample">
-        <strong>Sample data.</strong> These lots are invented. No real stock, costs or locations.
-      </p>
-      <form class="pf-toolbar" id="pf-inv-form" autocomplete="off">
-        <label class="pf-field pf-field--grow">
-          <span>Search lots</span>
-          <input type="search" id="pf-inv-q" placeholder="tables, Tulsa, L-2041">
-        </label>
-        <label class="pf-field">
-          <span>Status</span>
-          <select id="pf-inv-status"><option value="">Any status</option></select>
-        </label>
-        <label class="pf-field">
-          <span>Live on</span>
-          <select id="pf-inv-channel"><option value="">Any channel</option></select>
-        </label>
-        {# phones only: the column headers that sort the table are not on screen there #}
-        <label class="pf-field pf-field--phone">
-          <span>Sort by</span>
-          <select id="pf-inv-sort">
-            <option value="lot_id:desc">Newest lot</option>
-            <option value="quantity_remaining:desc">Most left</option>
-            <option value="price_per_unit:asc">Price, low to high</option>
-            <option value="price_per_unit:desc">Price, high to low</option>
-            <option value="title:asc">Item, A to Z</option>
-            <option value="status:asc">Status</option>
-          </select>
-        </label>
-      </form>
-      <div class="pf-table-wrap">
-        <table class="pf-table pf-table--inv">
-          <thead>
-            <tr>
-              <th scope="col"><button class="pf-sort" type="button" data-sort="lot_id">Lot</button></th>
-              <th scope="col"><button class="pf-sort" type="button" data-sort="title">Item</button></th>
-              <th scope="col" class="num"><button class="pf-sort" type="button" data-sort="quantity_remaining">Qty left</button></th>
-              <th scope="col" class="num"><button class="pf-sort" type="button" data-sort="price_per_unit">Price / unit</button></th>
-              <th scope="col"><button class="pf-sort" type="button" data-sort="status">Status</button></th>
-              <th scope="col" class="pf-ch-head">Site</th>
-              <th scope="col" class="pf-ch-head">FB Catalog</th>
-              <th scope="col" class="pf-ch-head">Google</th>
-              <th scope="col" class="pf-ch-head">eBay</th>
-              <th scope="col" class="pf-ch-head">FB Mkt</th>
-              <th scope="col" class="pf-ch-head">Craigslist</th>
-            </tr>
-          </thead>
-          <tbody id="pf-inv-rows">
-            <tr class="pf-row-msg"><td colspan="11">Loading sample lots…</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="pf-pager">
-        <span class="pf-pager-count" id="pf-inv-count"></span>
-        <span class="pf-legend" aria-hidden="true">
-          <span class="pf-ch pf-ch--live">live</span>
-          <span class="pf-ch pf-ch--pending_approval">needs OK</span>
-          <span class="pf-ch pf-ch--queued">queued</span>
-          <span class="pf-ch pf-ch--error">error</span>
-          <span class="pf-ch pf-ch--delisted">down</span>
-          <span class="pf-ch pf-ch--off">off</span>
-        </span>
-      </div>
-    </div>
+      <div class="pf-main">
+        <header class="pf-top">
+          <label class="pf-top-search">
+            <span class="pf-sr">Search this section</span>
+            <input type="search" id="pf-q" placeholder="Search auctions" autocomplete="off">
+          </label>
+          <span class="pf-top-mode">Nothing is saved</span>
+        </header>
 
-    {# ───────────── Buyer CRM — SAMPLE ───────────── #}
-    <div class="pf-pane" role="tabpanel" id="pf-pane-crm" aria-labelledby="pf-tab-crm" data-source="sample" hidden>
-      <p class="pf-pane-note pf-pane-note--sample">
-        <strong>Sample data.</strong> These buyers and messages are invented. No real conversations.
-      </p>
-      <form class="pf-toolbar" id="pf-crm-form" autocomplete="off">
-        <label class="pf-field">
-          <span>Stage</span>
-          <select id="pf-crm-stage"><option value="">Any stage</option></select>
-        </label>
-        <label class="pf-field">
-          <span>Channel</span>
-          <select id="pf-crm-channel"><option value="">Any channel</option></select>
-        </label>
-        <label class="pf-field">
-          <span>Sort by</span>
-          <select id="pf-crm-sort">
-            <option value="recent">Latest message</option>
-            <option value="qty">Quantity wanted</option>
-            <option value="name">Name</option>
-          </select>
-        </label>
-        <span class="pf-toolbar-count" id="pf-crm-count"></span>
-      </form>
-      <div class="pf-crm" id="pf-crm">
-        <ul class="pf-buyers" id="pf-crm-list" aria-label="Buyers">
-          <li class="pf-row-msg">Loading sample buyers…</li>
-        </ul>
-        <div class="pf-thread" id="pf-crm-thread" aria-live="polite"></div>
+        {# ───────────── Auctions — REAL: filters, list and map in sync ───────────── #}
+        <div class="pf-pane pf-pane--auctions" role="tabpanel" id="pf-pane-auctions" aria-labelledby="pf-tab-auctions" data-source="live">
+          <div class="pf-pane-head">
+            <h2 class="pf-pane-title">Auctions</h2>
+            <span class="pf-tag pf-tag--live" id="pf-au-tag">Real data</span>
+            <span class="pf-pane-count" id="pf-au-count" aria-live="polite"></span>
+          </div>
+          <form class="pf-filters" id="pf-au-form" autocomplete="off">
+            <div class="pf-seg" role="group" aria-label="Auction status" id="pf-au-status">
+              <button class="pf-seg-btn is-active" type="button" data-status="open" aria-pressed="true">Open</button>
+              <button class="pf-seg-btn" type="button" data-status="closed" aria-pressed="false">Closed</button>
+            </div>
+            <button class="pf-preset" type="button" id="pf-au-deals" aria-pressed="false"
+                    title="No bids, ending within 24 hours">Great deals</button>
+            <select id="pf-au-site" aria-label="Site"><option value="">Any site</option></select>
+            <select id="pf-au-category" aria-label="Category"><option value="">Any category</option></select>
+            <select id="pf-au-state" aria-label="State"><option value="">Any state</option></select>
+            <select id="pf-au-ending" aria-label="Ending">
+              <option value="">Ending any time</option>
+              <option value="24h">Ending in 24 h</option>
+              <option value="7d">Ending in 7 days</option>
+            </select>
+            <label class="pf-money">
+              <span>Max bid $</span>
+              <input type="number" id="pf-au-maxbid" min="0" step="50" inputmode="numeric">
+            </label>
+            <label class="pf-check">
+              <input type="checkbox" id="pf-au-nobids">
+              <span>No bids</span>
+            </label>
+            <select id="pf-au-sort" aria-label="Sort">
+              <option value="ending">Ending soonest</option>
+              <option value="bid_low">Lowest bid</option>
+              <option value="bids">Most bids</option>
+              <option value="newest">Newest</option>
+            </select>
+          </form>
+          <div class="pf-au-split">
+            <div class="pf-au-listwrap" id="pf-au-listwrap">
+              <ol class="pf-au-list" id="pf-au-list" aria-live="polite">
+                <li class="pf-row-msg">Loading auctions…</li>
+              </ol>
+              <button class="pf-btn pf-au-more" type="button" id="pf-au-more" hidden>Show more</button>
+            </div>
+            <div class="pf-au-map" id="pf-au-map" role="region" aria-label="Map of the auctions in the list"></div>
+          </div>
+        </div>
+
+        {# ───────────── Favorites — the visitor's own stars, this browser only ───────────── #}
+        <div class="pf-pane" role="tabpanel" id="pf-pane-favorites" aria-labelledby="pf-tab-favorites" data-source="visitor" hidden>
+          <div class="pf-pane-head">
+            <h2 class="pf-pane-title">Favorites</h2>
+            <span class="pf-tag">Saved in this browser</span>
+            <span class="pf-pane-count" id="pf-fav-count" aria-live="polite"></span>
+          </div>
+          <ol class="pf-au-list pf-au-list--fav" id="pf-fav-list"></ol>
+        </div>
+
+        {# ───────────── Inventory — SAMPLE ───────────── #}
+        <div class="pf-pane" role="tabpanel" id="pf-pane-inventory" aria-labelledby="pf-tab-inventory" data-source="sample" hidden>
+          <div class="pf-pane-head">
+            <h2 class="pf-pane-title">Inventory</h2>
+            <span class="pf-tag pf-tag--sample">Sample data, invented</span>
+            <span class="pf-pane-count" id="pf-inv-count"></span>
+          </div>
+          <form class="pf-filters" id="pf-inv-form" autocomplete="off">
+            <select id="pf-inv-status" aria-label="Status"><option value="">Any status</option></select>
+            <select id="pf-inv-channel" aria-label="Live on"><option value="">Any channel</option></select>
+            {# phones only: the column headers that sort the table are not on screen there #}
+            <select id="pf-inv-sort" class="pf-phone-only" aria-label="Sort">
+              <option value="lot_id:desc">Newest lot</option>
+              <option value="quantity_remaining:desc">Most left</option>
+              <option value="price_per_unit:asc">Price, low to high</option>
+              <option value="price_per_unit:desc">Price, high to low</option>
+              <option value="title:asc">Item, A to Z</option>
+              <option value="status:asc">Status</option>
+            </select>
+            <span class="pf-legend" aria-hidden="true">
+              <span class="pf-ch pf-ch--live">live</span>
+              <span class="pf-ch pf-ch--pending_approval">needs OK</span>
+              <span class="pf-ch pf-ch--queued">queued</span>
+              <span class="pf-ch pf-ch--error">error</span>
+              <span class="pf-ch pf-ch--delisted">down</span>
+              <span class="pf-ch pf-ch--off">off</span>
+            </span>
+          </form>
+          <div class="pf-table-wrap">
+            <table class="pf-table pf-table--inv">
+              <thead>
+                <tr>
+                  <th scope="col"><button class="pf-sort" type="button" data-sort="lot_id">Lot</button></th>
+                  <th scope="col"><button class="pf-sort" type="button" data-sort="title">Item</button></th>
+                  <th scope="col" class="num"><button class="pf-sort" type="button" data-sort="quantity_remaining">Qty left</button></th>
+                  <th scope="col" class="num"><button class="pf-sort" type="button" data-sort="price_per_unit">Price / unit</button></th>
+                  <th scope="col"><button class="pf-sort" type="button" data-sort="status">Status</button></th>
+                  <th scope="col" class="pf-ch-head">Site</th>
+                  <th scope="col" class="pf-ch-head">FB Catalog</th>
+                  <th scope="col" class="pf-ch-head">Google</th>
+                  <th scope="col" class="pf-ch-head">eBay</th>
+                  <th scope="col" class="pf-ch-head">FB Mkt</th>
+                  <th scope="col" class="pf-ch-head">Craigslist</th>
+                </tr>
+              </thead>
+              <tbody id="pf-inv-rows">
+                <tr class="pf-row-msg"><td colspan="11">Loading sample lots…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {# ───────────── Buyers — SAMPLE: CRM list + thread, then the lot → buyers map ───────────── #}
+        <div class="pf-pane" role="tabpanel" id="pf-pane-buyers" aria-labelledby="pf-tab-buyers" data-source="sample" hidden>
+          <div class="pf-pane-head">
+            <h2 class="pf-pane-title">Buyers</h2>
+            <span class="pf-tag pf-tag--sample">Sample data, invented</span>
+            <span class="pf-pane-count" id="pf-crm-count"></span>
+          </div>
+          <form class="pf-filters" id="pf-crm-form" autocomplete="off">
+            <select id="pf-crm-stage" aria-label="Stage"><option value="">Any stage</option></select>
+            <select id="pf-crm-channel" aria-label="Channel"><option value="">Any channel</option></select>
+            <select id="pf-crm-sort" aria-label="Sort">
+              <option value="recent">Latest message</option>
+              <option value="qty">Quantity wanted</option>
+              <option value="name">Name</option>
+            </select>
+          </form>
+          <div class="pf-crm" id="pf-crm">
+            <ul class="pf-buyers" id="pf-crm-list" aria-label="Buyers">
+              <li class="pf-row-msg">Loading sample buyers…</li>
+            </ul>
+            <div class="pf-thread" id="pf-crm-thread" aria-live="polite"></div>
+          </div>
+          {# The lot → buyers-in-radius map lives in its own partial + static/site/platform/map.{js,css}. #}
+          {% include "_platform_map.html" %}
+        </div>
+
+        {# ───────────── Sites — names from the handler (no DB); platform.js adds each TRUE status ───────────── #}
+        <div class="pf-pane" role="tabpanel" id="pf-pane-sites" aria-labelledby="pf-tab-sites" data-source="live" hidden>
+          <div class="pf-pane-head">
+            <h2 class="pf-pane-title">Sites</h2>
+            <span class="pf-pane-count" id="pf-sites-count" aria-live="polite"></span>
+          </div>
+          <ul class="pf-sites" id="pf-sites-list">
+            {% for name in platform_sources %}
+            <li class="pf-source"><span class="pf-source-name">{{ name }}</span></li>
+            {% endfor %}
+          </ul>
+        </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 
 {# ══════════ WHY LIQUIDATORS — COPY BLOCK (start) ══════════
    Three rows, pain → what this does about it, about 40 words in total. A research agent refines this

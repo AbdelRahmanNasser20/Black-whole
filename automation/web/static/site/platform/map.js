@@ -1,17 +1,12 @@
-// static/site/platform/map.js — the combined map on GET /platform.
-// Three layers on one dark map:
-//   · auctions = REAL, from the existing public endpoint /deals/api/pins (automation/web/public_deals.py owns
-//                every exclusion). Only the fields that endpoint returns are read. Loaded once, when the
-//                section scrolls into view — the query can take many seconds and may return nothing.
-//   · lots + buyers = SAMPLE, invented: inventory.sample.json + crm.sample.json joined by id with the
-//                city-level coordinates in map.sample.json.
+// static/site/platform/map.js — the lot → buyers-in-radius map in the Buyers section of the /platform window.
+// Two layers on one dark map, both SAMPLE, invented: inventory.sample.json + crm.sample.json joined by id
+// with the city-level coordinates in map.sample.json.
 // Click a sample lot → a radius ring + the sample buyers inside it, the lot↔buyer match the CRM map does.
+// (Real auctions have their own map: ./auctions.js.) Starts when the Buyers section first comes on screen.
 // Read-only: no writes, no storage. The map library is the storefront's own (/static/admin_map.js).
 import { api, esc, fmt } from '/static/ui/state.js';
 
-const PINS_URL = '/deals/api/pins';
 const SAMPLE = '/static/site/platform/';
-const PINS_TIMEOUT_MS = 60000;
 const MI = 1609.344;   // metres
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -19,13 +14,10 @@ const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 const state = {
   q: '',
-  on: { auctions: true, lots: true, buyers: true },
-  deals: false,          // "great deals" = open auctions nobody has bid on yet
+  on: { lots: true, buyers: true },
   radius: 300,
   picked: null,          // lot_id
-  auctions: [], lots: [], buyers: [],
-  auctionsState: 'idle', // idle | loading | ready | empty | error
-  capped: false,
+  lots: [], buyers: [],
 };
 let map = null, L = null, lotLayer = null, buyerLayer = null, ring = null;
 const lotMarkers = new Map(), buyerMarkers = new Map();
@@ -50,12 +42,8 @@ function miles(a, b) {
 }
 const place = (o) => [o.city, o.state].filter(Boolean).join(', ');
 const hit = (hay) => !state.q || hay.toLowerCase().includes(state.q);
-const noBids = (pt) => (pt.bid_count ?? 0) === 0;
 const plural = (n, word) => `${fmt.int(n)} ${word}${n === 1 ? '' : 's'}`;
 
-const shownAuctions = () => (state.on.auctions
-  ? state.auctions.filter((pt) => (!state.deals || noBids(pt)) && hit(`${pt.title || ''} ${pt.city || ''} ${pt.state || ''}`))
-  : []);
 const shownLots = () => (state.on.lots
   ? state.lots.filter((l) => hit(`${l.lot_id} ${l.title} ${l.city} ${l.state} ${l.status}`)) : []);
 const shownBuyers = () => (state.on.buyers
@@ -63,16 +51,6 @@ const shownBuyers = () => (state.on.buyers
 
 /* ── cards ───────────────────────────────────────────────────────────────── */
 const kind = (cls, label) => `<div class="pf-map-card-kind"><i class="pf-map-dot pf-map-dot--${cls}"></i>${label}</div>`;
-
-function auctionCard(pt) {
-  const bids = pt.bid_count ?? 0;
-  return `<div class="pf-map-card">${kind('auctions', 'Auction · real')}
-    <div class="pf-map-card-title">${esc(pt.title || 'Untitled lot')}</div>
-    <div class="pf-map-card-line">${esc(place(pt) || '—')}</div>
-    <div class="pf-map-card-num">${esc(fmt.money(pt.current_bid))} · ${bids ? esc(plural(bids, 'bid')) : 'no bids'} · ${esc(fmt.endsIn(pt.end_utc))}</div>
-    <a href="/deals/${esc(pt.asset_id)}/${esc(pt.account_id)}/${esc(pt.auction_id)}">View lot</a>
-  </div>`;
-}
 
 function lotCard(lot) {
   const m = state.picked === lot.lot_id ? matchFor(lot) : null;
@@ -97,10 +75,6 @@ function buyerCard(b) {
 const icon = (cls, id, size) => L.divIcon({
   className: `pf-map-pin pf-map-pin--${cls}`, html: `<i data-id="${esc(id)}"></i>`, iconSize: [size, size],
 });
-
-function drawAuctions() {
-  map.setPoints(shownAuctions().map((pt) => ({ lat: pt.lat, lng: pt.lng, title: pt.title || '', popup: auctionCard(pt) })));
-}
 
 function drawSample() {
   lotLayer.clearLayers(); buyerLayer.clearLayers(); lotMarkers.clear(); buyerMarkers.clear();
@@ -167,37 +141,22 @@ function pick(lotId) {
   if (ring) map.leaflet.fitBounds(ring.getBounds(), { padding: [16, 16], animate: false });
 }
 
-/* ── chrome: counts, toggles, status line ────────────────────────────────── */
-function statusText() {
-  if (state.auctionsState === 'loading') return 'Loading auctions…';
-  if (state.auctionsState === 'empty') return 'No open auctions right now.';
-  if (state.auctionsState === 'error') return 'Auctions unavailable right now.';
-  if (state.auctionsState !== 'ready') return '';
-  const free = state.auctions.filter(noBids).length;
-  return `${plural(state.auctions.length, 'open auction')}${state.capped ? ' (first 5,000)' : ''} · ${fmt.int(free)} with no bids`;
-}
-
+/* ── chrome: counts, toggles ─────────────────────────────────────────────── */
 function paintChrome() {
-  const n = { auctions: shownAuctions().length, lots: shownLots().length, buyers: shownBuyers().length };
+  const n = { lots: shownLots().length, buyers: shownBuyers().length };
   for (const btn of $$('.pf-map-layer')) {
     const key = btn.dataset.layer;
     btn.classList.toggle('is-on', state.on[key]);
     btn.setAttribute('aria-pressed', String(state.on[key]));
-    const out = $('[data-n]', btn);
-    out.textContent = key === 'auctions' && state.auctionsState !== 'ready' ? (state.auctionsState === 'loading' ? '…' : '0') : fmt.int(n[key]);
+    $('[data-n]', btn).textContent = fmt.int(n[key]);
   }
-  const deals = $('#pf-map-deals');
-  deals.disabled = state.auctionsState !== 'ready';
-  deals.classList.toggle('is-on', state.deals);
-  deals.setAttribute('aria-pressed', String(state.deals));
   for (const r of $$('.pf-map-r')) {
     const on = Number(r.dataset.mi) === state.radius;
     r.classList.toggle('is-on', on); r.setAttribute('aria-pressed', String(on));
   }
-  $('#pf-map-status').textContent = statusText();
 }
 
-function redraw() { drawAuctions(); drawSample(); paintChrome(); }
+function redraw() { drawSample(); paintChrome(); }
 
 /* ── data ────────────────────────────────────────────────────────────────── */
 async function loadSample() {
@@ -210,39 +169,13 @@ async function loadSample() {
   state.buyers = crm.buyers.filter((b) => buyerAt.has(b.id)).map((b) => ({ ...b, ...buyerAt.get(b.id) }));
 }
 
-async function loadAuctions() {
-  state.auctionsState = 'loading'; paintChrome();
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), PINS_TIMEOUT_MS);
-  try {
-    const data = await api(PINS_URL, { signal: ctl.signal });
-    state.auctions = (data.points || []).filter((pt) => pt.lat != null && pt.lng != null);
-    state.capped = !!data.capped;
-    state.auctionsState = state.auctions.length ? 'ready' : 'empty';
-  } catch {
-    state.auctions = []; state.auctionsState = 'error';
-  } finally { clearTimeout(timer); }
-  drawAuctions(); paintChrome();
-}
-
 /* ── wiring ──────────────────────────────────────────────────────────────── */
 function wire(shell) {
-  let t;
-  $('#pf-map-q').addEventListener('input', (e) => {
-    clearTimeout(t);
-    t = setTimeout(() => { state.q = e.target.value.trim().toLowerCase(); redraw(); }, 150);
-  });
   shell.addEventListener('click', (e) => {
     const layer = e.target.closest('.pf-map-layer');
     if (layer) {
       const key = layer.dataset.layer;
       state.on[key] = !state.on[key];
-      if (key === 'auctions' && !state.on.auctions) state.deals = false;
-      return redraw();
-    }
-    if (e.target.closest('#pf-map-deals')) {
-      state.deals = !state.deals;
-      if (state.deals) state.on.auctions = true;
       return redraw();
     }
     const r = e.target.closest('.pf-map-r');
@@ -262,7 +195,7 @@ async function start(el) {
     return;
   }
   L = window.L;
-  // a landing page scrolls past the map: the wheel zooms only once the map has been clicked
+  // the page scrolls past the map: the wheel zooms only once the map has been clicked
   map.leaflet.scrollWheelZoom.disable();
   map.leaflet.on('click', () => map.leaflet.scrollWheelZoom.enable());
   el.addEventListener('mouseleave', () => map.leaflet.scrollWheelZoom.disable());
@@ -272,7 +205,6 @@ async function start(el) {
   drawSample(); paintChrome();
   fitAll();
   el.dataset.ready = '1';
-  loadAuctions();   // not awaited: the sample layers work while this runs, and if it comes back empty
 }
 
 const el = document.querySelector('[data-pf-map]');

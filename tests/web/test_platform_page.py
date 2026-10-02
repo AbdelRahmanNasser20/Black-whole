@@ -1,12 +1,13 @@
-"""GET /platform — the software page with the read-only demo.
+"""GET /platform — the software page: one product window (read-only demo) over a dark backdrop.
 
 What this guards:
-  · the page renders with NO database (the handler reads nothing; the Deal finder calls the existing
-    public /deals/api/* endpoints from the browser);
+  · the page renders with NO database (the handler reads nothing; the window's sections fetch from the
+    browser: /platform/api/auctions with the public /deals/api/* as fallback, /platform/api/sites);
   · the hero stays almost wordless, the sections keep their order, and the copy never claims "all" sites
     or a natural-language search that does not exist yet;
+  · the window has its five sections, the two sample ones are labelled as sample in the server-rendered
+    HTML (not only by JS), and Favorites is the visitor's own stars in this browser — never the operator's;
   · GET /platform/api/sources is public, read-only, memoised, and answers names only when the read fails;
-  · the two sample tabs are labelled as sample data in the server-rendered HTML, not only by JS;
   · it is reachable by direct URL only — not in the storefront nav/footer, not in the sitemap, noindex;
   · the sample JSON is invented and stays that way: no contact details, no private fields, and the same
     vocabulary as the real ledger (statuses, channels, channel states);
@@ -32,6 +33,8 @@ app_module = sys.modules["automation.web.app"]
 WEB = Path("automation/web")
 SAMPLE_DIR = WEB / "static/site/platform"
 JS = (WEB / "static/site/platform.js").read_text()
+AUCTIONS_JS = (SAMPLE_DIR / "auctions.js").read_text()
+SECTIONS = ("auctions", "favorites", "inventory", "buyers", "sites")
 TEMPLATE = (WEB / "templates/platform.html").read_text()
 LEAD_TAG = "[PLATFORM PAGE]"
 
@@ -71,9 +74,17 @@ def _page(no_db=None) -> str:
 
 def test_platform_renders_without_a_database(no_db):
     html = _page()
-    for tab in ("Deal finder", "Inventory &amp; listings", "Buyer CRM"):
-        assert tab in html
-    assert 'id="pf-pane-deals"' in html and 'id="pf-pane-inventory"' in html and 'id="pf-pane-crm"' in html
+    assert html.count('id="pf-win"') == 1, "one product window"
+    for name in SECTIONS:
+        assert f'id="pf-tab-{name}"' in html and f'id="pf-pane-{name}"' in html, name
+    # application chrome: a sidebar of sections and a top bar with one search field
+    assert 'class="pf-side"' in html and 'class="pf-top"' in html and 'id="pf-q"' in html
+    side = html.split('class="pf-side-nav"', 1)[1].split("</aside>", 1)[0]
+    assert [m for m in re.findall(r'data-tab="(\w+)"', side)] == list(SECTIONS)
+    # Auctions is the section on screen; every other pane starts hidden
+    for name in SECTIONS:
+        pane = html.split(f'id="pf-pane-{name}"', 1)[1].split(">", 1)[0]
+        assert ("hidden" in pane) == (name != "auctions"), name
     assert "/static/site/platform.js" in html and "/static/site/platform.css" in html
 
 
@@ -82,20 +93,52 @@ def test_handler_is_plain_def_and_public():
     assert not auth_svc.PROTECTED_PREFIXES or not "/platform".startswith(auth_svc.PROTECTED_PREFIXES)
 
 
-def test_sample_tabs_are_labelled_in_the_html(no_db):
+def test_sample_sections_are_labelled_in_the_html(no_db):
     html = _page()
-    # one live pane, two sample panes — marked in the markup, not left to JavaScript
-    assert html.count('data-source="live"') == 1
+    # two sample panes, one visitor pane (favorites) — marked in the markup, not left to JavaScript
     assert html.count('data-source="sample"') == 2
-    for pane in ("inventory", "crm"):
+    assert html.count('data-source="visitor"') == 1
+    for pane in ("inventory", "buyers"):
         block = html.split(f'id="pf-pane-{pane}"', 1)[1].split('role="tabpanel"', 1)[0]
         assert 'data-source="sample"' in block.split(">", 1)[0]
-        assert "<strong>Sample data.</strong>" in block
-        assert "invented" in block
+        head = block.split('class="pf-pane-head"', 1)[1].split("</div>", 1)[0]
+        assert "Sample data" in head and "invented" in head
         tab = html.split(f'id="pf-tab-{pane}"', 1)[1].split("</button>", 1)[0]
-        assert "Sample data" in tab
-    deals_tab = html.split('id="pf-tab-deals"', 1)[1].split("</button>", 1)[0]
-    assert "Sample data" not in deals_tab
+        assert "Sample" in tab
+    for pane in ("auctions", "favorites", "sites"):
+        block = html.split(f'id="pf-pane-{pane}"', 1)[1].split('role="tabpanel"', 1)[0]
+        assert "Sample" not in block.split('class="pf-pane-head"', 1)[1].split("</div>", 1)[0], pane
+        assert "Sample" not in html.split(f'id="pf-tab-{pane}"', 1)[1].split("</button>", 1)[0], pane
+    auctions = html.split('id="pf-pane-auctions"', 1)[1].split('role="tabpanel"', 1)[0]
+    assert 'data-source="live"' in auctions.split(">", 1)[0] and "Real data" in auctions
+
+
+def test_auctions_view_has_every_filter_a_list_and_a_map(no_db):
+    html = _page()
+    pane = html.split('id="pf-pane-auctions"', 1)[1].split('role="tabpanel"', 1)[0]
+    for control in ("pf-au-status", "pf-au-deals", "pf-au-site", "pf-au-category", "pf-au-state",
+                    "pf-au-ending", "pf-au-maxbid", "pf-au-nobids", "pf-au-sort"):
+        assert f'id="{control}"' in pane, control
+    assert 'data-status="open"' in pane and 'data-status="closed"' in pane
+    assert 'value="24h"' in pane and 'value="7d"' in pane
+    for sort in ("ending", "bid_low", "bids", "newest"):
+        assert f'<option value="{sort}">' in pane, sort
+    assert 'id="pf-au-list"' in pane and 'id="pf-au-map"' in pane
+    # the text search is the window's one search field, in the top bar
+    assert 'type="search"' not in pane
+
+
+def test_favorites_are_the_visitors_own_stars():
+    # kept in this browser, every storage call guarded, and nothing reads the operator's favorites
+    assert "const STAR_KEY = 'pf.stars.v1';" in AUCTIONS_JS
+    assert AUCTIONS_JS.count("window.localStorage.") == 2
+    for call in ("window.localStorage.getItem(STAR_KEY)", "window.localStorage.setItem(STAR_KEY"):
+        before = AUCTIONS_JS.split(call, 1)[0]
+        assert before.rstrip().endswith("try {") or "try {" in before.rsplit("\n", 3)[-1] or "try {" in before[-120:], call
+    for src in (JS, AUCTIONS_JS):
+        assert "favorite" not in "".join(re.findall(r"api\([^)]*\)", src)).lower()
+        assert "auction_favorites" not in src and "/favorites" not in src
+    assert "localStorage" not in JS and "sessionStorage" not in JS + AUCTIONS_JS
 
 
 def test_page_is_noindex_and_out_of_the_sitemap(no_db, monkeypatch):
@@ -123,9 +166,9 @@ def test_copy_makes_no_price_or_customer_claims(no_db):
     for banned in ("testimonial", "trusted by", "per month", "/mo", "customers use", "join ", "free trial"):
         assert banned not in html, banned
     assert "no price list" in html
-    # No number about the feed is baked into the template: those come from /deals/api/facets at runtime.
-    stats = TEMPLATE.split('id="pf-deals-stats"', 1)[1].split("</span>", 1)[0]
-    assert not re.search(r"\d", stats)
+    # No number about the feed is baked into the template: the counts come from the endpoints at runtime.
+    for slot in ("pf-au-count", "pf-n-auctions", "pf-sites-count", "pf-n-sites"):
+        assert TEMPLATE.split(f'id="{slot}"', 1)[1].split("</span>", 1)[0].split(">", 1)[1].strip() == "", slot
 
 
 # ───────────────────────── hero, order, words ─────────────────────────
@@ -134,7 +177,7 @@ def _words(text: str) -> list[str]:
     return re.sub(r"<[^>]+>", " ", text).split()
 
 
-def test_hero_is_almost_wordless_and_jumps_to_the_map(no_db):
+def test_hero_is_almost_wordless_and_jumps_to_the_window(no_db):
     html = _page()
     hero = html.split('class="pf-hero"', 1)[1].split("</section>", 1)[0]
     headline = hero.split('class="pf-headline">', 1)[1].split("</h1>", 1)[0]
@@ -142,20 +185,25 @@ def test_hero_is_almost_wordless_and_jumps_to_the_map(no_db):
     assert 1 <= len(_words(headline)) <= 6, headline
     assert 1 <= len(_words(sub)) <= 14, sub
     assert hero.count("<p") == 1, "one sub-line, no lede paragraphs"
-    assert hero.count('class="pf-cta"') == 1 and '<a class="pf-cta" href="#map">' in hero
-    # the hero must not depend on hero.jpg existing: a colour and gradients sit under it
+    assert hero.count('class="pf-cta"') == 1 and '<a class="pf-cta" href="#app">' in hero
+    # the backdrop must not depend on hero.jpg existing: a colour and gradients sit under it
     css = (WEB / "static/site/platform.css").read_text()
-    rule = css.split(".pf-hero {", 1)[1].split("}", 1)[0]
+    rule = css.split(".pf-backdrop {", 1)[1].split("}", 1)[0]
     assert "background-color" in rule and "url(/static/site/platform/hero.jpg)" in rule
     assert "linear-gradient" in rule and "radial-gradient" in rule
 
 
 def test_sections_come_in_the_agreed_order(no_db):
     html = _page()
-    marks = ['class="pf-hero"', 'id="sources"', 'id="map"', 'id="demo"', 'id="why"', 'id="access"']
+    marks = ['class="pf-hero"', 'id="app"', 'id="why"', 'id="access"']
     at = [html.index(m) for m in marks]
     assert at == sorted(at), dict(zip(marks, at))
-    # the map agent's three hooks stay in the template
+    # the hero and the window share one dark backdrop; the window sits directly under the hero
+    stage = html.split('class="pf-backdrop" data-theme="dark"', 1)[1].split('id="why"', 1)[0]
+    assert 'class="pf-hero"' in stage and 'id="pf-win"' in stage
+    # no separate map section or tabbed console any more: the window replaced both
+    assert 'id="map"' not in html and 'id="demo"' not in html and "pf-console" not in html
+    # the buyers map keeps its own partial + files
     assert '/static/site/platform/map.css' in html and '/static/site/platform/map.js' in html
     assert '{% include "_platform_map.html" %}' in TEMPLATE
     for h2 in re.findall(r"<h2[^>]*>(.*?)</h2>", TEMPLATE, re.S):
@@ -167,8 +215,8 @@ def test_copy_stays_inside_the_honesty_limits(no_db):
     text = " ".join(_words(html.split('<main', 1)[1].split("</main>", 1)[0])).lower()
     for banned in ("all surplus", "all sites", "all auction", "every site", "every auction", "every surplus"):
         assert banned not in text, banned
-    # no count of sites is baked in: it comes from /platform/api/sources at runtime
-    strip = TEMPLATE.split('id="sources"', 1)[1].split("</section>", 1)[0]
+    # no count of sites is baked in: it comes from the sites endpoint at runtime
+    strip = TEMPLATE.split('id="pf-pane-sites"', 1)[1].split("</ul>", 1)[0]
     assert not re.search(r"\d", " ".join(_words(re.sub(r"\{[#%].*?[#%]\}", "", strip, flags=re.S))))
     # natural-language search does not exist yet: only ever labelled as coming
     why = html.split('id="why"', 1)[1].split("</section>", 1)[0]
@@ -205,7 +253,7 @@ def _snapshot_rows():
 
 
 def test_sources_strip_renders_names_without_a_database(no_db):
-    strip = _page().split('id="sources"', 1)[1].split("</section>", 1)[0]
+    strip = _page().split('id="pf-sites-list"', 1)[1].split("</ul>", 1)[0]
     for name in app_module._PLATFORM_SOURCE_NAMES.values():
         assert f'<span class="pf-source-name">{name}</span>' in strip
 
@@ -262,11 +310,17 @@ def test_sources_endpoint_failure_gives_names_only_and_is_not_cached(monkeypatch
     assert len(calls) == 1
 
 
-def test_script_fills_the_strip_from_the_public_endpoint_only():
-    assert "api('/platform/api/sources')" in JS
-    block = JS.split("async function initSources()", 1)[1].split("\n}\n", 1)[0]
-    assert "catch { return; }" in block, "a failed read leaves the server-rendered names alone"
-    assert "data.tracked" in block and "esc(s.name)" in block
+def test_script_shows_each_site_with_its_true_status():
+    block = JS.split("async function fetchSites()", 1)[1].split("\n}\n", 1)[0]
+    # the new route first, the older one as fallback, names only when both fail
+    assert block.index("api('/platform/api/sites')") < block.index("api('/platform/api/sources')")
+    assert "return null;" in block
+    assert "const SITE_STATUS = {live: 'Live', paused: 'Paused', planned: 'Planned'};" in JS
+    render = JS.split("function renderSites()", 1)[1].split("\n}\n", 1)[0]
+    assert "if (!sites.rows) return;" in render, "a failed read leaves the server-rendered names alone"
+    # a planned site is never shown as scraped: no lot count, no last-seen
+    assert "const scraped = status === 'live' || status === 'paused';" in render
+    assert render.count("scraped &&") == 2 and "esc(s.name)" in render
 
 
 # ───────────────────────── the sample data ─────────────────────────
@@ -341,27 +395,45 @@ def test_crm_sample_has_no_contact_details(inv_sample, crm_sample):
 
 # ───────────────────────── the script ─────────────────────────
 
-def test_script_reads_only_the_public_deals_endpoints():
-    assert "'/deals/api/lots?'" in JS and "'/deals/api/facets'" in JS
-    # never the auth-walled admin API, and never a second sellable-lots or inventory read
-    assert not re.search(r"['\"`]/api/", JS)
-    assert "/listings" not in JS and "/catalog" not in JS
+def test_scripts_read_only_public_endpoints():
+    assert "const PRIMARY_URL = '/platform/api/auctions';" in AUCTIONS_JS
+    for url in ("'/deals/api/lots'", "'/deals/api/pins'", "'/deals/api/facets'"):
+        assert url in AUCTIONS_JS, url
+    for src in (JS, AUCTIONS_JS):
+        # never the auth-walled admin API, and never a second sellable-lots or inventory read
+        assert not re.search(r"['\"`]/api/", src)
+        assert "/listings" not in src and "/catalog" not in src and "/subscribe" not in src
+        for verb in ("PATCH", "PUT", "DELETE"):
+            assert verb not in src
     # the only write is the request-access POST
     assert JS.count("method: 'POST'") == 1 and "api('/contact'" in JS
-    assert "/subscribe" not in JS
-    for verb in ("PATCH", "PUT", "DELETE"):
-        assert verb not in JS
-    assert "localStorage" not in JS and "sessionStorage" not in JS
+    assert "POST" not in AUCTIONS_JS
+    assert "fetch(" not in AUCTIONS_JS.replace("fetchPrimary(", "").replace("fetchFallback(", ""), "go through ui/state.js api()"
+
+
+def test_auctions_fall_back_when_the_new_route_is_missing():
+    load = AUCTIONS_JS.split("async function load(", 1)[1].split("\n}\n", 1)[0]
+    assert load.index("fetchPrimary(page, ac.signal)") < load.index("fetchFallback(page, ac.signal)")
+    assert "view.mode = 'fallback';" in load
+    # the fallback reads only columns the public endpoint returns
+    used = set(re.findall(r"\br\.([a-z_]+)", AUCTIONS_JS.split("function fromDeal(r)", 1)[1].split("\n}\n", 1)[0]))
+    cols = {c.strip() for c in public_deals.PUBLIC_COLS.split(",")} | {"govdeals_url"}
+    assert used and used <= cols, used - cols
+    # an auction with no coordinates is listed, just without a pin
+    assert "filter((it) => it.lat != null && it.lng != null)" in AUCTIONS_JS
+    # "great deals" is a preset over the server's own filters: no bids + ending within 24 hours
+    assert "{ status: 'open', noBids: true, ending: '24h', sort: 'ending' }" in AUCTIONS_JS
+    assert "p.set('no_bids', '1')" in AUCTIONS_JS and "p.set('max_bids', '0')" in AUCTIONS_JS
 
 
 def test_script_never_claims_live_without_the_endpoint_saying_so():
-    # The tab ships as "Real data"; only paintDealsTruth() may upgrade it, from an endpoint count.
-    tag = TEMPLATE.split('id="pf-deals-tag"', 1)[1].split("</span>", 1)[0]
+    # The pane ships as "Real data"; only paintTruth() may upgrade it, once the endpoint reports open auctions.
+    tag = TEMPLATE.split('id="pf-au-tag"', 1)[1].split("</span>", 1)[0]
     assert "Real data" in tag
-    assert "live ? 'Live data' : 'Real data'" in JS
+    assert "live ? 'Live data' : 'Real data'" in AUCTIONS_JS
+    assert "if (f.status === 'open' && res.total > 0) view.sawOpen = true;" in AUCTIONS_JS
     # the slow closed-archive query runs on a click, never on page load
-    assert "onOpen.deals = () => { loadDealFacets(); loadDeals(); };" in JS
-    assert "status: 'active'" in JS.split("const deals = ", 1)[1].split(";", 1)[0]
+    assert "status: 'open'" in AUCTIONS_JS.split("const f = ", 1)[1].split(";", 1)[0]
 
 
 # ───────────────────────── the form ─────────────────────────

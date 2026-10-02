@@ -1,42 +1,17 @@
-/* static/site/platform/map.css — the combined map on GET /platform.
-   A dark island like the demo console: .pf-map-shell carries data-theme="dark", so every colour below
-   is the operator palette from ui/tokens.css. No literal colours here. Every class is prefixed pf-map-. */
+/* static/site/platform/map.css — the lot → buyers-in-radius map, inside the Buyers section of the
+   /platform window. The window is already a dark island (data-theme="dark" on the backdrop), so every colour
+   below is the operator palette from ui/tokens.css. No literal colours here. Every class is prefixed pf-map-. */
 
-.pf-map-section {
-  /* light-theme values, resolved here so the dark shell can still reach them */
-  --pf-map-page-ink: var(--text);
-  --pf-map-page-accent: var(--accent);
-  padding: 0 48px 56px 48px; scroll-margin-top: 84px;
-}
 .pf-map-shell {
+  margin-top: 16px; min-width: 0;
   background: var(--bg); color: var(--text);
-  font-family: var(--sans); font-size: 14px; line-height: 1.45;
-  border: 1.5px solid var(--pf-map-page-ink);
-  box-shadow: 10px 10px 0 0 var(--pf-map-page-accent);
-  min-width: 0;
+  border: 1px solid var(--border); border-radius: 10px; overflow: hidden;
 }
-.pf-map-shell :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.pf-map-shell button { font: inherit; cursor: pointer; border-radius: var(--radius); }
-.pf-map-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-
-/* ── head: title + search ── */
-.pf-map-head {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px 24px; flex-wrap: wrap;
-  padding: 14px 16px; border-bottom: 1px solid var(--border);
-}
+.pf-map-shell button { font: inherit; cursor: pointer; border-radius: 8px; }
 .pf-map-title {
-  margin: 0; font-family: var(--sans); font-weight: 600; font-size: 20px; line-height: 1.2;
+  margin: 0 auto 0 0; font-family: var(--sans); font-weight: 600; font-size: 15px; line-height: 1.2;
   letter-spacing: 0; text-transform: none; color: var(--text);
 }
-.pf-map-search { flex: 1 1 260px; max-width: 420px; min-width: 0; }
-.pf-map-search input {
-  width: 100%; box-sizing: border-box; padding: 9px 12px;
-  background: var(--surface); color: var(--text);
-  border: 1px solid var(--border-strong); border-radius: var(--radius);
-  font: 400 14px/1.3 var(--sans);
-}
-.pf-map-search input::placeholder { color: var(--muted); }
-.pf-map-search input:focus { border-color: var(--accent); outline: none; }
 
 /* ── layer toggles (also the legend) ── */
 .pf-map-bar {
@@ -44,7 +19,7 @@
   padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .pf-map-layers { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
-.pf-map-layer, .pf-map-deals, .pf-map-r {
+.pf-map-layer, .pf-map-r {
   display: inline-flex; align-items: center; gap: 7px;
   padding: 6px 10px; min-height: 34px;
   background: transparent; color: var(--muted);
@@ -53,23 +28,20 @@
 }
 .pf-map-layer.is-on { color: var(--text); background: var(--surface-2); }
 .pf-map-layer:not(.is-on) .pf-map-dot { opacity: .3; }
-.pf-map-layer:hover, .pf-map-deals:hover:not(:disabled), .pf-map-r:hover { border-color: var(--accent); color: var(--text); }
-.pf-map-deals.is-on, .pf-map-r.is-on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.pf-map-deals:disabled { opacity: .45; cursor: not-allowed; }
+.pf-map-layer:hover, .pf-map-r:hover { border-color: var(--accent); color: var(--text); }
+.pf-map-r.is-on { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .pf-map-dot { display: inline-block; width: 10px; height: 10px; flex: none; }
-.pf-map-dot--auctions { background: var(--accent); }
 .pf-map-dot--lots { background: var(--success); transform: rotate(45deg); }
 .pf-map-dot--buyers { background: var(--info); border-radius: 50%; }
 .pf-map-tag {
   font: 400 10px/1 var(--mono); text-transform: uppercase; letter-spacing: .06em;
   padding: 3px 5px; border: 1px solid var(--border-strong); color: var(--muted);
 }
-.pf-map-tag--real { color: var(--accent); border-color: var(--accent); }
 .pf-map-n { font: 400 12px/1 var(--mono); font-variant-numeric: tabular-nums; color: var(--muted); }
 .pf-map-n:empty { display: none; }
 
 /* ── the map ── */
-.pf-map { height: 520px; width: 100%; background: var(--surface); z-index: 0; }
+.pf-map { height: 420px; width: 100%; background: var(--surface); z-index: 0; }
 .pf-map-pin { background: transparent; border: 0; }
 .pf-map-pin i {
   display: block; width: 100%; height: 100%; box-sizing: border-box;
@@ -108,26 +80,12 @@
 .pf-map-clear:hover { color: var(--text); border-color: var(--accent); }
 .pf-map-radius { display: flex; gap: 6px; flex: none; }
 .pf-map-r { font-family: var(--mono); font-size: 12px; }
-.pf-map-note {
-  display: flex; justify-content: space-between; gap: 4px 16px; flex-wrap: wrap;
-  margin: 0; padding: 8px 16px; border-top: 1px solid var(--border);
-  font: 400 12px/1.4 var(--mono); color: var(--muted);
-}
 
-@media (max-width: 900px) {
-  .pf-map-section { padding: 0 24px 48px 24px; }
-  .pf-map-shell { box-shadow: 6px 6px 0 0 var(--pf-map-page-accent); }
-  .pf-map { height: 460px; }
-}
 @media (max-width: 600px) {
-  .pf-map-section { padding: 0 0 40px 0; }
-  .pf-map-shell { box-shadow: none; border-left: 0; border-right: 0; }
-  .pf-map-head, .pf-map-bar, .pf-map-foot, .pf-map-note { padding-left: 12px; padding-right: 12px; }
-  .pf-map-title { font-size: 18px; }
-  .pf-map-search { max-width: none; flex-basis: 100%; }
-  .pf-map-search input { font-size: 16px; }   /* below 16px iOS zooms the page on focus */
-  .pf-map { height: 380px; }
-  .pf-map-layer, .pf-map-deals { padding: 6px 8px; gap: 5px; }
+  .pf-map-bar, .pf-map-foot { padding-left: 12px; padding-right: 12px; }
+  .pf-map-title { flex-basis: 100%; }
+  .pf-map { height: 340px; }
+  .pf-map-layer { padding: 6px 8px; gap: 5px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pf-map-pin i { transition: none; }

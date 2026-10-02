@@ -65,6 +65,7 @@ from .. import freight_estimate
 from .. import freight_log
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import platform_api
 from . import public_deals
 from . import rate_limit
 from . import public_map
@@ -1607,6 +1608,34 @@ def public_platform_sources():
             "last_seen": seen.isoformat() if seen else None,
         })
     return {"ok": True, "tracked": len(out), "live": sum(1 for s in out if s["live"]), "sources": out}
+
+
+@app.get("/platform/api/sites")
+def public_platform_sites():
+    """Every auction site in scope: `live` / `paused` (an adapter exists) or
+    `planned` (roadmap, nothing scraped, `lots: null`). Public, read-only, shares
+    the memoised read behind /platform/api/sources. 503 when that read fails —
+    never a guessed status. Policy: platform_api.py."""
+    try:
+        return platform_api.sites(_platform_source_rows)
+    except Exception:
+        log.warning("platform sites read failed", exc_info=True)
+        return JSONResponse({"ok": False, "error": "unavailable"}, status_code=503)
+
+
+@app.get("/platform/api/auctions")
+def public_platform_auctions(
+    q: str | None = None, site: str | None = None, category: str | None = None,
+    state: str | None = None, status: str = "open", no_bids: str | None = None,
+    max_bid: str | None = None, ending: str | None = None, sort: str = "ending",
+    page: int = 1, per_page: int = 50,
+):
+    """One auctions view across every site the recorder observes. Public and
+    read-only (deliberately not under the auth-walled `/api/`); the read model,
+    its allow-list and the public_deals exclusions live in platform_api.py."""
+    return platform_api.auctions(
+        q=q, site=site, category=category, state=state, status=status, no_bids=no_bids,
+        max_bid=max_bid, ending=ending, sort=sort, page=page, per_page=per_page)
 
 
 @app.get("/robots.txt", response_class=PlainTextResponse)

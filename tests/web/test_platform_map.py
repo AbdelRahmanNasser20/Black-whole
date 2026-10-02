@@ -1,12 +1,12 @@
-"""The combined map on GET /platform (templates/_platform_map.html + static/site/platform/map.*).
+"""The lot → buyers-in-radius map in the Buyers section of the GET /platform window
+(templates/_platform_map.html + static/site/platform/map.*).
 
 What this guards:
-  · the section renders with the page and labels the two sample layers as sample in the server HTML;
-  · the auction layer reads only the existing public /deals/api/pins, lazily, and only fields it returns;
-  · map.sample.json is coordinates only, city-level, and agrees with the sample tabs (same ids);
+  · the map renders inside the Buyers pane and labels both layers as sample in the server HTML;
+  · it shows sample lots and sample buyers only — real auctions have their own map (auctions.js);
+  · map.sample.json is coordinates only, city-level, and agrees with the sample sections (same ids);
   · the map's own files stay inside their lane: pf-map- classes, token colours, no writes.
 """
-import inspect
 import json
 import re
 from pathlib import Path
@@ -25,11 +25,6 @@ JS = (SAMPLE_DIR / "map.js").read_text()
 CSS = (SAMPLE_DIR / "map.css").read_text()
 GEO = json.loads((SAMPLE_DIR / "map.sample.json").read_text())
 
-# what public_deals.fetch_pins returns per point
-PIN_FIELDS = {"asset_id", "account_id", "auction_id", "title", "current_bid", "bid_count",
-              "end_utc", "city", "state", "lat", "lng", "govdeals_url"}
-
-
 @pytest.fixture(autouse=True)
 def _no_auth(monkeypatch):
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
@@ -45,23 +40,26 @@ def _client():
 def _section() -> str:
     r = _client().get("/platform")
     assert r.status_code == 200
-    return r.text.split('<section class="pf-map-section"', 1)[1].split("</section>", 1)[0]
+    pane = r.text.split('id="pf-pane-buyers"', 1)[1].split('role="tabpanel"', 1)[0]
+    return pane.split('<div class="pf-map-shell"', 1)[1]
 
 
 # ───────────────────────── the section ─────────────────────────
 
-def test_map_section_renders_on_the_page(monkeypatch):
+def test_map_renders_inside_the_buyers_section(monkeypatch):
     def boom(*a, **k):
-        raise AssertionError("rendering the map section must not query auctions")
+        raise AssertionError("rendering the page must not query auctions")
     monkeypatch.setattr(public_deals, "fetch_pins", boom)
     html = _client().get("/platform").text
-    assert "data-pf-map" in html
+    assert html.count("data-pf-map") == 1
     assert "/static/site/platform/map.js" in html and "/static/site/platform/map.css" in html
     sec = _section()
-    assert 'data-theme="dark"' in sec
-    for layer in ("auctions", "lots", "buyers"):
+    assert "data-pf-map" in sec and 'id="pf-map-match"' in sec
+    for layer in ("lots", "buyers"):
         assert f'data-layer="{layer}"' in sec
-    assert 'id="pf-map-q"' in sec and 'id="pf-map-deals"' in sec
+    assert 'data-layer="auctions"' not in sec
+    for mi in ("150", "300", "500"):
+        assert f'data-mi="{mi}"' in sec
 
 
 def test_sample_layers_are_labelled_in_the_html():
@@ -69,15 +67,12 @@ def test_sample_layers_are_labelled_in_the_html():
     for layer in ("lots", "buyers"):
         btn = sec.split(f'data-layer="{layer}"', 1)[1].split("</button>", 1)[0]
         assert "sample" in btn, layer
-    auctions = sec.split('data-layer="auctions"', 1)[1].split("</button>", 1)[0]
-    assert "sample" not in auctions and "real" in auctions
-    assert "sample data" in sec.lower()
-    # the page test counts the demo panes by this attribute — the map must not add to it
+    # the page test counts the window's panes by this attribute — the map must not add to it
     assert "data-source=" not in PARTIAL
 
 
 def test_few_words():
-    title = re.search(r'<h2 class="pf-map-title">(.*?)</h2>', PARTIAL, re.S).group(1)
+    title = re.search(r'<h3 class="pf-map-title">(.*?)</h3>', PARTIAL, re.S).group(1)
     assert 1 <= len(title.split()) <= 4
     body = re.sub(r"\{#.*?#\}", "", PARTIAL, flags=re.S)
     for p in re.findall(r"<p\b[^>]*>(.*?)</p>", body, re.S):
@@ -132,35 +127,22 @@ def test_map_sample_is_coordinates_only_and_city_level():
 
 # ───────────────────────── the script ─────────────────────────
 
-def test_script_reads_only_the_public_pins_and_the_sample_files():
-    assert "const PINS_URL = '/deals/api/pins';" in JS
+def test_script_reads_only_the_sample_files():
     assert not re.search(r"['\"`]/api/", JS), "never the auth-walled admin API"
+    assert "/deals/api/" not in JS and "/platform/api/" not in JS, "real auctions live in auctions.js"
     assert "fetch(" not in JS, "go through ui/state.js api()"
     for verb in ("POST", "PATCH", "PUT", "DELETE"):
         assert verb not in JS
     assert "localStorage" not in JS and "sessionStorage" not in JS
-    # the pins query is never widened from here: no query string, no closed/all status
-    assert "api(PINS_URL, {" in JS and "PINS_URL +" not in JS and "status=" not in JS
     for name in ("inventory.sample.json", "crm.sample.json", "map.sample.json"):
         assert name in JS
 
 
-def test_script_uses_only_fields_the_endpoint_returns():
-    src = inspect.getsource(public_deals.fetch_pins)
-    used = set(re.findall(r"\bpt\.([a-z_]+)", JS))
-    assert used and used <= PIN_FIELDS, used - PIN_FIELDS
-    for field in used:
-        assert field in src, f"{field} is not returned by fetch_pins"
-    # "great deals" is the ledger's own no-bid rule: bid_count == 0, nothing invented
-    assert "const noBids = (pt) => (pt.bid_count ?? 0) === 0;" in JS
-
-
-def test_auctions_load_lazily_and_never_block_the_sample_layers():
+def test_map_starts_when_the_buyers_section_comes_on_screen():
     assert "IntersectionObserver" in JS
     start = JS.split("async function start(el)", 1)[1].split("\n}\n", 1)[0]
-    assert "await loadAuctions" not in start and "loadAuctions();" in start
-    assert start.index("drawSample()") < start.index("loadAuctions();")
-    assert "'No open auctions right now.'" in JS
+    assert "drawSample()" in start and "fitAll()" in start
+    assert "'Click a lot to see buyers in range.'" in JS
 
 
 def test_script_reuses_the_storefront_map_library():

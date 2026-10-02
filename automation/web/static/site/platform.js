@@ -1,25 +1,26 @@
-// static/site/platform.js — the read-only demo on GET /platform. ES module.
+// static/site/platform.js — the product window on GET /platform. ES module.
 //
-//   Deal finder  LIVE    reads /deals/api/facets + /deals/api/lots through UI.api. Those endpoints are the
-//                        public policy (automation/web/public_deals.py); nothing is filtered or widened here.
-//                        Every number on the page comes from them; with no open auctions the tab says so.
-//   Inventory    SAMPLE  static/site/platform/inventory.sample.json — invented lots, filtered/sorted in memory.
-//   Buyer CRM    SAMPLE  static/site/platform/crm.sample.json — invented buyers and threads, in memory.
-//   Sources      LIVE    GET /platform/api/sources — count + freshness per auction site. The names are already
-//                        in the HTML; a failed read leaves the strip names-only and says nothing else.
+//   The shell   sidebar sections, the top-bar search (it searches whichever section is open), deep links.
+//   Auctions    REAL    ./platform/auctions.js — filters, list and map in sync; also owns Favorites
+//                       (the visitor's own stars, this browser only).
+//   Inventory   SAMPLE  static/site/platform/inventory.sample.json — invented lots, filtered/sorted in memory.
+//   Buyers      SAMPLE  static/site/platform/crm.sample.json — invented buyers and threads, in memory.
+//                       The lot → buyers-in-radius map under it is ./platform/map.js.
+//   Sites       LIVE    GET /platform/api/sites, else GET /platform/api/sources. Each site shows its true
+//                       status: Live, Paused or Planned. The names are already in the HTML; a failed read
+//                       leaves them names-only and claims nothing.
 //
 // The one write on the page is the request-access form: POST /contact (existing endpoint, unchanged),
 // with the lead tagged in `message` because `inquiries` has no source column. Everything else — sorting,
 // filtering, selecting a lot, approving a draft reply — changes memory only and is gone on reload.
 import {api, pending, fmt, esc} from '../ui/state.js';
+import * as auctions from './platform/auctions.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 export const LEAD_TAG = '[PLATFORM PAGE]';
 const SAMPLE_BASE = '/static/site/platform/';
-const PER_PAGE = 25;                       // one of the server's own per_page choices
-const HOUR_MS = 3600 * 1000;
 
 function words(v) { return String(v || '').replace(/_/g, ' '); }
 // Whole dollars stay whole; anything else shows cents ($5,062.50, never $5,062.5).
@@ -47,13 +48,22 @@ function msgRow(tbody, cols, html) {
   tbody.innerHTML = `<tr class="pf-row-msg"><td colspan="${cols}">${html}</td></tr>`;
 }
 
-// ═════════════════════════════ tabs ═════════════════════════════
-const TABS = ['deals', 'inventory', 'crm'];
+// ═════════════════════════════ the window shell ═════════════════════════════
+const TABS = ['auctions', 'favorites', 'inventory', 'buyers', 'sites'];
+const SEARCH_HINT = {
+  auctions: 'Search auctions', favorites: 'Search favorites', inventory: 'Search lots',
+  buyers: 'Search buyers', sites: 'Search sites',
+};
 const opened = new Set();
-const onOpen = {};                         // tab → loader, run the first time the tab is shown
+const onOpen = {};                         // section → loader, run the first time the section is shown
+const onShow = {};                         // section → run every time it is shown
+const onSearch = {};                       // section → apply the top-bar query
+const query = {};                          // section → what its search field holds
+let current = null;
 
 function showTab(name, {focus = false, scroll = false, hash = true} = {}) {
   if (!TABS.includes(name)) return;
+  current = name;
   for (const t of TABS) {
     const tab = $(`#pf-tab-${t}`), pane = $(`#pf-pane-${t}`);
     const on = t === name;
@@ -63,280 +73,51 @@ function showTab(name, {focus = false, scroll = false, hash = true} = {}) {
     pane.hidden = !on;
     if (on && focus) tab.focus();
   }
+  $('#pf-win').dataset.section = name;
+  const q = $('#pf-q');
+  q.value = query[name] || ''; q.placeholder = SEARCH_HINT[name];
   if (!opened.has(name)) { opened.add(name); onOpen[name]?.(); }
+  onShow[name]?.();
   if (hash) history.replaceState(null, '', '#' + name);
-  if (scroll) $('#demo').scrollIntoView({block: 'start'});
+  if (scroll) $('#app').scrollIntoView({block: 'start'});
 }
 
-function initTabs() {
-  const list = $('.pf-tabs');
+function initShell() {
+  const list = $('.pf-side-nav');
   list.addEventListener('click', e => {
-    const tab = e.target.closest('.pf-tab');
+    const tab = e.target.closest('.pf-side-item');
     if (tab) showTab(tab.dataset.tab);
   });
   list.addEventListener('keydown', e => {
     const i = TABS.indexOf(document.activeElement?.dataset?.tab);
     if (i < 0) return;
     let next = null;
-    if (e.key === 'ArrowRight') next = TABS[(i + 1) % TABS.length];
-    else if (e.key === 'ArrowLeft') next = TABS[(i + TABS.length - 1) % TABS.length];
+    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = TABS[(i + 1) % TABS.length];
+    else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = TABS[(i + TABS.length - 1) % TABS.length];
     else if (e.key === 'Home') next = TABS[0];
     else if (e.key === 'End') next = TABS[TABS.length - 1];
     if (next) { e.preventDefault(); showTab(next, {focus: true}); }
   });
-  // Any [data-pf-jump] link opens its tab (none in the current hero; kept for deep links from copy).
+  // One search field for the window: it searches the section on screen and remembers each section's query.
+  let qTimer = null;
+  const apply = () => { query[current] = $('#pf-q').value.trim(); onSearch[current]?.(query[current]); };
+  $('#pf-q').addEventListener('input', () => { clearTimeout(qTimer); qTimer = setTimeout(apply, current === 'auctions' ? 400 : 120); });
+  $('#pf-q').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(qTimer); apply(); } });
+  // Any [data-pf-jump] link opens its section (kept for deep links from copy).
   $$('[data-pf-jump]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
     showTab(a.dataset.pfJump, {scroll: true});
   }));
-  const fromHash = location.hash.replace('#', '');
-  showTab(TABS.includes(fromHash) ? fromHash : 'deals', {hash: false, scroll: TABS.includes(fromHash)});
+  const fromHash = location.hash.replace('#', '').replace(/^crm$/, 'buyers').replace(/^deals$/, 'auctions');
+  showTab(TABS.includes(fromHash) ? fromHash : 'auctions', {hash: false, scroll: TABS.includes(fromHash)});
 }
+function clearSearch() { query[current] = ''; $('#pf-q').value = ''; }
 
-// ═════════════════════════ deal finder (LIVE) ═════════════════════════
-// Two honest states, both straight from the endpoint:
-//   · the feed has open auctions  → "Open now" lists them, the tab tag reads "Live data";
-//   · the feed has none           → the pane says so and offers the closed archive. It never auto-runs the
-//     closed query: that one scans the whole archive (tens of seconds) and holds a pooled DB connection.
-const CAT_LABELS = {
-  general_merchandise: 'General', vehicles: 'Vehicles', collectibles_jewelry: 'Collectibles & jewelry',
-  computers_electronics: 'Computers & electronics', other: 'Other',
-};
-const catLabel = v => CAT_LABELS[v] || words(v).replace(/^./, c => c.toUpperCase());
-// Facets only count OPEN auctions, so with none open they come back empty. These keep the filters usable;
-// they carry no numbers, and the server still decides what each one matches.
-const FALLBACK_CATS = Object.keys(CAT_LABELS);
-const US_STATES = ('AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO MT NE NV NH NJ NM NY '
-  + 'NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY').split(' ');
-const SORTS = {
-  active: [['ends', 'Ending soonest'], ['newest', 'Newest'], ['bid:asc', 'Bid, low to high'],
-           ['bid:desc', 'Bid, high to low'], ['bids:desc', 'Most bids'], ['bids:asc', 'Fewest bids']],
-  closed: [['ends:desc', 'Most recently closed'], ['bid:desc', 'Final bid, high to low'],
-           ['bid:asc', 'Final bid, low to high'], ['bids:desc', 'Most bids']],
-};
-const TIMEOUT_MS = {active: 20000, closed: 60000};
-
-const deals = {status: 'active', q: '', category: '', state: '', sort: 'ends', dir: '', noBids: false, page: 1};
-let dealsAbort = null;
-let dealsBody = null;
-let dealStats = null;                      // facets.stats, when it has arrived
-
-const dealsFiltered = () => !!(deals.q || deals.category || deals.state || deals.noBids);
-
-function dealsQuery() {
-  const p = new URLSearchParams({status: deals.status, per_page: String(PER_PAGE), page: String(deals.page), sort: deals.sort});
-  if (deals.dir) p.set('dir', deals.dir);
-  if (deals.q) p.set('q', deals.q);
-  if (deals.category) p.set('category', deals.category);
-  if (deals.state) p.set('state', deals.state);
-  if (deals.noBids) p.set('max_bids', '0');
-  return p.toString();
-}
-
-function dealRow(r) {
-  const closed = !!r.outcome_complete;
-  const bid = closed && r.final_bid != null ? r.final_bid : r.current_bid;
-  const bids = Number(closed && r.final_bid_count != null ? r.final_bid_count : r.bid_count) || 0;
-  // $/unit and all-in are computed server-side from current_bid; show them only when that is the price on screen.
-  const derived = !closed || r.final_bid == null || Number(r.final_bid) === Number(r.current_bid);
-  const qty = Number(r.quantity) || 0;
-  const none = '<span class="pf-none">—</span>';
-  const perUnit = derived && qty > 1 && r.quantity_source !== 'default' && r.unit_bid != null
-    ? `${esc(money(r.unit_bid))}<span class="pf-sub">× ${esc(fmt.int(qty))}</span>` : none;
-  const allIn = derived && r.landed_cost != null ? esc(money(r.landed_cost)) : none;
-  // A closed auction with no bids never had a final bid: the number on record is the opening price.
-  const bidNote = closed && !bids ? '<span class="pf-sub">opening bid</span>' : '';
-  const place = [r.city, r.state].filter(Boolean).map(esc).join(', ') || 'Location not listed';
-  const src = r.govdeals_url
-    ? `<a class="pf-src" href="${esc(r.govdeals_url)}" target="_blank" rel="noopener">GovDeals<span aria-hidden="true"> ↗</span></a>` : '';
-  let endCell;
-  if (closed) {
-    const when = r.end_utc ? new Date(r.end_utc).toLocaleDateString(undefined, {month: 'short', day: 'numeric', year: 'numeric'}) : '';
-    endCell = `<td class="num pf-result" data-label="Result">${esc(words(r.outcome) || 'closed')}<span class="pf-sub">${esc(when)}</span></td>`;
-  } else {
-    const left = r.end_utc ? new Date(r.end_utc).getTime() - Date.now() : NaN;
-    const urgent = Number.isFinite(left) && left > 0 && left < HOUR_MS;
-    endCell = `<td class="num pf-timer${urgent ? ' is-urgent' : ''}" data-label="Ends in" data-ends="${esc(r.end_utc || '')}">${esc(fmt.endsIn(r.end_utc))}</td>`;
-  }
-  return `<tr>
-    <td class="pf-c-lot" data-label="Lot">
-      <a class="pf-lot-title" href="${esc(r.viewer_url || r.govdeals_url || '#')}" target="_blank" rel="noopener">${esc(r.title || 'Untitled lot')}</a>
-      <span class="pf-sub">${place}${src ? ' ' + src : ''}</span>
-    </td>
-    <td class="pf-c-cat" data-label="Category">${esc(catLabel(r.canonical_category || 'other'))}</td>
-    <td class="num" data-label="${closed ? 'Final bid' : 'Current bid'}">${esc(money(bid))}${bidNote}</td>
-    <td class="num" data-label="Per unit">${perUnit}</td>
-    <td class="num" data-label="Est. all-in">${allIn}</td>
-    <td class="num${bids ? '' : ' pf-zero'}" data-label="Bids">${esc(fmt.int(bids))}</td>
-    ${endCell}
-  </tr>`;
-}
-
-function renderDealsPager() {
-  const b = dealsBody;
-  const count = $('#pf-deals-count');
-  if (!b || !b.total) { count.textContent = ''; $('#pf-deals-prev').disabled = true; $('#pf-deals-next').disabled = true; return; }
-  const from = (b.page - 1) * b.per_page + 1, to = Math.min(b.total, b.page * b.per_page);
-  count.textContent = `${fmt.int(from)}–${fmt.int(to)} of ${fmt.int(b.total)} ${deals.status === 'closed' ? 'closed' : 'open'} auctions`;
-  $('#pf-deals-prev').disabled = b.page <= 1;
-  $('#pf-deals-next').disabled = b.page >= b.pages;
-}
-
-function dealsEmptyHtml() {
-  if (dealsFiltered()) return 'No auctions match these filters. <button class="pf-btn" type="button" data-deals-reset>Clear filters</button>';
-  if (deals.status === 'active') {
-    return 'No auctions are open in the feed right now. The record of closed auctions is still searchable. '
-      + '<button class="pf-btn pf-btn--go" type="button" data-deals-closed>Show closed auctions</button>';
-  }
-  return 'No closed auctions on record yet.';
-}
-
-// The claim on the tab follows the data: "Live data" only while the endpoint reports open auctions.
-function paintDealsTruth(openCount) {
-  if (openCount == null) return;
-  const live = openCount > 0;
-  $('#pf-deals-tag').textContent = live ? 'Live data' : 'Real data';
-  $('#pf-pane-deals .pf-pane-note strong').textContent = live ? 'Live data.' : 'Real data.';
-}
-
-function renderDealStats() {
-  const s = dealStats;
-  if (!s) return;
-  // Every number in this sentence comes from the endpoint. A missing one drops its clause rather than printing a guess.
-  const bits = [];
-  if (Number(s.active) > 0) {
-    bits.push(`${fmt.int(s.active)} open now${s.states ? ` across ${fmt.int(s.states)} states` : ''}`);
-    if (s.closed != null) bits.push(`${fmt.int(s.closed)} closed auctions on record`);
-  } else {
-    if (s.tracked != null) bits.push(`${fmt.int(s.tracked)} auctions on record`);
-    if (s.no_bid != null) bits.push(`${fmt.int(s.no_bid)} of them closed with no bids`);
-  }
-  let text = bits.length ? bits.join(', ') + '.' : '';
-  if (s.active != null && Number(s.active) === 0) text += ' None are open in the feed right now.';
-  $('#pf-deals-stats').textContent = text.replace(/^./, c => c.toUpperCase());
-  paintDealsTruth(Number(s.active));
-}
-
-async function loadDeals() {
-  const tbody = $('#pf-deals-rows');
-  dealsAbort?.abort();
-  const ac = new AbortController(); dealsAbort = ac;
-  const status = deals.status;
-  let timedOut = false;
-  const timer = setTimeout(() => { timedOut = true; ac.abort(); }, TIMEOUT_MS[status]);
-  tbody.setAttribute('aria-busy', 'true');
-  if (!dealsBody || !dealsBody.total) {
-    msgRow(tbody, 7, status === 'closed'
-      ? 'Searching the closed auctions. The archive is large, so this can take up to half a minute.'
-      : 'Loading auctions…');
-  }
-  try {
-    const body = await api('/deals/api/lots?' + dealsQuery(), {signal: ac.signal});
-    if (dealsAbort !== ac) return;
-    dealsBody = body;
-    if (status === 'active' && !dealsFiltered()) paintDealsTruth(body.total);
-    if (!body.total) msgRow(tbody, 7, dealsEmptyHtml());
-    else tbody.innerHTML = body.rows.map(dealRow).join('');
-    renderDealsPager();
-  } catch (err) {
-    if (dealsAbort !== ac) return;               // superseded by a newer request
-    dealsBody = null;
-    const why = timedOut ? `The server did not answer in ${Math.round(TIMEOUT_MS[status] / 1000)} seconds.`
-      : err.status ? `The server said ${err.status}.` : 'The request did not go through.';
-    msgRow(tbody, 7, `The auction feed did not load. ${esc(why)} <button class="pf-btn" type="button" data-deals-retry>Try again</button>`);
-    renderDealsPager();
-  } finally {
-    clearTimeout(timer);
-    if (dealsAbort === ac) tbody.removeAttribute('aria-busy');
-  }
-}
-
-function renderDealChips(cats) {
-  const withCounts = cats.length > 0;
-  const list = withCounts ? cats : FALLBACK_CATS.map(value => ({value}));
-  const total = cats.reduce((a, c) => a + Number(c.count || 0), 0);
-  const chip = (value, label, count) =>
-    `<button class="pf-chip${value === deals.category ? ' is-active' : ''}" type="button" data-cat="${esc(value)}" aria-pressed="${value === deals.category}">${esc(label)}`
-    + (withCounts ? ` <span class="pf-chip-n">${esc(fmt.int(count))}</span>` : '') + '</button>';
-  $('#pf-deals-cats').innerHTML = chip('', 'All categories', total) + list.map(c => chip(c.value, catLabel(c.value), c.count)).join('');
-}
-
-function renderDealStates(states) {
-  const sel = $('#pf-deals-state');
-  sel.querySelectorAll('option:not([value=""])').forEach(o => o.remove());
-  fillSelect(sel, states.length
-    ? states.map(s => ({value: s.value, label: `${s.value} (${fmt.int(s.count)})`}))
-    : US_STATES.map(v => ({value: v, label: v})));
-  sel.value = deals.state;
-}
-
-function renderDealSorts() {
-  const sel = $('#pf-deals-sort');
-  sel.innerHTML = '';
-  fillSelect(sel, SORTS[deals.status].map(([value, label]) => ({value, label})));
-  const [sort, dir] = SORTS[deals.status][0][0].split(':');
-  deals.sort = sort; deals.dir = dir || '';
-  const closed = deals.status === 'closed';
-  $('#pf-deals-th-bid').textContent = closed ? 'Final bid' : 'Current bid';
-  $('#pf-deals-th-end').textContent = closed ? 'Result' : 'Ends in';
-  $$('#pf-deals-status .pf-seg-btn').forEach(b => {
-    const on = b.dataset.status === deals.status;
-    b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
-  });
-}
-
-async function loadDealFacets() {
-  let facets;
-  try { facets = await api('/deals/api/facets'); } catch { return; }   // the fallback filters stay; the table reports its own errors
-  if ((facets.categories || []).length) renderDealChips(facets.categories);
-  if ((facets.states || []).length) renderDealStates(facets.states);
-  dealStats = facets.stats || null;
-  renderDealStats();
-}
-
-function setDeals(patch, {keepPage = false} = {}) {
-  const statusChanged = patch.status && patch.status !== deals.status;
-  Object.assign(deals, patch);
-  if (statusChanged) { renderDealSorts(); dealsBody = null; }
-  if (!keepPage) deals.page = 1;
-  $$('#pf-deals-cats .pf-chip').forEach(c => {
-    const on = (c.dataset.cat || '') === deals.category;
-    c.classList.toggle('is-active', on); c.setAttribute('aria-pressed', on ? 'true' : 'false');
-  });
-  loadDeals();
-}
-
-function initDeals() {
-  renderDealSorts(); renderDealChips([]); renderDealStates([]);
-  let qTimer = null;
-  $('#pf-deals-q').addEventListener('input', e => {
-    clearTimeout(qTimer);
-    qTimer = setTimeout(() => setDeals({q: e.target.value.trim()}), 400);
-  });
-  $('#pf-deals-form').addEventListener('submit', e => { e.preventDefault(); clearTimeout(qTimer); setDeals({q: $('#pf-deals-q').value.trim()}); });
-  $('#pf-deals-status').addEventListener('click', e => { const b = e.target.closest('[data-status]'); if (b && b.dataset.status !== deals.status) setDeals({status: b.dataset.status}); });
-  $('#pf-deals-state').addEventListener('change', e => setDeals({state: e.target.value}));
-  $('#pf-deals-sort').addEventListener('change', e => { const [sort, dir] = e.target.value.split(':'); setDeals({sort, dir: dir || ''}); });
-  $('#pf-deals-nobids').addEventListener('change', e => setDeals({noBids: e.target.checked}));
-  $('#pf-deals-cats').addEventListener('click', e => { const c = e.target.closest('[data-cat]'); if (c) setDeals({category: c.dataset.cat}); });
-  $('#pf-deals-prev').addEventListener('click', () => setDeals({page: Math.max(1, deals.page - 1)}, {keepPage: true}));
-  $('#pf-deals-next').addEventListener('click', () => setDeals({page: deals.page + 1}, {keepPage: true}));
-  $('#pf-deals-rows').addEventListener('click', e => {
-    if (e.target.closest('[data-deals-retry]')) { loadDeals(); if (!dealStats) loadDealFacets(); }
-    if (e.target.closest('[data-deals-closed]')) setDeals({status: 'closed'});
-    if (e.target.closest('[data-deals-reset]')) {
-      $('#pf-deals-q').value = ''; $('#pf-deals-state').value = ''; $('#pf-deals-nobids').checked = false;
-      setDeals({q: '', category: '', state: '', noBids: false});
-    }
-  });
-  setInterval(() => $$('#pf-deals-rows [data-ends]').forEach(el => {
-    const iso = el.dataset.ends; if (!iso) return;
-    const left = new Date(iso).getTime() - Date.now();
-    el.textContent = fmt.endsIn(iso);
-    el.classList.toggle('is-urgent', left > 0 && left < HOUR_MS);
-  }), 30000);
-}
-onOpen.deals = () => { loadDealFacets(); loadDeals(); };
+// ═════════════════════════ auctions + favorites (REAL) ═════════════════════════
+// Everything lives in ./platform/auctions.js; the shell only routes the search field and section changes.
+onShow.auctions = () => auctions.shown();
+onSearch.auctions = q => auctions.setQuery(q);
+onSearch.favorites = q => auctions.setFavoritesQuery(q);
 
 // ═════════════════════ inventory & listings (SAMPLE) ═════════════════════
 const STATUS_LABELS = {
@@ -451,7 +232,6 @@ async function loadInv() {
 
 function initInv() {
   $('#pf-inv-form').addEventListener('submit', e => e.preventDefault());
-  $('#pf-inv-q').addEventListener('input', e => { inv.q = e.target.value.trim(); if (inv.data) renderInv(); });
   $('#pf-inv-status').addEventListener('change', e => { inv.status = e.target.value; if (inv.data) renderInv(); });
   $('#pf-inv-channel').addEventListener('change', e => { inv.channel = e.target.value; if (inv.data) renderInv(); });
   $('#pf-inv-sort').addEventListener('change', e => { [inv.sort, inv.dir] = e.target.value.split(':'); if (inv.data) renderInv(); });
@@ -463,7 +243,7 @@ function initInv() {
   $('#pf-inv-rows').addEventListener('click', e => {
     if (e.target.closest('[data-inv-retry]')) { loadInv(); return; }
     if (e.target.closest('[data-inv-reset]')) {
-      $('#pf-inv-q').value = ''; $('#pf-inv-status').value = ''; $('#pf-inv-channel').value = '';
+      clearSearch(); $('#pf-inv-status').value = ''; $('#pf-inv-channel').value = '';
       Object.assign(inv, {q: '', status: '', channel: ''}); renderInv(); return;
     }
     const tr = e.target.closest('tr.pf-pick');
@@ -471,14 +251,17 @@ function initInv() {
   });
 }
 onOpen.inventory = loadInv;
+onSearch.inventory = q => { inv.q = q; if (inv.data) renderInv(); };
 
 // ═════════════════════════ buyer CRM (SAMPLE) ═════════════════════════
-const crm = {stage: '', channel: '', sort: 'recent', selected: null, data: null};
+const crm = {q: '', stage: '', channel: '', sort: 'recent', selected: null, data: null};
 const lastMins = b => Math.min(...b.thread.map(m => m.mins_ago));
 const label = (list, key) => (list.find(x => x.key === key) || {}).label || words(key);
 
 function crmRows() {
-  const rows = crm.data.buyers.filter(b => (!crm.stage || b.stage === crm.stage) && (!crm.channel || b.channel === crm.channel));
+  const q = crm.q.toLowerCase();
+  const rows = crm.data.buyers.filter(b => (!crm.stage || b.stage === crm.stage) && (!crm.channel || b.channel === crm.channel)
+    && (!q || [b.name, b.about, b.wants, b.lot_id].join(' ').toLowerCase().includes(q)));
   if (crm.sort === 'qty') rows.sort((a, b) => (b.quantity_wanted || 0) - (a.quantity_wanted || 0));
   else if (crm.sort === 'name') rows.sort((a, b) => a.name.localeCompare(b.name));
   else rows.sort((a, b) => lastMins(a) - lastMins(b));
@@ -557,8 +340,8 @@ function initCrm() {
   $('#pf-crm-list').addEventListener('click', e => {
     if (e.target.closest('[data-crm-retry]')) { loadCrm(); return; }
     if (e.target.closest('[data-crm-reset]')) {
-      $('#pf-crm-stage').value = ''; $('#pf-crm-channel').value = '';
-      Object.assign(crm, {stage: '', channel: ''}); renderBuyers(); return;
+      clearSearch(); $('#pf-crm-stage').value = ''; $('#pf-crm-channel').value = '';
+      Object.assign(crm, {q: '', stage: '', channel: ''}); renderBuyers(); return;
     }
     const b = e.target.closest('[data-buyer]');
     if (b) selectBuyer(b.dataset.buyer);
@@ -566,8 +349,9 @@ function initCrm() {
   $('#pf-crm-thread').addEventListener('click', e => {
     if (e.target.closest('[data-crm-back]')) { selectBuyer(null); return; }
     const lot = e.target.closest('[data-open-lot]');
-    if (lot) {                                   // jump to the same lot on the Inventory tab
+    if (lot) {                                   // jump to the same lot in the Inventory section
       const go = () => { Object.assign(inv, {q: '', status: '', channel: '', selected: lot.dataset.openLot}); renderInv(); };
+      query.inventory = '';
       showTab('inventory', {focus: true});
       if (inv.data) go(); else loadInv().then(() => inv.data && go());
       return;
@@ -581,7 +365,8 @@ function initCrm() {
     renderBuyers(); renderThread();
   });
 }
-onOpen.crm = loadCrm;
+onOpen.buyers = loadCrm;
+onSearch.buyers = q => { crm.q = q; if (crm.data) renderBuyers(); };
 
 // ═════════════════════════ request access ═════════════════════════
 // POST /contact as-is. `inquiries` has no source column, so the page tags the lead in the message text.
@@ -620,26 +405,59 @@ function initAccess() {
   });
 }
 
-// ═════════════════════════ sources strip (LIVE) ═════════════════════════
-// The server renders the names. This adds lots tracked + last seen for live sites and "Paused" for the rest.
-// "N tracked" is the endpoint's number — the page never says "all".
-async function initSources() {
-  const list = $('#pf-sources-list');
-  if (!list) return;
-  let data;
-  try { data = await api('/platform/api/sources'); } catch { return; }
-  if (!data || !data.ok || !Array.isArray(data.sources) || !data.sources.length) return;
-  list.innerHTML = data.sources.map(s => {
-    const mins = s.last_seen ? (Date.now() - new Date(s.last_seen).getTime()) / 60000 : null;
-    return s.live
-      ? `<li class="pf-source is-live"><span class="pf-source-name">${esc(s.name)}</span>
-           <span class="pf-source-n">${esc(fmt.int(s.lots))}</span>
-           <span class="pf-source-meta">lots · ${esc(ago(mins))}</span></li>`
-      : `<li class="pf-source is-paused"><span class="pf-source-name">${esc(s.name)}</span>
-           <span class="pf-source-meta">Paused</span></li>`;
-  }).join('');
-  $('#pf-sources-count').textContent = `${data.tracked} tracked · ${data.live} live now`;
+// ═════════════════════════ sites (LIVE) ═════════════════════════
+// The server renders the names. This adds each site's true status. /platform/api/sites answers
+// live | paused | planned; the older /platform/api/sources only knows live or not (shown as Paused).
+// A planned site never shows a lot count, and the page never says "all".
+const SITE_STATUS = {live: 'Live', paused: 'Paused', planned: 'Planned'};
+const SITE_KIND = {government: 'Government', commercial: 'Commercial'};
+const sites = {rows: null, q: ''};
+
+async function fetchSites() {
+  try {
+    const d = await api('/platform/api/sites');
+    const rows = Array.isArray(d) ? d : Array.isArray(d?.sites) ? d.sites : [];
+    if (rows.length) return rows;
+  } catch { /* route missing or down: try the older one */ }
+  try {
+    const d = await api('/platform/api/sources');
+    if (d && d.ok && Array.isArray(d.sources) && d.sources.length) {
+      return d.sources.map(s => ({key: s.key, name: s.name, kind: null, status: s.live ? 'live' : 'paused', lots: s.lots, last_seen: s.last_seen}));
+    }
+  } catch { /* names only */ }
+  return null;
 }
 
-initSources();
-if ($('#demo')) { initDeals(); initInv(); initCrm(); initTabs(); initAccess(); }
+function renderSites() {
+  if (!sites.rows) return;
+  const q = sites.q.toLowerCase();
+  const rows = sites.rows.filter(s => !q || `${s.name} ${s.kind || ''} ${s.status || ''}`.toLowerCase().includes(q));
+  const n = k => sites.rows.filter(s => s.status === k).length;
+  $('#pf-sites-count').textContent = ['live', 'paused', 'planned'].filter(n).map(k => `${n(k)} ${k}`).join(', ');
+  $('#pf-n-sites').textContent = n('live') ? `${n('live')} live` : '';
+  $('#pf-sites-list').innerHTML = rows.map(s => {
+    const status = SITE_STATUS[s.status] ? s.status : null;
+    const mins = s.last_seen ? (Date.now() - new Date(s.last_seen).getTime()) / 60000 : null;
+    const scraped = status === 'live' || status === 'paused';
+    return `<li class="pf-source${status ? ' is-' + status : ''}">
+      <span class="pf-source-name">${esc(s.name)}</span>
+      <span class="pf-source-kind">${esc(SITE_KIND[s.kind] || '')}</span>
+      <span class="pf-source-n">${scraped && Number(s.lots) > 0 ? esc(fmt.int(s.lots)) + ' lots' : ''}</span>
+      <span class="pf-source-seen">${scraped && mins != null ? 'seen ' + esc(ago(mins)) : ''}</span>
+      ${status ? `<span class="pf-site-chip pf-site-chip--${status}">${SITE_STATUS[status]}</span>` : ''}
+    </li>`;
+  }).join('') || '<li class="pf-row-msg">No sites match this search.</li>';
+}
+
+async function loadSites() {
+  if (!$('#pf-sites-list')) return;
+  sites.rows = await fetchSites();
+  renderSites();
+}
+onSearch.sites = q => { sites.q = q; renderSites(); };
+
+if ($('#pf-win')) {
+  auctions.init({showSection: name => showTab(name), clearSearch});
+  initInv(); initCrm(); initShell(); initAccess();
+  loadSites();
+}
