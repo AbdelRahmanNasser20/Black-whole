@@ -17,7 +17,8 @@ leaves it bit-identical, which this script proves rather than assumes: it
 checksums `sold_comps` before and after and rolls back on any difference.
 
 Deletion is real, and a closed auction can never be re-scraped — so the doomed
-rows are exported to R2 and read back first. Nothing is deleted until the
+rows are exported to the PRIVATE R2 bucket (`LOT_ARCHIVE_R2_BUCKET`) and read
+back first. Nothing is deleted until the
 export verifies.
 
     python scripts/compact_listing_snapshots.py            # dry run
@@ -81,6 +82,7 @@ def export(ids: list[int]) -> str:
     cfg = r2_images.env_config()
     if not cfg:
         sys.exit("R2 is not configured — refusing to delete without a backup")
+    bucket = r2_images.private_bucket()   # raises; never the public bucket
     s3 = r2_images.client(cfg)
 
     rows = []
@@ -97,11 +99,11 @@ def export(ids: list[int]) -> str:
 
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     path = f"{ARCHIVE_PREFIX}/interior_{stamp}_{len(rows)}.jsonl.gz"
-    if not r2_images.put_object(s3, bucket=cfg["bucket"], path=path, data=blob,
-                                content_type="application/gzip"):
+    if not r2_images.put_private_object(s3, bucket=bucket, path=path, data=blob,
+                                        content_type="application/gzip"):
         sys.exit(f"R2 upload failed for {path!r} — nothing deleted")
 
-    got = s3.get_object(Bucket=cfg["bucket"], Key=path)["Body"].read()
+    got = s3.get_object(Bucket=bucket, Key=path)["Body"].read()
     back = []
     with gzip.GzipFile(fileobj=io.BytesIO(got), mode="rb") as gz:
         for line in gz:
