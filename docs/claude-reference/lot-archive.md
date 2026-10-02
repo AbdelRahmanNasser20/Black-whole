@@ -69,6 +69,6 @@
 - Furniture scope (~2.2k closes/month): ~1 GB/month, inside the free 10 GB for ~10 months.
 - Knobs: `LOT_ARCHIVE_PHOTOS=3` roughly halves it.
 
-### Index (migration 015 — PENDING)
+### Index (migration 015 — APPLIED to prod 2026-09-30)
 
 - `scripts/sql/015_lot_archive_index.sql` = `lot_archive` table (~250 B/row). **Not applied.** Until it is, the list page reads the `_meta/` sidecars (one LIST per 1,000 lots + one GET each, cached in-process) and the recorder checks "already archived" by listing R2. Fine at hundreds of lots, slow at tens of thousands.

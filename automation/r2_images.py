@@ -15,6 +15,10 @@ Config (all required, else `is_configured()` is False and callers fall back to
 the Supabase path):
     R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET,
     R2_PUBLIC_BASE   e.g. https://pub-<hash>.r2.dev  (or a custom domain)
+
+Scraped data (raw maestro archives, lot archives, snapshot backups) is NOT an
+image and must never land in the public `R2_BUCKET`: it goes to the private
+`LOT_ARCHIVE_R2_BUCKET` via `private_bucket()` / `put_private_object()`.
 """
 from __future__ import annotations
 
@@ -91,6 +95,51 @@ def put_object(s3, *, bucket: str, path: str, data: bytes, content_type: str) ->
                       CacheControl=CACHE_CONTROL)
     except Exception as e:  # noqa: BLE001 - never crash a scrape over a photo
         print(f"[r2_images] upload failed for {path!r}: {e}", file=sys.stderr)
+        return False
+    return True
+
+
+class PrivateBucketNotConfigured(RuntimeError):
+    """LOT_ARCHIVE_R2_BUCKET is unset, or names the public image bucket."""
+
+
+def private_bucket() -> str:
+    """The PRIVATE R2 bucket for scraped data (raw archives, lot archives).
+
+    `R2_BUCKET` is public (served at `R2_PUBLIC_BASE`), so anything written
+    there is readable by anyone who guesses the key. Scraped auction data —
+    the moat — goes to `LOT_ARCHIVE_R2_BUCKET` instead. This NEVER falls back
+    to the public bucket: unset, or set to the same name as `R2_BUCKET`, is a
+    hard error so a missing env var can't quietly publish the dataset.
+    """
+    priv = (os.getenv("LOT_ARCHIVE_R2_BUCKET") or "").strip()
+    pub = (os.getenv("R2_BUCKET") or "").strip()
+    if not priv:
+        raise PrivateBucketNotConfigured(
+            "LOT_ARCHIVE_R2_BUCKET is not set — refusing to write scraped data "
+            "without a private bucket (never falls back to R2_BUCKET)")
+    if priv == pub:
+        raise PrivateBucketNotConfigured(
+            f"LOT_ARCHIVE_R2_BUCKET == R2_BUCKET ({pub!r}) — that bucket is "
+            "public; point LOT_ARCHIVE_R2_BUCKET at a private one")
+    return priv
+
+
+def put_private_object(s3, *, bucket: str, path: str, data: bytes,
+                       content_type: str) -> bool:
+    """Upload to the private bucket. No CacheControl, no public URL.
+
+    `bucket` must be the value `private_bucket()` returned; passing the public
+    bucket name is refused. False on upload failure (callers raise).
+    """
+    if bucket == (os.getenv("R2_BUCKET") or "").strip():
+        raise PrivateBucketNotConfigured(
+            f"put_private_object refused the public bucket {bucket!r}")
+    try:
+        s3.put_object(Bucket=bucket, Key=path, Body=data,
+                      ContentType=content_type or "application/octet-stream")
+    except Exception as e:  # noqa: BLE001 - callers turn False into a hard stop
+        print(f"[r2_images] private upload failed for {path!r}: {e}", file=sys.stderr)
         return False
     return True
 

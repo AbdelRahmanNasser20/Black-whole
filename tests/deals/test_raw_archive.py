@@ -23,21 +23,31 @@ def test_serialize_preserves_the_blob_not_just_the_key():
 
 
 class FakeS3:
-    """Minimal in-memory S3: put stores, get returns."""
+    """Minimal in-memory S3: put stores, get returns. Records the bucket and
+    the put kwargs so tests can prove WHERE (and how) the blob landed."""
     def __init__(self, corrupt=False, fail=False):
         self.store, self.corrupt, self.fail = {}, corrupt, fail
+        self.puts = []
 
     def put_object(self, Bucket, Key, Body, **kw):
         if self.fail:
             raise RuntimeError("boom")
-        self.store[Key] = ra.serialize_batch(_rows(1)) if self.corrupt else Body
+        self.puts.append((Bucket, Key, kw))
+        self.store[(Bucket, Key)] = ra.serialize_batch(_rows(1)) if self.corrupt else Body
 
     def get_object(self, Bucket, Key):
-        return {"Body": io.BytesIO(self.store[Key])}
+        return {"Body": io.BytesIO(self.store[(Bucket, Key)])}
 
 
-CFG = {"bucket": "b", "public_base": "https://pub.r2.dev",
+PUBLIC, PRIVATE = "blackwhole-images", "blackwhole-archive"
+CFG = {"bucket": PUBLIC, "public_base": "https://pub.r2.dev",
        "account": "a", "access_key": "k", "secret_key": "s", "endpoint": "e"}
+
+
+@pytest.fixture(autouse=True)
+def _buckets(monkeypatch):
+    monkeypatch.setenv("R2_BUCKET", PUBLIC)
+    monkeypatch.setenv("LOT_ARCHIVE_R2_BUCKET", PRIVATE)
 
 
 def _run(fake, **kw):
@@ -80,3 +90,28 @@ def test_empty_backlog_is_a_noop():
          patch.object(ra.db, "fetch_all", return_value=[]):
         meter = ra.run_archive_raw()
     assert meter["exported"] == 0 and meter["nulled"] == 0
+
+
+def test_writes_to_the_private_bucket_never_the_public_one():
+    fake = FakeS3()
+    _run(fake)
+    assert [b for b, _, _ in fake.puts] == [PRIVATE]
+    # No public-serving cache header on a private object.
+    assert "CacheControl" not in fake.puts[0][2]
+
+
+@pytest.mark.parametrize("value", ["", PUBLIC])
+def test_raises_when_private_bucket_unset_or_public(monkeypatch, value):
+    """Unset (or pointed at the public image bucket) is a hard stop BEFORE any
+    DB read or upload — never a fallback to R2_BUCKET."""
+    monkeypatch.setenv("LOT_ARCHIVE_R2_BUCKET", value)
+    fake = FakeS3()
+    with pytest.raises(ra.r2_images.PrivateBucketNotConfigured):
+        _run(fake)
+    assert fake.puts == []
+
+
+def test_put_private_object_refuses_the_public_bucket():
+    with pytest.raises(ra.r2_images.PrivateBucketNotConfigured):
+        ra.r2_images.put_private_object(FakeS3(), bucket=PUBLIC, path="x",
+                                        data=b"", content_type="text/plain")
