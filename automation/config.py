@@ -112,6 +112,8 @@ MAX_ALERTS_PER_DAY = _env_int("MAX_ALERTS_PER_DAY", 100)
 ALERTS_FROM_EMAIL = os.getenv("ALERTS_FROM_EMAIL", "alerts@black-whole.com")
 ALERTS_REPLY_TO = os.getenv("ALERTS_REPLY_TO", "")  # operator Gmail (PRD §8)
 ALERTS_POSTAL_ADDRESS = os.getenv("ALERTS_POSTAL_ADDRESS", "")
+# Public business line shown on /privacy as the way to reach us. Empty hides it.
+PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "(619) 407-8945")
 
 # ── Reserve with deposit (Stripe Checkout) ──────────────────────────────────
 # SHIPS DARK. No STRIPE_SECRET_KEY => no Reserve button on the storefront,

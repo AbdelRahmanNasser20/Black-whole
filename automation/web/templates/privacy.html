@@ -1,0 +1,118 @@
+{% extends "_public_base.html" %}
+{# Context contract (app.py::public_privacy): postal_address (config
+   ALERTS_POSTAL_ADDRESS, may be empty) and contact_phone. This is the URL Meta
+   lead forms, Google Merchant Center and email footers link to, so keep it
+   stable and keep the copy true to what the site and the CRM actually do —
+   change the wording only with the operator. #}
+{% block title %}Privacy Policy | Black Whole Liquidation{% endblock %}
+{% block meta_description %}What Black Whole Liquidation collects when you ask about a chair lot, how it is used, and how to have it deleted.{% endblock %}
+{% block body_class %}page-terms page-privacy{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">THE FINE PRINT · PLAIN ENGLISH</div>
+    <h1 class="page-title">PRIVACY</h1>
+    <p class="page-lede">
+      We sell bulk chairs. We collect what we need to quote you, reach you, and
+      deliver — and nothing we plan to sell to anyone else.
+    </p>
+  </div>
+  <div class="page-head-right mono tiny">
+    <a href="#collect">WHAT WE COLLECT →</a><br>
+    <a href="#use">HOW WE USE IT →</a><br>
+    <a href="#choices">YOUR CHOICES →</a>
+  </div>
+</section>
+
+<section class="terms-body">
+  <article class="terms-section" id="collect">
+    <div class="section-rule"></div>
+    <h2 class="section-title">WHAT WE COLLECT</h2>
+    <p class="terms-lede">Last updated October 2, 2026. This policy covers
+      black-whole.com and the forms, ads, and messages that lead to it.</p>
+    <ul class="terms-list terms-list--plain">
+      <li>
+        <p><strong>What you give us.</strong> Your name, phone number, email,
+          delivery address or ZIP code, how many chairs you want, when you need
+          them, and anything you write in a message. You give us this through
+          the forms on this site, a freight estimate, a lead form or message on
+          Facebook or Instagram, or a call, text, or email.</p>
+      </li>
+      <li>
+        <p><strong>Payment details.</strong> Deposits are processed by Stripe.
+          Your card or bank details go to Stripe, not to us — we see that a
+          payment was made, the amount, and its status.</p>
+      </li>
+      <li>
+        <p><strong>What a web server sees.</strong> Like every website, our
+          hosting and security providers keep standard logs: IP address, browser
+          type, and the pages requested. We use them to keep the site running
+          and to stop abuse.</p>
+      </li>
+    </ul>
+  </article>
+
+  <article class="terms-section" id="use">
+    <div class="section-rule"></div>
+    <h2 class="section-title">HOW WE USE IT</h2>
+    <ul class="terms-list terms-list--plain">
+      <li>
+        <p><strong>To answer you.</strong> Pricing, availability, freight
+          estimates, and arranging pickup or delivery. If you give us a phone
+          number or email, we may call, text, or email you about your inquiry.</p>
+      </li>
+      <li>
+        <p><strong>To complete an order.</strong> Taking a deposit, booking a
+          carrier, delivering the chairs, and issuing refunds.</p>
+      </li>
+      <li>
+        <p><strong>To send alerts you asked for.</strong> If you sign up for
+          new-inventory alerts, we email you when a matching lot comes in. Every
+          alert has an unsubscribe link.</p>
+      </li>
+      <li>
+        <p><strong>We do not sell your information.</strong> We share it only
+          with the companies that help us serve you: the payment processor, the
+          freight carrier or broker delivering your order (they need your
+          address and phone), and our email, messaging, and hosting providers.
+          If you reach us through Facebook or Instagram, Meta's own privacy
+          policy also applies to what you send there. We may also disclose
+          information when the law requires it.</p>
+      </li>
+    </ul>
+  </article>
+
+  <article class="terms-section" id="choices">
+    <div class="section-rule"></div>
+    <h2 class="section-title">YOUR CHOICES</h2>
+    <ul class="terms-list terms-list--plain">
+      <li>
+        <p><strong>Stop messages.</strong> Reply STOP to a text, use the
+          unsubscribe link in an email, or just tell us — we will stop.</p>
+      </li>
+      <li>
+        <p><strong>See, correct, or delete.</strong> Ask and we will tell you
+          what we have on you, fix it, or delete it. We keep order and payment
+          records as long as tax and accounting rules require; inquiries that
+          never became an order are deleted on request.</p>
+      </li>
+      <li>
+        <p><strong>How to reach us.</strong> Use the
+          <a href="/#contact">contact form</a>{% if contact_phone %}, or call or
+          text {{ contact_phone }}{% endif %}.{% if postal_address %} By mail:
+          Black Whole Liquidation, {{ postal_address }}.{% endif %}</p>
+      </li>
+      <li>
+        <p><strong>Changes.</strong> If this policy changes, the new version is
+          posted here with a new date.</p>
+      </li>
+    </ul>
+  </article>
+
+  <div class="terms-cta">
+    <a class="btn btn-primary" href="/listings">BROWSE CURRENT LOTS →</a>
+    <a class="btn btn-ghost" href="/#contact">ASK A QUESTION</a>
+  </div>
+</section>
+{% endblock %}

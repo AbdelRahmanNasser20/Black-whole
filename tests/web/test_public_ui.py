@@ -203,6 +203,40 @@ def test_footer_links_the_terms_everywhere():
     assert 'href="/terms#deposits"' in _client().get("/terms").text
 
 
+# ─────────────────────────────── privacy ────────────────────────────────────
+
+def test_privacy_page_renders_with_contact_details(monkeypatch):
+    monkeypatch.setattr(config_mod, "ALERTS_POSTAL_ADDRESS", "1 Test St, Phoenix, AZ 85054")
+    monkeypatch.setattr(config_mod, "PUBLIC_CONTACT_PHONE", "(555) 010-0000")
+    r = _client().get("/privacy")
+    assert r.status_code == 200
+    for anchor in ('id="collect"', 'id="use"', 'id="choices"'):
+        assert anchor in r.text
+    assert "We do not sell your information" in r.text
+    assert "(555) 010-0000" in r.text
+    assert "1 Test St, Phoenix, AZ 85054" in r.text
+
+
+def test_privacy_page_hides_missing_contact_details(monkeypatch):
+    monkeypatch.setattr(config_mod, "ALERTS_POSTAL_ADDRESS", "")
+    monkeypatch.setattr(config_mod, "PUBLIC_CONTACT_PHONE", "")
+    r = _client().get("/privacy")
+    assert r.status_code == 200
+    assert "By mail" not in r.text
+    assert "call or" not in r.text
+
+
+def test_footer_links_the_privacy_policy():
+    assert 'href="/privacy"' in _client().get("/terms").text
+
+
+def test_sitemap_lists_the_policy_pages(monkeypatch):
+    monkeypatch.setattr(inventory, "list_public", lambda: [])
+    monkeypatch.setattr(inventory, "list_sold_showcase", lambda: [])
+    body = _client().get("/sitemap.xml").text
+    assert "/privacy</loc>" in body and "/terms</loc>" in body
+
+
 # ─────────────────────────────── landing copy ───────────────────────────────
 
 @pytest.fixture
