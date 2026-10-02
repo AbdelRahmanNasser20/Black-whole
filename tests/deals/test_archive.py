@@ -171,20 +171,63 @@ def test_proxy_reads_from_the_private_bucket(r2_on):
 
 
 def test_storage_path_matches_the_proxy_key_shape(monkeypatch):
+    """Including foreign sites, whose synthesized account_id is negative —
+    otherwise the proxy 404s forever while images_archived=true."""
     from deals import archive
+    from deals.models import synth_ids
+    a, b, c = synth_ids("publicsurplus", "PS-123456", ordinal=2)
+    assert b < 0
+    foreign = archive._RowLot(a, b, c, None, "publicsurplus")
     for h in ("0", "800"):
         monkeypatch.setenv("DEALS_ARCHIVE_IMG_HEIGHT", h)
         assert archive.PHOTO_KEY_RE.match(_storage_path(_lot(), 0, "https://x/1.png?cb=1"))
+        p = _storage_path(foreign, 0, "https://x/1.png?cb=1")
+        assert p.startswith(f"publicsurplus/{a}_{b}_0/")
+        assert archive.PHOTO_KEY_RE.match(p)
 
 
-def test_upload_uses_supabase_only_when_r2_unconfigured(r2_off, monkeypatch):
+@pytest.mark.parametrize("key", [
+    "govdeals/--1_2_3/abcdef0123.webp",
+    "govdeals/1-_2_3/abcdef0123.webp",
+    "govdeals/-_2_3/abcdef0123.webp",
+    "../1_2_3/abcdef0123.webp",
+    "govdeals/1_2_3/../abcdef0123.webp",
+])
+def test_minus_allowance_does_not_open_other_shapes(key):
+    from deals import archive
+    assert not archive.PHOTO_KEY_RE.match(key)
+
+
+def test_archive_active_namespaces_keys_by_row_site(fullres):
+    from deals.archive import archive_active
+    rows = [{"asset_id": 7, "account_id": -2, "auction_id": 0,
+             "hero_image_url": "https://x/a.jpg", "site": "publicsurplus"},
+            {"asset_id": 8, "account_id": 9, "auction_id": 1,
+             "hero_image_url": "https://x/b.jpg"}]          # no site -> govdeals
+
+    class FakeAdapter:
+        def fetch_gallery(self, asset_id, account_id):
+            return []
+
+    paths = []
+    with patch("deals.store.unarchived_active", return_value=rows), \
+         patch("deals.store.set_archived_images"), \
+         patch("deals.archive._download", return_value=b"bytes"), \
+         patch("deals.archive._upload", side_effect=lambda p, d: paths.append(p) or "/u"):
+        archive_active(FakeAdapter(), limit=10, sleep_s=0)
+    assert paths[0].startswith("publicsurplus/7_-2_0/")
+    assert paths[1].startswith("govdeals/8_9_1/")
+
+
+def test_upload_raises_and_never_touches_supabase_when_r2_unconfigured(r2_off, monkeypatch):
+    """Scraped photos need the private R2 bucket. The old Supabase fallback
+    minted a PUBLIC URL for the seller's photos — now a hard error."""
     monkeypatch.setenv("SUPABASE_STORAGE_URL", "https://proj.supabase.co")
     monkeypatch.setenv("SUPABASE_STORAGE_KEY", "key")
     with patch.object(r2_off, "httpx") as fake_httpx:
-        url = r2_off._upload("govdeals/1_2_3/abc.jpg", b"bytes")
-    fake_httpx.post.assert_called_once()
-    assert url == ("https://proj.supabase.co/storage/v1/object/public/"
-                   "listing-images/govdeals/1_2_3/abc.jpg")
+        with pytest.raises(RuntimeError, match="R2 is not configured"):
+            r2_off._upload("govdeals/1_2_3/abc.jpg", b"bytes")
+    fake_httpx.post.assert_not_called()
 
 
 def test_failed_upload_is_isolated_per_lot_and_never_marks_archived(fullres):
