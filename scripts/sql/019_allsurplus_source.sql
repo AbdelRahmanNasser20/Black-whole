@@ -1,7 +1,8 @@
 -- 019_allsurplus_source.sql — AllSurplus becomes its own recorder source.
 --
--- STATUS: PENDING — NOT applied to prod. Review, then apply in the Supabase
--- SQL Editor (or `.venv/bin/python scripts/apply_sql.py scripts/sql/019_allsurplus_source.sql`).
+-- STATUS: APPLIED to prod 2026-10-02 (main session, Supabase): UPDATE 212 rows /
+-- 36 lots, lot_archive.currency added, sold_comps 4,101 rows (28 allsurplus).
+-- Re-apply elsewhere with `.venv/bin/python scripts/apply_sql.py scripts/sql/019_allsurplus_source.sql`.
 --
 -- Why: GovDeals and AllSurplus share one maestro API. Before this change the
 -- GovDeals whole-site sweep stored AllSurplus ("GI") lots under
@@ -37,8 +38,10 @@ WHERE s.source = 'govdeals'
 
 ALTER TABLE lot_archive ADD COLUMN IF NOT EXISTS currency text;
 
--- The lot_archive index (015) keys on (source, lot_key); none of the 30
--- archived lots is GI today, but keep the two tables consistent anyway.
+-- The lot_archive index (015) keys on (source, lot_key). The 4 AllSurplus
+-- sample lots archived 2026-10-02 were already written with source='allsurplus';
+-- this catches any GI lot archived under 'govdeals' before this release, so the
+-- index and listing_snapshots agree.
 UPDATE lot_archive a
 SET source = 'allsurplus'
 WHERE a.source = 'govdeals'

@@ -14,6 +14,8 @@
 
 ### Sources (2026-10-02)
 
+- Migration `019_allsurplus_source.sql` **APPLIED to prod 2026-10-02** (212 rows / 36 lots moved to `allsurplus`, `lot_archive.currency`, `sold_comps.currency`/`country`). Column checks (`lot_archive.currency`, `recorder_source_health.last_discover_at`) are cached per process — **restart the web + recorder processes after deploy.**
+
 - `govdeals` and `allsurplus` (maestro `businessId` GI — same API, own prefix `archive/lots/allsurplus/…`). `lot_archive.SOURCES` is the whitelist; routes are `/admin/archive/{source}/{a}/{b}/{c}` and `/api/archive/{source}/…`, any other source = 404. The list page has a Source facet; `run` archives both under one time budget. AllSurplus prices are often EUR/GBP/ZAR: the page shows the lot's currency, and the analyzer never compares a non-USD final with (USD) comps.
 
 ### R2 layout (`slug` = `{asset}_{account}_{auction}`)

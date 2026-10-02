@@ -118,7 +118,7 @@ def _metas_from_index() -> list[dict] | None:
     try:
         if not (db.fetch_one("SELECT to_regclass('lot_archive') AS reg") or {}).get("reg"):
             return None
-        # lot_archive.currency = migration 019 (PENDING); without it every
+        # lot_archive.currency = migration 019 (APPLIED to prod 2026-10-02); without it every
         # row reads as USD-unknown (None) and the list shows no currency.
         has_cur = bool(db.fetch_one(
             "SELECT 1 AS ok FROM information_schema.columns "

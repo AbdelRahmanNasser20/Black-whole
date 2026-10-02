@@ -453,13 +453,14 @@ def _corroborate_absence(adapter: GovDealsAdapter, asset_id: int, account_id: in
         return "unknown", None
 
     if not detail:
-        if getattr(adapter, "last_detail_status", None) == 204:
-            # Empty-body 204: the same tentative signal the JSONDecodeError
-            # path used to carry — still subject to the batch guard below.
-            print(f"[govdeals] RECORDER NOTE: corroboration 204 for {asset_id}/{account_id} — "
-                  "treating as gone (204 signal, unverified)")
-            return "gone_unverified", None
-        return "gone", detail
+        # Any empty detail — the real 204 purge signal, OR a 200 with an empty
+        # body/object (what a WAF interstitial can look like) — is only a
+        # TENTATIVE gone, subject to the batch guard in _absence_observations.
+        # fetch_detail returns {} for both, so neither is trusted alone.
+        status = getattr(adapter, "last_detail_status", None)
+        print(f"[govdeals] RECORDER NOTE: corroboration empty detail (HTTP {status}) for "
+              f"{asset_id}/{account_id} — treating as gone (unverified)")
+        return "gone_unverified", None
     if _status_of(detail.get("assetStatusCd")) == "closed":
         return "closed", detail
     return "active", detail

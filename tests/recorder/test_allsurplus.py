@@ -226,3 +226,15 @@ def test_index_upsert_writes_currency_only_when_the_column_exists(monkeypatch):
     (sql0, p0), (sql1, p1) = sent
     assert "currency" not in sql0 and len(p0) == sql0.count("%s") == 16
     assert "currency = EXCLUDED.currency" in sql1 and p1[-1] == "EUR" and len(p1) == sql1.count("%s") == 17
+
+
+def test_empty_200_detail_is_not_a_trusted_gone(monkeypatch):
+    """WAF-safe: a 200 with an empty body reads {} just like a 204."""
+    class R200:
+        status_code, content = 200, b""
+        def raise_for_status(self): pass
+
+    monkeypatch.setattr(deals_gd.requests, "post", lambda *a, **k: R200())
+    a = deals_gd.GovDealsAdapter()
+    assert a.fetch_detail(1, 2) == {} and a.last_detail_status == 200
+    assert govdeals._corroborate_absence(a, 1, 2) == ("gone_unverified", None)

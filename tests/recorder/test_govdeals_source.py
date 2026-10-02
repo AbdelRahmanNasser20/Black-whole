@@ -239,12 +239,16 @@ def test_corroborate_absence_gone_unverified_on_json_decode_error(monkeypatch, c
     assert "999/888" in out
 
 
-def test_corroborate_absence_gone_on_falsy_detail(monkeypatch):
+def test_corroborate_absence_empty_detail_is_only_tentative(monkeypatch, capsys):
+    """An empty detail — a real 204 OR a 200 with an empty body (a WAF
+    interstitial can look exactly like that) — is never a trusted 'gone'."""
     adapter = govdeals.GovDealsAdapter()
     monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", lambda self, a, c: {})
-    verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
-    assert verdict == "gone"
-    assert payload == {}
+    for status in (None, 200, 204):
+        adapter.last_detail_status = status
+        verdict, payload = govdeals._corroborate_absence(adapter, 999, 888)
+        assert verdict == "gone_unverified" and payload is None
+    assert capsys.readouterr().out.count("RECORDER NOTE") == 3
 
 
 def test_corroborate_absence_unknown_on_connection_error(monkeypatch, capsys):
@@ -548,20 +552,20 @@ def test_poll_corroboration_cap_falls_back_to_absence_alone_gone(monkeypatch, ca
     calls = []
 
     def fake_fetch_detail(self, asset_id, account_id):
-        # a CLEAN parsed-but-empty 200 (verdict "gone", not "gone_unverified")
-        # — deliberately NOT JSONDecodeError, so the fix-round-2 systemic-
-        # event guard (tested separately below) doesn't interfere with this
-        # test's actual subject, the corroboration-count CAP.
+        # a non-empty CLOSED detail (verdict "closed") — deliberately not an
+        # empty body, so the systemic-event guard (tested separately below)
+        # doesn't interfere with this test's actual subject, the CAP.
         calls.append((asset_id, account_id))
-        return {}
+        return {"assetId": asset_id, "assetStatusCd": "Closed", "assetAuctionEndDate": "2026-07-30T12:00:00"}
 
     monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
     past_end = datetime.now(timezone.utc) - timedelta(hours=1)
     n = govdeals.CORROBORATION_CAP_PER_BATCH + 3
     lots = [{"source_lot_id": f"{i}/888/1", "end_date": past_end} for i in range(n)]
     obs = govdeals.GovDealsSource().poll(lots)
-    assert len(obs) == n  # every lot still ends up 'gone' one way or another
-    assert all(o.status == "gone" for o in obs)
+    assert len(obs) == n  # every lot still gets a terminal row
+    assert sum(o.status == "closed" for o in obs) == govdeals.CORROBORATION_CAP_PER_BATCH
+    assert sum(o.status == "gone" for o in obs) == 3    # beyond the cap: absence alone
     assert len(calls) == govdeals.CORROBORATION_CAP_PER_BATCH  # cap respected
     out = capsys.readouterr().out
     assert "WARNING" in out
@@ -601,14 +605,15 @@ def test_poll_single_json_decode_error_among_healthy_verdicts_still_gone(monkeyp
     def fake_fetch_detail(self, asset_id, account_id):
         if asset_id == 999:
             raise govdeals.requests.exceptions.JSONDecodeError("Expecting value", "", 0)
-        return {}  # clean parsed-empty 200 -> verdict "gone" for the others
+        # healthy, non-empty closed detail for the others
+        return {"assetId": asset_id, "assetStatusCd": "Closed", "assetAuctionEndDate": "2026-07-30T12:00:00"}
 
     monkeypatch.setattr(govdeals.GovDealsAdapter, "fetch_detail", fake_fetch_detail)
     past_end = datetime.now(timezone.utc) - timedelta(hours=1)
     lots = [{"source_lot_id": f"{i}/888/1", "end_date": past_end} for i in [999, 1, 2, 3, 4]]
     obs = govdeals.GovDealsSource().poll(lots)
     assert len(obs) == 5  # 1/5 = 20%, below both thresholds — not suspected
-    assert all(o.status == "gone" for o in obs)
+    assert sum(o.status == "closed" for o in obs) == 4
     unverified_obs = [o for o in obs if o.source_lot_id == "999/888/1"]
     assert len(unverified_obs) == 1
     assert unverified_obs[0].raw["recorder_probe"]["http_status"] == 204

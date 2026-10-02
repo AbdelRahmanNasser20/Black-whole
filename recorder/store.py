@@ -510,7 +510,7 @@ _lot_archive_cols: dict[str, bool] = {}
 
 
 def lot_archive_has_currency() -> bool:
-    """lot_archive.currency arrives with migration 019 (PENDING). Checked once
+    """lot_archive.currency arrives with migration 019 (APPLIED to prod 2026-10-02). Checked once
     per process; absent → the index row is written without it."""
     if "currency" not in _lot_archive_cols:
         row = _read_with_backoff(
