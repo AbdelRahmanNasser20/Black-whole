@@ -258,8 +258,18 @@ Backoff once open = min(`RECORDER_BREAKER_BASE_MIN` (10) min × 2^k,
 - `run` loads the breaker once, skips open sources (`poll source=X skipped:
   circuit open until …`, `discover source=X skipped: …`), records every
   outcome and saves once. Ends with `run: elapsed=…s`.
-- Discover staleness = newest row **or** last clean discover, whichever is
-  newer — a quiet source no longer re-discovers every run.
+- Discover staleness = newest row **or** last clean *discover*
+  (`last_discover_at`, migration 020), whichever is newer — a quiet source no
+  longer re-discovers every run, and clean polls never hold discover off.
+- `RECORDER_RUN_BUDGET_S` (default 0 = off): once a run has spent this long,
+  remaining stale discovers wait for the next run (polls/closes come first).
+- Public Surplus discover stops after the first term whose connection fails
+  (host down = one 10 s timeout, not six).
+- **"≤ 2 discovers per hour" for a dead source:** keep
+  `RECORDER_BREAKER_FAILURES=3`; set `RECORDER_BREAKER_BASE_MIN=30`. A
+  discover-only source (municibid, mibid) then opens after its 3rd failed
+  run and probes at +30 / +60 / +120 min. With the default 10 the first hour
+  still sees ~5–6 attempts.
 - `poll-once` abandons lots whose `end_date` is more than
   `RECORDER_POLL_ABANDON_DAYS` (14) days past (no row written; reported
   `abandoned=n`).
@@ -269,13 +279,15 @@ Backoff once open = min(`RECORDER_BREAKER_BASE_MIN` (10) min × 2^k,
 - HTTP: `polite_get/post` timeout is `(10, 30)` (connect, read). A 429 is
   returned at once, and the host then fails fast (`RateLimited`, no request)
   until `Retry-After` (default 60 s) has passed.
-- Telegram `health` topic pings on open/close transitions only, best-effort,
+- Telegram `health` topic pings on closed → open and on recovery (→ closed)
+  only — a failed half-open probe is the same outage, no ping. Best-effort,
   never raises. `RECORDER_HEALTH_TELEGRAM=0` silences it.
 - `python -m recorder health` prints state / consecutive_failures /
   last_success_at / next_attempt_at / last_error; **exit 1** if a source has
   been open with no success for > 24 h.
 - State table `recorder_source_health` = `scripts/sql/018_recorder_source_health.sql`
-  (**PENDING — not applied**). Until it is: in-memory per run + a
+  (**PENDING**) + `020_recorder_source_health_discover.sql` (`last_discover_at`,
+  **PENDING**; code reads/writes the column only when it exists). Until it is: in-memory per run + a
   `RECORDER NOTE`; `RECORDER_HEALTH_FILE=/path.json` keeps it across runs on
   one machine (laptop/dev only — Render disks are ephemeral).
 

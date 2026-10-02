@@ -139,7 +139,13 @@ from typing import Any
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, PollBudget, polite_get
+from recorder.sources.base import (
+    BLOCK_SUSPECT_MIN_COUNT,
+    BLOCK_SUSPECT_MIN_FRACTION,
+    FURNITURE_TERMS,
+    PollBudget,
+    polite_get,
+)
 
 SOURCE = "public_surplus"
 
@@ -162,8 +168,7 @@ MAX_SEARCH_PAGES = 20
 # see module docstring. A poll() batch is only treated as a suspected
 # session-wide block when AT LEAST this many lots AND AT LEAST this fraction
 # of the whole batch both came back 401-not-found in the same round.
-BLOCK_SUSPECT_MIN_COUNT = 3
-BLOCK_SUSPECT_MIN_FRACTION = 0.8
+# (Defined in recorder/sources/base.py, shared with the source breaker.)
 
 _GRID_CARD_RE = re.compile(r'<div class="auction-item" id="(\d+)searchGrid">')
 _LOCATION_RE = re.compile(r'auction-item-state[^>]*>\s*([^<]*)')
@@ -312,6 +317,8 @@ def _fetch_search_page(term: str, page: int) -> list[dict] | None:
         resp = polite_get(SEARCH_URL, params={"posting": "y", "keyWord": term, "page": page})
     except requests.exceptions.RequestException as e:
         print(f"[public_surplus] RECORDER ERROR: request failed ({term!r}, page={page}): {e}")
+        if isinstance(e, (requests.exceptions.ConnectTimeout, requests.exceptions.ConnectionError)):
+            _sweep_state["host_down"] = True
         return None
     if resp.status_code in (403, 429):
         print(
@@ -357,6 +364,9 @@ def _sweep_term(term: str, max_pages: int = MAX_SEARCH_PAGES) -> tuple[list[dict
     return cards, True
 
 
+_sweep_state = {"host_down": False}
+
+
 def _sweep_all_terms() -> tuple[dict[str, dict], bool]:
     """Sweep FURNITURE_TERMS, merging/deduping by auc_id across terms (a lot
     matching two terms is fetched twice, stored once). Returns
@@ -364,8 +374,17 @@ def _sweep_all_terms() -> tuple[dict[str, dict], bool]:
     failed outright."""
     cards_by_id: dict[str, dict] = {}
     any_ok = False
-    for term in FURNITURE_TERMS:
+    _sweep_state["host_down"] = False
+    for i, term in enumerate(FURNITURE_TERMS):
         cards, ok = _sweep_term(term)
+        if not ok and _sweep_state["host_down"]:
+            # The host would not even accept a connection: the other terms
+            # would each wait out the same connect timeout (6 × 10 s).
+            rest = len(FURNITURE_TERMS) - i - 1
+            if rest:
+                print(f"[public_surplus] RECORDER ERROR: host unreachable — skipping the "
+                      f"remaining {rest} term(s) this sweep")
+            break
         any_ok = any_ok or ok
         for c in cards:
             cards_by_id[c["auc_id"]] = c
