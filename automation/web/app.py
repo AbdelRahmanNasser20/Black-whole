@@ -1462,10 +1462,19 @@ def admin_archive_page():
     return RedirectResponse("/admin?tab=archive", status_code=303)
 
 
-@app.get("/admin/archive/govdeals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
-def admin_archive_lot_page(request: Request, asset_id: int, account_id: int, auction_id: int):
+def _archive_source_or_404(source: str) -> str:
+    """Whitelist ({govdeals, allsurplus}); anything else never reaches the store."""
+    if not lot_archive_view.valid_source(source):
+        raise HTTPException(404, "unknown archive source")
+    return source
+
+
+@app.get("/admin/archive/{source}/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
+def admin_archive_lot_page(request: Request, source: str, asset_id: int, account_id: int,
+                           auction_id: int):
+    _archive_source_or_404(source)
     key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
-    ctx = _archive_or_503(lot_archive_view.page_context, key)
+    ctx = _archive_or_503(lot_archive_view.page_context, key, source)
     if ctx is None:
         raise HTTPException(404, "lot not archived")
     return templates.TemplateResponse(request, "archive_lot.html", ctx)
@@ -1476,26 +1485,31 @@ def admin_archive_lot_page(request: Request, asset_id: int, account_id: int, auc
 def archive_lots(q: str | None = None, category: str | None = None, outcome: str | None = None,
                  min_price: float | None = None, max_price: float | None = None,
                  since: str | None = None, until: str | None = None,
-                 page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200)):
+                 page: int = Query(1, ge=1), per_page: int = Query(50, ge=1, le=200),
+                 source: str | None = None):
+    if source:
+        _archive_source_or_404(source)
     return _archive_or_503(lot_archive_view.list_lots, q=q, category=category, outcome=outcome,
                            min_price=min_price, max_price=max_price, since=since, until=until,
-                           page=page, per_page=per_page)
+                           page=page, per_page=per_page, source=source)
 
 
-@app.get("/api/archive/govdeals/{asset_id}/{account_id}/{auction_id}")
+@app.get("/api/archive/{source}/{asset_id}/{account_id}/{auction_id}")
 @readcache.cached()
-def archive_lot_json(asset_id: int, account_id: int, auction_id: int):
+def archive_lot_json(source: str, asset_id: int, account_id: int, auction_id: int):
+    _archive_source_or_404(source)
     key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
-    out = _archive_or_503(lot_archive_view.lot_json, key)
+    out = _archive_or_503(lot_archive_view.lot_json, key, source)
     if out is None:
         raise HTTPException(404, "lot not archived")
     return out
 
 
-@app.get("/api/archive/govdeals/{asset_id}/{account_id}/{auction_id}/photo/{i}")
-def archive_lot_photo(asset_id: int, account_id: int, auction_id: int, i: int):
+@app.get("/api/archive/{source}/{asset_id}/{account_id}/{auction_id}/photo/{i}")
+def archive_lot_photo(source: str, asset_id: int, account_id: int, auction_id: int, i: int):
+    _archive_source_or_404(source)
     key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
-    data = _archive_or_503(lot_archive_view.photo_bytes, key, i)
+    data = _archive_or_503(lot_archive_view.photo_bytes, key, i, source)
     if data is None:
         raise HTTPException(404, "no such photo")
     return Response(data, media_type="image/jpeg",
@@ -1503,12 +1517,13 @@ def archive_lot_photo(asset_id: int, account_id: int, auction_id: int, i: int):
                              "X-Robots-Tag": "noindex"})
 
 
-@app.post("/api/archive/govdeals/{asset_id}/{account_id}/{auction_id}/analyze")
-def archive_lot_analyze(asset_id: int, account_id: int, auction_id: int):
+@app.post("/api/archive/{source}/{asset_id}/{account_id}/{auction_id}/analyze")
+def archive_lot_analyze(source: str, asset_id: int, account_id: int, auction_id: int):
     """Re-run the LLM analysis now (one lot, a few seconds). An LLM failure is
     returned as status=unavailable, never a default."""
+    _archive_source_or_404(source)
     key = lot_archive_view.lot_key(asset_id, account_id, auction_id)
-    out = _archive_or_503(lot_archive_view.rerun_analysis, key)
+    out = _archive_or_503(lot_archive_view.rerun_analysis, key, source)
     if out.get("error") == "lot is not archived":
         raise HTTPException(404, "lot not archived")
     return out

@@ -7,6 +7,8 @@
 {% set nav_active = 'admin' %}
 {% set brand_href = '/admin' %}
 {% macro money(v) -%}{% if v is none %}—{% else %}${{ '{:,.2f}'.format(v) }}{% endif %}{%- endmacro %}
+{#- lot-currency money: the lot's own prices (final, opening, paid, chart). Comps stay USD. -#}
+{% macro lmoney(v) -%}{% if v is none %}—{% else %}{{ cur or '$' }}{{ '{:,.2f}'.format(v) }}{% endif %}{%- endmacro %}
 {% macro when(iso) -%}{% if iso %}<time datetime="{{ iso }}">{{ iso[:16]|replace('T', ' ') }} UTC</time>{% else %}—{% endif %}{%- endmacro %}
 {% set outcome = s.outcome or 'unknown' %}
 {% set place = [s.city, s.state]|select|join(', ') %}
@@ -21,13 +23,13 @@
 <a class="back-link" href="/admin?tab=archive">← Lot archive</a>
 <h1 class="page-title arc-title">{{ s.title or 'Untitled lot' }}</h1>
 <p class="crumbs mono">
-  <span class="crumb-src">GovDeals</span> · {{ (s.canonical_category or 'other')|replace('_', ' ') }}
+  <span class="crumb-src">{{ source_name or 'GovDeals' }}</span> · {{ (s.canonical_category or 'other')|replace('_', ' ') }}
   {% if s.category_name %} · {{ s.category_name }}{% endif %}{% if place %} · {{ place }}{% endif %}
   · <span class="arc-key">{{ key }}</span>
 </p>
 
 <div class="arc-strip" role="list">
-  <div class="arc-stat" role="listitem"><span class="arc-k">Final</span><span class="arc-v arc-big">{{ money(s.final_price) }}</span></div>
+  <div class="arc-stat" role="listitem"><span class="arc-k">Final</span><span class="arc-v arc-big">{{ lmoney(s.final_price) }}</span></div>
   <div class="arc-stat" role="listitem"><span class="arc-k">Outcome</span><span class="arc-v"><span class="arc-outcome arc-o-{{ outcome }}">{{ outcome|replace('_', ' ') }}</span></span></div>
   <div class="arc-stat" role="listitem"><span class="arc-k">Bids</span><span class="arc-v">{{ s.bid_count if s.bid_count is not none else '—' }}</span></div>
   <div class="arc-stat" role="listitem"><span class="arc-k">Closed</span><span class="arc-v arc-small">{{ when(s.closed_at) }}</span></div>
@@ -40,7 +42,7 @@
       <div class="gallery arc-gallery">
         {% for p in photos %}<a href="{{ photo_base }}/{{ p.i }}" target="_blank" rel="noopener"><img src="{{ photo_base }}/{{ p.i }}" alt="{{ s.title if loop.first else '' }}" width="{{ p.w }}" height="{{ p.h }}"{% if not loop.first %} loading="lazy"{% endif %}></a>{% endfor %}
       </div>
-      <p class="muted data-line">{{ photos|length }} of {{ (doc.gallery_urls or [])|length }} GovDeals photos kept · ≤1024 px · private archive, never public.</p>
+      <p class="muted data-line">{{ photos|length }} of {{ (doc.gallery_urls or [])|length }} {{ source_name or 'GovDeals' }} photos kept · ≤1024 px · private archive, never public.</p>
       {% else %}
       <p class="muted">No photos were archived for this lot.</p>
       {% endif %}
@@ -50,15 +52,15 @@
       {% if chart %}
       <svg class="arc-chart" viewBox="0 0 {{ chart.width }} {{ chart.height }}" role="img" aria-label="Bid price over time, {{ series|length }} points">
         <line class="arc-axis" x1="{{ chart.pad }}" y1="{{ chart.baseline }}" x2="{{ chart.width - chart.pad }}" y2="{{ chart.baseline }}"></line>
-        <text class="arc-tick" x="{{ chart.pad }}" y="{{ chart.pad - 10 }}">{{ money(chart.y_max) }}</text>
+        <text class="arc-tick" x="{{ chart.pad }}" y="{{ chart.pad - 10 }}">{{ lmoney(chart.y_max) }}</text>
         <path class="arc-line" d="{{ chart.path }}"></path>
-        {% for d in chart.dots %}<circle class="arc-dot{% if d.final %} is-final{% endif %}" cx="{{ d.x }}" cy="{{ d.y }}" r="{{ 5 if d.final else 3 }}"><title>{{ d.t[:16]|replace('T', ' ') }} · {{ money(d.price) }}{% if d.bids is not none %} · {{ d.bids }} bids{% endif %}</title></circle>{% endfor %}
+        {% for d in chart.dots %}<circle class="arc-dot{% if d.final %} is-final{% endif %}" cx="{{ d.x }}" cy="{{ d.y }}" r="{{ 5 if d.final else 3 }}"><title>{{ d.t[:16]|replace('T', ' ') }} · {{ lmoney(d.price) }}{% if d.bids is not none %} · {{ d.bids }} bids{% endif %}</title></circle>{% endfor %}
         <text class="arc-tick" x="{{ chart.pad }}" y="{{ chart.height - 6 }}">{{ chart.t_start[:10] }}</text>
         <text class="arc-tick arc-tick-end" x="{{ chart.width - chart.pad }}" y="{{ chart.height - 6 }}">{{ chart.t_end[:10] }}</text>
       </svg>
       <p class="muted data-line">{{ series|length }} observed prices (recorder snapshots + bidbox samples) ending at the bidbox final.</p>
       {% elif series %}
-      <p class="muted">One observed price only: {{ money(series[0].price) }} at {{ series[0].t[:16]|replace('T', ' ') }}.</p>
+      <p class="muted">One observed price only: {{ lmoney(series[0].price) }} at {{ series[0].t[:16]|replace('T', ' ') }}.</p>
       {% else %}
       <p class="muted">We never observed this lot while it was live — only its final is known.</p>
       {% endif %}
@@ -74,8 +76,8 @@
         <dt>Location</dt><dd>{{ place or '—' }}{% if s.zip %} {{ s.zip }}{% endif %}</dd>
         <dt>Opened</dt><dd class="mono">{{ when(s.opened_at) }}</dd>
         <dt>Closed</dt><dd class="mono">{{ when(s.closed_at) }}{% if s.auto_extensions %} · {{ s.auto_extensions }} soft-close extension(s){% endif %}</dd>
-        <dt>Opening bid</dt><dd class="mono">{{ money(s.opening_bid) }}</dd>
-        <dt>Buyer paid</dt><dd class="mono">{{ money(s.grand_total) if outcome == 'sold' else '— (no sale)' }}{% if s.premium_pct %} · {{ s.premium_pct }}% premium{% endif %}</dd>
+        <dt>Opening bid</dt><dd class="mono">{{ lmoney(s.opening_bid) }}</dd>
+        <dt>Buyer paid</dt><dd class="mono">{{ lmoney(s.grand_total) if outcome == 'sold' else '— (no sale)' }}{% if s.premium_pct %} · {{ s.premium_pct }}% premium{% endif %}</dd>
         <dt>Winner</dt><dd class="mono">{{ s.winner_handle or '—' }}</dd>
         <dt>Traffic</dt><dd class="mono">{{ s.visitors if s.visitors is not none else '—' }} visitors · {{ s.hits if s.hits is not none else '—' }} hits</dd>
         <dt>Status code</dt><dd class="mono">{{ s.status_code or '—' }}{% if s.reserve_not_met %} · reserve not met{% endif %}</dd>

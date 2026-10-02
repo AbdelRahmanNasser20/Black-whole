@@ -143,7 +143,7 @@ def test_cached_analysis_panel_and_unavailable_state(store):
 
 def test_rerun_endpoint(store, monkeypatch):
     monkeypatch.setattr(lot_archive_view, "rerun_analysis",
-                        lambda key: {"lot_key": key, "status": "unavailable", "error": "groq down"})
+                        lambda key, source="govdeals": {"lot_key": key, "status": "unavailable", "error": "groq down"})
     r = TestClient(app).post("/api/archive/govdeals/5282/3780/2/analyze")
     assert r.status_code == 200 and r.json()["status"] == "unavailable"
 
@@ -185,3 +185,87 @@ def test_admin_has_the_archive_tab(store):
     assert 'data-tab="archive"' in html and 'data-pane="archive"' in html
     assert 'id="arc-list" data-state="loading"' in html
     assert re.search(r'id="arc-form"', html)
+
+
+# --- AllSurplus (source-aware routes, 2026-10-02) -----------------------------------
+
+AS_FIX = Path(__file__).resolve().parents[1] / "recorder" / "fixtures" / "allsurplus"
+
+
+def _put_allsurplus(store):
+    detail = json.loads((AS_FIX / "detail_gi.json").read_text())
+    bidbox = dict(json.loads((AS_FIX / "bidbox_gi.json").read_text()), assetStatusCd="SOA",
+                  bidCount=3, currentBid=2750.0, assetAuctionEndDateUTC="2026-10-01T09:00:49Z")
+    k = (257, 20948, 13)
+    store.put(lot_archive.photo_key(k, 0, "allsurplus"), _jpeg(), "image/jpeg")
+    doc = lot_archive.build_document(k, detail=detail, gallery=["x"], bidbox=bidbox, bidbox_result="ok",
+                                     search_raw=None, timeline=[], completeness="full", source="allsurplus",
+                                     photos=[{"i": 0, "key": lot_archive.photo_key(k, 0, "allsurplus"),
+                                              "bytes": 1, "w": 40, "h": 30, "src": "x"}])
+    store.put(lot_archive.meta_key(k, "allsurplus"), json.dumps(lot_archive.meta_of(doc), default=str).encode(),
+              "application/json")
+    store.put(lot_archive.doc_key(k, "allsurplus"), lot_archive.serialize(doc), "application/gzip")
+
+
+def test_allsurplus_lot_page_photo_and_json(store):
+    _put_allsurplus(store)
+    c = TestClient(app)
+    html = c.get("/admin/archive/allsurplus/257/20948/13")
+    assert html.status_code == 200
+    assert "AllSurplus" in html.text and "EUR 2,750.00" in html.text
+    assert "/api/archive/allsurplus/257/20948/13/photo/0" in html.text
+    assert c.get("/api/archive/allsurplus/257/20948/13/photo/0").status_code == 200
+    assert c.get("/api/archive/allsurplus/257/20948/13").json()["source"] == "allsurplus"
+    # the same key under govdeals is a different lot (not archived)
+    assert c.get("/admin/archive/govdeals/257/20948/13").status_code == 404
+    # govdeals still renders
+    assert c.get("/admin/archive/govdeals/5282/3780/2").status_code == 200
+
+
+def test_unknown_archive_source_is_404(store):
+    c = TestClient(app)
+    for url in ("/admin/archive/mibid/5282/3780/2", "/api/archive/mibid/5282/3780/2",
+                "/api/archive/mibid/5282/3780/2/photo/0", "/api/archive/lots?source=mibid"):
+        assert c.get(url).status_code == 404, url
+    assert c.post("/api/archive/mibid/5282/3780/2/analyze").status_code == 404
+
+
+def test_list_has_a_source_facet_and_filter(store):
+    _put_allsurplus(store)
+    c = TestClient(app)
+    b = c.get("/api/archive/lots").json()
+    assert b["facets"]["source"] == {"govdeals": 2, "allsurplus": 1}
+    only = c.get("/api/archive/lots?source=allsurplus").json()
+    assert [m["lot_key"] for m in only["items"]] == ["257/20948/13"]
+    assert only["items"][0]["currency"] == "EUR"
+
+
+def test_list_through_the_index_path_carries_currency(store, monkeypatch):
+    """migration 015 table present (+ 019's currency column): the list is
+    built from lot_archive rows and keeps each lot's currency."""
+    from automation import db
+    monkeypatch.undo()   # drop the store fixture's _metas_from_index stub…
+    monkeypatch.setenv("LOT_ARCHIVE_STORE", "local")
+    monkeypatch.setenv("LOT_ARCHIVE_LOCAL_DIR", str(store.root))
+    monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
+    auth_svc.reset_caches()
+    lot_archive_view.reset()
+    readcache.invalidate_all()
+    seen = []
+
+    def fetch_one(sql, params=None):
+        return {"reg": "lot_archive"} if "to_regclass" in sql else {"ok": 1}
+
+    def fetch_all(sql, params=None):
+        seen.append(sql)
+        return [{"source": "allsurplus", "lot_key": "257/20948/13", "title": "Asher",
+                 "canonical_category": "lab_test_equipment", "category_name": None, "city": None,
+                 "state": None, "seller": None, "closed_at": None, "final_price": 2750,
+                 "bid_count": 3, "outcome": "sold", "status_code": "SOA", "photo_count": 0,
+                 "completeness": "full", "archived_at": None, "currency": "EUR"}]
+
+    monkeypatch.setattr(db, "fetch_one", fetch_one)
+    monkeypatch.setattr(db, "fetch_all", fetch_all)
+    b = TestClient(app).get("/api/archive/lots").json()
+    assert b["index"] == "table" and b["items"][0]["currency"] == "EUR"
+    assert ", currency" in seen[0]

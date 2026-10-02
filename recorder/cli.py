@@ -53,6 +53,7 @@ from automation import db
 
 from recorder import health, lot_archive, schedule, store
 from recorder.sources import govdeals as govdeals_source
+from recorder.sources.allsurplus import AllSurplusSource
 from recorder.sources.govdeals import GovDealsSource
 from recorder.sources.gsa import GSASource
 from recorder.sources.mibid import MiBidSource
@@ -63,7 +64,9 @@ from recorder.sources.purple_wave import PurpleWaveSource
 # Canonical source-name order — single source of truth for both the CLI's
 # `--source` choices (needed before any adapter is instantiated, so --help
 # never touches the network) and `build_registry()`'s dict.
-SOURCE_NAMES = ("govdeals", "public_surplus", "purple_wave", "municibid", "mibid", "gsa")
+SOURCE_NAMES = ("govdeals", "allsurplus", "public_surplus", "purple_wave", "municibid", "mibid", "gsa")
+# Sources on the maestro API (bidbox finals, the 7-day re-check, the lot archive).
+MAESTRO_SOURCES = govdeals_source.MAESTRO_SOURCES
 
 
 def build_registry() -> dict:
@@ -71,6 +74,7 @@ def build_registry() -> dict:
     required args (confirmed against Tasks 2-4)."""
     return {
         "govdeals": GovDealsSource(),
+        "allsurplus": AllSurplusSource(),
         "public_surplus": PublicSurplusSource(),
         "purple_wave": PurpleWaveSource(),
         "municibid": MunicibidSource(),
@@ -347,25 +351,29 @@ def cmd_recheck_finals(registry: dict) -> int:
     """One bounded pass of the 7-day SOA re-check (payment default / relist).
     Re-check rows skip `filter_changed` on purpose: an unchanged re-check is
     still the marker that the lot has been re-checked."""
-    adapter = registry.get("govdeals")
-    if adapter is None or not hasattr(adapter, "recheck_finals"):
-        return 0
-    try:
-        rows = store.soa_recheck_due(
-            sorted(govdeals_source.SOLD_CODES),
-            govdeals_source.SOA_RECHECK_AFTER.total_seconds(),
-            govdeals_source.SOA_RECHECK_LIMIT_PER_RUN,
-        )
-        if not rows:
-            return 0
-        observations = adapter.recheck_finals(rows)
-        n = store.insert_observations(observations)
-    except Exception as exc:  # noqa: BLE001 - never kill the run over the re-check
-        print(f"RECORDER ERROR source=govdeals recheck failed: {exc!r}", file=sys.stderr)
-        return 1
-    changed = sum(1 for o in observations if o.raw["recorder_capture"].get("changed"))
-    print(f"recheck source=govdeals due={len(rows)} inserted={n} changed={changed}")
-    return 0
+    rc = 0
+    for name in MAESTRO_SOURCES:
+        adapter = registry.get(name)
+        if adapter is None or not hasattr(adapter, "recheck_finals"):
+            continue
+        try:
+            rows = store.soa_recheck_due(
+                sorted(govdeals_source.SOLD_CODES),
+                govdeals_source.SOA_RECHECK_AFTER.total_seconds(),
+                govdeals_source.SOA_RECHECK_LIMIT_PER_RUN,
+                source=name,
+            )
+            if not rows:
+                continue
+            observations = adapter.recheck_finals(rows)
+            n = store.insert_observations(observations)
+        except Exception as exc:  # noqa: BLE001 - never kill the run over the re-check
+            print(f"RECORDER ERROR source={name} recheck failed: {exc!r}", file=sys.stderr)
+            rc = 1
+            continue
+        changed = sum(1 for o in observations if o.raw["recorder_capture"].get("changed"))
+        print(f"recheck source={name} due={len(rows)} inserted={n} changed={changed}")
+    return rc
 
 
 def _money(v) -> str:
@@ -376,12 +384,12 @@ def cmd_finals_backfill(source: str, since_days: int, limit: int, apply: bool,
                         now: datetime | None = None, adapter=None) -> int:
     """Bidbox finals for GovDeals lots that ended in the window and were
     recorded `gone` (i.e. `last_snapshot`). Dry-run unless `apply`."""
-    if source != "govdeals":
-        print(f"finals-backfill: only govdeals has a post-close bidbox (got {source!r})",
-              file=sys.stderr)
+    if source not in MAESTRO_SOURCES:
+        print(f"finals-backfill: only {'/'.join(MAESTRO_SOURCES)} have a post-close bidbox "
+              f"(got {source!r})", file=sys.stderr)
         return 2
     now = now or datetime.now(timezone.utc)
-    adapter = adapter or govdeals_source.GovDealsAdapter()
+    adapter = adapter or govdeals_source.adapter_for_source(source)
     rows = store.finals_backfill_candidates(source, since_days, limit)
     counts = {"checked": 0, "final": 0, "purged": 0, "extended": 0, "grace": 0, "error": 0}
     outcomes: dict[str, int] = {}
@@ -501,8 +509,9 @@ def _print_archive_meter(meter: dict, mode: str, source: str, since_days: int, l
 def cmd_archive_backfill(source: str, since_days: int, limit: int, apply: bool,
                          lots: list[str] | None = None, archive_store=None, adapter=None,
                          http_get=None, force: bool = False) -> int:
-    if source != "govdeals":
-        print(f"archive-backfill: only govdeals is archived (got {source!r})", file=sys.stderr)
+    if source not in lot_archive.SOURCES:
+        print(f"archive-backfill: only {'/'.join(lot_archive.SOURCES)} are archived "
+              f"(got {source!r})", file=sys.stderr)
         return 2
     if apply:
         try:
@@ -521,13 +530,14 @@ def cmd_archive_backfill(source: str, since_days: int, limit: int, apply: bool,
         except Exception:  # noqa: BLE001
             pass
         rows = store.archive_candidates(since_days, max(limit * 4, limit + 50),
-                                        lot_archive.MIN_AGE.total_seconds(), use_index=use_index)
-    already = lot_archive.archived_slugs(archive_store) if archive_store else set()
+                                        lot_archive.MIN_AGE.total_seconds(), use_index=use_index,
+                                        source=source)
+    already = lot_archive.archived_slugs(archive_store, source) if archive_store else set()
     meter = lot_archive.run_archive(
-        rows, store=archive_store, adapter=adapter or govdeals_source._adapter(),
+        rows, store=archive_store, adapter=adapter or govdeals_source.adapter_for_source(source),
         http_get=http_get or _archive_http_get, timeline_fn=store.lot_timeline,
         limit=limit, apply=apply, already=already,
-        index_fn=_index_fn() if apply else None, force=bool(force and lots))
+        index_fn=_index_fn() if apply else None, force=bool(force and lots), source=source)
     _print_archive_meter(meter, "APPLY" if apply else "DRY-RUN", source, since_days, limit)
     print(f"  store={getattr(archive_store, 'kind', 'none')}")
     if not apply:
@@ -543,40 +553,51 @@ def cmd_archive_pending(registry: dict) -> int:
         return 0
     archive_store = lot_archive.store_from_env()
     if archive_store is None:
-        why = lot_archive.last_store_error() or "R2 not configured"
-        print(f"RECORDER NOTE: lot archive skipped — {why}", file=sys.stderr)
+        why = lot_archive.last_store_error()
+        print(f"RECORDER NOTE: lot archive skipped — R2 not configured" + (f" ({why})" if why else ""),
+              file=sys.stderr)
         return 0
     limit = lot_archive.env_int("RECORDER_ARCHIVE_MAX_PER_RUN", ARCHIVE_PER_RUN_DEFAULT)
     try:
         budget = float(os.getenv("RECORDER_ARCHIVE_TIME_BUDGET_S") or ARCHIVE_TIME_BUDGET_S_DEFAULT)
     except ValueError:
         budget = ARCHIVE_TIME_BUDGET_S_DEFAULT
-    try:
-        index_fn = _index_fn()
-        rows = store.archive_candidates(ARCHIVE_SINCE_DAYS, limit * 4,
-                                        lot_archive.MIN_AGE.total_seconds(),
-                                        use_index=index_fn is not None)
-        meter = lot_archive.run_archive(
-            rows, store=archive_store, adapter=govdeals_source._adapter(),
-            http_get=_archive_http_get, timeline_fn=store.lot_timeline, limit=limit,
-            apply=True, time_budget_s=budget, index_fn=index_fn)
-    except Exception as exc:  # noqa: BLE001 - never kill the run over the archive
-        print(f"RECORDER ERROR source=govdeals archive failed: {exc!r}", file=sys.stderr)
-        return 1
-    print(f"archive source=govdeals archived={meter['archived']} not_ready={meter['not_ready']} "
-          f"errors={meter['error']} bytes={meter['doc_bytes'] + meter['photo_bytes']:,}")
-    return 1 if meter["error"] else 0
+    index_fn = _index_fn()
+    rc = 0
+    t0 = time.monotonic()
+    for source in lot_archive.SOURCES:     # one shared time budget across sources
+        left = budget - (time.monotonic() - t0)
+        if left <= 0:
+            break
+        try:
+            rows = store.archive_candidates(ARCHIVE_SINCE_DAYS, limit * 4,
+                                            lot_archive.MIN_AGE.total_seconds(),
+                                            use_index=index_fn is not None, source=source)
+            if not rows:
+                continue
+            meter = lot_archive.run_archive(
+                rows, store=archive_store, adapter=govdeals_source.adapter_for_source(source),
+                http_get=_archive_http_get, timeline_fn=store.lot_timeline, limit=limit,
+                apply=True, time_budget_s=left, index_fn=index_fn, source=source)
+        except Exception as exc:  # noqa: BLE001 - never kill the run over the archive
+            print(f"RECORDER ERROR source={source} archive failed: {exc!r}", file=sys.stderr)
+            rc = 1
+            continue
+        print(f"archive source={source} archived={meter['archived']} not_ready={meter['not_ready']} "
+              f"errors={meter['error']} bytes={meter['doc_bytes'] + meter['photo_bytes']:,}")
+        rc = rc or (1 if meter["error"] else 0)
+    return rc
 
 
 def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
-                        archive_store=None) -> int:
+                        archive_store=None, source: str = "govdeals") -> int:
     from recorder import lot_analysis
     try:
         archive_store = lot_archive.require_store(archive_store)
     except lot_archive.StoreNotConfigured as exc:
         print(f"RECORDER ERROR: {exc}", file=sys.stderr)
         return 1
-    keys = [lot] if lot else sorted(lot_archive.archived_slugs(archive_store), reverse=True)
+    keys = [lot] if lot else sorted(lot_archive.archived_slugs(archive_store, source), reverse=True)
     counts = {"ok": 0, "unavailable": 0, "cached": 0}
     done = 0
     for k in keys:
@@ -585,12 +606,12 @@ def cmd_archive_analyze(limit: int, lot: str | None = None, force: bool = False,
         key = k if "/" in k else "/".join(map(str, lot_archive.parse_slug(k) or ()))
         if not key:
             continue
-        cached = lot_analysis.load(archive_store, key)
+        cached = lot_analysis.load(archive_store, key, source)
         if (cached and cached.get("status") == "ok" and not force
                 and (cached.get("version") or 0) >= lot_analysis.ANALYSIS_VERSION):
             counts["cached"] += 1
             continue
-        a = lot_analysis.analyze_and_store(archive_store, key)
+        a = lot_analysis.analyze_and_store(archive_store, key, source)
         done += 1
         counts[a["status"]] = counts.get(a["status"], 0) + 1
         v = a.get("deal") or {}
@@ -799,7 +820,7 @@ def build_parser() -> argparse.ArgumentParser:
         "finals-backfill",
         help="read the post-close bidbox for recently-ended GovDeals lots (dry-run unless --apply)",
     )
-    p_backfill.add_argument("--source", default="govdeals", choices=["govdeals"])
+    p_backfill.add_argument("--source", default="govdeals", choices=list(MAESTRO_SOURCES))
     p_backfill.add_argument("--since-days", type=int, default=8)
     p_backfill.add_argument("--limit", type=int, default=500)
     p_backfill.add_argument("--apply", action="store_true",
@@ -810,7 +831,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="archive recently closed GovDeals lots (detail, photos, bidbox, timeline) to R2; "
              "dry-run unless --apply",
     )
-    p_arch.add_argument("--source", default="govdeals", choices=["govdeals"])
+    p_arch.add_argument("--source", default="govdeals", choices=list(lot_archive.SOURCES))
     p_arch.add_argument("--since-days", type=int, default=ARCHIVE_SINCE_DAYS)
     p_arch.add_argument("--limit", type=int, default=100)
     p_arch.add_argument("--lot", action="append", default=None, metavar="ASSET/ACCOUNT/AUCTION",
@@ -823,6 +844,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_an.add_argument("--limit", type=int, default=30)
     p_an.add_argument("--lot", default=None, metavar="ASSET/ACCOUNT/AUCTION")
     p_an.add_argument("--force", action="store_true", help="re-run even when a cached analysis exists")
+    p_an.add_argument("--source", default="govdeals", choices=list(lot_archive.SOURCES))
 
     return parser
 
@@ -857,7 +879,7 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_archive_backfill(args.source, args.since_days, args.limit, args.apply,
                                     lots=args.lot, force=args.force)
     if args.cmd == "archive-analyze":
-        return cmd_archive_analyze(args.limit, lot=args.lot, force=args.force)
+        return cmd_archive_analyze(args.limit, lot=args.lot, force=args.force, source=args.source)
 
     parser.error(f"unknown command {args.cmd!r}")  # pragma: no cover - argparse prevents this
     return 2  # pragma: no cover

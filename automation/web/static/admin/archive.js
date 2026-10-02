@@ -1,11 +1,11 @@
 // static/admin/archive.js — Archive tab: the private, permanent copy of every closed GovDeals lot (recorder/lot_archive.py).
 // Reads: GET /api/archive/lots?q=&category=&outcome=&min_price=&max_price=&since=&until=&page= → UI.load on #arc-list.
 // URL state: the filter keys above through shared.js getParams/setParams — the shell owns only `tab`.
-// Each row opens /admin/archive/govdeals/{asset}/{account}/{auction}, the listing rebuilt from our archive only.
+// Each row opens /admin/archive/{source}/{asset}/{account}/{auction} (source = govdeals | allsurplus), the listing rebuilt from our archive only.
 import {$, esc, getParams, setParams} from './shared.js';
 import {api, fmt, load as uiLoad} from '../ui/state.js';
 
-const KEYS = ['q', 'category', 'outcome', 'min_price', 'max_price', 'since', 'until', 'page'];
+const KEYS = ['q', 'source', 'category', 'outcome', 'min_price', 'max_price', 'since', 'until', 'page'];
 const arc = {loadedOnce: false, facetsPainted: false};
 
 function _form() { return $('#arc-form'); }
@@ -41,24 +41,28 @@ function _paintFacets(facets) {
       .map(([k, n]) => `<option value="${esc(k)}">${esc(k.replace(/_/g, ' '))} (${n})</option>`).join('');
     sel.value = cur;
   };
+  fill('source', facets.source);
   fill('category', facets.category);
   fill('outcome', facets.outcome);
   _fillForm(getParams());
 }
 
-function _lotHref(key) { const [a, b, c] = key.split('/'); return `/admin/archive/govdeals/${a}/${b}/${c}`; }
-function _photoSrc(key) { const [a, b, c] = key.split('/'); return `/api/archive/govdeals/${a}/${b}/${c}/photo/0`; }
+const SOURCES = new Set(['govdeals', 'allsurplus']);
+function _src(m) { return SOURCES.has(m.source) ? m.source : 'govdeals'; }
+function _lotHref(m) { const [a, b, c] = m.lot_key.split('/'); return `/admin/archive/${_src(m)}/${a}/${b}/${c}`; }
+function _photoSrc(m) { const [a, b, c] = m.lot_key.split('/'); return `/api/archive/${_src(m)}/${a}/${b}/${c}/photo/0`; }
+function _price(m) { return (!m.currency || m.currency === 'USD') ? fmt.money(m.final_price) : (m.final_price == null ? '—' : `${esc(m.currency)} ${Number(m.final_price).toLocaleString()}`); }
 
 function _row(m) {
   const place = [m.city, m.state].filter(Boolean).join(', ');
   const outcome = m.outcome || 'unknown';
   return `<tr>
-    <td>${m.photo_count ? `<img class="arc-thumb" src="${_photoSrc(m.lot_key)}" alt="" loading="lazy">` : ''}</td>
-    <td class="arc-lot"><a href="${_lotHref(m.lot_key)}">${esc(m.title || m.lot_key)}</a>
-      <div class="tiny mono">${esc(m.lot_key)}${place ? ' · ' + esc(place) : ''}${m.completeness === 'partial' ? ' · partial' : ''}</div></td>
+    <td>${m.photo_count ? `<img class="arc-thumb" src="${_photoSrc(m)}" alt="" loading="lazy">` : ''}</td>
+    <td class="arc-lot"><a href="${_lotHref(m)}">${esc(m.title || m.lot_key)}</a>
+      <div class="tiny mono">${_src(m) === 'allsurplus' ? 'AllSurplus · ' : ''}${esc(m.lot_key)}${place ? ' · ' + esc(place) : ''}${m.completeness === 'partial' ? ' · partial' : ''}</div></td>
     <td class="tiny">${esc((m.canonical_category || 'other').replace(/_/g, ' '))}</td>
     <td><span class="arc-outcome arc-o-${esc(outcome)}">${esc(outcome.replace(/_/g, ' '))}</span></td>
-    <td class="num mono">${fmt.money(m.final_price)}</td>
+    <td class="num mono">${_price(m)}</td>
     <td class="num mono">${m.bid_count ?? '—'}</td>
     <td class="tiny mono">${fmt.date(m.closed_at)}</td>
   </tr>`;

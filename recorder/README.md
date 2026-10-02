@@ -72,10 +72,10 @@ python -m recorder.cli finals-backfill --source govdeals --since-days 8 [--limit
 
 # permanent private archive of closed GovDeals lots (detail, photos, bidbox,
 # our timeline) into R2. Dry-run (no request) unless --apply.
-python -m recorder.cli archive-backfill --source govdeals --since-days 30 [--limit N] [--lot a/b/c ...] [--apply] [--force]
+python -m recorder.cli archive-backfill --source govdeals|allsurplus --since-days 30 [--limit N] [--lot a/b/c ...] [--apply] [--force]
 
 # LLM analysis of archived lots, cached per lot (runs once; --force re-runs)
-python -m recorder.cli archive-analyze [--limit 30] [--lot a/b/c] [--force]
+python -m recorder.cli archive-analyze [--limit 30] [--lot a/b/c] [--force] [--source allsurplus]
 
 # per-source circuit breaker table; exit 1 if any source is open > 24 h
 python -m recorder.cli health
@@ -124,6 +124,7 @@ snapshot actually confirms `closed` or `gone`. A lot leaves the poll set
 | `mibid`         | Michigan's own Knockout.js homepage embeds the entire 2,000+ auction catalog as a literal JS array; per-lot bid data confirmed via `GET /AuctionBid/GetBasicInfo?guid=`. | `api_final` — `sold_sweep()` filters the embed to `status=4` (closed) and enriches each match with `GetBasicInfo` for a trustworthy final bid + bid count |
 | `gsa`           | Official `api.data.gov` GSA Auctions JSON API (`GSA_API_KEY`, falls back to the shared `DEMO_KEY`). No closed/sold feed exists — a lot simply drops off the active list. **`bid_count` is really `biddersCount`** (GSA doesn't publish a bid-count field) — it's the number of distinct bidders, not the number of bids; don't read it as a bid-count in comps analysis. | `last_snapshot` — the last observation before a lot vanishes from the active feed is the de-facto close |
 | `govdeals`      | Thin import-only wrapper over `deals.adapters.govdeals.GovDealsAdapter` (the maestro JSON search API already built for the `deals/` closing-price tracker). After close, the per-lot bidbox (`fetch_bid_state`). | `bidbox_final` — see "GovDeals finals"; `last_snapshot` only when the bidbox is purged (204) |
+| `allsurplus`    | Same maestro API as `govdeals` with `businessId` `GI` (`recorder/sources/allsurplus.py`, a `GovDealsSource` subclass): whole GI catalog (~1,470 live, 13 pages, ≤ `RECORDER_ALLSURPLUS_MAX_PAGES` 40) every discover. Any GI asset — even one the GovDeals sweep returns — is recorded here, never under `govdeals`; `AD` lots stay `govdeals`. **Multi-currency** (USD/EUR/GBP/ZAR/CNY/AUD/BRL): `raw.currencyCode` is the lot's currency; never aggregate finals across currencies (`sold_comps.currency`, migration `019_allsurplus_source.sql`, APPLIED to prod 2026-10-02). | `bidbox_final` — same bidbox, same rules |
 | `public_surplus`| Independent plain-HTTP scrape of the server-rendered `publicsurplus.com` search + detail pages (legacy JSP, no JSON API). | `last_snapshot` — **closed/removed lots return HTTP 401** (a login wall), not 404 and not a distinguishable "closed" page, so `poll()` reads a 401 as `status='gone'`. Documented in detail in `recorder/sources/public_surplus.py`'s module docstring. |
 
 ## GovDeals finals (bidbox)

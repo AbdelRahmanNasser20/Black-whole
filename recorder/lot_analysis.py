@@ -511,6 +511,11 @@ def analyze(doc: dict, *, identity_fn: Callable | None = None, classify_fn: Call
     # Auction comps (what similar surplus closed for) → "was it a deal?"
     plan = match_plan(ident.item_type, ident.brand, ident.model, ident.queries, lot.title)
     our_cat = _category_of(s.get("canonical_category"), category.get("llm"))
+    currency = (s.get("currency") or "USD").upper()
+    if currency != "USD":
+        # Comps are USD-only; a EUR/GBP/ZAR final is never compared with them.
+        plan = None
+        out["comps_note"] = f"lot priced in {currency} — USD comps not comparable"
     try:
         rows = comps_fn(plan, doc["lot_key"]) if plan else []
     except Exception as e:  # noqa: BLE001 - DB trouble: say so, don't invent
@@ -608,18 +613,18 @@ def analyze(doc: dict, *, identity_fn: Callable | None = None, classify_fn: Call
     return out
 
 
-def load(store, key) -> dict | None:
-    blob = store.get(lot_archive.analysis_key(key))
+def load(store, key, source: str = lot_archive.SOURCE) -> dict | None:
+    blob = store.get(lot_archive.analysis_key(key, source))
     return json.loads(blob) if blob else None
 
 
-def analyze_and_store(store, key: str, **kw) -> dict:
-    doc = lot_archive.load(store, key)
+def analyze_and_store(store, key: str, source: str = lot_archive.SOURCE, **kw) -> dict:
+    doc = lot_archive.load(store, key, source)
     if doc is None:
         return {"lot_key": key, "status": "unavailable", "error": "lot is not archived"}
     if "ebay_provider" not in kw:
         from deals.comps import comps_provider_from_env
         kw["ebay_provider"] = comps_provider_from_env()
     a = analyze(doc, **kw)
-    store.put(lot_archive.analysis_key(key), json.dumps(a, default=str).encode(), "application/json")
+    store.put(lot_archive.analysis_key(key, source), json.dumps(a, default=str).encode(), "application/json")
     return a

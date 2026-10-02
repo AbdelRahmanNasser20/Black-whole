@@ -258,7 +258,8 @@ def test_recheck_error_writes_nothing(monkeypatch):
 
 def test_cmd_recheck_inserts_without_change_gating(monkeypatch, capsys):
     _serve(monkeypatch, {"5282/3780/2": payload("soa_old_5282_3780_2")})
-    monkeypatch.setattr(store, "soa_recheck_due", lambda codes, secs, limit: [PRIOR])
+    monkeypatch.setattr(store, "soa_recheck_due",
+                        lambda codes, secs, limit, source="govdeals": [PRIOR] if source == "govdeals" else [])
     monkeypatch.setattr(store, "filter_changed",
                         lambda obs: (_ for _ in ()).throw(AssertionError("must not gate")))
     inserted = []
