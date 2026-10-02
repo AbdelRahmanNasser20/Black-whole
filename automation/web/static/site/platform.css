@@ -47,7 +47,6 @@
   font-family: var(--sans); font-size: 14px; line-height: 1.45;
   border: 1.5px solid var(--pf-page-ink);
   box-shadow: 10px 10px 0 0 var(--pf-page-accent);
-  max-width: 1400px;
 }
 .pf-console :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .pf-console p { margin: 0; }
