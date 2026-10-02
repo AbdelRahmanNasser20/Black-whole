@@ -12,6 +12,7 @@ Three steps, each safe to re-run:
     python scripts/migrate_r2_prefix_private.py             # dry run (default)
     python scripts/migrate_r2_prefix_private.py --apply     # copy + verify + manifest
     python scripts/migrate_r2_prefix_private.py --delete    # delete public copies
+    python scripts/migrate_r2_prefix_private.py --prefix govdeals/   # other prefixes
 
 `--apply` server-side copies every public key to the same key in the private
 bucket, then stream-reads BOTH objects and records size + sha256 of each in a
@@ -133,12 +134,13 @@ def _write(path: Path, manifest: dict) -> None:
     tmp.replace(path)
 
 
-def do_apply(s3, pub: str, priv: str, keys: dict[str, int]) -> Path:
+def do_apply(s3, pub: str, priv: str, keys: dict[str, int],
+             prefixes=PREFIXES) -> Path:
     MANIFEST_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
     path = MANIFEST_DIR / f"r2_migrate_{stamp}.json"
     manifest = {"created": stamp, "source_bucket": pub, "dest_bucket": priv,
-                "prefixes": list(PREFIXES), "entries": []}
+                "prefixes": list(prefixes), "entries": []}
     for i, (key, size) in enumerate(sorted(keys.items()), 1):
         src_size, src_sha = digest(s3, pub, key)
         dst_size = head_size(s3, priv, key)
@@ -190,7 +192,8 @@ def do_delete(s3, pub: str, priv: str, mpath: Path, public_base: str) -> int:
                f"delete {e['key']}")
         print(f"  deleted public {e['key']}", flush=True)
 
-    leftover = set(list_keys(s3, pub)) - {e["key"] for e in entries}
+    leftover = (set(list_keys(s3, pub, m.get("prefixes") or PREFIXES))
+                - {e["key"] for e in entries})
     if leftover:
         print(f"\n  NOTE {len(leftover)} public key(s) not in manifest, left alone:")
         for k in sorted(leftover):
@@ -213,7 +216,13 @@ def main() -> int:
     g.add_argument("--apply", action="store_true", help="copy + verify + manifest")
     g.add_argument("--delete", action="store_true", help="delete verified public copies")
     ap.add_argument("--manifest", help="manifest for --delete (default: latest)")
+    ap.add_argument("--prefix", action="append",
+                    help="key prefix to move (repeatable; must end in '/'). "
+                         f"Default: {', '.join(PREFIXES)}")
     a = ap.parse_args()
+    prefixes = tuple(a.prefix) if a.prefix else PREFIXES
+    if any(not p or not p.endswith("/") for p in prefixes):
+        sys.exit("--prefix must be a non-empty folder ending in '/'")
 
     cfg = r2_images.env_config()
     if not cfg:
@@ -230,11 +239,11 @@ def main() -> int:
             sys.exit("no manifest — run --apply first")
         return do_delete(s3, pub, priv, mp, cfg["public_base"])
 
-    keys = list_keys(s3, pub)
+    keys = list_keys(s3, pub, prefixes)
     print(f"  {pub} -> {priv}: {len(keys)} keys, "
-          f"{sum(keys.values()) / 1e6:.1f} MB under {', '.join(PREFIXES)}")
+          f"{sum(keys.values()) / 1e6:.1f} MB under {', '.join(prefixes)}")
     if not a.apply:
-        present = list_keys(s3, priv)
+        present = list_keys(s3, priv, prefixes)
         for k, sz in sorted(keys.items()):
             tag = "present" if present.get(k) == sz else "to-copy"
             print(f"    {tag:<8} {sz:>11,}  {k}")
@@ -243,7 +252,7 @@ def main() -> int:
     if not keys:
         print("  nothing to migrate")
         return 0
-    do_apply(s3, pub, priv, keys)
+    do_apply(s3, pub, priv, keys, prefixes)
     return 0
 
 

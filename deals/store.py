@@ -137,7 +137,7 @@ def unarchived_active(limit: int = 100, zero_bid_only: bool = False) -> list[dic
     """Active lots whose images haven't been archived yet. Zero-bid lots (the
     buy candidates) first, then soonest-ending — those pages vanish first."""
     zb = "AND bid_count = 0" if zero_bid_only else ""
-    return db.fetch_all(f"""SELECT asset_id, account_id, auction_id, hero_image_url
+    return db.fetch_all(f"""SELECT asset_id, account_id, auction_id, hero_image_url, site
         FROM deal_lots
         WHERE images_archived IS NOT TRUE AND end_utc > now() {zb}
         ORDER BY (bid_count = 0) DESC, end_utc ASC
