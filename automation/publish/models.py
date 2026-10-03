@@ -51,6 +51,7 @@ class PublishRequest:
 
 # Result statuses. `ok` (below) treats the first three as success.
 STATUS_DRAFT = "draft"                 # a real draft was created on the platform
+STATUS_PUBLISHED = "published"         # a real, live post (Craigslist has no draft state)
 STATUS_DRY_RUN = "dry_run"             # simulated — nothing touched the platform
 STATUS_SKIPPED_DUPLICATE = "skipped_duplicate"  # already published, left as-is
 STATUS_ERROR = "error"                 # adapter raised / failed
@@ -72,6 +73,7 @@ class PublishResult:
     def ok(self) -> bool:
         return self.status in (
             STATUS_DRAFT,
+            STATUS_PUBLISHED,
             STATUS_DRY_RUN,
             STATUS_SKIPPED_DUPLICATE,
         )
