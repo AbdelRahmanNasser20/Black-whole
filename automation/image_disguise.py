@@ -16,10 +16,11 @@ photos Lens exact-matched to GovDeals' Instagram, GovDeals and AllSurplus):
   no honest edit removes that. Photos we took ourselves are the only full fix.
 So all three layers were shipped together on 2026-09-19.
 
-**Policy change 2026-10-03** (`automation/photo_policy.py`): the watermark is
-now only on black-whole.com for lots still `active_bid`. Every other surface,
-and every lot we own or won, gets the mirror + re-frame pass without the
-watermark. The operator accepted that those copies can be Lens-matched.
+**Policy change 2026-10-03** (`automation/photo_policy.py`): this whole recipe
+now runs only for the black-whole.com copy of a lot still `active_bid` (and
+favorites). Every other surface, and every lot we own or won, gets the actual
+photo — dewatermarked, web-optimised, no mirror/re-frame/watermark. The
+operator accepted that those copies can be Lens-matched.
 
 The chairs, their colour, their condition and their count are untouched — it is
 the same product seen from a slightly different camera, with our mark on it.
@@ -329,13 +330,14 @@ def _encode(img: Image.Image, quality: int) -> bytes:
     return buf.getvalue()
 
 
-def disguise(data: bytes, *, key: str, watermark: bool = False) -> tuple[bytes, str, str] | None:
+def disguise(data: bytes, *, key: str) -> tuple[bytes, str, str] | None:
     """Disguised JPEG for one photo of lot `key`: ``(bytes, "jpg", "image/jpeg")``.
 
-    Clean (no watermark) by default. `watermark=True` is only for the
-    black-whole.com copy of an `active_bid` lot — `photo_policy` decides; see
-    `r2_images.upload_lot_images`. A clean copy can be Lens-matched to GovDeals;
-    the operator accepted that on 2026-10-03.
+    Always the full recipe — mirror + re-frame + tiled watermark — because the
+    layers only beat Lens together. Whether a photo is disguised at all is
+    `photo_policy`'s call, made in `listing_images.prepare_for_web`: only the
+    black-whole.com copy of an `active_bid` lot is. Every other copy is the
+    untouched original (`listing_images.clean_for_web`).
 
     None when the bytes aren't a readable image — the caller must then skip the
     file rather than upload the original.
@@ -348,7 +350,7 @@ def disguise(data: bytes, *, key: str, watermark: bool = False) -> tuple[bytes, 
     key = _norm(key)
     digest = hashlib.sha256(data).hexdigest()
     mirror = mirror_allowed(key)
-    mark = watermark_text() if watermark else None
+    mark = watermark_text()
     src_hashes = (image_hash.phash(src), image_hash.dhash(src))
 
     best: tuple[int, bytes] | None = None
@@ -370,12 +372,11 @@ def disguise(data: bytes, *, key: str, watermark: bool = False) -> tuple[bytes, 
     return best[1], "jpg", "image/jpeg"
 
 
-def disguise_files(paths, *, key: str, out_dir: Path, watermark: bool = False) -> list[Path]:
-    """Disguised copies of local photos, for uploaders that post files (FB, eBay).
+def disguise_files(paths, *, key: str, out_dir: Path) -> list[Path]:
+    """Disguised copies of local photos (full recipe). Unreadable files dropped.
 
-    Same key + same source bytes as the R2 upload, so Marketplace gets the exact
-    bytes of the clean R2 variant. Unreadable files are dropped, never passed
-    through. Never watermarked for a channel upload (`photo_policy`).
+    No channel uploader uses this since 2026-10-03: channels get the original
+    (`listing_images.public_copies`). Kept for ad-hoc site-copy work.
     """
     out_dir.mkdir(parents=True, exist_ok=True)
     out: list[Path] = []
@@ -385,7 +386,7 @@ def disguise_files(paths, *, key: str, out_dir: Path, watermark: bool = False) -
         except OSError as e:
             print(f"[image_disguise] read failed for {p}: {e}", file=sys.stderr)
             continue
-        result = disguise(data, key=key, watermark=watermark)
+        result = disguise(data, key=key)
         if result is None:
             print(f"[image_disguise] skipped unreadable {p.name}", file=sys.stderr)
             continue

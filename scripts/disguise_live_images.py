@@ -90,11 +90,6 @@ class Converter:
                                                    path=path, data=blob, content_type=ct):
             self.stats["failed"] += 1
             return url
-        if hero and self.apply:  # watermark-free twin for the FB catalog feed
-            twin = image_disguise.disguise(source, key=li.key_base(lot_key), watermark=False)
-            if twin:
-                r2_images.put_object(self.s3, bucket=self.cfg["bucket"], path=li.catalog_path(path),
-                                     data=twin[0], content_type=twin[2])
         self.stats["converted"] += 1
         self.done[memo] = new
         return new

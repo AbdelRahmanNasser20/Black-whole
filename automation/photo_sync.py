@@ -203,7 +203,7 @@ def apply_plan(plan: LotPlan, *, s3, cfg: dict, drop_missing: bool = False,
     """
     # Fill the variants of what is stored first, even when the folder takes
     # over below: FB plan entries, caches and old pages still name these
-    # objects, and `photo_policy.clean_url` sends them to the `.c.jpg` twin.
+    # objects, and `photo_policy.clean_url` sends them to the `.o.jpg` twin.
     cache: dict[str, bytes | None] = {}
     for ph in plan.photos:
         if not ph.ours or not ph.source:
@@ -219,12 +219,13 @@ def apply_plan(plan: LotPlan, *, s3, cfg: dict, drop_missing: bool = False,
             continue
         key = li.key_base(plan.lot_key)
         if need_clean:
-            out = li.prepare_for_web(src, "jpg", key=key, watermark=False)
+            out = li.prepare_for_web(src, "jpg", key=key, status=plan.status, channel=None)
             if out and r2_images.put_object(s3, bucket=cfg["bucket"], path=ph.clean_path,
                                             data=out[0], content_type=out[2]):
                 ph.clean_exists = True
         if need_wm:
-            out = li.prepare_for_web(src, "jpg", key=key, watermark=True)
+            out = li.prepare_for_web(src, "jpg", key=key, status=plan.status,
+                                     channel=photo_policy.SITE)
             if out and r2_images.put_object(s3, bucket=cfg["bucket"], path=ph.wm_path,
                                             data=out[0], content_type=out[2]):
                 ph.wm_exists = True

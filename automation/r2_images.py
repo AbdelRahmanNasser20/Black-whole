@@ -158,11 +158,11 @@ def upload_lot_images(lot_id, paths, *, status: str | None = None) -> dict | Non
 
     Returns ``{"hero_image_url": str, "image_urls": [str, ...]}`` or None when
     unconfigured / no lot id / nothing uploaded. The URLs are always the
-    **clean** variant (`photo_policy`): disguised (mirror + re-frame, see
-    `image_disguise`), no watermark, under `p/<hmac>/h.c.jpg` and
-    `p/<hmac>/<tok>.c.jpg`. When `status` is `active_bid` the watermarked twin
-    is also written at `h.jpg` / `<tok>.jpg` — the copy black-whole.com shows
-    while we're still bidding. With `IMAGE_DISGUISE=0` it is the legacy
+    **clean** variant (`photo_policy`): the actual photo, web-optimised, no
+    disguise or watermark, under `p/<hmac>/h.o.jpg` and `p/<hmac>/<tok>.o.jpg`.
+    When `status` is `active_bid` the disguised + watermarked twin (see
+    `image_disguise`) is also written at `h.jpg` / `<tok>.jpg` — the copy
+    black-whole.com shows while we're still bidding. With `IMAGE_DISGUISE=0` it is the legacy
     `optimize_for_web` JPEG under the lot-id key (never watermarked).
     """
     from pathlib import Path
@@ -200,14 +200,15 @@ def upload_lot_images(lot_id, paths, *, status: str | None = None) -> dict | Non
         if not source:
             continue
         prepared = li.prepare_for_web(source, li.guess_ext(fp.name), key=base_key,
-                                      watermark=False)
+                                      status=status, channel=None)
         if prepared is None:
             print(f"[r2_images] skipped unreadable image {fp.name}", file=sys.stderr)
             continue
         data, ext, ct = prepared
         marked = None
         if watermark:
-            marked = li.prepare_for_web(source, ext, key=base_key, watermark=True)
+            marked = li.prepare_for_web(source, li.guess_ext(fp.name), key=base_key,
+                                        status=status, channel=photo_policy.SITE)
 
         ver = content_version(data)
 

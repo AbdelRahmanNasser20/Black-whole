@@ -1,11 +1,11 @@
 """Photos disguised before they go public (automation/image_disguise.py).
 
 Offline: synthetic fixtures, FakeS3 injected. What matters here is the contract
-the Lens tests of 2026-09-19 rest on — every public photo is mirrored,
-re-framed, stripped of metadata, stored under an opaque key, and never uploaded
-raw — plus determinism (idempotent re-runs, stable R2 URLs). Since 2026-10-03
-the watermark is only on the site copy of an `active_bid` lot (photo_policy);
-tests/test_photo_policy.py covers that matrix.
+the Lens tests of 2026-09-19 rest on — a disguised photo is mirrored,
+re-framed, watermarked, stripped of metadata, stored under an opaque key, and
+never uploaded raw — plus determinism (idempotent re-runs, stable R2 URLs).
+Since 2026-10-03 only the site copy of an `active_bid` lot is disguised; every
+other copy is the original (photo_policy, tests/test_photo_policy.py).
 """
 from __future__ import annotations
 
@@ -118,11 +118,10 @@ def test_mirrors_by_default_and_honours_the_no_mirror_list(monkeypatch):
 
 def test_watermark_can_be_turned_off(monkeypatch):
     src = _photo()
-    marked = d.disguise(src, key="31225", watermark=True)[0]
-    assert d.disguise(src, key="31225")[0] != marked  # clean is the default
+    marked = d.disguise(src, key="31225")[0]
     monkeypatch.setenv("IMAGE_DISGUISE_WATERMARK", "off")
     assert d.watermark_text() is None
-    assert d.disguise(src, key="31225", watermark=True)[0] != marked
+    assert d.disguise(src, key="31225")[0] != marked
 
 
 def test_unreadable_bytes_return_none_never_the_original():
@@ -147,7 +146,9 @@ def test_salt_falls_back_to_r2_secret(monkeypatch):
 def test_kill_switch_restores_legacy_optimize(monkeypatch):
     src = _photo()
     monkeypatch.setenv("IMAGE_DISGUISE", "0")
-    assert li.prepare_for_web(src, "jpg", key="31225") == li.optimize_for_web(src, "jpg")
+    for status in ("active_bid", "owned"):
+        assert (li.prepare_for_web(src, "jpg", key="31225", status=status, channel="site")
+                == li.optimize_for_web(src, "jpg"))
 
 
 def test_opaque_keys_hide_the_lot_id():
@@ -183,9 +184,9 @@ def test_r2_upload_disguises_and_uses_opaque_keys(tmp_path, monkeypatch):
 
     keys = [p["Key"] for p in fake.puts]
     assert all(k.startswith("p/") and "31465" not in k for k in keys)
-    assert out["hero_image_url"].split("?")[0].endswith("/h.c.jpg")
+    assert out["hero_image_url"].split("?")[0].endswith("/h.o.jpg")
     assert len(out["image_urls"]) == 2 and all(li.is_disguised_url(u) for u in out["image_urls"])
-    assert all(u.split("?")[0].endswith(".c.jpg") for u in out["image_urls"])  # clean in the DB
+    assert all(u.split("?")[0].endswith(".o.jpg") for u in out["image_urls"])  # clean in the DB
     sources = {a.read_bytes(), b.read_bytes()}
     assert all(p["Body"] not in sources and p["ContentType"] == "image/jpeg" for p in fake.puts)
 
@@ -203,7 +204,7 @@ def test_r2_upload_skips_unreadable_files_instead_of_publishing_them(tmp_path, m
 
     assert all(p["Body"] != bad.read_bytes() for p in fake.puts)
     assert len(out["image_urls"]) == 1  # the good one, now also the hero
-    assert out["hero_image_url"].split("?")[0].endswith("/h.c.jpg")
+    assert out["hero_image_url"].split("?")[0].endswith("/h.o.jpg")
 
 
 def test_public_copies_match_what_r2_serves(tmp_path, monkeypatch):
@@ -242,9 +243,11 @@ def test_hash_self_distance_zero_and_reencode_close():
 
 def test_catalog_url_maps_disguised_photos_to_their_clean_twin():
     hero = "https://pub-xyz.r2.dev/p/abc/h.jpg?v=12345678"
-    assert li.catalog_url(hero) == "https://pub-xyz.r2.dev/p/abc/h.c.jpg?v=12345678"
+    assert li.catalog_url(hero) == "https://pub-xyz.r2.dev/p/abc/h.o.jpg?v=12345678"
     gallery = "https://pub-xyz.r2.dev/p/abc/0f0f0f.jpg?v=1"
-    assert li.catalog_url(gallery) == "https://pub-xyz.r2.dev/p/abc/0f0f0f.c.jpg?v=1"
+    assert li.catalog_url(gallery) == "https://pub-xyz.r2.dev/p/abc/0f0f0f.o.jpg?v=1"
+    old_twin = "https://pub-xyz.r2.dev/p/abc/h.c.jpg?v=1"  # 2026-09 mirrored twin
+    assert li.catalog_url(old_twin) == "https://pub-xyz.r2.dev/p/abc/h.o.jpg?v=1"
     legacy = "https://pub-xyz.r2.dev/31225.jpg?v=1"
     assert li.catalog_url(legacy) == legacy
     assert li.catalog_url(li.catalog_url(hero)) == li.catalog_url(hero)  # idempotent
@@ -265,7 +268,8 @@ def test_r2_upload_puts_a_watermark_free_hero_twin(tmp_path, monkeypatch):
     hero_key = li.opaque_hero_path("31225")
     twin_key = li.catalog_path(hero_key)
     assert twin_key in bodies and bodies[twin_key] != bodies[hero_key]
-    assert bodies[twin_key] == d.disguise(src.read_bytes(), key="31225", watermark=False)[0]
+    assert bodies[hero_key] == d.disguise(src.read_bytes(), key="31225")[0]
+    assert bodies[twin_key] == li.clean_for_web(src.read_bytes())[0]  # the original
 
 
 def test_catalog_feed_ships_the_twin(monkeypatch):
@@ -273,4 +277,4 @@ def test_catalog_feed_ships_the_twin(monkeypatch):
     row = {"lot_id": "31225", "title": "300 banquet chairs", "price_per_chair": 12,
            "quantity_remaining": 300, "status": "owned",
            "hero_image_url": "https://pub-xyz.r2.dev/p/abc/h.jpg?v=1", "image_urls": []}
-    assert catalog_feed._image_link(row) == "https://pub-xyz.r2.dev/p/abc/h.c.jpg?v=1"
+    assert catalog_feed._image_link(row) == "https://pub-xyz.r2.dev/p/abc/h.o.jpg?v=1"

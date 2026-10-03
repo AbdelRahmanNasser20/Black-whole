@@ -58,18 +58,24 @@ any lot to `crm_offerable`.
 | `active_bid` (still bidding) | **watermarked** | clean |
 | anything else (owned, won, listed, sold, lost, hidden) | clean | clean |
 
-"Clean" = dewatermarked GovDeals mark (`automation/dewatermark.py`, API only,
-unchanged) + the mirror/re-frame disguise, **no** BLACKWHOLE watermark. One
-function decides: `photo_policy.wants_watermark(status, channel)` =
-`channel == "site" and status == "active_bid"`.
+"Clean" = **the actual photo**: GovDeals mark removed (`automation/dewatermark.py`,
+API only, unchanged), web-optimised (`listing_images.clean_for_web`: EXIF
+orientation baked in, long edge ≤ 1600, JPEG q82, metadata stripped — phone
+GPS would leak the storage location). **No** mirror, **no** re-frame, **no**
+watermark. The full disguise (mirror + re-frame + tiled watermark,
+`image_disguise.disguise`) runs only for the site copy of an `active_bid` lot
+and for favorites. One function decides: `photo_policy.wants_watermark(status,
+channel)` = `channel == "site" and status == "active_bid"`, applied in
+`listing_images.prepare_for_web(data, ext, key=, status=, channel=)`.
 
 **R2 layout** (extends the opaque `p/<hmac>/` scheme):
 
 ```
-p/<hmac>/h.c.jpg       hero, clean          always
-p/<hmac>/<tok>.c.jpg   gallery, clean       always
-p/<hmac>/h.jpg         hero, watermarked    only uploaded while active_bid
-p/<hmac>/<tok>.jpg     gallery, watermarked only uploaded while active_bid
+p/<hmac>/h.o.jpg       hero, original (clean)                always
+p/<hmac>/<tok>.o.jpg   gallery, original (clean)             always
+p/<hmac>/h.jpg         hero, disguised + watermarked         only uploaded while active_bid
+p/<hmac>/<tok>.jpg     gallery, disguised + watermarked      only uploaded while active_bid
+p/<hmac>/h.c.jpg       2026-09 FB-catalog twin (mirrored, no watermark) — legacy, never served
 ```
 
 `inventory.hero_image_url` / `image_urls` (and `auction_favorites.clean_*`)
@@ -112,7 +118,12 @@ scrape photos are only the fallback when we have nothing of our own.
 <log>`. Sources for a missing variant: the lot folder (exact match on the
 source-bytes token) → the pre-disguise R2 object named in a
 `disguise-backfill-*.jsonl` log → for the hero, gallery photo 0's source.
-Objects are never deleted. Facebook Marketplace posts keep whatever photos they
+Objects are never deleted.
+
+**Deploy order.** Run `.venv/bin/python scripts/apply_photo_policy.py --apply`
+on the laptop (folders + backfill logs are the sources) **before** this code
+is deployed. The new code maps every stored URL to a `.o.jpg` object; until
+the script has uploaded them and rewritten the DB, non-site images 404. Facebook Marketplace posts keep whatever photos they
 were posted with — re-upload with `scripts/fb_replace_photos.py` (writes to FB,
 operator's call).
 
@@ -156,8 +167,9 @@ same scene). No honest edit removes that; photos we take ourselves do.
 new salt = new keys for every re-upload).
 
 **FB catalog twin.** Meta rejects watermarked catalog images, so each disguised
-hero got a watermark-free copy at `…/h.c.jpg`. That twin is now the clean
-variant every photo has (see the policy above).
+hero got a watermark-free (still mirrored) copy at `…/h.c.jpg`. Since
+2026-10-03 it is unused: `photo_policy.clean_url` maps it to the `.o.jpg`
+original.
 
 **Paths covered.** R2 uploads (`upload_lot_images`: lot_channels add/redo-photos,
 import_deal_images, backfill_listing_images, favorites mirror), `run.py` FB/eBay

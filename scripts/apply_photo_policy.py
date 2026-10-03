@@ -6,7 +6,7 @@ still `active_bid`. Every other channel, and every lot we own/won/sold, gets
 the clean (dewatermarked, unwatermarked) copy. The DB stores clean URLs.
 
 Per row (inventory, plus `auction_favorites` — treated as `active_bid`):
-- HEAD the clean (`.c.jpg`) and, for bid lots, the watermarked (`.jpg`) object
+- HEAD the clean original (`.o.jpg`) and, for bid lots, the disguised (`.jpg`) object
   of every photo; render a missing one from its source (lot folder on this
   host, or the pre-disguise R2 object named in a disguise-backfill log);
 - owned lots whose folder holds a different photo set re-upload from the
