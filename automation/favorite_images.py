@@ -96,7 +96,10 @@ def mirror_favorite_photos(asset_id: str, *, log=print, force: bool = False) -> 
     # budget can never be blown by a caller that forgets to slice.
     urls = urls[:FAVORITE_PHOTO_LIMIT]
     result = lot_channels.clean_and_upload(key, urls, log, dewatermark=True,
-                                           limit=FAVORITE_PHOTO_LIMIT, strict=True)
+                                           limit=FAVORITE_PHOTO_LIMIT, strict=True,
+                                           # an auction we're watching = still being bid on:
+                                           # the site map shows the watermarked twin
+                                           status="active_bid")
     if not result:
         log(f"  ! {asset_id}: nothing clean to publish")
         return None

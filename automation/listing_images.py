@@ -29,7 +29,7 @@ from urllib.parse import urlparse
 import httpx
 from PIL import Image, ImageOps
 
-from . import config, image_disguise
+from . import config, image_disguise, photo_policy
 
 DEFAULT_BUCKET = "listing-images"
 
@@ -151,22 +151,17 @@ def opaque_gallery_path(lot_id, source: bytes) -> str | None:
 
 
 def catalog_path(hero_path: str) -> str:
-    """Watermark-free twin of a disguised hero (`…/h.jpg` → `…/h.c.jpg`).
+    """Clean twin of a disguised object key (`…/h.jpg` → `…/h.o.jpg`).
 
-    Meta's catalog rejects watermarked images, so the FB feed gets this copy;
-    every other surface keeps the watermarked hero (the part that beats Lens).
+    Kept under its old name (it began as the FB-catalog hero twin); the clean
+    variant now exists for every photo — see `photo_policy`.
     """
-    return hero_path[: -len(".jpg")] + ".c.jpg"
+    return photo_policy.clean_path(hero_path)
 
 
 def catalog_url(url: str | None) -> str | None:
-    """The catalog twin for a disguised hero URL; any other URL unchanged."""
-    if not url or not is_disguised_url(url):
-        return url
-    path, sep, query = url.partition("?")
-    if not path.endswith("/h.jpg"):
-        return url
-    return catalog_path(path) + sep + query
+    """The clean variant of a disguised photo URL; any other URL unchanged."""
+    return photo_policy.clean_url(url)
 
 
 def is_disguised_url(url: str | None) -> bool:
@@ -226,30 +221,88 @@ def optimize_for_web(data: bytes, ext: str) -> tuple[bytes, str, str]:
     return out, "jpg", "image/jpeg"
 
 
-def prepare_for_web(data: bytes, ext: str, *, key: str) -> tuple[bytes, str, str] | None:
+def clean_for_web(data: bytes, ext: str = "jpg") -> tuple[bytes, str, str] | None:
+    """The actual photo, ready to publish: ``(jpeg bytes, "jpg", "image/jpeg")``.
+
+    `optimize_for_web` (EXIF orientation baked in, long edge capped, JPEG
+    q82) but it **always** re-encodes, so no metadata survives — phone EXIF
+    carries GPS, and the storage-unit location is private. No mirror, no
+    re-frame, no watermark. None when the bytes aren't an image: skip the
+    file, never upload them raw.
+    """
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+    except Exception:
+        return None
+    try:
+        img = ImageOps.exif_transpose(img)
+    except Exception:
+        pass
+    if max(img.size) > MAX_IMAGE_DIM:
+        img.thumbnail((MAX_IMAGE_DIM, MAX_IMAGE_DIM), Image.LANCZOS)
+    if img.mode in ("RGBA", "LA", "P"):
+        img = img.convert("RGBA")
+        flat = Image.new("RGB", img.size, (255, 255, 255))
+        flat.paste(img, mask=img.split()[-1])
+        img = flat
+    elif img.mode != "RGB":
+        img = img.convert("RGB")
+    buf = io.BytesIO()
+    try:
+        img.save(buf, format="JPEG", quality=JPEG_QUALITY, optimize=True)
+    except Exception:
+        return None
+    out = buf.getvalue()
+    return (out, "jpg", "image/jpeg") if out else None
+
+
+def prepare_for_web(data: bytes, ext: str, *, key: str, status: str | None,
+                    channel: str | None) -> tuple[bytes, str, str] | None:
     """The one gate every public lot photo passes before upload.
 
-    Disguise on (default): mirrored/re-framed/watermarked JPEG, or None when the
-    bytes aren't an image — skip the file, never upload the original. Kill
-    switch `IMAGE_DISGUISE=0`: the legacy `optimize_for_web` behaviour.
+    The policy decides (`photo_policy.wants_watermark(status, channel)`):
+    the black-whole.com copy of an `active_bid` lot gets the full disguise
+    (mirror + re-frame + tiled watermark); everything else gets the actual
+    photo (`clean_for_web`). None when the bytes aren't an image — skip the
+    file, never upload the original. Kill switch `IMAGE_DISGUISE=0`: the
+    legacy `optimize_for_web` behaviour for every case (lot-id keys, no twins).
     """
-    if image_disguise.enabled():
+    if not image_disguise.enabled():
+        return optimize_for_web(data, ext)
+    if photo_policy.wants_watermark(status, channel):
         return image_disguise.disguise(data, key=key)
-    return optimize_for_web(data, ext)
+    return clean_for_web(data, ext)
 
 
 def public_copies(lot_id, paths, *, out_dir: Path | None = None) -> list[Path]:
-    """Local disguised copies for uploaders that post files (FB / eBay drafts).
+    """Local clean copies for uploaders that post files (FB / eBay drafts).
 
-    Identity when disguise is off. Same key + source bytes as `upload_lot_images`,
-    so Marketplace and the site carry the same pixels.
+    The actual photos (`clean_for_web`: web-optimised, metadata stripped, no
+    disguise, no watermark) — the same bytes as the clean R2 variant. No
+    channel but the site may show the watermark (`photo_policy`). Unreadable
+    files are dropped, never passed through.
     """
     files = [Path(p) for p in (paths or [])]
     base = key_base(lot_id)
-    if not image_disguise.enabled() or not base:
+    if not image_disguise.enabled() or not base:  # kill switch: legacy identity
         return files
     out_dir = out_dir or Path(config.SCRATCH_DIR) / "public_photos" / base
-    return image_disguise.disguise_files(files, key=base, out_dir=out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out: list[Path] = []
+    for i, p in enumerate(files):
+        try:
+            result = clean_for_web(p.read_bytes(), guess_ext(p.name))
+        except OSError as e:
+            print(f"[listing_images] read failed for {p}: {e}", file=sys.stderr)
+            continue
+        if result is None:
+            print(f"[listing_images] skipped unreadable {p.name}", file=sys.stderr)
+            continue
+        dst = out_dir / f"{i:02d}.jpg"
+        dst.write_bytes(result[0])
+        out.append(dst)
+    return out
 
 
 def _post_object(client: httpx.Client, *, base, key, bucket, path, data, content_type) -> bool:
@@ -277,8 +330,12 @@ def _post_object(client: httpx.Client, *, base, key, bucket, path, data, content
     return True
 
 
-def upload_lot_images(lot_id, paths) -> dict | None:
+def upload_lot_images(lot_id, paths, *, status: str | None = None) -> dict | None:
     """Upload a lot's local image files to the shared bucket.
+
+    Returned URLs are always the **clean** variant. `status` is the lot's
+    `inventory.status`: when it is `active_bid` the R2 path also writes the
+    watermarked twin the storefront shows (`photo_policy`).
 
     Returns ``{"hero_image_url": str, "image_urls": [str, ...]}`` or None when
     storage is unconfigured, there's no lot id, or nothing uploaded. The first
@@ -290,7 +347,7 @@ def upload_lot_images(lot_id, paths) -> dict | None:
     # 402-restricted Storage and took every listing photo offline.
     from automation import r2_images  # lazy: avoids an import cycle
     if r2_images.is_configured():
-        return r2_images.upload_lot_images(lot_id, paths)
+        return r2_images.upload_lot_images(lot_id, paths, status=status)
 
     cfg = env_config()
     base_key = key_base(lot_id)
@@ -314,7 +371,8 @@ def upload_lot_images(lot_id, paths) -> dict | None:
                 continue
             if not data:
                 continue
-            prepared = prepare_for_web(data, guess_ext(fp.name), key=key_base(lot_id))
+            prepared = prepare_for_web(data, guess_ext(fp.name), key=key_base(lot_id),
+                                       status=status, channel=None)
             if prepared is None:
                 print(f"[listing_images] skipped unreadable image {fp.name}", file=sys.stderr)
                 continue

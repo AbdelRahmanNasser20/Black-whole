@@ -196,8 +196,9 @@ def _uploads(monkeypatch):
     """Records what reached R2. Nothing watermarked may ever appear here."""
     seen = {}
 
-    def fake_upload(key, files):
+    def fake_upload(key, files, status=None):
         seen["key"] = key
+        seen["status"] = status
         seen["names"] = [f.name for f in files]
         assert all(f.parent.name != "_originals" for f in files), "watermarked original uploaded"
         return {"hero_image_url": "h", "image_urls": ["a"]}
@@ -222,7 +223,7 @@ def test_clean_and_upload_publishes_only_cleaned_photos(_scratch, _uploads, monk
 def test_clean_and_upload_uploads_nothing_when_every_photo_fails(_scratch, monkeypatch, strict):
     _fake_dewatermark(monkeypatch, clean_indexes=set())
     monkeypatch.setattr(lc.listing_images, "upload_lot_images",
-                        lambda key, files: pytest.fail("must not upload watermarked files"))
+                        lambda key, files, status=None: pytest.fail("must not upload watermarked files"))
     assert lc.clean_and_upload("fav-abc", ["https://cdn/0.jpg", "https://cdn/1.jpg"],
                                log=lambda *a: None, strict=strict) is None
 
@@ -254,9 +255,12 @@ def test_mirror_photos_stamps_inventory(_scratch, _uploads, monkeypatch):
     stamped = {}
     monkeypatch.setattr(lc.inventory, "set_images",
                         lambda lot_id, hero, urls: stamped.update(lot_id=lot_id, hero=hero, urls=urls))
+    monkeypatch.setattr(lc.inventory, "get", lambda lot_id: {"lot_id": lot_id, "status": "active_bid"})
     out = lc.mirror_photos("gd-1-2", ["https://cdn/0.jpg"], log=lambda *a: None)
     assert out["hero_image_url"] == "h"
     assert stamped == {"lot_id": "gd-1-2", "hero": "h", "urls": ["a"]}
+    # the uploader learns the status, so a bid lot also gets its site-only watermark twin
+    assert _uploads["status"] == "active_bid"
 
 
 # ───────────────────────── listing_channels mirror (Phase 1.7) ─────────────────────────

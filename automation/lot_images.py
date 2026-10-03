@@ -38,6 +38,11 @@ import os
 import re
 from dataclasses import dataclass, field
 
+try:  # package import here; a vendored copy sits next to photo_policy.py
+    from . import photo_policy
+except ImportError:  # pragma: no cover - vendored, no package
+    import photo_policy  # type: ignore
+
 # Photo folders the pipeline creates but must never publish: `_originals/` are
 # the pre-dewatermark files, `_screenshots/` are debug captures of the GovDeals
 # page. Only top-level files in a lot folder are real listing photos.
@@ -60,6 +65,7 @@ ROW_COLUMNS = (
     "folder_path",
     "folder_name",
     "hero_image",
+    "status",
 )
 
 _SELECT = f"SELECT {', '.join(ROW_COLUMNS)} FROM inventory WHERE lot_id = %(lot_id)s"
@@ -153,21 +159,28 @@ def local_image_paths(row: dict) -> list[str]:
     return [os.path.join(folder, n) for n in files]
 
 
-def resolve(row: dict) -> LotImages:
+def resolve(row: dict, channel: str | None = None) -> LotImages:
     """Resolve one already-fetched inventory row. The core of this module.
 
     The gallery (`image_urls`) is the set; the hero is only folded into it when
     the gallery is empty. File 0 is uploaded under both the hero key and
     `<key>/00.<ext>`, so unioning them would attach the same photo twice.
+
+    `channel` picks the photo variant through `photo_policy`: only
+    `channel="site"` on an `active_bid` row gets the watermarked copy. Every
+    other channel — and `None`, the default, so a caller that forgets to say
+    can never ship a watermark — gets the clean copy.
     """
     row = row or {}
     lot_id = row.get("lot_id")
     lot_id = str(lot_id) if lot_id is not None else None
+    wm = photo_policy.wants_watermark(row.get("status"), channel)
 
     hero = str(row.get("hero_image_url") or "").strip()
-    hero = hero if hero.startswith("http") else None
+    hero = photo_policy.variant_url(hero, watermark=wm) if hero.startswith("http") else None
 
     urls = _clean_urls(row.get("image_urls"))
+    urls = list(dict.fromkeys(photo_policy.variant_url(u, watermark=wm) for u in urls))
     if not urls and hero:
         urls = [hero]
 
@@ -180,7 +193,7 @@ def resolve(row: dict) -> LotImages:
     return LotImages(lot_id=lot_id)
 
 
-def resolve_lot(lot_id: str | None, *, fetch_row=None) -> LotImages:
+def resolve_lot(lot_id: str | None, *, fetch_row=None, channel: str | None = None) -> LotImages:
     """Resolve by lot id, reading the row through `fetch_row`.
 
     `fetch_row(sql, params) -> dict | None`. Defaults to this repo's
@@ -202,14 +215,23 @@ def resolve_lot(lot_id: str | None, *, fetch_row=None) -> LotImages:
         return LotImages(lot_id=str(lot_id))
     row = dict(row)
     row.setdefault("lot_id", str(lot_id))
-    return resolve(row)
+    return resolve(row, channel)
 
 
-def image_urls(row_or_lot_id, *, fetch_row=None) -> list[str]:
+def image_urls(row_or_lot_id, *, fetch_row=None, channel: str | None = None) -> list[str]:
     """Host-independent photo URLs for a lot. Accepts a row or a lot id."""
     if isinstance(row_or_lot_id, dict):
-        return resolve(row_or_lot_id).urls
-    return resolve_lot(row_or_lot_id, fetch_row=fetch_row).urls
+        return resolve(row_or_lot_id, channel).urls
+    return resolve_lot(row_or_lot_id, fetch_row=fetch_row, channel=channel).urls
+
+
+def channel_photo_urls(row_or_lot_id, channel: str, *, fetch_row=None) -> list[str]:
+    """Photo URLs a channel writer may publish (Craigslist, eBay, FB, ...).
+
+    Same as `image_urls`, but `channel` is required so the caller has to name
+    where the photos are going. Only `"site"` can ever get a watermark.
+    """
+    return image_urls(row_or_lot_id, fetch_row=fetch_row, channel=channel)
 
 
 def has_usable_images(row_or_lot_id, *, fetch_row=None) -> bool:
@@ -221,13 +243,13 @@ def has_usable_images(row_or_lot_id, *, fetch_row=None) -> bool:
     return bool(image_urls(row_or_lot_id, fetch_row=fetch_row))
 
 
-def hero_src(row: dict, *, local_route: str = "/image") -> str | None:
+def hero_src(row: dict, *, local_route: str = "/image", channel: str | None = "site") -> str | None:
     """Cover image for a web template: durable URL, else the local serving route.
 
     The `/image/<folder>/<name>` fallback only renders where the folder exists,
     which is exactly the dev-laptop case it's there for.
     """
-    resolved = resolve(row)
+    resolved = resolve(row, channel)
     if resolved.hero:
         return resolved.hero
     folder = (row.get("folder_name") or "").strip()
@@ -239,9 +261,9 @@ def hero_src(row: dict, *, local_route: str = "/image") -> str | None:
     return None
 
 
-def gallery_srcs(row: dict, *, local_route: str = "/image") -> list[str]:
+def gallery_srcs(row: dict, *, local_route: str = "/image", channel: str | None = "site") -> list[str]:
     """Ordered gallery for a web template. Same precedence as `hero_src`."""
-    resolved = resolve(row)
+    resolved = resolve(row, channel)
     if resolved.urls:
         return resolved.urls
     folder = (row.get("folder_name") or "").strip()

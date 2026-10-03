@@ -99,6 +99,15 @@ def put_object(s3, *, bucket: str, path: str, data: bytes, content_type: str) ->
     return True
 
 
+def object_exists(s3, *, bucket: str, path: str) -> bool:
+    """HEAD one object. False on 404 or any error (read-only)."""
+    try:
+        s3.head_object(Bucket=bucket, Key=path)
+    except Exception:  # noqa: BLE001 - absent, or unreachable: either way not servable
+        return False
+    return True
+
+
 class PrivateBucketNotConfigured(RuntimeError):
     """LOT_ARCHIVE_R2_BUCKET is unset, or names the public image bucket."""
 
@@ -144,18 +153,21 @@ def put_private_object(s3, *, bucket: str, path: str, data: bytes,
     return True
 
 
-def upload_lot_images(lot_id, paths) -> dict | None:
+def upload_lot_images(lot_id, paths, *, status: str | None = None) -> dict | None:
     """R2 twin of `listing_images.upload_lot_images` — same keys, same return.
 
     Returns ``{"hero_image_url": str, "image_urls": [str, ...]}`` or None when
-    unconfigured / no lot id / nothing uploaded. Every photo passes
-    `listing_images.prepare_for_web` first: disguised (see `image_disguise`) and
-    stored under an opaque `p/…` key, or — with `IMAGE_DISGUISE=0` — the legacy
-    `optimize_for_web` JPEG under the lot-id key.
+    unconfigured / no lot id / nothing uploaded. The URLs are always the
+    **clean** variant (`photo_policy`): the actual photo, web-optimised, no
+    disguise or watermark, under `p/<hmac>/h.o.jpg` and `p/<hmac>/<tok>.o.jpg`.
+    When `status` is `active_bid` the disguised + watermarked twin (see
+    `image_disguise`) is also written at `h.jpg` / `<tok>.jpg` — the copy
+    black-whole.com shows while we're still bidding. With `IMAGE_DISGUISE=0` it is the legacy
+    `optimize_for_web` JPEG under the lot-id key (never watermarked).
     """
     from pathlib import Path
 
-    from automation import image_disguise
+    from automation import image_disguise, photo_policy
     from automation import listing_images as li  # lazy: avoids an import cycle
 
     cfg = env_config()
@@ -177,6 +189,7 @@ def upload_lot_images(lot_id, paths) -> dict | None:
     gallery: list[str] = []
     # Disguised photos go under opaque keys; the legacy keys spell the lot id.
     opaque = image_disguise.enabled()
+    watermark = opaque and photo_policy.keeps_watermark_variant(status)
 
     for i, fp in enumerate(files):
         try:
@@ -186,28 +199,40 @@ def upload_lot_images(lot_id, paths) -> dict | None:
             continue
         if not source:
             continue
-        prepared = li.prepare_for_web(source, li.guess_ext(fp.name), key=base_key)
+        prepared = li.prepare_for_web(source, li.guess_ext(fp.name), key=base_key,
+                                      status=status, channel=None)
         if prepared is None:
             print(f"[r2_images] skipped unreadable image {fp.name}", file=sys.stderr)
             continue
         data, ext, ct = prepared
+        marked = None
+        if watermark:
+            marked = li.prepare_for_web(source, li.guess_ext(fp.name), key=base_key,
+                                        status=status, channel=photo_policy.SITE)
 
         ver = content_version(data)
 
-        gal_path = (li.opaque_gallery_path(lot_id, source) if opaque
-                    else li.gallery_object_path(lot_id, i, ext=ext))
+        if opaque:
+            wm_gal = li.opaque_gallery_path(lot_id, source)
+            gal_path = photo_policy.clean_path(wm_gal) if wm_gal else None
+        else:
+            wm_gal, gal_path = None, li.gallery_object_path(lot_id, i, ext=ext)
         if gal_path and put_object(s3, bucket=bucket, path=gal_path, data=data, content_type=ct):
             gallery.append(public_url(gal_path, public_base=public_base, version=ver))
+            if marked and wm_gal:
+                put_object(s3, bucket=bucket, path=wm_gal, data=marked[0], content_type=marked[2])
 
         if hero_url is None:  # first photo that made it through is the cover
-            hero_path = li.opaque_hero_path(lot_id) if opaque else li.hero_object_path(lot_id, ext=ext)
+            if opaque:
+                wm_hero = li.opaque_hero_path(lot_id)
+                hero_path = photo_policy.clean_path(wm_hero) if wm_hero else None
+            else:
+                wm_hero, hero_path = None, li.hero_object_path(lot_id, ext=ext)
             if hero_path and put_object(s3, bucket=bucket, path=hero_path, data=data, content_type=ct):
                 hero_url = public_url(hero_path, public_base=public_base, version=ver)
-                if opaque:
-                    twin = image_disguise.disguise(source, key=base_key, watermark=False)
-                    if twin:
-                        put_object(s3, bucket=bucket, path=li.catalog_path(hero_path),
-                                   data=twin[0], content_type=twin[2])
+                if marked and wm_hero:
+                    put_object(s3, bucket=bucket, path=wm_hero, data=marked[0],
+                               content_type=marked[2])
 
     if not gallery and not hero_url:
         return None
