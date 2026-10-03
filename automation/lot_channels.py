@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import config  # noqa: F401  (loads .env)
-from . import db, inventory, listing_images, lot_images, progress
+from . import db, inventory, listing_images, lot_images, photo_policy, progress
 from .catalog_feed import FEED_COLUMNS, build_feed_rows, state_code
 from .channels import store as channel_store
 
@@ -349,8 +349,11 @@ def quantity_from_detail(detail: dict) -> int | None:
 
 def clean_and_upload(key: str, urls: list[str], log: Log = _print, *,
                      dewatermark: bool = True, limit: int | None = None,
-                     strict: bool = False) -> dict | None:
+                     strict: bool = False, status: str | None = None) -> dict | None:
     """Seller photos -> dewatermark.ai -> R2 under `key` (any string; key_base sanitises).
+
+    `status` is the lot's `inventory.status`; `active_bid` also writes the
+    watermarked storefront twin (`photo_policy`). The returned URLs are clean.
 
     Does NOT touch inventory — callers stamp the returned URLs where they belong
     (`mirror_photos` -> `inventory`, `favorite_images` -> `auction_favorites`).
@@ -408,7 +411,15 @@ def clean_and_upload(key: str, urls: list[str], log: Log = _print, *,
         # `upload_lot_images` makes file 0 the hero — put the gallery back in
         # download order (stems are 00, 01, …) so the hero is photo one.
         files = sorted(cleaned, key=lambda p: p.stem)
-    return listing_images.upload_lot_images(key, files)
+    return listing_images.upload_lot_images(key, files, status=status)
+
+
+def _status_of(lot_id: str) -> str | None:
+    """The lot's `inventory.status`, or None if the row can't be read."""
+    try:
+        return (inventory.get(lot_id) or {}).get("status")
+    except Exception:  # noqa: BLE001 — a status lookup must not block an upload
+        return None
 
 
 def mirror_photos(lot_id: str, urls: list[str], log: Log = _print, *,
@@ -420,7 +431,8 @@ def mirror_photos(lot_id: str, urls: list[str], log: Log = _print, *,
     Seller photos carry the tiled www.govdeals.com watermark, so shipping them
     raw is never right — `dewatermark=False` exists for tests only.
     """
-    result = clean_and_upload(lot_id, urls, log, dewatermark=dewatermark)
+    result = clean_and_upload(lot_id, urls, log, dewatermark=dewatermark,
+                              status=_status_of(lot_id))
     if result:
         inventory.set_images(lot_id, result["hero_image_url"], result["image_urls"])
     return result
@@ -448,12 +460,12 @@ def redo_photos(lot_id: str, log: Log = _print) -> dict | None:
     up = mirror_photos(lot_id, urls, log=log)
     if up:
         row = inventory.get(lot_id) or row
-        fresh = lot_images.resolve(row).urls
+        fresh = lot_images.resolve(row, "fb_marketplace").urls
         cur = plan_entry_for(lot_id)
         if cur:
             # Keep a hand-picked photo order (cover first) when the set is the
             # same — only the bytes and the ?v= cache-busters changed.
-            key = lambda u: u.split("?")[0]  # noqa: E731
+            key = lambda u: photo_policy.clean_url(u).split("?")[0]  # noqa: E731
             by_key = {key(u): u for u in fresh}
             ordered = [by_key[key(u)] for u in cur.get("photo_urls") or [] if key(u) in by_key]
             ordered += [u for u in fresh if u not in ordered]
@@ -567,7 +579,7 @@ def add_lot(url: str, *, price: float | None = None, split: str | None = None,
 
         # photos → R2 (idempotent; a lot that already has durable photos is left alone)
         _phase("download", "running", lot_id=lot_id)
-        have = lot_images.resolve(row).urls if row else []
+        have = lot_images.resolve(row, "fb_marketplace").urls if row else []
         if have and not part.photos:
             res.photos = len(have)
             log(f"  = {len(have)} durable photos already on R2")
@@ -579,7 +591,7 @@ def add_lot(url: str, *, price: float | None = None, split: str | None = None,
 
         row = inventory.get(lot_id) or row
         res.row = row
-        photo_urls = lot_images.resolve(row).urls
+        photo_urls = lot_images.resolve(row, "fb_marketplace").urls
 
         # FB copy of record
         entry = plan_entry(

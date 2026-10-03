@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from automation import browser  # noqa: E402
+from automation import photo_policy  # noqa: E402
 from automation.facebook import _ensure_hide_from_friends_on  # noqa: E402
 from automation.config import CHROME_PROFILE  # noqa: E402
 from fb_my_listings import scrape_selling, match  # noqa: E402
@@ -46,8 +47,11 @@ def load(sku: str) -> dict:
 
 
 def fetch_photos(urls: list[str], dest: Path) -> list[Path]:
+    """Download the photos to post. Always the clean variant: Facebook never gets
+    the watermark (`automation/photo_policy.py`), even from an old plan entry
+    that still names a watermarked `p/…/x.jpg` object."""
     out = []
-    for i, u in enumerate(urls):
+    for i, u in enumerate(photo_policy.clean_url(x) for x in urls):
         ext = ".jpg" if ".png" not in u.lower() else ".png"
         p = dest / f"{i:02d}{ext}"
         req = urllib.request.Request(u, headers={"User-Agent": UA})

@@ -20,7 +20,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from automation import config  # noqa: F401  (loads .env)
-from automation import inventory
+from automation import inventory, photo_policy
 
 BRAND = "Black Whole"
 SITE = "https://black-whole.com"
@@ -61,7 +61,7 @@ def row_for(item: dict) -> dict[str, str]:
         "condition": "used",
         "price": f"{price:.2f} USD",
         "link": f"{SITE}/listings/{lot_id}",
-        "image_link": item.get("hero_image_url") or "",
+        "image_link": photo_policy.clean_url(item.get("hero_image_url")) or "",  # never the watermark
         "brand": BRAND,
         "google_product_category": GOOGLE_CATEGORY,
         "quantity_to_sell_on_facebook": str(qty) if qty > 0 else "",

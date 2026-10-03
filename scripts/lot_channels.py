@@ -126,7 +126,7 @@ def cmd_copy(a) -> int:
         lot_id=a.lot_id, title=row.get("title") or "", price=float(row.get("price_per_chair") or 0),
         city=row.get("city") or "", state=row.get("state") or "", zip_code=row.get("zip_code"),
         quantity=row.get("quantity_remaining"), blurb=row.get("description") or "",
-        photo_urls=lot_images.resolve(row).urls, unit=lc.unit_word(row), profile_id=lc.profile_id(),
+        photo_urls=lot_images.resolve(row, "fb_marketplace").urls, unit=lc.unit_word(row), profile_id=lc.profile_id(),
         notes=(lc.plan_entry_for(a.lot_id) or {}).get("notes", ""),
         fb_city=a.fb_city, fb_state=a.fb_state,
     )
