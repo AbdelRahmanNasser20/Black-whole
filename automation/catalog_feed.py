@@ -144,11 +144,12 @@ def _image_link(row: dict) -> str | None:
     the image itself, so a relative ``/image/...`` local path is equally useless
     — rows with no live durable URL are dropped instead of shipped broken.
     """
-    resolved = lot_images.resolve(row)
+    resolved = lot_images.resolve(row, "fb_catalog")
     candidates = ([resolved.hero] if resolved.hero else []) + resolved.urls
     for url in candidates:
         if url and lot_images.storage_backend(url) != "supabase":
-            # Disguised hero → its watermark-free twin: Meta rejects watermarks.
+            # Already the clean variant (photo_policy: no channel but the site
+            # ever shows the watermark); catalog_url is a belt for old rows.
             return listing_images.catalog_url(url)
     return None
 

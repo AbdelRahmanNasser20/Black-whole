@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Re-publish every live lot photo through the disguise (automation/image_disguise.py).
+"""SUPERSEDED 2026-10-03 by scripts/apply_photo_policy.py — only `--rollback` still runs.
+
+It stored the *watermarked* variant in the DB for every lot; the photo policy
+(automation/photo_policy.py) stores clean URLs and shows the watermark only on
+black-whole.com for `active_bid` lots. Its logs are still read: they map each
+disguised object back to its pre-disguise source (`photo_sync.legacy_sources`).
+
+Original description:
+Re-publish every live lot photo through the disguise (automation/image_disguise.py).
 
 Photos uploaded before the disguise shipped are the dewatermarked GovDeals
 originals under lot-id keys (`…r2.dev/gd-239-31465/00.jpg`), and Google Lens
@@ -182,9 +190,8 @@ def main() -> int:
     args = ap.parse_args()
     if args.rollback:
         return rollback(args.rollback)
-    if not image_disguise.enabled():
-        raise SystemExit("IMAGE_DISGUISE is off — refusing to re-publish undisguised photos")
-    return run(args)
+    raise SystemExit("superseded by scripts/apply_photo_policy.py (photo policy 2026-10-03); "
+                     "only --rollback still runs here")
 
 
 if __name__ == "__main__":

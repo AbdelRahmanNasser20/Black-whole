@@ -2,8 +2,10 @@
 
 Offline: synthetic fixtures, FakeS3 injected. What matters here is the contract
 the Lens tests of 2026-09-19 rest on — every public photo is mirrored,
-re-framed, watermarked, stripped of metadata, stored under an opaque key, and
-never uploaded raw — plus determinism (idempotent re-runs, stable R2 URLs).
+re-framed, stripped of metadata, stored under an opaque key, and never uploaded
+raw — plus determinism (idempotent re-runs, stable R2 URLs). Since 2026-10-03
+the watermark is only on the site copy of an `active_bid` lot (photo_policy);
+tests/test_photo_policy.py covers that matrix.
 """
 from __future__ import annotations
 
@@ -116,10 +118,11 @@ def test_mirrors_by_default_and_honours_the_no_mirror_list(monkeypatch):
 
 def test_watermark_can_be_turned_off(monkeypatch):
     src = _photo()
-    marked = d.disguise(src, key="31225")[0]
+    marked = d.disguise(src, key="31225", watermark=True)[0]
+    assert d.disguise(src, key="31225")[0] != marked  # clean is the default
     monkeypatch.setenv("IMAGE_DISGUISE_WATERMARK", "off")
     assert d.watermark_text() is None
-    assert d.disguise(src, key="31225")[0] != marked
+    assert d.disguise(src, key="31225", watermark=True)[0] != marked
 
 
 def test_unreadable_bytes_return_none_never_the_original():
@@ -180,8 +183,9 @@ def test_r2_upload_disguises_and_uses_opaque_keys(tmp_path, monkeypatch):
 
     keys = [p["Key"] for p in fake.puts]
     assert all(k.startswith("p/") and "31465" not in k for k in keys)
-    assert out["hero_image_url"].split("?")[0].endswith("/h.jpg")
+    assert out["hero_image_url"].split("?")[0].endswith("/h.c.jpg")
     assert len(out["image_urls"]) == 2 and all(li.is_disguised_url(u) for u in out["image_urls"])
+    assert all(u.split("?")[0].endswith(".c.jpg") for u in out["image_urls"])  # clean in the DB
     sources = {a.read_bytes(), b.read_bytes()}
     assert all(p["Body"] not in sources and p["ContentType"] == "image/jpeg" for p in fake.puts)
 
@@ -199,7 +203,7 @@ def test_r2_upload_skips_unreadable_files_instead_of_publishing_them(tmp_path, m
 
     assert all(p["Body"] != bad.read_bytes() for p in fake.puts)
     assert len(out["image_urls"]) == 1  # the good one, now also the hero
-    assert out["hero_image_url"].split("?")[0].endswith("/h.jpg")
+    assert out["hero_image_url"].split("?")[0].endswith("/h.c.jpg")
 
 
 def test_public_copies_match_what_r2_serves(tmp_path, monkeypatch):
@@ -236,13 +240,14 @@ def test_hash_self_distance_zero_and_reencode_close():
 
 # --- FB catalog twin (Meta rejects watermarked catalog images) ----------------
 
-def test_catalog_url_maps_only_disguised_heroes():
+def test_catalog_url_maps_disguised_photos_to_their_clean_twin():
     hero = "https://pub-xyz.r2.dev/p/abc/h.jpg?v=12345678"
     assert li.catalog_url(hero) == "https://pub-xyz.r2.dev/p/abc/h.c.jpg?v=12345678"
     gallery = "https://pub-xyz.r2.dev/p/abc/0f0f0f.jpg?v=1"
+    assert li.catalog_url(gallery) == "https://pub-xyz.r2.dev/p/abc/0f0f0f.c.jpg?v=1"
     legacy = "https://pub-xyz.r2.dev/31225.jpg?v=1"
-    assert li.catalog_url(gallery) == gallery
     assert li.catalog_url(legacy) == legacy
+    assert li.catalog_url(li.catalog_url(hero)) == li.catalog_url(hero)  # idempotent
     assert li.catalog_url(None) is None
 
 
@@ -254,7 +259,7 @@ def test_r2_upload_puts_a_watermark_free_hero_twin(tmp_path, monkeypatch):
     src = tmp_path / "a.jpg"
     src.write_bytes(_photo())
 
-    r2.upload_lot_images("31225", [src])
+    r2.upload_lot_images("31225", [src], status="active_bid")
 
     bodies = {p["Key"]: p["Body"] for p in fake.puts}
     hero_key = li.opaque_hero_path("31225")

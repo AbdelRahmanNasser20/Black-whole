@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from automation import favorites as favorites_mod
-from automation import inventory, lot_channels, lot_images
+from automation import inventory, lot_channels, lot_images, photo_policy
 from automation.alerts import geo
 from automation.web import readcache
 
@@ -176,7 +176,11 @@ def _favorite_points(favs: Iterable[favorites_mod.Favorite], *,
             title=title, bucket="incoming", quantity=qty,
             unit=unit.upper(),
             price_per_chair=None, city=city, state=state, lat=lat, lng=lng,
-            precision=prec, hero=f.clean_hero_url or None, url="/#contact",
+            # a favorite is an auction still being bid on: the site shows the
+            # watermarked twin (photo_policy), same as an active_bid lot
+            precision=prec, url="/#contact",
+            hero=photo_policy.url_for(f.clean_hero_url, status=photo_policy.WATERMARK_STATUS,
+                                      channel=photo_policy.SITE) or None,
         ))
     return pts, unmapped
 

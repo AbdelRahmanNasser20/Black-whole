@@ -643,13 +643,42 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         current = get(lot_id) or {}
         if not current.get("sold_at"):
             clean["sold_at"] = _now()
+    # Photo policy (automation/photo_policy.py): crossing `active_bid` changes
+    # which photo variant the site shows. Read the prior status only when the
+    # status is being written.
+    prior_status = _prior_status(lot_id) if "status" in clean else None
     clean["updated_at"] = _now()
     cols = ", ".join(f"{k} = %s" for k in clean)
     params = list(clean.values()) + [str(lot_id)]
     with connect() as conn:
         conn.execute(f"UPDATE inventory SET {cols} WHERE lot_id = %s", params)
         conn.commit()
+    if "status" in clean:
+        _photo_status_hook(lot_id, prior_status, clean["status"])
     return get(lot_id)
+
+
+def _prior_status(lot_id: str) -> str | None:
+    try:
+        return (get(lot_id) or {}).get("status")
+    except Exception:  # noqa: BLE001 - only feeds the photo hook
+        return None
+
+
+def _photo_status_hook(lot_id: str, prior: str | None, new: str | None) -> None:
+    """A lot moving into/out of `active_bid` gets its photo variants synced.
+
+    The site already flips at read time (`lot_images.resolve` derives the
+    variant from `status`); `photo_sync` fills R2 gaps in a background thread.
+    Bookkeeping never breaks a ledger write, so any failure is swallowed.
+    """
+    if prior is None or prior == new:
+        return
+    try:
+        from automation import photo_sync
+        photo_sync.on_status_change(lot_id, prior, new)
+    except Exception as e:  # noqa: BLE001
+        print(f"[inventory] photo sync not started for {lot_id}: {e}")
 
 
 def _sanitize_filename(name: str) -> str:
