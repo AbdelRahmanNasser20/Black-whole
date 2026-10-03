@@ -10,16 +10,19 @@ The operator's rule (2026-10-03, replaces "every public photo is watermarked"):
 * The flip is automatic: the variant is derived from `inventory.status` at read
   time, so the moment a lot leaves `active_bid` every surface serves clean.
 
-"Clean" means dewatermarked (the GovDeals mark is removed by
-`automation/dewatermark.py` first, always) and without our own watermark. The
-mirror/re-frame disguise from `image_disguise` stays on both variants.
+"Clean" means the actual photo: dewatermarked (the GovDeals mark is removed
+by `automation/dewatermark.py` first, always), web-optimised, metadata
+stripped — **no** mirror, **no** re-frame, **no** watermark. The full
+`image_disguise` recipe (mirror + re-frame + tiled watermark) is applied only
+to the watermarked variant, i.e. the site copy of an `active_bid` lot.
 
 R2 layout (opaque `p/<hmac>/` keys from `listing_images`):
 
-    p/<hmac>/h.c.jpg       hero, clean        (always)
-    p/<hmac>/<tok>.c.jpg   gallery, clean     (always)
-    p/<hmac>/h.jpg         hero, watermarked  (uploaded while active_bid)
-    p/<hmac>/<tok>.jpg     gallery, watermarked
+    p/<hmac>/h.o.jpg       hero, clean (original)   always
+    p/<hmac>/<tok>.o.jpg   gallery, clean           always
+    p/<hmac>/h.jpg         hero, disguised + watermarked   only while active_bid
+    p/<hmac>/<tok>.jpg     gallery, disguised + watermarked
+    p/<hmac>/h.c.jpg       2026-09 catalog twin (mirrored, unwatermarked) — legacy, unused
 
 `inventory.hero_image_url` / `image_urls` store the **clean** URLs, so any
 reader that skips this module (the CRM repo, an old script) gets a clean photo.
@@ -50,7 +53,11 @@ WATERMARK_STATUS = "active_bid"
 OWNED_STATUSES = ("owned", "won_pickup", "listed", "draft", "sold_out")
 
 OPAQUE_PREFIX = "p/"
-_CLEAN_SUFFIX = ".c.jpg"
+# `.o.jpg` = the original photo (dewatermarked, web-optimised, untouched).
+# `.c.jpg` = the 2026-09 FB-catalog twin: mirrored/re-framed, no watermark. It
+# is still on R2 but no longer a variant anything serves; both map to `.o.jpg`.
+_CLEAN_SUFFIX = ".o.jpg"
+_LEGACY_TWIN_SUFFIX = ".c.jpg"
 _PLAIN_SUFFIX = ".jpg"
 
 
@@ -74,12 +81,39 @@ def _split(url: str) -> tuple[str, str]:
 
 
 def is_opaque(url: str | None) -> bool:
-    """URL whose object key sits under the disguised `p/` namespace."""
+    """URL whose object key sits under the opaque `p/` namespace."""
     return urlsplit(url or "").path.lstrip("/").startswith(OPAQUE_PREFIX)
 
 
+def _stem(object_path: str) -> str | None:
+    """`p/x/tok` for any variant of `p/x/tok(.o|.c)?.jpg`; None if not a variant key."""
+    for suffix in (_CLEAN_SUFFIX, _LEGACY_TWIN_SUFFIX, _PLAIN_SUFFIX):
+        if object_path.endswith(suffix):
+            return object_path[: -len(suffix)]
+    return None
+
+
+def clean_path(object_path: str) -> str:
+    """Object key of the clean variant (`p/x/h.jpg` → `p/x/h.o.jpg`)."""
+    stem = _stem(object_path)
+    return stem + _CLEAN_SUFFIX if stem is not None else object_path
+
+
+def watermarked_path(object_path: str) -> str:
+    """Object key of the watermarked variant (`p/x/h.o.jpg` → `p/x/h.jpg`)."""
+    stem = _stem(object_path)
+    return stem + _PLAIN_SUFFIX if stem is not None else object_path
+
+
+def _map_url(url: str | None, fn) -> str | None:
+    if not url or not is_opaque(url):
+        return url
+    path, rest = _split(url)
+    return fn(path) + rest
+
+
 def is_clean(url: str | None) -> bool:
-    """True unless the URL names a watermarked object.
+    """True unless the URL names a disguised/watermarked object.
 
     Legacy (non-`p/`) keys never carried our watermark, so they count as clean.
     """
@@ -89,37 +123,13 @@ def is_clean(url: str | None) -> bool:
 
 
 def clean_url(url: str | None) -> str | None:
-    """The clean twin of a photo URL (`…/x.jpg` → `…/x.c.jpg`); others unchanged."""
-    if not url or not is_opaque(url):
-        return url
-    path, rest = _split(url)
-    if path.endswith(_CLEAN_SUFFIX) or not path.endswith(_PLAIN_SUFFIX):
-        return url
-    return path[: -len(_PLAIN_SUFFIX)] + _CLEAN_SUFFIX + rest
+    """The clean twin of a photo URL (`…/x.jpg` → `…/x.o.jpg`); others unchanged."""
+    return _map_url(url, clean_path)
 
 
 def watermarked_url(url: str | None) -> str | None:
-    """The watermarked twin of a clean opaque URL (`…/x.c.jpg` → `…/x.jpg`)."""
-    if not url or not is_opaque(url):
-        return url
-    path, rest = _split(url)
-    if not path.endswith(_CLEAN_SUFFIX):
-        return url
-    return path[: -len(_CLEAN_SUFFIX)] + _PLAIN_SUFFIX + rest
-
-
-def clean_path(object_path: str) -> str:
-    """Object key of the clean variant (`p/x/h.jpg` → `p/x/h.c.jpg`)."""
-    if object_path.endswith(_CLEAN_SUFFIX) or not object_path.endswith(_PLAIN_SUFFIX):
-        return object_path
-    return object_path[: -len(_PLAIN_SUFFIX)] + _CLEAN_SUFFIX
-
-
-def watermarked_path(object_path: str) -> str:
-    """Object key of the watermarked variant (`p/x/h.c.jpg` → `p/x/h.jpg`)."""
-    if not object_path.endswith(_CLEAN_SUFFIX):
-        return object_path
-    return object_path[: -len(_CLEAN_SUFFIX)] + _PLAIN_SUFFIX
+    """The watermarked twin of an opaque URL (`…/x.o.jpg` → `…/x.jpg`)."""
+    return _map_url(url, watermarked_path)
 
 
 def variant_url(url: str | None, *, watermark: bool) -> str | None:

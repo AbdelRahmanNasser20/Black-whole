@@ -66,9 +66,9 @@ def test_only_active_bid_keeps_a_watermark_variant():
 
 # ─── URL variants ───
 
-CLEAN = f"{BASE}/p/abc/0f0f.c.jpg?v=1"
+CLEAN = f"{BASE}/p/abc/0f0f.o.jpg?v=1"
 MARKED = f"{BASE}/p/abc/0f0f.jpg?v=1"
-HERO_CLEAN = f"{BASE}/p/abc/h.c.jpg?v=2"
+HERO_CLEAN = f"{BASE}/p/abc/h.o.jpg?v=2"
 HERO_MARKED = f"{BASE}/p/abc/h.jpg?v=2"
 LEGACY = f"{BASE}/31225/00.jpg?v=3"
 
@@ -89,10 +89,17 @@ def test_legacy_and_foreign_urls_are_never_rewritten():
     assert photo_policy.is_clean(LEGACY)
 
 
+def test_old_mirrored_catalog_twin_maps_to_the_original():
+    old = f"{BASE}/p/abc/h.c.jpg?v=2"
+    assert photo_policy.clean_url(old) == HERO_CLEAN
+    assert photo_policy.watermarked_url(old) == HERO_MARKED
+    assert not photo_policy.is_clean(old)
+
+
 def test_object_path_variants():
-    assert photo_policy.clean_path("p/abc/h.jpg") == "p/abc/h.c.jpg"
-    assert photo_policy.watermarked_path("p/abc/h.c.jpg") == "p/abc/h.jpg"
-    assert photo_policy.clean_path("p/abc/h.c.jpg") == "p/abc/h.c.jpg"
+    assert photo_policy.clean_path("p/abc/h.jpg") == "p/abc/h.o.jpg"
+    assert photo_policy.watermarked_path("p/abc/h.o.jpg") == "p/abc/h.jpg"
+    assert photo_policy.clean_path("p/abc/h.o.jpg") == "p/abc/h.o.jpg"
 
 
 # ─── the resolver ───
@@ -204,7 +211,7 @@ def test_upload_writes_watermark_twin_only_for_active_bid(tmp_path, monkeypatch,
     src.write_bytes(_photo())
     out = r2.upload_lot_images("gd-1-2", [src], status=status)
     keys = {p["Key"] for p in fake.puts}
-    clean_keys = {k for k in keys if k.endswith(".c.jpg")}
+    clean_keys = {k for k in keys if k.endswith(".o.jpg")}
     marked_keys = keys - clean_keys
     assert len(clean_keys) == 2  # gallery + hero, always
     assert len(marked_keys) == (2 if status == "active_bid" else 0)
@@ -224,8 +231,46 @@ def test_public_copies_are_the_clean_bytes(tmp_path, monkeypatch):
     r2.upload_lot_images("gd-1-2", [src], status="active_bid")
     copies = li.public_copies("gd-1-2", [src], out_dir=tmp_path / "pub")
     clean_gallery = next(p["Body"] for p in fake.puts
-                         if p["Key"].endswith(".c.jpg") and not p["Key"].endswith("/h.c.jpg"))
+                         if p["Key"].endswith(".o.jpg") and not p["Key"].endswith("/h.o.jpg"))
     assert [c.read_bytes() for c in copies] == [clean_gallery]
+
+
+# ─── the bytes: original everywhere, disguise only on the site copy of a bid lot ───
+
+def _exif_photo() -> bytes:
+    img = Image.open(io.BytesIO(_photo()))
+    ex = Image.Exif()
+    ex[0x010F] = "Apple"
+    ex[0x8825] = {2: (33, 30, 0)}  # GPS — the storage unit's location
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=92, exif=ex.tobytes())
+    return buf.getvalue()
+
+
+def _left_dark(blob: bytes) -> bool:
+    g = Image.open(io.BytesIO(blob)).convert("L")
+    w, h = g.size
+    return sum(g.crop((0, 0, w // 2, h)).tobytes()) < sum(g.crop((w // 2, 0, w, h)).tobytes())
+
+
+@pytest.mark.parametrize("status", STATUSES)
+@pytest.mark.parametrize("channel", CHANNELS + (None,))
+def test_prepare_for_web_disguises_only_the_site_copy_of_a_bid_lot(status, channel):
+    from automation import image_disguise
+    src = _exif_photo()
+    out, ext, ct = li.prepare_for_web(src, "jpg", key="gd-1-2", status=status, channel=channel)
+    assert (ext, ct) == ("jpg", "image/jpeg")
+    assert not Image.open(io.BytesIO(out)).getexif()  # metadata never survives
+    if photo_policy.wants_watermark(status, channel):
+        assert out == image_disguise.disguise(src, key="gd-1-2")[0]
+    else:
+        assert out == li.clean_for_web(src)[0]
+        assert Image.open(io.BytesIO(out)).size == Image.open(io.BytesIO(src)).size  # no re-frame
+        assert _left_dark(out) == _left_dark(src)  # no mirror
+
+
+def test_clean_for_web_refuses_non_images():
+    assert li.clean_for_web(b"not an image") is None
 
 
 # ─── photo_sync: plan + apply ───
@@ -297,7 +342,7 @@ def test_owned_lot_with_its_own_folder_photos_reuploads_from_the_folder(tmp_path
     assert plan.reupload_from_folder
     new = photo_sync.apply_plan(plan, s3=fake, cfg=r2.env_config())
     assert len(new[1]) == 3 and all(photo_policy.is_clean(u) for u in [new[0], *new[1]])
-    assert not any(k["Key"].endswith(".jpg") and not k["Key"].endswith(".c.jpg")
+    assert not any(k["Key"].endswith(".jpg") and not k["Key"].endswith(".o.jpg")
                    for k in fake.puts), "an owned lot never gets a new watermarked object"
 
 
