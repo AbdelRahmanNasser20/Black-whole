@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Awaitable, Callable, Union
 
 from .templates import listing_title, state_abbr
+from .web.short_links import short_url
 
 
 # ── City registry ───────────────────────────────────────────────────────────
@@ -219,6 +220,8 @@ def _body_lines(listing: CraigslistListing, label: str) -> list[str]:
     lines.append(f"Asking ${listing.price} per chair — bulk discounts on the full lot.")
     lines.append(f"Local pickup in the {label} area (delivery quotes on request).")
     lines.append("Ideal for churches, banquet halls, schools, and event venues.")
+    # Typed short link → tagged visit, so Craigslist traffic shows as its own source.
+    lines.append(f"Photos, specs and all our lots: {short_url('cl')}")
     return lines
 
 
