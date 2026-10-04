@@ -74,6 +74,7 @@ from . import public_map
 from . import auth as auth_svc
 from . import readcache
 from . import visits
+from . import short_links
 from . import lot_archive_view
 from deals import profiles
 from deals.fees import fee_model_from_env
@@ -593,6 +594,18 @@ def public_landing(request: Request):
         request, "landing.html",
         _public_ctx({"stats": counts, "featured": featured}),
     )
+
+
+def _short_link_redirect(code: str):
+    def _go(lot_id: str | None = None):
+        return RedirectResponse(short_links.target(code, lot_id), status_code=302)
+    return _go
+
+
+# Typed short links (`black-whole.com/cl`) → tagged landing/lot URL. See short_links.py.
+for _code in short_links.CHANNELS:
+    app.add_api_route(f"/{_code}", _short_link_redirect(_code), methods=["GET"], include_in_schema=False)
+    app.add_api_route(f"/{_code}/{{lot_id}}", _short_link_redirect(_code), methods=["GET"], include_in_schema=False)
 
 
 def _decorate(row: dict) -> dict:
