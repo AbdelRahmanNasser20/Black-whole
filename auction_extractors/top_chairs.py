@@ -32,9 +32,15 @@ from pathlib import Path
 from typing import Literal
 
 import requests
-from dateutil import parser as _date_parser
 from dateutil.parser import UnknownTimezoneWarning
 from dotenv import load_dotenv
+
+try:  # imported as a package (automation/*) or flat (CLI / sibling scripts)
+    from auction_extractors.end_dates import parse_end_date
+    from auction_extractors.quantity_infer import explicit_title_quantity
+except ImportError:  # pragma: no cover
+    from end_dates import parse_end_date
+    from quantity_infer import explicit_title_quantity
 
 # GovDeals end_date strings use "EDT" / "EST" abbreviations. dateutil parses
 # them but emits a UnknownTimezoneWarning for each parse — hundreds of those
@@ -115,6 +121,33 @@ def trusted_quantity(row: dict) -> int | None:
         return int(q)
     except (TypeError, ValueError):
         return None
+
+
+# An LLM count it was itself unsure of. "Two Hundred Ten (210) Banquet Hall
+# Chairs" (Orlando 28859/2863) came back qty=1 / confidence=low — a trusted
+# source, so the held-back rescue below never looked at it, and the 50-chair
+# floor dropped it from the Auctions tab and the alert.
+UNSURE_CONFIDENCES = frozenset({"low", "unknown"})
+
+
+def title_claimed_quantity(row: dict) -> tuple[int, str] | None:
+    """The count the *title* states outright, when the row's own count can't
+    be relied on and is lower than the claim. Returns ``(n, pattern)`` or None.
+
+    "Can't be relied on" = no trusted count (``trusted_quantity`` is None), or
+    a trusted-source count the LLM marked ``low``/``unknown`` confidence.
+
+    Like ``explicit_title_quantity`` this is a reporting signal, not a count:
+    callers show it as unverified and never write it into ``quantity`` /
+    ``quantity_source``. The trust gate stays shut.
+    """
+    q = trusted_quantity(row)
+    if q is not None and (row.get("quantity_confidence") or "") not in UNSURE_CONFIDENCES:
+        return None
+    claim = explicit_title_quantity(row.get("title"))
+    if not claim or (q is not None and claim[0] <= q):
+        return None
+    return claim
 
 
 # Keyword-based vertical classifier. Runs on cached rows at query time —
@@ -228,16 +261,12 @@ def _is_active(row: dict, now: datetime, max_stale_days: int) -> bool:
     Returns True (active) only if BOTH checks pass. Returns True when
     data is missing rather than silently dropping rows.
     """
-    end = (row.get("end_date") or "").strip()
-    if end:
-        try:
-            dt = _date_parser.parse(end, fuzzy=True)
-            if dt.tzinfo is None:
-                dt = dt.replace(tzinfo=timezone.utc)
-            if dt < now:
-                return False
-        except (ValueError, TypeError, OverflowError):
-            pass  # Un-parseable — fall through to last_seen_at check.
+    # Naive GovDeals times are US Eastern, not UTC — reading them as UTC hid
+    # every live lot for the last 4-5h of its auction. Un-parseable → None,
+    # fall through to the last_seen_at check.
+    dt = parse_end_date(row.get("end_date"))
+    if dt is not None and dt < now:
+        return False
 
     last = (row.get("last_seen_at") or "").strip()
     if last:

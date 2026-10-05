@@ -78,6 +78,7 @@
 .auction-title { font-family: var(--display); font-size: 16px; line-height: 1.25; margin: 0; color: var(--text); font-weight: 400; }
 .auction-meta { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; font-family: var(--mono); font-size: var(--fs-xs); }
 .auction-qty { color: var(--accent); font-weight: 700; font-size: 13px; }
+.auction-unverified { font-size: 11px; padding: 0 6px; border-radius: var(--radius); border: 1px solid var(--border); color: var(--muted); }
 .auction-price { color: var(--text); padding: 2px 6px; border: 1px solid var(--border-strong); }
 .auction-cond { padding: 2px 6px; font-weight: 700; border: 1px solid currentColor; }
 .auction-cond.good { color: var(--success); }

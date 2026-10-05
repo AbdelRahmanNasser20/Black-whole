@@ -25,9 +25,11 @@ from auction_extractors.top_chairs import (  # noqa: E402
     CATEGORIES,
     _SANE_MAX_QUANTITY,
     TRUSTED_QUANTITY_SOURCES,
+    UNSURE_CONFIDENCES,
     _enrich_via_llm,
     _is_active,
     _price_to_float,
+    title_claimed_quantity,
 )
 
 Source = Literal["gd", "ps", "bs"]
@@ -41,10 +43,21 @@ _SELECT_COLS = (
 )
 
 
-def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | None) -> list[dict]:
+def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | None,
+                        seen_within_days: int | None = None) -> list[dict]:
     """Rows from `auction_listings` matching the profile (keywords, exclusions,
-    quantity floor) for one source, quantity-desc then price-asc."""
+    quantity floor) for one source, quantity-desc then price-asc.
+
+    Plus the rows whose count is untrusted or low-confidence but whose title
+    states a count over the floor (``title_claimed_quantity``). Those carry
+    ``quantity_unverified=True`` + ``llm_quantity`` (what the LLM said), and
+    ``quantity`` is the title's claim so they rank and render as the lot they
+    say they are. Before this, "Two Hundred Ten (210) Banquet Hall Chairs"
+    (LLM: 1, low) never reached the Auctions tab although it was starred.
+    ``seen_within_days`` only narrows that second query.
+    """
     frag = _SOURCE_FRAG[source]
+    floor = max(1, profile.min_quantity if min_quantity is None else int(min_quantity))
     pwhere, pargs = _profiles.auction_listings_where(profile, min_quantity)
     rows = db.fetch_all(
         f"""
@@ -58,6 +71,32 @@ def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | No
         """,
         (*pargs, _SANE_MAX_QUANTITY, list(TRUSTED_QUANTITY_SOURCES), f"%{frag}%"),
     )
+    kwhere, kargs = _profiles.auction_listings_where(profile, quantity_floor=False)
+    seen_sql, seen_args = "", ()
+    if seen_within_days is not None:
+        seen_sql = "AND last_seen_at >= now() - make_interval(days => %s)"
+        seen_args = (int(seen_within_days) + 1,)
+    unsure = db.fetch_all(
+        f"""
+        SELECT {_SELECT_COLS}
+        FROM auction_listings
+        WHERE {kwhere}
+          AND (quantity IS NULL OR quantity < %s)
+          AND (quantity_source <> ALL(%s) OR quantity_confidence = ANY(%s))
+          AND title ~ '[0-9]'
+          AND link ILIKE %s
+          {seen_sql}
+        """,
+        (*kargs, floor, list(TRUSTED_QUANTITY_SOURCES), list(UNSURE_CONFIDENCES),
+         f"%{frag}%", *seen_args),
+    )
+    for r in unsure:
+        claim = title_claimed_quantity(r)
+        if claim and floor <= claim[0] <= _SANE_MAX_QUANTITY:
+            r["llm_quantity"] = r.get("quantity")
+            r["quantity"] = claim[0]
+            r["quantity_unverified"] = True
+            rows.append(r)
     # last_seen_at comes back as a datetime (timestamptz); the upstream
     # _is_active helper expects an ISO string. Normalize so it parses.
     for r in rows:
@@ -75,7 +114,8 @@ def get_top_lots(profile: Profile, source: Source = "gd", n: int = 15,
     `category` is the profile slug, `category_keyword` the keyword that hit."""
     if source not in _SOURCE_FRAG:
         raise ValueError(f"source must be one of {sorted(_SOURCE_FRAG)}, got {source!r}")
-    items = _load_from_supabase(profile, source, min_quantity)
+    items = _load_from_supabase(profile, source, min_quantity,
+                                seen_within_days=max_stale_days if active_only else None)
     for it in items:
         it["category"] = profile.slug
         it["category_keyword"] = _profiles.matched_keyword(profile, it.get("title"), it.get("description"))
@@ -107,6 +147,8 @@ def get_top_lots(profile: Profile, source: Source = "gd", n: int = 15,
             "category": it["category"], "category_keyword": it["category_keyword"],
             "condition": en["condition"] if include_condition else None,
             "condition_note": en["condition_note"] if include_condition else None,
+            "quantity_unverified": bool(it.get("quantity_unverified")),
+            "llm_quantity": it.get("llm_quantity"),
         })
     return out
 
@@ -157,3 +199,81 @@ def cache_stats() -> dict:
             for r in by_rows
         },
     }
+
+
+# ── Listings DB tab: raw browser over auction_listings ──────────────────────
+#
+# The tab used to read auction_extractors/state/listings.db on the laptop. The
+# scrape moved to the Render discovery cron (which writes /tmp/listings.db and
+# pushes straight to Supabase), so that file stopped advancing on 2026-07-14
+# and the tab silently showed a three-month-old cache — the Orlando lots
+# starred on 2026-10-01 were in Supabase and missing here. Read the same table
+# the Auctions tab reads.
+
+# end_date is free text. ISO with no zone = GovDeals = US Eastern (the rule in
+# auction_extractors/end_dates.py); ISO with Z/offset keeps its zone; anything
+# else (old "April 20, 2026 01:00 PM EDT" strings) is NULL → "unknown".
+_END_TS_SQL = r"""(CASE
+  WHEN end_date ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?$'
+    THEN end_date::timestamp AT TIME ZONE 'America/New_York'
+  WHEN end_date ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$'
+    THEN end_date::timestamptz
+END)"""
+
+_PRICE_SQL = (r"(CASE WHEN regexp_replace(price, '[^0-9.]', '', 'g') ~ '^\d+(\.\d+)?$' "
+              r"THEN regexp_replace(price, '[^0-9.]', '', 'g')::numeric END)")
+
+LISTINGS_SORTS = {
+    "qty_desc":        "COALESCE(quantity, 0) DESC, last_seen_at DESC",
+    "qty_asc":         "COALESCE(quantity, 0) ASC, last_seen_at DESC",
+    "last_seen_desc":  "last_seen_at DESC",
+    "first_seen_desc": "first_seen_at DESC",
+    "price_low":       f"{_PRICE_SQL} ASC NULLS LAST, last_seen_at DESC",
+}
+
+_LISTINGS_COLS = (
+    "asset_id, link, title, description, quantity, quantity_source, "
+    "quantity_confidence, price, location, lot_number, end_date, time_left, "
+    "description_fetched_at, first_seen_at, last_seen_at, image_url"
+)
+
+
+def browse_listings(*, source: str = "all", q: str = "", min_qty: int = 0,
+                    max_qty: int = 99999, status: str = "all",
+                    seen_within_days: int = 0, sort: str = "qty_desc",
+                    limit: int = 50, offset: int = 0) -> tuple[int, list[dict]]:
+    """Filtered page of raw `auction_listings` rows → ``(total, rows)``."""
+    where: list[str] = ["COALESCE(quantity, 0) BETWEEN %s AND %s"]
+    args: list = [min_qty, max_qty]
+    if source in _SOURCE_FRAG:
+        where.append("link ILIKE %s")
+        args.append(f"%{_SOURCE_FRAG[source]}%")
+    if q.strip():
+        where.append("(title ILIKE %s OR description ILIKE %s)")
+        like = f"%{q.strip()}%"
+        args += [like, like]
+    if seen_within_days > 0:
+        where.append("last_seen_at >= now() - make_interval(days => %s)")
+        args.append(int(seen_within_days))
+    if status == "active":
+        where.append(f"({_END_TS_SQL} >= now() OR ({_END_TS_SQL} IS NULL "
+                     "AND COALESCE(time_left, '') <> ''))")
+    elif status == "expired":
+        where.append(f"{_END_TS_SQL} < now()")
+    elif status == "unknown":
+        where.append(f"({_END_TS_SQL} IS NULL AND COALESCE(time_left, '') = '')")
+    where_sql = " AND ".join(where)
+    order = LISTINGS_SORTS.get(sort, LISTINGS_SORTS["qty_desc"])
+
+    total = (db.fetch_one(f"SELECT count(*) AS n FROM auction_listings WHERE {where_sql}",
+                          tuple(args)) or {}).get("n", 0) or 0
+    rows = db.fetch_all(
+        f"SELECT {_LISTINGS_COLS} FROM auction_listings WHERE {where_sql} "
+        f"ORDER BY {order} LIMIT %s OFFSET %s",
+        (*args, limit, offset),
+    )
+    for r in rows:
+        for k in ("description_fetched_at", "first_seen_at", "last_seen_at"):
+            if isinstance(r.get(k), datetime):
+                r[k] = r[k].isoformat()
+    return total, rows

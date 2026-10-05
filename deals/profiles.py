@@ -181,8 +181,11 @@ def deal_lots_where(p: Profile) -> tuple[str, list]:
     return (" AND ".join(where) or "TRUE", args)
 
 
-def auction_listings_where(p: Profile, min_quantity: int | None = None) -> tuple[str, list]:
-    """Fragment over auction_listings (title, description, quantity)."""
+def auction_listings_where(p: Profile, min_quantity: int | None = None, *,
+                           quantity_floor: bool = True) -> tuple[str, list]:
+    """Fragment over auction_listings (title, description, quantity).
+    ``quantity_floor=False`` drops the ``quantity >=`` clause (keywords and
+    exclusions only)."""
     where: list[str] = []
     args: list = []
     if p.keywords:
@@ -191,10 +194,11 @@ def auction_listings_where(p: Profile, min_quantity: int | None = None) -> tuple
     if p.exclude_terms:
         where.append("NOT (title ILIKE ANY(%s))")
         args.append(_likes(p.exclude_terms))
-    q = p.min_quantity if min_quantity is None else int(min_quantity)
-    where.append("quantity >= %s")
-    args.append(max(1, q))
-    return (" AND ".join(where), args)
+    if quantity_floor:
+        q = p.min_quantity if min_quantity is None else int(min_quantity)
+        where.append("quantity >= %s")
+        args.append(max(1, q))
+    return (" AND ".join(where) or "TRUE", args)
 
 
 # ── storage ──────────────────────────────────────────────────────────────────
