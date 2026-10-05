@@ -84,10 +84,13 @@ try:
     # Auctions tab reads the shared Supabase `auction_listings` table. The
     # loader reuses the upstream ranking/condition helpers, so card output is
     # identical to the old SQLite path — only the data source changed.
-    from ..auctions_supabase import get_top_chairs, get_top_lots, cache_stats as _auctions_cache_stats
+    from ..auctions_supabase import (
+        browse_listings, get_top_chairs, get_top_lots, cache_stats as _auctions_cache_stats,
+    )
 except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
     get_top_lots = None
+    browse_listings = None
     _auctions_cache_stats = None
 
 log = logging.getLogger(__name__)
@@ -3888,78 +3891,23 @@ async def list_raw_listings(
     limit: int = 50,
     offset: int = 0,
 ):
-    """Admin DB browser over auction_extractors/state/listings.db — raw rows
-    with filters. Unlike /api/auctions this has no ranking / LLM step; it's
-    a straight SQL query for admins."""
-    import sqlite3
-
-    db_path = AUCTION_EXTRACTORS_DIR / "state" / "listings.db"
-    if not db_path.exists():
-        return {"items": [], "total": 0, "limit": limit, "offset": offset}
-
+    """Admin DB browser over Supabase `auction_listings` — the same table the
+    Auctions tab reads — as raw rows with filters. No ranking / LLM step.
+    (It used to read the laptop's listings.db, which the cloud scrape stopped
+    writing in July; see auctions_supabase.browse_listings.)"""
+    if browse_listings is None:
+        raise HTTPException(503, "auction listings loader not available")
     limit = max(1, min(int(limit), 500))
     offset = max(0, int(offset))
     min_qty = max(0, int(min_qty))
     max_qty = max(min_qty, int(max_qty))
     seen_within_days = max(0, int(seen_within_days))
 
-    where = []
-    params: list = []
-    if source == "gd":
-        where.append("link LIKE '%govdeals.com%'")
-    elif source == "ps":
-        where.append("link LIKE '%publicsurplus.com%'")
-    elif source == "bs":
-        where.append("link LIKE '%bidspotter.com%'")
-    if q.strip():
-        where.append("(title LIKE ? OR description LIKE ?)")
-        like = f"%{q.strip()}%"
-        params.extend([like, like])
-    where.append("COALESCE(quantity, 0) BETWEEN ? AND ?")
-    params.extend([min_qty, max_qty])
-
-    if seen_within_days > 0:
-        from datetime import datetime, timedelta, timezone
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=seen_within_days)).isoformat()
-        where.append("last_seen_at >= ?")
-        params.append(cutoff)
-
-    if status == "active":
-        # end_date populated and parseable → GovDeals rows; time_left present → Public Surplus.
-        where.append("((end_date IS NOT NULL AND end_date != '' AND end_date >= datetime('now')) "
-                     "OR (time_left IS NOT NULL AND time_left != ''))")
-    elif status == "expired":
-        where.append("(end_date IS NOT NULL AND end_date != '' AND end_date < datetime('now'))")
-    elif status == "unknown":
-        where.append("((end_date IS NULL OR end_date = '') AND (time_left IS NULL OR time_left = ''))")
-
-    order = {
-        "qty_desc":         "COALESCE(quantity, 0) DESC, last_seen_at DESC",
-        "qty_asc":          "COALESCE(quantity, 0) ASC, last_seen_at DESC",
-        "last_seen_desc":   "last_seen_at DESC",
-        "first_seen_desc":  "first_seen_at DESC",
-        "price_low":        "CAST(REPLACE(REPLACE(REPLACE(price,'USD',''),'$',''),',','') AS REAL) ASC, last_seen_at DESC",
-    }.get(sort, "COALESCE(quantity, 0) DESC, last_seen_at DESC")
-
-    where_sql = (" WHERE " + " AND ".join(where)) if where else ""
-
-    def _query():
-        conn = sqlite3.connect(str(db_path))
-        conn.row_factory = sqlite3.Row
-        try:
-            total = conn.execute(f"SELECT COUNT(*) FROM listings{where_sql}", params).fetchone()[0]
-            rows = conn.execute(
-                f"SELECT asset_id, link, title, description, quantity, quantity_source, "
-                f"quantity_confidence, price, location, lot_number, end_date, time_left, "
-                f"description_fetched_at, first_seen_at, last_seen_at, image_url "
-                f"FROM listings{where_sql} ORDER BY {order} LIMIT ? OFFSET ?",
-                params + [limit, offset],
-            ).fetchall()
-            return total, [dict(r) for r in rows]
-        finally:
-            conn.close()
-
-    total, rows = await asyncio.to_thread(_query)
+    total, rows = await asyncio.to_thread(
+        browse_listings, source=source, q=q, min_qty=min_qty, max_qty=max_qty,
+        status=status, seen_within_days=seen_within_days, sort=sort,
+        limit=limit, offset=offset,
+    )
 
     def _source_of(link: str) -> str:
         if "govdeals.com" in link: return "gd"

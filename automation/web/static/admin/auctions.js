@@ -545,6 +545,7 @@ function renderAuctionCard(it) {
       <h3 class="auction-title">${esc(_titleOf(it) || '—')}</h3>
       <div class="auction-meta">
         <span class="auction-qty">${(it.quantity||0).toLocaleString()} ×</span>
+        ${it.quantity_unverified ? `<span class="auction-unverified" title="Count read from the title; the quantity LLM said ${esc(String(it.llm_quantity ?? 'nothing'))}. Check the listing.">unverified</span>` : ''}
         ${it.price ? `<span class="auction-price">${esc(it.price)}</span>` : ''}
         ${condPill}
       </div>

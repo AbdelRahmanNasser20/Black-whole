@@ -111,6 +111,25 @@ def test_junk_rows_cannot_crash_the_split() -> None:
     assert len(held) == 1 and kept == []
 
 
+def test_a_low_confidence_llm_count_under_the_floor_is_held_back() -> None:
+    """Orlando 28859/2863, 2026-10-05: "Two Hundred Ten (210) Banquet Hall
+    Chairs" came back qty=1, confidence=low. ``llm`` is a trusted source, so
+    the old split ranked it on 1 and dropped it. An LLM count it was unsure of
+    must not outvote a count the title states outright."""
+    row = _trusted("Two Hundred Ten (210) Banquet Hall Chairs", 1,
+                   quantity_confidence="low")
+    kept, held = gd.partition_for_alert([row])
+    assert kept == []
+    assert [h["claimed_quantity"] for h in held] == [210]
+    assert held[0]["quantity"] == 1, "the claim never overwrites the LLM's number"
+
+
+def test_a_confident_llm_count_still_wins_over_the_title() -> None:
+    row = _trusted("Lot of (210) banquet chairs", 1, quantity_confidence="high")
+    kept, held = gd.partition_for_alert([row])
+    assert kept == [] and held == []
+
+
 # ── message rendering ────────────────────────────────────────────────────────
 
 def test_alert_is_sent_even_when_nothing_is_verified() -> None:

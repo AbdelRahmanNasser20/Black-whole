@@ -78,6 +78,9 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Storefront pages live on `_base.html` via `_public_base.html` with `data-theme="light"`; CSS is `static/site/site.css` using tokens (`--text`/`--bg`/`--surface-2`/`--accent-soft`/`--mono`/`--display`) — the old `--ink`/`--paper`/`--f-mono` names are gone. The admin Deposits view is an ES module like every other tab: `static/admin/deposits.js` (`mount()`/`load()`) + `deposits.css`, registered in `shell.js` (it now sits under the Sales rail tab).
 
 **auction_extractors:**
+- **Auction end dates: one parser, `auction_extractors/end_dates.py::parse_end_date`.** A naive GovDeals time is US Eastern, never UTC. Never call `dateutil.parse` on an `end_date` anywhere else. A second copy hid live lots for the last 4 h of their auction (Orlando 2863, 2026-10-05).
+- An LLM count marked `low`/`unknown` confidence never outvotes a count the title states outright: `top_chairs.title_claimed_quantity` shows the lot as **unverified** (Auctions tab + alert held-back), and it never writes `quantity`.
+- The Listings DB tab reads Supabase `auction_listings` (`auctions_supabase.browse_listings`). The laptop `state/listings.db` is not written since the scrape moved to the Render cron (2026-07-14). Don't point a UI at it.
 - `OLLAMA_MODEL=gpt-oss:120b-cloud` is load-bearing. Don't swap without re-benchmarking via the upstream `quantity_eval/`.
 - Launch button on Auctions cards is enabled only for GovDeals URLs — `run.py` doesn't understand Public Surplus yet.
 

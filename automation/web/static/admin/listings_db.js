@@ -3,7 +3,7 @@
 // and on filter changes so the old rows stay dimmed while re-querying); the two mutations (queue a lot, reload)
 // and "Load more" go through UI.pending. `q`, `source`, `offset` live in the URL via shell.js-style params; the
 // other filters (status, qty range, seen-within, sort, page size) stay in the form.
-// auction_extractors/state/listings.db is read-only — this tab only ever GETs.
+// Supabase auction_listings (read-only here) — this tab only ever GETs.
 import {$, $$, toast, escapeHtml, escapeAttr, _ageInDays, _fmtAge, queueRuns, getParams, setParams} from './shared.js';
 import {load as uiLoad, pending, api} from '../ui/state.js';
 
@@ -84,9 +84,9 @@ async function loadListingsDb({keepOld = false, append = false} = {}) {
       if (append) { $('#ldb-tbody', el)?.insertAdjacentHTML('beforeend', html); return null; }
       return tableHtml(html);
     },
-    errorMessage: (err) => err.status ? `Couldn't query listings.db. The server said ${err.status}.`
-                         : err.name === 'AbortError' ? "Couldn't query listings.db. The server didn't answer in 15 s."
-                                                     : "Couldn't query listings.db. The server didn't answer at all.",
+    errorMessage: (err) => err.status ? `Couldn't query the listings table. The server said ${err.status}.`
+                         : err.name === 'AbortError' ? "Couldn't query the listings table. The server didn't answer in 15 s."
+                                                     : "Couldn't query the listings table. The server didn't answer at all.",
     onError: () => { $('#ldb-status-bar').textContent = ''; $('#ldb-more').hidden = true; },
   });
   if (!data) return undefined;

@@ -19,7 +19,7 @@ from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from dotenv import load_dotenv
 
-from quantity_infer import explicit_title_quantity, infer_chair_quantity_from_title
+from quantity_infer import infer_chair_quantity_from_title
 from quantity_llm import refine_quantities_with_llm
 from quantity_refine import refine_quantities_with_regex_fulltext
 from paths import REPORTS_DIR
@@ -975,7 +975,7 @@ def partition_for_alert(
     ``quantity_source`` are left exactly as the LLM left them, so nothing
     downstream can mistake the claim for a verified count.
     """
-    from top_chairs import _classify, _is_non_chair_lot, trusted_quantity
+    from top_chairs import _classify, _is_non_chair_lot, title_claimed_quantity, trusted_quantity
 
     kept: list = []
     held: list = []
@@ -994,11 +994,12 @@ def partition_for_alert(
         if _is_non_chair_lot(title):
             continue
         q = trusted_quantity(item)
-        if q is not None:
-            if q > min_quantity:
-                kept.append(item)
+        if q is not None and q > min_quantity:
+            kept.append(item)
             continue
-        claim = explicit_title_quantity(title)
+        # No trusted count, or a low-confidence one under the floor: hold the
+        # lot back if its title states a bulk count (title_claimed_quantity).
+        claim = title_claimed_quantity(item)
         if claim and claim[0] > min_quantity:
             flagged = dict(item)
             flagged["claimed_quantity"] = claim[0]
