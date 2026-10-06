@@ -70,6 +70,7 @@
       <div>
         <dt>{% if item.is_sold %}SOLD AT / {{ item.unit }}{% else %}PRICE / {{ item.unit }}{% endif %}</dt>
         <dd class="big-num">{% if item.price_per_chair %}${{ "%.0f"|format(item.price_per_chair) }}{% else %}INQUIRE{% endif %}</dd>
+        {% if not item.is_sold %}<div class="mono tiny price-freight-note">+ FREIGHT · GET AN EXACT QUOTE BELOW OR <a href="/#contact">CONTACT US</a> · PICKUP FREE</div>{% endif %}
       </div>
       <div>
         <dt>{% if item.location_labels | length > 1 %}LOCATIONS{% else %}LOCATION{% endif %}</dt>
@@ -120,6 +121,7 @@
           <div class="fw-framing mono tiny">
             ESTIMATE — FINALIZED AT SHIP TIME · INCLUDES RESIDENTIAL DELIVERY + LIFTGATE
             · CHAIR PRICE SEPARATE &amp; FIRM · LOCAL PICKUP ALWAYS FREE
+            · THE SHIPPING SHOWN ON GOOGLE IS A PLACEHOLDER — THIS IS THE REAL NUMBER
           </div>
         </dd>
       </div>
