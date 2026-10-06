@@ -2531,6 +2531,12 @@ async def reserve_checkout(lot_id: str, payload: dict):
     return {"ok": True, "url": session.url, "deposit_id": deposit["id"]}
 
 
+@app.get("/returns", include_in_schema=False)
+def public_returns():
+    """Short, shareable link to the returns policy (Merchant Center + DMs)."""
+    return RedirectResponse("/terms#returns", status_code=301)
+
+
 @app.get("/terms", response_class=HTMLResponse)
 async def public_terms(request: Request):
     """The deposit policy, on a stable URL.
