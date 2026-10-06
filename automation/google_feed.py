@@ -61,6 +61,21 @@ def _additional_images(row: dict, hero: str) -> str:
     return ",".join(extra)
 
 
+# Merchant Center needs one shipping number; ours is a $500 flat placeholder
+# (freight depends on the buyer's ZIP). Every Google description says so.
+SHIPPING_NOTE = (
+    "Freight is not included in the price. The shipping cost shown on Google is a "
+    "placeholder: use the freight estimate on our lot page or contact us for an "
+    "accurate quote. Local pickup is always free."
+)
+
+
+def _description(row: dict, title: str) -> str:
+    base = catalog_feed._description(row, title)
+    room = catalog_feed._DESC_MAX - len(SHIPPING_NOTE) - 1
+    return f"{base[:room].rstrip()} {SHIPPING_NOTE}"
+
+
 def feed_row(row: dict, base_url: str | None = None) -> dict | None:
     """Map one inventory row to a Merchant Center row, or None if Google would reject it."""
     base = (base_url or catalog_feed.site_base_url()).rstrip("/")
@@ -74,7 +89,7 @@ def feed_row(row: dict, base_url: str | None = None) -> dict | None:
     return {
         "id": lot_id,
         "title": title,
-        "description": catalog_feed._description(row, title),
+        "description": _description(row, title),
         "link": f"{base}/listings/{lot_id}?{UTM_QUERY}",
         "image_link": image,
         "additional_image_link": _additional_images(row, image),

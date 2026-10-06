@@ -44,7 +44,8 @@ def test_eligible_row_maps_all_columns():
     assert fr == {
         "id": "31225-atl",
         "title": "Brown Convention Chairs — Atlanta, GA",
-        "description": "1,200 stackable banquet chairs, brown fabric, metal frame.",
+        "description": "1,200 stackable banquet chairs, brown fabric, metal frame. "
+                       + google_feed.SHIPPING_NOTE,
         "link": f"{BASE}/listings/31225-atl?{google_feed.UTM_QUERY}",
         "image_link": f"{R2}/31225-atl/hero.jpg",
         "additional_image_link": f"{R2}/31225-atl/2.jpg,{R2}/31225-atl/3.jpg",
@@ -111,3 +112,16 @@ def test_site_base_url_env_override(monkeypatch):
     monkeypatch.setenv("SITE_BASE_URL", "https://staging.example.com/")
     fr = google_feed.feed_row(_lot())
     assert fr["link"].startswith("https://staging.example.com/listings/31225-atl?")
+
+
+def test_description_ends_with_shipping_placeholder_note():
+    row = google_feed.feed_row(_lot())
+    assert row["description"].endswith(google_feed.SHIPPING_NOTE)
+    long = google_feed.feed_row(_lot(description="x" * 6000))
+    assert len(long["description"]) <= 5000
+    assert long["description"].endswith(google_feed.SHIPPING_NOTE)
+
+
+def test_fb_catalog_description_has_no_google_note():
+    from automation import catalog_feed
+    assert google_feed.SHIPPING_NOTE not in catalog_feed._description(_lot(), "T")
