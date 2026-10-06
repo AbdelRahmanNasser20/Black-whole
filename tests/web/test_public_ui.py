@@ -255,3 +255,19 @@ def test_landing_copy_follows_the_gate(monkeypatch, landing):
     lit = _client().get("/")
     assert "Lock your lot with a refundable deposit" in lit.text
     assert "no deposit games" not in lit.text
+
+
+def test_terms_returns_policy_section():
+    t = _client().get("/terms").text
+    assert 'id="returns"' in t
+    for head in ("ALL SALES FINAL", "SEE THEM FIRST", "NOT AS DESCRIBED", "FREIGHT DAMAGE",
+                 "BUYING WITHOUT SEEING", "HOLD PERIOD", "PAYMENT RETURNS", "ALREADY COVERED"):
+        assert head in t
+    assert "14 days" in t and "2 business days" in t
+    assert 'href="/terms#returns"' in t  # footer
+
+
+def test_returns_short_link_redirects_to_terms_anchor():
+    r = _client().get("/returns", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/terms#returns"
