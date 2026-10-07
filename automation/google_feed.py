@@ -49,7 +49,7 @@ def _product_type(category: str) -> str:
 
 def _additional_images(row: dict, hero: str) -> str:
     """Up to 10 durable gallery URLs after the hero, comma-joined (Google's format)."""
-    resolved = lot_images.resolve(row)
+    resolved = lot_images.resolve(row, "google")  # clean variant, never the watermark
     extra: list[str] = []
     for url in resolved.urls:
         if not url or url == hero or lot_images.storage_backend(url) == "supabase":

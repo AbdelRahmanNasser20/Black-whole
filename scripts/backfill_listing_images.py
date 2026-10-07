@@ -90,7 +90,7 @@ def main() -> int:
             print(f"  would upload {len(imgs)} imgs for {lot_id} (hero={imgs[0].name})")
             uploaded += 1
             continue
-        result = listing_images.upload_lot_images(lot_id, imgs)
+        result = listing_images.upload_lot_images(lot_id, imgs, status=row.get("status"))
         if not result:
             failed += 1
             print(f"  FAIL {lot_id}: upload returned nothing")

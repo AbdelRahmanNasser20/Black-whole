@@ -28,9 +28,10 @@ def test_mirror_fetches_cleans_uploads_and_stamps(monkeypatch):
     monkeypatch.setattr(fi.lot_channels, "fetch_detail", lambda a, b: {"assetId": a, "assetPhotos": ["p"] * 9})
     monkeypatch.setattr(fi.lot_channels, "gallery_urls", lambda d: [f"https://cdn/{i}.jpg" for i in range(9)])
 
-    def fake_clean(key, urls, log=print, *, dewatermark=True, limit=None, strict=False):
+    def fake_clean(key, urls, log=print, *, dewatermark=True, limit=None, strict=False,
+                   status=None):
         calls["key"], calls["n"], calls["dw"] = key, len(urls), dewatermark
-        calls["limit"], calls["strict"] = limit, strict
+        calls["limit"], calls["strict"], calls["status"] = limit, strict, status
         return {"hero_image_url": "https://r2/fav-9685-56.jpg", "image_urls": ["https://r2/fav-9685-56/00.jpg"]}
 
     monkeypatch.setattr(fi.lot_channels, "clean_and_upload", fake_clean)
@@ -38,6 +39,7 @@ def test_mirror_fetches_cleans_uploads_and_stamps(monkeypatch):
     out = fi.mirror_favorite_photos("9685/56", log=lambda *a: None, force=True)
     assert calls["key"] == fi.r2_key("9685/56") and calls["n"] == fi.FAVORITE_PHOTO_LIMIT and calls["dw"] is True
     assert calls["strict"] is True, "a watermarked original is never published for a favorite"
+    assert calls["status"] == "active_bid", "a favorite is still bid on: the site map keeps its watermark twin"
     assert calls["stamped"][0] == "9685/56" and out["hero_image_url"].startswith("https://r2/")
 
 

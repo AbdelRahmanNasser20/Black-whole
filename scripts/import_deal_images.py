@@ -145,7 +145,8 @@ def main() -> int:
         if not files:
             print("ERROR: every download failed", file=sys.stderr)
             return 1
-        result = listing_images.upload_lot_images(args.lot, files)
+        result = listing_images.upload_lot_images(
+            args.lot, files, status=(row or {}).get("status"))
 
     if not result:
         print("ERROR: upload returned nothing — check R2/storage config",

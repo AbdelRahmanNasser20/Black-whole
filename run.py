@@ -186,9 +186,8 @@ async def _run(
             print("[3/5] skipped")
             progress.emit("phase", phase="dewatermark", status="skipped")
 
-        # FB / eBay drafts post files straight from disk: hand them the same
-        # disguised pixels the site serves (automation/image_disguise.py), so a
-        # reverse image search on the listing can't land on the GovDeals lot.
+        # FB / eBay drafts post files straight from disk: hand them the clean
+        # (mirrored/re-framed, never watermarked) copies — automation/photo_policy.py.
         public_imgs = listing_images.public_copies(meta.lot_id or meta.folder_name, cleaned)
 
         existing_inv = inventory.get(meta.lot_id) if meta.lot_id else None
@@ -320,7 +319,9 @@ async def _run(
                 if cleaned:
                     progress.emit("phase", phase="upload", status="running")
                     try:
-                        uploaded = listing_images.upload_lot_images(meta.lot_id, cleaned)
+                        uploaded = listing_images.upload_lot_images(
+                            meta.lot_id, cleaned,
+                            status=(existing_inv or {}).get("status"))
                     except Exception as e:  # never let storage crash a run
                         uploaded = None
                         print(f"  [warn] image upload failed: {e!r}")
