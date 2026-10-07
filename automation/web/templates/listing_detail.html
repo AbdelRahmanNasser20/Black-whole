@@ -10,6 +10,7 @@
 {% endblock %}
 {% block head_extra %}
   <script type="application/ld+json">{{ product_jsonld | safe }}</script>
+  {% if copy and copy.faq_jsonld %}<script type="application/ld+json">{{ copy.faq_jsonld | safe }}</script>{% endif %}
   <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
@@ -162,6 +163,42 @@
       <div class="section-rule"></div>
       <div class="section-label mono tiny">NOTES FROM THE FLOOR</div>
       <p>{{ item.description }}</p>
+    </div>
+    {% endif %}
+
+    {% if copy %}
+    {#- Original per-lot copy (automation/web/seo_copy.py) — the parts the
+        auction listing never answers. Built from ledger fields, never
+        scraped, never storage_note. #}
+    <div class="lot-copy">
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">SPECS</h2>
+      <table class="specs-table">
+        <tbody>
+        {% for label, value in copy.specs %}
+          <tr><th scope="row">{{ label }}</th><td>{{ value }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">{% if item.is_sold %}WHO BOUGHT SETS LIKE THIS{% else %}GOOD FOR{% endif %}</h2>
+      <p>{{ copy.good_for }}</p>
+
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">PICKUP &amp; FREIGHT</h2>
+      <p>{{ copy.pickup_freight }}</p>
+
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">QUESTIONS BUYERS ASK</h2>
+      <dl class="faq">
+        {% for q, a in copy.faq %}
+        <div class="faq-item">
+          <dt>{{ q }}</dt>
+          <dd>{{ a }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
     </div>
     {% endif %}
 

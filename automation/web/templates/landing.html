@@ -3,6 +3,7 @@
 {% block meta_description %}Wholesale banquet, stacking, and event chairs sold by the lot. Local pickup in the listed city or nationwide freight — priced to move.{% endblock %}
 {% block body_class %}page-landing{% endblock %}
 {% block head_extra %}
+{% if site_faq_jsonld %}<script type="application/ld+json">{{ site_faq_jsonld | safe }}</script>{% endif %}
 <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
@@ -91,6 +92,7 @@
   <div class="how-head">
     <div class="section-rule"></div>
     <h2 class="section-title">ON THE FLOOR NOW</h2>
+    {% if intent %}<p class="intent-line">{{ intent }}</p>{% endif %}
     <div class="carousel-nav">
       <button type="button" class="carousel-btn" id="feat-prev" aria-label="previous lots">←</button>
       <button type="button" class="carousel-btn" id="feat-next" aria-label="next lots">→</button>
@@ -171,6 +173,24 @@
     </article>
   </div>
 </section>
+
+{% if site_faq %}
+<section class="home-faq" id="faq">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">STRAIGHT ANSWERS</h2>
+  </div>
+  <dl class="faq faq--home">
+    {% for q, a in site_faq %}
+    <div class="faq-item">
+      <dt>{{ q }}</dt>
+      <dd>{{ a }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  <p class="mono tiny">More about who we are and how lots are sourced on the <a href="/about">about page</a>.</p>
+</section>
+{% endif %}
 
 <section class="contact" id="contact">
   <div class="contact-grid">

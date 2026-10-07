@@ -79,6 +79,7 @@ from . import deals_query
 from . import public_deals
 from . import rate_limit
 from . import public_map
+from . import seo_copy
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -773,8 +774,44 @@ def public_landing(request: Request):
         featured = []
     return templates.TemplateResponse(
         request, "landing.html",
-        _public_ctx({"stats": counts, "featured": featured}),
+        _public_ctx({
+            "stats": counts, "featured": featured,
+            "intent": _intent_line(counts, featured),
+            "site_faq": seo_copy.SITE_FAQ,
+            "site_faq_jsonld": seo_copy.faq_jsonld(seo_copy.SITE_FAQ),
+        }),
     )
+
+
+def _intent_line(counts: dict, featured: list[dict]) -> str | None:
+    """The one sentence a "bulk seating" searcher wants above the fold:
+    floor price, how many chairs, how many cities. Empty floor → no line."""
+    prices = [float(r["price_per_chair"]) for r in featured
+              if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
+    chairs = int(counts.get("chairs") or 0)
+    cities = int(counts.get("cities") or 0)
+    if not chairs:
+        return None
+    bits = []
+    if prices:
+        bits.append(f"Bulk seating from ${min(prices):,.0f} per chair")
+    else:
+        bits.append("Bulk seating priced by the chair")
+    bits.append(f"{chairs:,} chairs on the floor")
+    if cities:
+        bits.append(f"{cities} pickup cit{'y' if cities == 1 else 'ies'}")
+    bits.append("local pickup free or nationwide freight")
+    return " · ".join(bits) + "."
+
+
+@app.get("/about", response_class=HTMLResponse)
+def public_about(request: Request):
+    visits.track(request)
+    try:
+        counts = _landing_data()["counts"]
+    except Exception:  # noqa: BLE001 — the page reads fine without numbers
+        counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
+    return templates.TemplateResponse(request, "about.html", _public_ctx({"stats": counts}))
 
 
 def _short_link_redirect(code: str):
@@ -813,8 +850,28 @@ def public_listings(request: Request):
     return templates.TemplateResponse(
         request, "listings.html",
         _public_ctx({"items": items, "sold_items": sold_items,
-                     "cities": cities, "chair_types": chair_types}),
+                     "cities": cities, "chair_types": chair_types,
+                     "itemlist_jsonld": _itemlist_jsonld(items)}),
     )
+
+
+def _itemlist_jsonld(items: list[dict]) -> str:
+    """ItemList of the live lots for /listings — tells Google the page is a
+    catalogue of these products, so lot pages are found from it, not only
+    from the sitemap."""
+    data = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "Chair lots for sale",
+        "numberOfItems": len(items),
+        "itemListElement": [
+            {"@type": "ListItem", "position": i,
+             "url": f"{PUBLIC_BASE_URL}/listings/{r['lot_id']}",
+             "name": (r.get("title") or "Chair lot")}
+            for i, r in enumerate(items, start=1)
+        ],
+    }
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)
@@ -846,6 +903,7 @@ def public_listing_detail(request: Request, lot_id: str):
                 "default_qty": _freight_default_qty(row),
             },
             "nearby": near,
+            "copy": seo_copy.build(row, sold=row["is_sold"]),
             "robots_noindex": not _indexable(row, hero, images),
             "canonical_url": _canonical_twin(row),
             **_detail_seo(row, hero, images),
@@ -1767,7 +1825,7 @@ def _sitemap_body() -> str:
     is wasted pooler time. Any write through the admin API drops the memo."""
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/map", "/sell", "/terms", "/privacy"):
+    for path in ("/", "/listings", "/map", "/sell", "/about", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.

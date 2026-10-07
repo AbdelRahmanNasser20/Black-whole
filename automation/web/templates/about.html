@@ -1,0 +1,158 @@
+{% extends "_public_base.html" %}
+{#- templates/about.html — who is behind the site (E-E-A-T, SEO content PR 2026-10-07).
+    Context (app.py::public_about): stats (inventory.stats()), contact (NAP from config). Original copy only —
+    nothing here is scraped, and inventory.storage_note never renders anywhere on the storefront. -#}
+{% block title %}About Black Whole Liquidation — Bulk Chair Lots{% endblock %}
+{% block meta_description %}Who we are and how we source bulk banquet, stacking and folding chairs from closing venues and surplus auctions — then sell them by the lot with free pickup or nationwide freight.{% endblock %}
+{% block body_class %}page-about{% endblock %}
+
+{% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "About") }}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">THE OPERATION · EST. 2025 · PHOENIX, AZ</div>
+    <h1 class="page-title">WHO MOVES THE CHAIRS</h1>
+    <p class="page-lede">
+      Black Whole Liquidation buys matched sets of used commercial seating from
+      venues that are done with them and sells them by the lot to venues that
+      need them. One operator, real counts, real photos, and a phone that gets
+      answered.
+    </p>
+  </div>
+  <div class="page-head-right mono tiny">
+    {% if stats.moved %}<div>{{ "{:,}".format(stats.moved) }} CHAIRS MOVED</div>{% endif %}
+    {% if stats.chairs %}<div>{{ "{:,}".format(stats.chairs) }} ON THE FLOOR</div>{% endif %}
+    {% if stats.cities %}<div>{{ stats.cities }} PICKUP CIT{% if stats.cities == 1 %}Y{% else %}IES{% endif %}</div>{% endif %}
+  </div>
+</section>
+
+<section class="about-prose">
+  <div class="about-grid">
+    <article>
+      <div class="section-rule"></div>
+      <h2 class="section-title">WHERE THE LOTS COME FROM</h2>
+      <p>
+        Every lot on this site started as a room full of chairs somebody no
+        longer needed: a hotel refreshing its ballroom, a university clearing
+        an event hall, a convention center switching suppliers, a county
+        surplus office emptying a warehouse. Those sets go up on government
+        and institutional surplus auctions, and that is where we buy — whole
+        lots, hundreds to a few thousand chairs at a time, all one model and
+        one finish.
+      </p>
+      <p>
+        We bid on the sets a church, school or venue can actually use:
+        padded banquet chairs, wire-frame and sled-base stackers, metal
+        folders, the occasional run of conference seating. We skip the
+        mismatched piles. When a lot is won it is counted, photographed as
+        it sits, and listed here with the real number and the real city.
+      </p>
+    </article>
+
+    <article>
+      <div class="section-rule"></div>
+      <h2 class="section-title">WHAT "BY THE LOT" MEANS</h2>
+      <p>
+        A listing is one matched set in one place. The quantity on the page is
+        what is on the floor; the price is per chair, and it is a fraction of
+        the catalog price for the same commercial-grade chair because the
+        venue already paid for it once. Most lots split by the pallet for a
+        local buyer. For freight, the minimum is whatever makes the shipping
+        sensible, and we say so up front rather than making you guess.
+      </p>
+      <p>
+        Pickup in the listed city is free. For everything else we palletise
+        and shrink-wrap the chairs and ship LTL or by dedicated truck anywhere
+        in the continental US. Every lot page has a freight form that prices
+        your ZIP, and the number we confirm before you pay is the number you
+        pay.
+      </p>
+    </article>
+
+    <article>
+      <div class="section-rule"></div>
+      <h2 class="section-title">WHO YOU ARE TALKING TO</h2>
+      <p>
+        Black Whole is run by one person, Abdel Nasser, out of Phoenix,
+        Arizona, with chairs staged in whichever city they were bought in.
+        That is on purpose: no call center, no "let me check with the
+        warehouse." The person who answers the form is the person who counted
+        the chairs, took the photos and knows which pallet the spares are on.
+      </p>
+      <p>
+        Most of our buyers are churches, fellowship halls, event-rental
+        companies, schools and hotels seating a room on a budget. If you need
+        the board or the pastor to sign off first, say so — we hold lots while
+        you get approval, and a refundable deposit locks one when Checkout is
+        open.
+      </p>
+    </article>
+
+    <article>
+      <div class="section-rule"></div>
+      <h2 class="section-title">SELLING TO US</h2>
+      <p>
+        Closing a venue, refreshing a ballroom, or sitting on a storage unit
+        of chairs that never came back out? We buy used seating in bulk,
+        quote from photos and a count, and handle the haul. Start on the
+        <a href="/sell">sell page</a> — it takes two minutes.
+      </p>
+    </article>
+  </div>
+
+  {% if contact %}
+  <div class="about-contact">
+    <div class="section-rule"></div>
+    <h2 class="section-title">REACH US</h2>
+    <dl class="spec-sheet spec-sheet--about">
+      {% if contact.email %}<div><dt>EMAIL</dt><dd><a href="mailto:{{ contact.email }}">{{ contact.email }}</a></dd></div>{% endif %}
+      {% if contact.phone %}<div><dt>PHONE</dt><dd><a href="tel:{{ contact.phone | replace(' ', '') | replace('-', '') | replace('(', '') | replace(')', '') }}">{{ contact.phone }}</a></dd></div>{% endif %}
+      {% if contact.street or contact.city %}<div><dt>BUSINESS ADDRESS</dt><dd><address class="foot-address">
+        {%- if contact.street %}{{ contact.street }}<br>{% endif -%}
+        {{ contact.city }}{% if contact.region %}, {{ contact.region }}{% endif %} {{ contact.postal or '' }}
+      </address></dd></div>{% endif %}
+      <div><dt>HOURS</dt><dd>Messages answered within one business day · pickups by appointment</dd></div>
+    </dl>
+    <p class="mono tiny">Chairs are staged in the city shown on each lot, not at the business address — pickup details come with your confirmation.</p>
+  </div>
+  {% endif %}
+</section>
+
+<section class="contact contact--slim" id="contact">
+  <div class="contact-grid">
+    <div>
+      <div class="section-rule"></div>
+      <h2 class="section-title">TALK TO A HUMAN</h2>
+      <p class="contact-lede">Buying, selling, or just sizing a room? Say what you need and where it is going.</p>
+    </div>
+    <form class="manifest-form" id="contact-form" data-mode="landing">
+      <div class="mf-row">
+        <label>
+          <span>INQUIRY TYPE</span>
+          <select name="kind" required>
+            <option value="buy">I want to BUY chairs</option>
+            <option value="sell">I want to SELL surplus chairs</option>
+          </select>
+        </label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+        <label><span>EMAIL</span><input name="email" type="email" autocomplete="email"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+        <label><span>QUANTITY</span><input name="quantity_interested" type="number" min="1"></label>
+      </div>
+      <label class="mf-row"><span>MESSAGE</span>
+        <textarea name="message" rows="4" placeholder="Which lot, how many, and where they're headed."></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">FILE INQUIRY</button>
+      <div class="mf-result" hidden></div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+{% endblock %}
