@@ -17,16 +17,20 @@ attempted when BOTH:
   * the caller passes ``dry_run=False``, AND
   * the environment sets ``CRAIGSLIST_LIVE=1``.
 
-Even in that "live" mode the browser flow stops at Craigslist's preview/review
-step and NEVER clicks the final publish button — a human confirms every post.
-Tests exercise the pure logic only (city resolution, copy variation, draft
-building, dry-run orchestration) and never open a browser or hit the network.
+The live flow (`post_listing`) is the exact step sequence recorded on
+2026-10-03 against a logged-in account; it posts "for sale by owner →
+furniture" (free — never by-dealer, which is paid) and DOES click publish.
+The channel sync loop gates it behind `channel_craigslist_enabled` (ships 0)
+plus the browser pacing caps; the standalone CLIs behind `CRAIGSLIST_LIVE=1`.
+Tests exercise the pure logic only (city resolution, copy, draft building,
+dry-run orchestration) and never open a browser or hit the network.
 """
 
 from __future__ import annotations
 
 import inspect
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Union
@@ -58,6 +62,12 @@ CITY_SUBDOMAINS: dict[str, str] = {
     "new york": "newyork", "nyc": "newyork", "sfbay": "sfbay",
     "sanfrancisco": "sfbay", "seattle": "seattle", "denver": "denver",
     "miami": "miami", "boston": "boston",
+    # Cities our inventory actually sits in (2026-10)
+    "pittsburgh": "pittsburgh", "nashville": "nashville", "boise": "boise",
+    "las vegas": "lasvegas", "lasvegas": "lasvegas", "vegas": "lasvegas",
+    "tampa": "tampa", "orlando": "orlando",
+    "orange county": "orangecounty", "orangecounty": "orangecounty",
+    "stanton": "orangecounty", "cypress": "orangecounty", "anaheim": "orangecounty",
 }
 
 # Pretty labels for the copy. Anything missing falls back to a title-cased slug.
@@ -75,14 +85,48 @@ SUBDOMAIN_LABELS: dict[str, str] = {
     "denver": "Denver",
     "miami": "Miami",
     "boston": "Boston",
+    "pittsburgh": "Pittsburgh",
+    "nashville": "Nashville",
+    "boise": "Boise",
+    "lasvegas": "Las Vegas",
+    "tampa": "Tampa",
+    "orlando": "Orlando",
+    "orangecounty": "Orange County",
 }
 
-# Craigslist post-flow selectors used only on the LIVE path. "for sale by owner"
-# main category, then "furniture - by owner". Kept as constants so a live
-# operator can tweak them without hunting through the flow code.
-CL_MAINCAT_FOR_SALE_BY_OWNER = "for sale by owner"
-CL_CATEGORY_FURNITURE_BY_OWNER = "furniture - by owner"
+# Sub-area to pick when a city asks "choose the location that fits best"
+# (substring, case-insensitive). Cities not listed take the first option.
+SUBAREA_PREF: dict[str, str] = {
+    "phoenix": "phx north",
+    "atlanta": "city of atlanta",
+}
 
+# `post.craigslist.org/c/<code>` entry codes verified live 2026-10-03. A city
+# not listed is tried as `/c/<subdomain>` and falls back to the home page's
+# "create a posting" link.
+CL_POST_CODES: dict[str, str] = {
+    "phoenix": "phx", "atlanta": "atl", "pittsburgh": "pit", "nashville": "nsh",
+    "boise": "boi", "lasvegas": "lvg", "orangecounty": "orc", "tampa": "tpa", "orlando": "orl",
+}
+
+# City-centre ZIP used only when the inventory row has none. Never invent a ZIP
+# for a city that is not here — `build_lot_post` raises instead.
+CITY_ZIP: dict[str, str] = {
+    "phoenix": "85054", "atlanta": "30303", "pittsburgh": "15222", "nashville": "37203",
+    "orangecounty": "90680", "boise": "83702", "lasvegas": "89101", "tampa": "33602",
+    "orlando": "32801",
+}
+
+# Craigslist post-flow constants (recorded 2026-10-03). Radios are matched by
+# label text, never by numeric value — category ids differ per city.
+CL_POST_BASE = "https://post.craigslist.org"
+CL_TYPE_FOR_SALE_BY_OWNER = "fso"      # radio value on ?s=type — by-dealer is paid, never used
+CL_CATEGORY_LABEL = "furniture"        # radio label on ?s=cat
+CL_CONDITION_GOOD = "40"               # <select name=condition>
+CL_LANGUAGE_ENGLISH = "5"              # <select name=language>
+CL_TITLE_MAX = 70
+CL_MAX_PHOTOS = 8
+_POST_URL_RE = re.compile(r"^https://([a-z]+)\.craigslist\.org/.+/(\d+)\.html$")
 
 def _norm(city: str) -> str:
     return (city or "").strip().lower()
@@ -150,8 +194,7 @@ class CityDraft:
     ``status`` transitions:
       pending  -> built but not yet acted on
       dry_run  -> prepared copy only; nothing submitted (default outcome)
-      prepared -> live browser filled the form and stopped at review (no publish)
-      posted   -> operator published (only ever set by external confirmation)
+      posted   -> live browser published it; `detail_url` is the post URL
       skipped  -> city could not be resolved / was blank
       error    -> the live flow raised
     """
@@ -351,8 +394,8 @@ async def cross_post(
 
     Returns one :class:`CityDraft` per requested city. Defaults to a dry run:
     copy is prepared for every city but nothing is submitted. A live run
-    requires BOTH ``dry_run=False`` AND ``CRAIGSLIST_LIVE=1``; even then it
-    fills the form and stops at Craigslist's review step (never auto-publishes).
+    requires BOTH ``dry_run=False`` AND ``CRAIGSLIST_LIVE=1``; it then runs
+    `post_listing` per city (which publishes) and records the post URL.
     """
     if varier is None and use_llm:
         varier = llm_varier
@@ -376,93 +419,402 @@ async def cross_post(
             if draft.status != "pending":
                 continue
             try:
-                await _prepare_post(ctx, listing, draft)
-                draft.status = "prepared"
+                await _post_draft(ctx, listing, draft)
+                draft.status = "posted"
             except Exception as e:  # pragma: no cover - live browser path
                 draft.status = "error"
                 draft.error = f"{type(e).__name__}: {str(e)[:200]}"
-                print(f"[craigslist] {draft.subdomain} prepare failed: {draft.error}")
+                print(f"[craigslist] {draft.subdomain} post failed: {draft.error}")
     return drafts
 
 
-async def _prepare_post(ctx, listing: CraigslistListing, draft: CityDraft) -> None:  # pragma: no cover
-    """Best-effort live fill of the Craigslist post form — STOPS before publish.
+async def _post_draft(ctx, listing: CraigslistListing, draft: CityDraft) -> None:  # pragma: no cover
+    """Live-publish one city draft of a `CraigslistListing` (CLI fan-out path)."""
+    postal = listing.zip_code or CITY_ZIP.get(draft.subdomain)
+    if not postal:
+        raise ValueError(f"no ZIP for {draft.subdomain} — pass --zip-code or add it to CITY_ZIP")
+    url, _id = await post_listing(
+        ctx, subdomain=draft.subdomain, title=draft.title, body=draft.body,
+        price=draft.price, postal=postal, city=draft.city_label,
+        images=list(listing.images)[:CL_MAX_PHOTOS],
+    )
+    draft.detail_url = url
 
-    Not exercised by the test suite (no live posting in CI). Selectors are
-    Craigslist's current post-flow labels; a live operator should verify them
-    before the first real run. This function intentionally advances only as far
-    as the preview/review page and never clicks the final "publish" control.
+
+# ── Per-lot copy (inventory row → one post in the lot's own city) ───────────
+@dataclass
+class LotPost:
+    """What one inventory row becomes on Craigslist. Pure data, no browser."""
+
+    lot_id: str
+    subdomain: str
+    city: str
+    title: str
+    body: str
+    price: int
+    postal: str
+    subarea_pref: str | None = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def resolve_lot_subdomain(city: str, state: str = "") -> str:
+    """Strict city→subdomain for inventory rows: unknown city raises so the
+    sync loop records a visible `error` row instead of posting to a guessed
+    subdomain (`resolve_subdomain`'s passthrough is for the CLI only)."""
+    key = _norm(city)
+    if not key:
+        raise ValueError("inventory row has no city — cannot pick a Craigslist site")
+    if key in CITY_SUBDOMAINS:
+        return CITY_SUBDOMAINS[key]
+    key_state = f"{key} {_norm(state)}".strip()
+    if key_state in CITY_SUBDOMAINS:
+        return CITY_SUBDOMAINS[key_state]
+    raise ValueError(f"no Craigslist subdomain for city {city!r} — add it to CITY_SUBDOMAINS")
+
+
+_TRAILING_PAREN_RE = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def lot_title(row: dict, city: str, st: str) -> str:
+    """`<title> — <qty> Available, Stackable (<City>, <ST>)`, fitted to 70 chars.
+
+    A trailing "(City, ST)" already on the inventory title is replaced, never
+    doubled. When the full suffix doesn't fit, it shortens in steps (drop
+    "Stackable", then the quantity) before trimming the base at a word break —
+    the location is the one part a Craigslist reader needs in the title.
     """
+    qty = int(row.get("quantity_remaining") or 0)
+    base = _TRAILING_PAREN_RE.sub("", (row.get("title") or "").strip())
+    if not base:
+        base = f"{qty} {row.get('chair_type') or 'Chairs'}".strip()
+    loc = ", ".join(x for x in (city, st) if x)
+    suffixes = [f" — {qty} Available, Stackable ({loc})", f" — {qty} Available ({loc})", f" ({loc})"]
+    for suffix in suffixes:
+        if len(base) + len(suffix) <= CL_TITLE_MAX:
+            return base + suffix
+    room = CL_TITLE_MAX - len(suffixes[-1])
+    cut = base[:room]
+    if " " in cut:
+        cut = cut[:cut.rfind(" ")]
+    return cut.rstrip(" —-,") + suffixes[-1]
+
+
+def lot_body(row: dict, city: str) -> str:
+    qty = int(row.get("quantity_remaining") or 0)
+    price = int(float(row.get("price_per_chair") or 0))
+    desc = (row.get("description") or row.get("subtitle") or "").strip()
+    lines = []
+    if desc:
+        lines += [desc, ""]
+    lines += [
+        f"Quantity available: {qty}",
+        f"${price} per chair. Bulk discounts on the full lot.",
+        f"Local pickup in {city}. Delivery quotes available for larger orders.",
+        "Ideal for churches, banquet halls, schools, and event venues.",
+        "",
+        "Photos, specs and all our lots: black-whole.com",
+        "",
+        "Reply with how many you need and whether you want pickup or delivery.",
+    ]
+    return "\n".join(lines)
+
+
+def build_lot_post(row: dict, *, city: str | None = None) -> LotPost:
+    """Inventory row → `LotPost`. `city` overrides the lot's own city (per-city
+    fan-out); the ZIP then comes from `CITY_ZIP`, never from the row.
+
+    Raises `ValueError` on an unknown city or a missing ZIP — never invents one.
+    Never reads `storage_note` (the sync engine strips it anyway).
+    """
+    own_city = (row.get("city") or "").strip()
+    target_city = (city or own_city).strip()
+    st = state_abbr(row.get("state") or "") if _norm(target_city) == _norm(own_city) else ""
+    subdomain = resolve_lot_subdomain(target_city, row.get("state") or "")
+    label = city_label(subdomain) if not target_city else target_city
+    postal = (row.get("zip_code") or "").strip() if _norm(target_city) == _norm(own_city) else ""
+    postal = postal or CITY_ZIP.get(subdomain) or ""
+    if not postal:
+        raise ValueError(f"no ZIP for lot {row.get('lot_id')!r} in {target_city!r} — "
+                         "set inventory.zip_code or add the city to CITY_ZIP")
+    price = int(float(row.get("price_per_chair") or 0))
+    if price <= 0:
+        raise ValueError(f"lot {row.get('lot_id')!r} has no price_per_chair")
+    return LotPost(
+        lot_id=str(row.get("lot_id") or ""), subdomain=subdomain, city=label,
+        title=lot_title(row, label, st), body=lot_body(row, label), price=price,
+        postal=postal, subarea_pref=SUBAREA_PREF.get(subdomain),
+    )
+
+
+def lot_photo_urls(row: dict) -> list[str]:
+    """Hero first, then the gallery, deduped, capped at `CL_MAX_PHOTOS`."""
+    hero = row.get("hero_image_url")
+    urls = ([hero] if hero else []) + [u for u in (row.get("image_urls") or []) if u and u != hero]
+    return urls[:CL_MAX_PHOTOS]
+
+
+def download_lot_photos(row: dict, *, log=print) -> list[Path]:
+    """Local copies of the lot's public (already disguised) R2 photos under
+    `SCRATCH_DIR/craigslist/<key>/NN.jpg`. A file already on disk is reused."""
+    import httpx
+
+    from . import config, listing_images
+    from .lot_channels import DOWNLOAD_HEADERS
+
+    key = listing_images.key_base(row.get("lot_id")) or "lot"
+    folder = Path(config.SCRATCH_DIR) / "craigslist" / key
+    folder.mkdir(parents=True, exist_ok=True)
+    files: list[Path] = []
+    urls = lot_photo_urls(row)
+    with httpx.Client(timeout=60.0, follow_redirects=True, headers=DOWNLOAD_HEADERS) as client:
+        for i, url in enumerate(urls):
+            target = folder / f"{i:02d}.jpg"
+            if target.is_file() and target.stat().st_size > 0:
+                files.append(target)
+                continue
+            try:
+                resp = client.get(url)
+                resp.raise_for_status()
+            except Exception as exc:  # noqa: BLE001 — one bad photo isn't fatal
+                log(f"[craigslist] photo download failed ({type(exc).__name__}): {url[:90]}")
+                continue
+            if resp.content:
+                target.write_bytes(resp.content)
+                files.append(target)
+    return files
+
+
+# ── The live flow (recorded 2026-10-03) ─────────────────────────────────────
+# Steps are keyed by the `?s=` query param so a city without sub-areas (which
+# skips ?s=subarea) walks the same loop. Every step submits and then waits for
+# the URL to change; an unknown step raises so nothing is guessed.
+
+_LOGIN_MARKERS = ("accounts.craigslist.org/login", "/login/home?rp=")
+NOT_LOGGED_IN = ("Craigslist profile not logged in — run run.py --login-only and sign in at "
+                 "accounts.craigslist.org")
+# Seen live after the 5th post of the day across 5 cities: CL parks the draft
+# at `?s=pn` and wants a one-time SMS/voice code. That is the operator's phone —
+# never automated. The draft survives in the account; re-run after verifying.
+PHONE_VERIFY_NEEDED = ("Craigslist asks for phone verification (?s=pn) — verify once in the "
+                       "profile's Chrome (accounts.craigslist.org → drafts), then re-run")
+
+
+def _step_of(url: str) -> str | None:
+    m = re.search(r"[?&]s=([a-z]+)", url)
+    return m.group(1) if m else None
+
+
+def _assert_logged_in(page) -> None:  # pragma: no cover - live browser path
+    if any(mark in page.url for mark in _LOGIN_MARKERS):
+        raise RuntimeError(NOT_LOGGED_IN)
+
+
+async def _submit_and_wait(page, submit_selector: str, timeout: int = 20000) -> None:  # pragma: no cover
+    before = page.url
+    await page.click(submit_selector, timeout=timeout)
+    try:
+        await page.wait_for_url(lambda u: u != before, timeout=timeout)
+    except Exception:
+        # Extension-style clicks sometimes don't register on CL's radios; a DOM
+        # submit from inside the page always did.
+        await page.evaluate("sel => document.querySelector(sel).click()", submit_selector)
+        await page.wait_for_url(lambda u: u != before, timeout=timeout)
+    await page.wait_for_load_state("domcontentloaded")
+
+
+async def _check_radio_and_submit(page, radio_selector: str, submit_selector: str = "button[type=submit]") -> None:  # pragma: no cover
+    radio = page.locator(radio_selector).first
+    await radio.check(timeout=10000)
+    if not await radio.is_checked():
+        await page.evaluate("sel => { document.querySelector(sel).checked = true }", radio_selector)
+    await _submit_and_wait(page, submit_selector)
+
+
+async def _pick_radio_by_label(page, wanted: str | None) -> str:  # pragma: no cover
+    """Radio selector for the option whose label contains `wanted` (first option when None/no match)."""
+    options = await page.evaluate(
+        "() => [...document.querySelectorAll('input[type=radio]')]"
+        ".map(r => [r.value, (r.parentElement?.innerText || '').trim().toLowerCase()])"
+    )
+    if not options:
+        raise RuntimeError(f"no radio options on {page.url}")
+    value = options[0][0]
+    if wanted:
+        w = wanted.lower()
+        for val, label in options:
+            if w in label:
+                value = val
+                break
+    return f'input[type=radio][value="{value}"]'
+
+
+async def _radio_by_exact_label(page, label: str) -> str:  # pragma: no cover
+    options = await page.evaluate(
+        "() => [...document.querySelectorAll('input[type=radio]')]"
+        ".map(r => [r.value, (r.parentElement?.innerText || '').trim().toLowerCase()])"
+    )
+    for val, text in options:
+        if text == label.lower():
+            return f'input[type=radio][value="{val}"]'
+    raise RuntimeError(f"category {label!r} not offered on {page.url}")
+
+
+async def _fill_details(page, *, title: str, body: str, price: int, postal: str, city: str) -> None:  # pragma: no cover
+    await page.fill('[name="PostingTitle"]', title[:CL_TITLE_MAX])
+    await page.fill('[name="price"]', str(int(price)))
+    await page.fill('[name="geographic_area"]', city)
+    await page.fill('[name="postal"]', postal)
+    await page.fill('[name="PostingBody"]', body)
+    for name, value in (("condition", CL_CONDITION_GOOD), ("language", CL_LANGUAGE_ENGLISH)):
+        try:
+            await page.select_option(f'[name="{name}"]', value)
+        except Exception:
+            pass
+    for name in ("delivery_available", "see_my_other"):
+        try:
+            await page.check(f'[name="{name}"]', timeout=3000)
+        except Exception:
+            pass
+    # Never: show_address_ok, contact_phone — the pickup address stays private.
+    await _submit_and_wait(page, 'button[name="go"]')
+
+
+async def _upload_images(page, images: list[Path], timeout_s: int = 90) -> None:  # pragma: no cover
+    import asyncio
+
+    paths = [str(p) for p in images if Path(p).is_file()]
+    if paths:
+        await page.set_input_files("input[type=file]", paths, timeout=15000)
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while True:
+            text = await page.inner_text("body")
+            m = re.search(r"this posting has (\d+) images", text)
+            if m and int(m.group(1)) >= len(paths) and "cancel uploads" not in text:
+                break
+            if asyncio.get_event_loop().time() > deadline:
+                raise RuntimeError(f"image upload did not finish in {timeout_s}s "
+                                   f"({m.group(1) if m else 0}/{len(paths)})")
+            await asyncio.sleep(1.0)
+    await _submit_and_wait(page, 'button:has-text("done with images")')
+
+
+async def _confirmation_url(page, subdomain: str) -> tuple[str, str]:  # pragma: no cover
+    hrefs = await page.eval_on_selector_all("a[href]", "els => els.map(e => e.href)")
+    for href in hrefs:
+        m = _POST_URL_RE.match(href)
+        if m and m.group(1) == subdomain:
+            return href, m.group(2)
+    for href in hrefs:  # a city whose post host differs from the entry code
+        m = _POST_URL_RE.match(href)
+        if m:
+            return href, m.group(2)
+    raise RuntimeError(f"published but no post URL on the confirmation page ({page.url})")
+
+
+async def post_listing(
+    ctx, *, subdomain: str, title: str, body: str, price: int, postal: str, city: str,
+    images: list[Path], subarea_pref: str | None = None, max_steps: int = 14,
+) -> tuple[str, str]:  # pragma: no cover - live browser path
+    """Publish one furniture-by-owner post. Returns `(post_url, external_id)`.
+
+    Steps (all recorded live): /c/<code> → [copyfromanother: skip] → [area] →
+    [subarea] → type=fso → cat "furniture" → details → map (city + ZIP only,
+    no street) → images → preview → publish → confirmation. Raises on a login
+    page, the phone-verification step, an unexpected step, or a missing
+    confirmation link — never guesses.
+    """
+    subarea_pref = subarea_pref if subarea_pref is not None else SUBAREA_PREF.get(subdomain)
     page = await ctx.new_page()
-    await page.goto(draft.post_url, wait_until="domcontentloaded")
-    await page.wait_for_timeout(2000)
-
-    async def _click_text(text: str, timeout: int = 5000) -> None:
-        await page.get_by_text(text, exact=False).first.click(timeout=timeout)
-
-    # 1) create posting -> for sale by owner -> furniture by owner
     try:
-        await _click_text("create a posting")
-        await page.wait_for_timeout(1000)
-        await _click_text(CL_MAINCAT_FOR_SALE_BY_OWNER)
-        await page.wait_for_timeout(1000)
-        await _click_text(CL_CATEGORY_FURNITURE_BY_OWNER)
-        await page.wait_for_timeout(1500)
-    except Exception as e:
-        print(f"[craigslist] category nav fallback ({draft.subdomain}): {e}")
+        code = CL_POST_CODES.get(subdomain, subdomain)
+        await page.goto(f"{CL_POST_BASE}/c/{code}", wait_until="domcontentloaded")
+        _assert_logged_in(page)
+        if _step_of(page.url) is None:
+            # Not a post step — go in through the city home page's "create a posting".
+            await page.goto(post_url_for(subdomain), wait_until="domcontentloaded")
+            await page.get_by_text("create a posting", exact=False).first.click(timeout=10000)
+            await page.wait_for_load_state("domcontentloaded")
+            _assert_logged_in(page)
 
-    # 2) core fields
-    async def _fill(label: str, value: str) -> None:
-        el = page.get_by_label(label, exact=False).first
-        await el.click()
-        await el.fill(value)
-
-    for label in ("posting title", "Posting Title", "PostingTitle"):
+        for _ in range(max_steps):
+            step = _step_of(page.url)
+            if step == "copyfromanother":
+                # "Re-use selected data from your previous posting?" — never; each
+                # lot gets its own copy. `brand_new_post` = the "skip" button.
+                await _submit_and_wait(page, 'button[name="brand_new_post"]')
+            elif step == "area":
+                # Single <select name=n> already on the right city — just continue.
+                await _submit_and_wait(page, 'button[name="go"]')
+            elif step == "pn":
+                raise RuntimeError(PHONE_VERIFY_NEEDED)
+            elif step == "subarea":
+                await _check_radio_and_submit(page, await _pick_radio_by_label(page, subarea_pref))
+            elif step == "type":
+                await _check_radio_and_submit(page, f'input[type=radio][value="{CL_TYPE_FOR_SALE_BY_OWNER}"]')
+            elif step == "cat":
+                await _check_radio_and_submit(page, await _radio_by_exact_label(page, CL_CATEGORY_LABEL))
+            elif step == "edit":
+                await _fill_details(page, title=title, body=body, price=price, postal=postal, city=city)
+            elif step == "geoverify":
+                await page.fill('[name="city"]', city)
+                await page.fill('[name="postal"]', postal)
+                await _submit_and_wait(page, 'button:has-text("continue")')
+            elif step == "editimage":
+                await _upload_images(page, images)
+            elif step == "preview":
+                await _submit_and_wait(page, 'button[name="go"]')
+            elif step is None:
+                _assert_logged_in(page)
+                return await _confirmation_url(page, subdomain)
+            else:
+                raise RuntimeError(f"unexpected Craigslist step {step!r} at {page.url}")
+        raise RuntimeError(f"Craigslist flow did not finish in {max_steps} steps (at {page.url})")
+    finally:
         try:
-            await _fill(label, draft.title)
-            break
+            await page.close()
         except Exception:
-            continue
+            pass
+
+
+async def _manage_action(ctx, external_id: str, action: str) -> bool:  # pragma: no cover - live browser path
+    """UNVERIFIED SELECTORS — check on the first live run. The manage page
+    (`/manage/<id>`) carries delete / renew / edit controls; this clicks the one
+    named `action` and, if a confirmation control of the same name appears,
+    clicks that too. Returns True when a control was clicked."""
+    page = await ctx.new_page()
     try:
-        await _fill("price", str(listing.price))
-    except Exception:
-        pass
-    if listing.zip_code:
-        for label in ("postal code", "zip code", "postal"):
-            try:
-                await _fill(label, listing.zip_code)
+        await page.goto(f"{CL_POST_BASE}/manage/{external_id}", wait_until="domcontentloaded")
+        _assert_logged_in(page)
+        selector = (f'button:has-text("{action}"), input[type=submit][value*="{action}" i], '
+                    f'a:has-text("{action}")')
+        clicked = False
+        for _ in range(2):
+            loc = page.locator(selector).first
+            if await loc.count() == 0:
                 break
+            before = page.url
+            await loc.click(timeout=10000)
+            clicked = True
+            try:
+                await page.wait_for_url(lambda u: u != before, timeout=10000)
             except Exception:
-                continue
-    for label in ("posting body", "Posting Body", "PostingBody"):
+                await page.wait_for_timeout(1500)
+        return clicked
+    finally:
         try:
-            await _fill(label, draft.body)
-            break
+            await page.close()
         except Exception:
-            continue
-    if listing.contact_email:
-        for label in ("email", "reply email"):
-            try:
-                await _fill(label, listing.contact_email)
-                break
-            except Exception:
-                continue
+            pass
 
-    # 3) advance to image upload + preview — but STOP. No publish click here.
-    try:
-        await page.get_by_role("button", name="continue").first.click()
-        await page.wait_for_timeout(1500)
-    except Exception:
-        pass
 
-    file_input = await page.query_selector("input[type=file]")
-    if file_input and listing.images:
-        try:
-            await file_input.set_input_files([str(p) for p in listing.images])
-            await page.wait_for_timeout(2000)
-        except Exception as e:
-            print(f"[craigslist] image upload fallback ({draft.subdomain}): {e}")
+async def delete_posting(ctx, external_id: str) -> bool:  # pragma: no cover
+    """Delete a live post from its manage page. UNVERIFIED — see `_manage_action`."""
+    return await _manage_action(ctx, external_id, "delete")
 
-    draft.detail_url = page.url
-    print(f"[craigslist] {draft.subdomain}: form prepared, awaiting human review "
-          f"at {page.url} — NOT auto-published.")
+
+async def renew_posting(ctx, external_id: str) -> bool:  # pragma: no cover
+    """Renew (bump) a live post. CL allows it 48 h after posting, within the
+    45-day window. UNVERIFIED — see `_manage_action`."""
+    return await _manage_action(ctx, external_id, "renew")

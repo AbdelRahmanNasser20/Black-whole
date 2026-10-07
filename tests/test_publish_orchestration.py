@@ -129,7 +129,7 @@ async def test_fanout_city_scoped_vs_national(reg, sample_data):
 
 async def test_unknown_platform_degrades_to_no_adapter(reg, sample_data):
     results = await orchestrator.publish_all(
-        ctx=None, data=sample_data, platforms=["cl"], cities=["phx"], dry_run=True,
+        ctx=None, data=sample_data, platforms=["offerup"], cities=["phx"], dry_run=True,
     )
     assert len(results) == 1
     assert results[0].status == "no_adapter"
@@ -191,7 +191,8 @@ async def test_adapter_exception_becomes_error_result(reg, sample_data):
 # ── registration point for BLACKWHOLE-20 (Craigslist) ─────────────────────────
 
 async def test_craigslist_registration_point(reg, sample_data):
-    """Simulate BLACKWHOLE-20 dropping in its adapter; orchestrator finds it."""
+    """A registered adapter (the real one is `adapters/craigslist.py`; a fake
+    stands in here) is found by the orchestrator and fanned out per city."""
     class FakeCraigslist:
         platform = "craigslist"
         aliases = ("cl",)

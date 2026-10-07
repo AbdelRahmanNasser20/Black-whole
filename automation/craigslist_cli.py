@@ -16,8 +16,10 @@ Preview the exact per-city copy that would be posted::
     python -m automation.craigslist_cli --cities phx,ga,la \
         --chair-type "Banquet Chairs" --quantity 300 --price 20 --show-body
 
-A live run additionally requires the CRAIGSLIST_LIVE=1 env gate; even then the
-browser stops at Craigslist's review page and never clicks publish::
+A live run additionally requires the CRAIGSLIST_LIVE=1 env gate; it then
+PUBLISHES one furniture-by-owner post per city (recorded flow in
+``automation.craigslist.post_listing``). For a single inventory lot use
+``scripts/craigslist_lot.py`` instead — it reads the ledger and records the URL::
 
     CRAIGSLIST_LIVE=1 python -m automation.craigslist_cli --cities phoenix \
         --chair-type "Banquet Chairs" --quantity 300 --price 20 --live
@@ -60,7 +62,7 @@ def _collect_images(images_dir: str | None) -> list[Path]:
 @click.option("--llm/--no-llm", default=False,
               help="Use Gemini for per-city copy variation (falls back if no key)")
 @click.option("--live", is_flag=True,
-              help="Attempt a real post. Also requires CRAIGSLIST_LIVE=1; stops at review, never publishes.")
+              help="Publish for real. Also requires CRAIGSLIST_LIVE=1.")
 @click.option("--show-body", is_flag=True, help="Print the full per-city body copy")
 def main(cities, chair_type, quantity, price, description, dimensions, state,
          zip_code, images_dir, email, llm, live, show_body):
@@ -80,7 +82,7 @@ def main(cities, chair_type, quantity, price, description, dimensions, state,
         contact_email=email,
     )
 
-    mode = "LIVE (review-only)" if live else "DRY RUN"
+    mode = "LIVE" if live else "DRY RUN"
     click.echo(f"[craigslist] {mode} — {len(city_list)} city(ies): {', '.join(city_list)}")
 
     drafts = asyncio.run(cross_post(
@@ -99,14 +101,14 @@ def main(cities, chair_type, quantity, price, description, dimensions, state,
             for line in d.body.splitlines():
                 click.echo(f"      {line}")
         if d.detail_url:
-            click.echo(f"    review at: {d.detail_url}")
+            click.echo(f"    posted at: {d.detail_url}")
         if d.error:
             click.echo(f"    error: {d.error}")
 
-    n_ready = sum(1 for d in drafts if d.status in ("dry_run", "prepared"))
+    n_ready = sum(1 for d in drafts if d.status in ("dry_run", "posted"))
     click.echo("")
     click.echo(f"[craigslist] done — {n_ready}/{len(drafts)} city drafts ready. "
-               f"{'Review and publish each in the browser.' if live else 'No posts submitted (dry run).'}")
+               f"{'Posted.' if live else 'No posts submitted (dry run).'}")
 
 
 if __name__ == "__main__":

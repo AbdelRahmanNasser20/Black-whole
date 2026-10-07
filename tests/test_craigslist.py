@@ -53,6 +53,9 @@ def _listing(**kw) -> CraigslistListing:
     ("Washington DC", "washingtondc"),
     ("sacramento", "sacramento"),          # passthrough
     ("San Diego", "sandiego"),             # passthrough, spaces stripped
+    ("Las Vegas", "lasvegas"),
+    ("Stanton", "orangecounty"),
+    ("Pittsburgh", "pittsburgh"),
 ])
 def test_resolve_subdomain(raw, expected):
     assert resolve_subdomain(raw) == expected
@@ -151,25 +154,25 @@ async def test_cross_post_live_flag_without_env_gate_stays_dry(monkeypatch):
     assert all(d.status == "dry_run" for d in drafts)
 
 
-async def test_cross_post_live_gate_opens_browser_once_and_stops_at_review(monkeypatch):
+async def test_cross_post_live_gate_opens_browser_once_and_posts_each_city(monkeypatch):
     monkeypatch.setenv("CRAIGSLIST_LIVE", "1")
     opened = {"count": 0}
 
     @asynccontextmanager
     async def fake_ctx(*a, **kw):
         opened["count"] += 1
-        yield object()  # a stand-in BrowserContext; _prepare_post is stubbed out
+        yield object()  # a stand-in BrowserContext; _post_draft is stubbed out
 
-    async def fake_prepare(ctx, listing, draft):
-        draft.detail_url = f"https://{draft.subdomain}.craigslist.org/preview/123"
+    async def fake_post(ctx, listing, draft):
+        draft.detail_url = f"https://{draft.subdomain}.craigslist.org/fuo/d/x/123.html"
 
     monkeypatch.setattr(browser, "persistent_context", fake_ctx)
-    monkeypatch.setattr(craigslist, "_prepare_post", fake_prepare)
+    monkeypatch.setattr(craigslist, "_post_draft", fake_post)
 
     drafts = await cross_post(_listing(), ["phoenix", "atlanta"], dry_run=False)
     assert opened["count"] == 1                       # one shared browser for the batch
-    assert all(d.status == "prepared" for d in drafts)   # never auto-published
-    assert all(d.detail_url.endswith("/preview/123") for d in drafts)
+    assert all(d.status == "posted" for d in drafts)
+    assert all(d.detail_url.endswith("/123.html") for d in drafts)
 
 
 async def test_cross_post_records_skipped_city(monkeypatch):
