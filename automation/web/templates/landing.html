@@ -1,10 +1,11 @@
 {% extends "_public_base.html" %}
-{% block title %}Bulk Banquet &amp; Stacking Chairs for Sale | Black Whole Liquidation{% endblock %}
+{% block title %}Bulk Banquet Chairs for Sale | Black Whole Liquidation{% endblock %}
 {% block meta_description %}Wholesale banquet, stacking, and event chairs sold by the lot. Local pickup in the listed city or nationwide freight — priced to move.{% endblock %}
 {% block body_class %}page-landing{% endblock %}
 {% block head_extra %}
+{% if site_faq_jsonld %}<script type="application/ld+json">{{ site_faq_jsonld | safe }}</script>{% endif %}
 <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
-<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
+<link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
 
 {% block content %}
@@ -97,12 +98,13 @@
     </div>
     <a class="see-all mono" href="/listings">SEE ALL →</a>
   </div>
+  {% if intent %}<p class="intent-line">{{ intent }}</p>{% endif %}
   <div class="featured-track" id="featured-track">
     {% for item in featured %}
-    <a class="lot-card" href="/listings/{{ item.lot_id }}">
+    <a class="lot-card" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}
@@ -172,6 +174,24 @@
   </div>
 </section>
 
+{% if site_faq %}
+<section class="home-faq" id="faq">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">STRAIGHT ANSWERS</h2>
+  </div>
+  <dl class="faq faq--home">
+    {% for q, a in site_faq %}
+    <div class="faq-item">
+      <dt>{{ q }}</dt>
+      <dd>{{ a }}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  <p class="mono tiny">More about who we are and how lots are sourced on the <a href="/about">about page</a>.</p>
+</section>
+{% endif %}
+
 <section class="contact" id="contact">
   <div class="contact-grid">
     <div>
@@ -218,6 +238,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
-<script type="module" src="/static/site/map.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+<script type="module" src="/static/site/map.js?v={{ asset_v }}"></script>
 {% endblock %}

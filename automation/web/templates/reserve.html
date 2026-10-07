@@ -11,7 +11,7 @@
 {% block content %}
 <nav class="crumbs mono tiny">
   <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> /
-  <a href="/listings/{{ item.lot_id }}">{{ item.title or item.lot_id }}</a> / <span>RESERVE</span>
+  <a href="{{ lot_url(item) }}">{{ item.title or item.lot_id }}</a> / <span>RESERVE</span>
 </nav>
 
 <section class="page-head">
@@ -59,7 +59,7 @@
           </dd>
         </div>
       </dl>
-      <a class="reserve-back mono tiny" href="/listings/{{ item.lot_id }}">← BACK TO THE LOT</a>
+      <a class="reserve-back mono tiny" href="{{ lot_url(item) }}">← BACK TO THE LOT</a>
     </div>
   </aside>
 
@@ -133,5 +133,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
 {% endblock %}

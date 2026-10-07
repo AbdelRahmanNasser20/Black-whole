@@ -1,6 +1,8 @@
 """Public /map page + /map/api/points: ids the JS builds against, no auth, allow-list on the wire."""
 import importlib
 import pytest
+
+from automation.web import readcache
 from fastapi.testclient import TestClient
 
 from automation.web import auth as auth_svc
@@ -23,6 +25,7 @@ def _no_auth(monkeypatch):
 
 @pytest.fixture
 def client(monkeypatch):
+    readcache.invalidate_all()  # the sitemap/landing memo must not leak between tests
     seen = {}
     def fake_fetch(*, statuses=None, near=None, radius_mi=None):
         seen.update(statuses=statuses, near=near, radius_mi=radius_mi)

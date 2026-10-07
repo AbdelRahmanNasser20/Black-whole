@@ -43,7 +43,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from . import auction_watch_store as watch_store
-from . import lot_channels
+from . import lot_channels, lot_urls
 
 # The site the Telegram message points a buyer back at.
 SITE_BASE = lot_channels.SITE_BASE
@@ -230,7 +230,7 @@ def relist_message(row: dict, state: AuctionState | None, *, new_auction: bool,
     head = "RELISTED" if new_auction else "BACK LIVE"
     where = lot_location(row, state)
     when = format_close(state.end_utc if state else None)
-    link = f"{site_base.rstrip('/')}/listings/{row.get('lot_id')}"
+    link = f"{site_base.rstrip('/')}{lot_urls.public_path(row)}"
     return f"{head}: {title} — {where} — closes {when} — back on {link}"
 
 

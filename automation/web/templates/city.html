@@ -1,0 +1,140 @@
+{% extends "_public_base.html" %}
+{#- templates/city.html — /chairs/{city-slug} (SEO city pages, 2026-10-07).
+    Context (app.py::public_city): page = automation/web/city_pages.page(slug): label, city, state, live[],
+    sold[], nearby[], chairs, moved, min_price, intro, faq, faq_jsonld, title, description, indexable.
+    Rows are decorated like /listings (hero_src, location_labels, unit). storage_note never renders. -#}
+{% block title %}{{ page.title }}{% endblock %}
+{% block meta_description %}{{ page.description }}{% endblock %}
+{% block body_class %}page-city{% endblock %}
+{% block head_extra %}
+<script type="application/ld+json">{{ page.faq_jsonld | safe }}</script>
+{% if page.live %}
+<script type="application/ld+json">{{ page.itemlist_jsonld | safe }}</script>
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/"), ("Cities", "/chairs")], page.label | upper) }}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">PICKUP CITY · {{ page.label | upper }}</div>
+    <h1 class="page-title">BULK BANQUET CHAIRS FOR SALE IN {{ page.label | upper }}</h1>
+    <p class="page-lede">{{ page.intro }}</p>
+  </div>
+  <div class="page-head-right mono tiny">
+    {% if page.live %}<div>{{ page.live | length }} LOT{% if page.live | length != 1 %}S{% endif %} · {{ "{:,}".format(page.chairs) }} CHAIRS</div>{% endif %}
+    {% if page.moved %}<div>{{ "{:,}".format(page.moved) }} MOVED HERE</div>{% endif %}
+    <div><a href="/map?near={{ page.label | urlencode }}">ON THE MAP →</a></div>
+  </div>
+</section>
+
+{% if page.live %}
+<section class="floor">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">ON THE FLOOR IN {{ page.city | upper }}</h2>
+  </div>
+  <div class="lot-grid">
+    {% for item in page.live %}
+    <a class="lot-card" href="{{ lot_url(item) }}">
+      <div class="lot-img">
+        {% if item.hero_src %}
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+        {% else %}
+          <div class="lot-img-fallback">◉</div>
+        {% endif %}
+        <div class="lot-stamp">{% if item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE{% else %}INQUIRE{% endif %}</div>
+      </div>
+      <div class="lot-body">
+        <div class="lot-meta mono">{{ item.location_labels | join(' · ') }}</div>
+        <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+        <div class="lot-row">
+          <div class="lot-qty">
+            <div class="lot-qty-num">{{ item.quantity_remaining or item.quantity_original or '—' }}</div>
+            <div class="lot-qty-label">{{ item.unit }}S</div>
+          </div>
+          <div class="lot-price">
+            {% if item.price_per_chair %}
+              <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
+              <div class="lot-price-label">/ {{ item.unit }}</div>
+            {% else %}
+              <div class="lot-price-num">—</div>
+              <div class="lot-price-label">INQUIRE</div>
+            {% endif %}
+          </div>
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if page.nearby %}
+<section class="floor floor--nearby">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">WITHIN DRIVING DISTANCE</h2>
+    <span class="mono tiny">LOTS WITHIN 300 MI OF {{ page.city | upper }}</span>
+  </div>
+  <div class="nearby-list nearby-list--city">
+    {% for n in page.nearby %}
+    <a class="map-item b-{{ n.bucket }}" href="{{ n.url }}">
+      <span class="map-item-body">
+        <span class="map-item-title">{{ n.title }}</span>
+        <span class="mono tiny">{{ n.city }}{% if n.state %}, {{ n.state }}{% endif %} · {{ n.distance_mi }} mi{% if n.quantity %} · {{ "{:,}".format(n.quantity) }} {{ n.unit }}{% if n.quantity != 1 %}S{% endif %}{% endif %}{% if n.price_per_chair %} · ${{ "%.0f"|format(n.price_per_chair) }}/EA{% endif %}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% if page.sold %}
+<section class="sold-archive sold-archive--city">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">ALREADY MOVED THROUGH {{ page.city | upper }}</h2>
+  </div>
+  <div class="lot-grid lot-grid--sold">
+    {% for item in page.sold %}
+    <a class="lot-card lot-card--sold" href="{{ lot_url(item) }}">
+      <div class="lot-img">
+        {% if item.hero_src %}
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+        {% else %}
+          <div class="lot-img-fallback">◉</div>
+        {% endif %}
+        <div class="lot-stamp lot-stamp--sold">SOLD</div>
+      </div>
+      <div class="lot-body">
+        <div class="lot-meta mono">{{ item.location_labels | join(' · ') }}</div>
+        <div class="lot-title">{{ item.title or 'Untitled lot' }}</div>
+        <div class="lot-meta mono tiny">{{ "{:,}".format(item.quantity_original or 0) }} {{ item.unit }}S</div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+<section class="home-faq">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">BUYING IN {{ page.city | upper }}</h2>
+  </div>
+  <dl class="faq faq--home">
+    {% for q, a in page.faq %}
+    <div class="faq-item"><dt>{{ q }}</dt><dd>{{ a }}</dd></div>
+    {% endfor %}
+  </dl>
+  <p class="mono tiny"><a href="/listings">ALL LOTS →</a> · <a href="/chairs">OTHER CITIES →</a> · <a href="/about">HOW WE WORK →</a></p>
+</section>
+
+{% set subscribe_source = 'site_city' %}
+{% include "_subscribe_form.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+{% endblock %}

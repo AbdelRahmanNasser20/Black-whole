@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 from automation import favorites as favorites_mod
-from automation import inventory, lot_channels, lot_images
+from automation import inventory, lot_channels, lot_images, lot_urls
 from automation.alerts import geo
 from automation.web import readcache
 
@@ -117,7 +117,7 @@ def _inventory_points(rows: Iterable[dict]) -> tuple[list[dict], int]:
                 price_per_chair=(float(row["price_per_chair"])
                                  if row.get("price_per_chair") is not None else None),
                 city=place["city"], state=place["state"], lat=lat, lng=lng, precision=prec,
-                hero=lot_images.hero_src(row), url=f"/listings/{row['lot_id']}",
+                hero=lot_images.hero_src(row), url=lot_urls.public_path(row),
             ))
     return pts, unmapped
 

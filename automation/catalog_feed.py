@@ -32,7 +32,7 @@ import io
 import os
 from collections.abc import Iterable
 
-from . import listing_images, lot_images
+from . import listing_images, lot_images, lot_urls
 from .config import PUBLIC_BASE_URL
 
 # Column order copied from Meta's template header, 2026-08-25.
@@ -188,7 +188,7 @@ def feed_row(row: dict, base_url: str | None = None) -> dict | None:
         "description": _description(row, title),
         "availability": AVAILABILITY,
         "condition": CONDITION,
-        "link": f"{base}/listings/{lot_id}?{UTM_QUERY}",
+        "link": f"{base}{lot_urls.public_path(row)}?{UTM_QUERY}",
         "image_link": image,
         "brand": BRAND,
         "price": price,

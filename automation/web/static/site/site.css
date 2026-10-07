@@ -765,6 +765,8 @@ a:hover { color: var(--accent); }
 .foot-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; color: var(--foot-muted); margin-bottom: 8px; }
 .foot-col a { color: var(--bg); text-decoration: none; border-bottom: 1px solid var(--accent); padding-bottom: 1px; }
 .foot-col a:hover { color: var(--accent); }
+.foot-address { font-style: normal; line-height: 1.5; }
+.page-404 .page-head .btn { margin: 18px 10px 0 0; }
 .foot-rule { height: 1px; background: var(--foot-rule); margin: 0 0 18px 0; }
 .foot-meta {
   display: flex; justify-content: space-between;
@@ -848,4 +850,60 @@ a:hover { color: var(--accent); }
   .foot-row { grid-template-columns: 1fr; }
   .foot-meta { flex-wrap: wrap; gap: 6px; }
   .alerts-strip { padding: 14px 16px; }
+}
+
+/* =========================================================================
+   SEO content (2026-10-07): lot-page original copy, home FAQ, about page
+   ========================================================================= */
+.intent-line { flex-basis: 100%; margin: 6px 0 0; font-size: 17px; color: var(--text-soft); }
+.lot-copy { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
+.lot-copy .section-rule { margin-top: 12px; }
+.lot-copy p { font-size: 17px; color: var(--text-prose); line-height: 1.55; }
+.specs-table { border-collapse: collapse; width: 100%; font-size: 15px; }
+.specs-table th, .specs-table td { text-align: left; padding: 8px 0; border-bottom: 1px solid var(--surface-2); vertical-align: top; }
+.specs-table th { font-family: var(--mono); font-size: 10px; letter-spacing: 0.2em; color: var(--muted); font-weight: 400; width: 38%; padding-right: 12px; }
+.faq { margin: 0; display: grid; gap: 14px; }
+.faq-item dt { font-weight: 600; font-size: 17px; margin-bottom: 4px; }
+.faq-item dd { margin: 0; font-size: 16px; color: var(--text-prose); line-height: 1.55; }
+.home-faq { padding: 56px 48px; border-top: 1.5px solid var(--text); }
+.faq--home { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px 48px; max-width: 1100px; margin-bottom: 18px; }
+.home-faq a { color: var(--accent); }
+.about-prose { padding: 40px 48px 56px; }
+.about-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 40px 56px; max-width: 1100px; }
+.about-grid article p { font-size: 17px; color: var(--text-prose); line-height: 1.6; margin-top: 12px; }
+.about-grid article a { color: var(--accent); }
+.about-contact { margin-top: 48px; max-width: 760px; }
+.spec-sheet--about { margin: 16px 0; }
+.spec-sheet--about a { color: inherit; }
+@media (max-width: 900px) {
+  .faq--home, .about-grid { grid-template-columns: 1fr; }
+  .home-faq, .about-prose { padding: 40px 24px; }
+}
+@media (max-width: 600px) {
+  .home-faq, .about-prose { padding-left: 16px; padding-right: 16px; }
+}
+
+/* =========================================================================
+   SEO city pages (2026-10-07): /chairs, /chairs/{city}, map city list
+   ========================================================================= */
+.city-index { padding: 32px 48px 56px; }
+.city-index--map { border-top: 1.5px solid var(--text); padding-top: 40px; }
+.city-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; max-width: 820px; }
+.city-row a { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--surface-2); text-decoration: none; color: var(--text); }
+.city-row a:hover .city-name { color: var(--accent); }
+.city-row--quiet .city-name { color: var(--muted); }
+.city-name { font-family: var(--display); font-size: 22px; }
+.city-list--inline { display: flex; flex-wrap: wrap; gap: 10px 18px; max-width: none; }
+.city-list--inline a { text-decoration: none; color: var(--text); border-bottom: 1.5px solid var(--accent); padding-bottom: 2px; }
+.city-list--inline a:hover { color: var(--accent); }
+.floor--nearby { padding: 0 48px 24px; }
+.nearby-list--city { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 32px; max-width: 1100px; }
+.sold-archive--city .lot-grid { padding-top: 16px; }
+.page-city .page-head-right a { text-decoration: none; border-bottom: 2px solid var(--accent); }
+@media (max-width: 900px) {
+  .nearby-list--city { grid-template-columns: 1fr; }
+  .city-index, .floor--nearby { padding-left: 24px; padding-right: 24px; }
+}
+@media (max-width: 600px) {
+  .city-index, .floor--nearby { padding-left: 16px; padding-right: 16px; }
 }

@@ -50,7 +50,7 @@ _BOT_RE = re.compile(
     re.I,
 )
 _TRACKED_EXACT = {"/", "/listings"}
-_TRACKED_PREFIX = ("/listings/",)
+_TRACKED_PREFIX = ("/listings/", "/chairs", "/about")  # city pages + about (PRs #128/#129)
 # Click-only lead events (POST /event). Stored as path "/_event/<kind>".
 EVENT_KINDS = ("tel_click", "mailto_click")
 EVENT_PREFIX = "/_event/"
@@ -146,8 +146,10 @@ def _run_in_background(fn: Callable[[dict], None], row: dict) -> None:
 _runner: Callable[[Callable[[dict], None], dict], None] = _run_in_background
 
 
-def track(request) -> bool:
-    """Record one public page view. Returns True if a row was scheduled."""
+def track(request, *, lot_id: str | None = None) -> bool:
+    """Record one public page view. Returns True if a row was scheduled.
+    `lot_id` pins the ledger id when the path carries the lot's public slug
+    (PR #129) so one lot never rolls up under two keys."""
     if not enabled():
         return False
     path = request.url.path
@@ -156,6 +158,8 @@ def track(request) -> bool:
         return False
     client_ip = request.client.host if request.client else None
     row = build_row(path, dict(request.query_params), dict(request.headers), client_ip)
+    if lot_id:
+        row["lot_id"] = _clip(str(lot_id), 120)
     _runner(_insert, row)
     return True
 

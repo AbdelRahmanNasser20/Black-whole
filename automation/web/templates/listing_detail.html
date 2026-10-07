@@ -10,15 +10,17 @@
 {% endblock %}
 {% block head_extra %}
   <script type="application/ld+json">{{ product_jsonld | safe }}</script>
+  {% if copy and copy.faq_jsonld %}<script type="application/ld+json">{{ copy.faq_jsonld | safe }}</script>{% endif %}
   <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
-  <link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
+  <link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
 {% block body_class %}page-detail{% endblock %}
 
 {% block content %}
-<nav class="crumbs mono tiny">
-  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> / <span>{{ item.title or 'LOT' }}</span>
-</nav>
+{% from "_crumbs.html" import crumbs with context %}
+{%- set trail = [("Home", "/"), ("Inventory", "/listings")] -%}
+{%- if city_crumb %}{% set trail = trail + [city_crumb] %}{% endif -%}
+{{ crumbs(trail, crumb_name or item.title or 'LOT') }}
 
 <section class="detail-top">
   <div class="detail-gallery">
@@ -26,7 +28,7 @@
       <div class="gal-main">
         <img id="gal-main-img"
              src="{{ hero or images[0] }}"
-             alt="{{ item.title }}">
+             alt="{{ item.title }}" fetchpriority="high" width="1200" height="900">
         <div class="lot-stamp lot-stamp--big{% if item.is_sold %} lot-stamp--sold{% endif %}">
           {% if item.is_sold %}SOLD
           {%- elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE
@@ -37,7 +39,7 @@
       <div class="gal-thumbs">
         {% for img in images %}
           <button class="gal-thumb" data-src="{{ img }}" aria-label="view image">
-            <img src="{{ img }}" alt="" loading="lazy">
+            <img src="{{ img }}" alt="{{ item.title }} — photo {{ loop.index }}" loading="lazy" width="200" height="150">
           </button>
         {% endfor %}
       </div>
@@ -167,6 +169,43 @@
     </div>
     {% endif %}
 
+    {% if copy %}
+    {#- Original per-lot copy (automation/web/seo_copy.py) — the parts the
+        auction listing never answers. Built from ledger fields, never
+        scraped, never storage_note. #}
+    <div class="lot-copy">
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">{% if item.is_sold %}WHO BOUGHT SETS LIKE THIS{% else %}GOOD FOR{% endif %}</h2>
+      <p>{{ copy.good_for }}</p>
+
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">{% if copy.incoming %}ARRIVAL &amp; FREIGHT{% else %}PICKUP &amp; FREIGHT{% endif %}</h2>
+      <p>{{ copy.pickup_freight }}</p>
+      {% if copy.freight_facts %}
+      {#- Only what the spec sheet above does not already say: whole-lot
+          price, frame, pallets, weight. #}
+      <table class="specs-table">
+        <tbody>
+        {% for label, value in copy.freight_facts %}
+          <tr><th scope="row">{{ label }}</th><td>{{ value }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+
+      <div class="section-rule"></div>
+      <h2 class="section-label mono tiny">QUESTIONS BUYERS ASK</h2>
+      <dl class="faq">
+        {% for q, a in copy.faq %}
+        <div class="faq-item">
+          <dt>{{ q }}</dt>
+          <dd>{{ a }}</dd>
+        </div>
+        {% endfor %}
+      </dl>
+    </div>
+    {% endif %}
+
     <div class="detail-ctas">
       {#- Reserve replaces the lead-form CTA only when a buyer could actually
           pay: feature lit, lot unsold, priced, and something left to hold.
@@ -228,6 +267,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
-<script type="module" src="/static/site/map.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+<script type="module" src="/static/site/map.js?v={{ asset_v }}"></script>
 {% endblock %}

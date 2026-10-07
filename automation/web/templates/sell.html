@@ -1,9 +1,10 @@
 {% extends "_public_base.html" %}
-{% block title %}Sell Used Chairs in Bulk — We Buy Chair Lots | Black Whole Liquidation{% endblock %}
+{% block title %}Sell Used Chairs in Bulk — We Buy Lots | Black Whole{% endblock %}
 {% block meta_description %}Liquidating banquet halls, hotels, churches, or event venues? We buy used chairs in bulk and handle the haul. Get an offer on your chair lot.{% endblock %}
 {% block body_class %}page-sell{% endblock %}
 
 {% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "SELL YOUR CHAIRS") }}
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">INTAKE FORM · SELLER</div>
@@ -55,5 +56,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
 {% endblock %}

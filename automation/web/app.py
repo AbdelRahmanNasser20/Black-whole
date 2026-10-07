@@ -47,14 +47,23 @@ from ..config import (
     DOWNLOAD_ROOT,
     FACEBOOK_BUSINESS_URL,
     GOOGLE_SITE_VERIFICATION,
+    PUBLIC_ADDRESS_CITY,
+    PUBLIC_ADDRESS_POSTAL,
+    PUBLIC_ADDRESS_REGION,
+    PUBLIC_ADDRESS_STREET,
     PUBLIC_BASE_URL,
+    PUBLIC_CONTACT_EMAIL,
+    PUBLIC_CONTACT_PHONE,
 )
+from fastapi.exception_handlers import http_exception_handler as fastapi_http_exception_handler
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
 from .. import catalog_feed, google_feed, lot_channels
 from .. import inventory
 from .. import lot_images
+from .. import lot_urls
 from .. import favorite_images
 from .. import favorites
 from .. import telegram_alerts
@@ -73,6 +82,8 @@ from . import deals_query
 from . import public_deals
 from . import rate_limit
 from . import public_map
+from . import seo_copy
+from . import city_pages
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -109,6 +120,7 @@ app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
+templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 
@@ -136,6 +148,45 @@ async def _response_headers_middleware(request: Request, call_next):
         else:
             response.headers["Cache-Control"] = "public, max-age=300"
     return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """A browser hitting a dead storefront URL (an old Facebook post, a feed
+    link to a removed lot, a typo) gets a real page with the live lots on it
+    instead of `{"detail": "..."}` — those visitors are buyers, and Google
+    counts a JSON 404 as a soft error on the whole site. API callers and
+    anything not asking for HTML keep the JSON contract unchanged."""
+    wants_html = "text/html" in (request.headers.get("accept") or "")
+    path = request.url.path
+    storefront = not path.startswith(_NON_STOREFRONT_PREFIXES)
+    if exc.status_code == 404 and wants_html and storefront:
+        lots = await asyncio.to_thread(_not_found_lots)
+        return templates.TemplateResponse(
+            request, "404.html",
+            _public_ctx({"lots": lots, "robots_noindex": True, "no_canonical": True}),
+            status_code=404,
+        )
+    return await fastapi_http_exception_handler(request, exc)
+
+
+# Paths whose 404 is never a buyer on a dead lot link: assets, JSON APIs,
+# feeds, the local-photo fallback. They keep FastAPI's default response.
+_NON_STOREFRONT_PREFIXES = ("/api/", "/static/", "/deals/api/", "/map/api/",
+                            "/catalog/", "/image/", "/stripe/")
+
+
+@readcache.cached(ttl=60)
+def _not_found_lots() -> list[dict]:
+    """Up to six live lots for the 404 page (threadpool: it touches the DB).
+    Memoised like _landing_data — a scanner sweeping /wp-admin, /.env, …
+    with a browser Accept header must not turn into a pooler round trip per
+    probe."""
+    try:
+        rows = inventory.list_public()[:6]
+    except Exception:  # noqa: BLE001 — the 404 page must render without the DB
+        return []
+    return [_decorate(r) for r in rows]
 
 
 # ───────────────────────────── run state ─────────────────────────────
@@ -451,13 +502,96 @@ def _reservable(row: dict | None) -> bool:
 def _public_ctx(extra: dict) -> dict:
     """Common context for every public-page template (footer link etc)."""
     return {
-        "now": int(time.time()),
         "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
         "base_url": PUBLIC_BASE_URL,
         "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
         "reserve_enabled": _reserve_enabled(),
+        "contact": PUBLIC_CONTACT,
         **extra,
     }
+
+
+# Business identity for the footer + Organization JSON-LD (NAP). Built once;
+# the phone key is simply absent until PUBLIC_CONTACT_PHONE is set.
+PUBLIC_CONTACT: dict = {
+    k: v for k, v in {
+        "email": PUBLIC_CONTACT_EMAIL.strip() or None,
+        "phone": PUBLIC_CONTACT_PHONE.strip() or None,
+        "street": PUBLIC_ADDRESS_STREET.strip() or None,
+        "city": PUBLIC_ADDRESS_CITY.strip() or None,
+        "region": PUBLIC_ADDRESS_REGION.strip() or None,
+        "postal": PUBLIC_ADDRESS_POSTAL.strip() or None,
+    }.items() if v
+}
+
+
+# <title> budget. Google shows ~60 characters on desktop and truncates the
+# rest with an ellipsis, so the brand goes on the short form and the scraped
+# lot title gets trimmed at a word boundary to fit.
+SEO_TITLE_MAX = 65
+SEO_DESCRIPTION_MAX = 155
+_BRAND_SHORT = "Black Whole"
+# A leading number is a count ("~2,500 Wire Frame…", "Lot of 657 …") unless
+# the next word is a unit of measure ("8 ft Rectangular Tables", "60 in
+# Round Tables") — those are the Augusta table lots and the size stays.
+_TITLE_QTY_PREFIX = re.compile(
+    r"^\s*(?:lot\s+of\s+)?~?\s*\d[\d,]*\s*(?:×|x)?\s+"
+    r"(?!(?:ft|feet|foot|in|inch|inches|cm|mm|m|lb|lbs|ga|gauge|pc|pcs|piece|pieces)\b)",
+    re.I,
+)
+_TITLE_TRAILING_PAREN = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _short_title(title: str) -> str:
+    """Scraped titles read like `~2,500 Wire Frame Stacking Chairs — Chrome
+    Frame, Dark Plum Pad, Linkable (Pittsburgh, PA)`. Strip the leading count
+    (we add our own) and the trailing `(City, ST)` (we add the location) so
+    the words that are left are the ones a buyer searches for."""
+    t = _TITLE_TRAILING_PAREN.sub("", (title or "").strip())
+    t = _TITLE_QTY_PREFIX.sub("", t)
+    return t.strip(" —–-·,") or (title or "").strip()
+
+
+_SEGMENT_SPLIT = re.compile(r"(\s+[—–|·]\s+|,\s+|\s+-\s+)")
+
+
+def _truncate_words(text: str, limit: int, ellipsis: str = "…") -> str:
+    """Cut `text` to at most `limit` characters. Prefers dropping whole
+    descriptor segments (`… — Chrome Frame, Dark Plum Pad`) so the part that
+    names the product survives, keeping each segment's own separator;
+    falls back to a word boundary."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    budget = max(limit - len(ellipsis), 0)
+    parts = _SEGMENT_SPLIT.split(text)  # [seg, sep, seg, sep, …]
+    kept = ""
+    for i in range(0, len(parts), 2):
+        sep = parts[i - 1] if i else ""
+        candidate = f"{kept}{sep}{parts[i]}"
+        if len(candidate) > budget:
+            break
+        kept = candidate
+    if not kept:
+        kept = text[:budget]
+        kept = kept.rsplit(" ", 1)[0] if " " in kept else kept
+    return kept.rstrip(" ,;:—–-·") + ellipsis
+
+
+def _seo_title(qty, title: str, loc: str) -> str:
+    """`{qty}× {short title} — {City, ST} | Black Whole`, trimmed to the
+    budget by shortening the title part first (never the location or brand).
+    A multi-city location keeps only its first city when it would not fit."""
+    short = _short_title(title)
+    suffix = f" | {_BRAND_SHORT}"
+    prefix = f"{qty}× " if qty else ""
+    for loc_part in (loc, loc.split(" · ")[0] if loc else ""):
+        tail = f" — {loc_part}" if loc_part else ""
+        room = SEO_TITLE_MAX - len(prefix) - len(tail) - len(suffix)
+        if room >= 12 or not loc_part:
+            body = short if len(short) <= room else _truncate_words(short, max(room, 12), ellipsis="")
+            return f"{prefix}{body}{tail}{suffix}"
+    return f"{prefix}{_truncate_words(short, 30, ellipsis='')}{suffix}"
 
 
 def _absolute(url: str | None) -> str | None:
@@ -482,10 +616,7 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
     # A multi-location lot advertises every city it sat in, not just the first.
     loc = " · ".join(inventory.location_labels(row)) or _location_str(row)
 
-    seo_title = f"{qty}× {title}" if qty else title
-    if loc:
-        seo_title += f" — {loc}"
-    seo_title += " | Black Whole Liquidation"
+    seo_title = _seo_title(qty, title, loc)
 
     desc_bits = []
     if qty:
@@ -494,17 +625,27 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         desc_bits.append(f"${row['price_per_chair']:.0f}/chair")
     if loc:
         desc_bits.append(("sourced from " if sold else "pickup in ") + loc)
+    # The lead (count · price · every city) is the part that must survive —
+    # the title only has room for the first city, so a multi-location lot's
+    # other cities live here. The scraped title is shortened first and the
+    # scraped description only fills whatever room is left.
+    name = _truncate_words(_short_title(title), 50, ellipsis="")
     if sold:
-        lead = f"{title} — this lot has sold" + (
+        lead = f"{name} — this lot has sold" + (
             f" ({' · '.join(desc_bits)})." if desc_bits else "."
-        ) + " We buy sets like it every week; ask us about the next one."
+        )
+        tail = " We buy sets like it every week; ask us about the next one."
+        if len(lead) + len(tail) <= SEO_DESCRIPTION_MAX:
+            lead += tail
     else:
-        lead = f"{title} for sale in bulk" + (
+        lead = f"{name} for sale in bulk" + (
             f" — {' · '.join(desc_bits)}." if desc_bits else "."
         )
     body = (row.get("description") or "").strip()
-    if body:
-        lead += " " + (body[:150] + "…" if len(body) > 150 else body)
+    room = SEO_DESCRIPTION_MAX - len(lead) - 1
+    if body and room >= 20:
+        lead += " " + _truncate_words(body, room)
+    lead = _truncate_words(lead, SEO_DESCRIPTION_MAX)
 
     address = {
         k: v for k, v in {
@@ -534,7 +675,9 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         "@context": "https://schema.org",
         "@type": "Product",
         "name": title,
-        "sku": row.get("lot_id"),
+        # The slug, never the ledger id: a `gd-{asset}-{account}` sku pastes
+        # straight back into GovDeals and finds the auction.
+        "sku": row.get("slug") or row.get("lot_id"),
         "offers": offer,
     }
     imgs = [u for u in (_absolute(hero), *map(_absolute, images)) if u]
@@ -547,9 +690,49 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         "seo_title": seo_title,
         "seo_description": lead,
         "og_image": _absolute(hero) or (imgs[0] if imgs else None),
-        # </ escaped so a scraped description can't close the <script> tag
-        "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
+        "product_jsonld": seo_copy.jsonld(product),
+        # Visible trail + BreadcrumbList come from the _crumbs.html macro.
+        "crumb_name": _truncate_words(_short_title(title), 60, ellipsis=""),
     }
+
+
+def _public_indexable_status(row: dict) -> bool:
+    """A live, public, in-stock lot — the sitemap's first half."""
+    remaining = row.get("quantity_remaining")
+    return (row.get("status") in inventory.PUBLIC_STATUSES
+            and (remaining is None or remaining > 0))
+
+
+def _indexable(row: dict, hero: str | None, images: list[str]) -> bool:
+    """Should Google index this lot page? Mirrors the sitemap: a live public
+    lot, or a sold lot that earns a showcase card (real headcount + a photo).
+    Everything else (lost, hidden, half-imported folder rows) still renders
+    for anyone holding a link, but carries noindex so it can't drag the site
+    down as a pile of thin orphan pages."""
+    if _public_indexable_status(row):
+        return True
+    if inventory.is_sold(row) and (row.get("quantity_original") or 0) > 0 and (hero or images):
+        return True
+    return False
+
+
+def _canonical_twin(row: dict) -> str | None:
+    """A `<lot>-sold` showcase row is the same chairs as `<lot>` (the operator
+    keeps a sold copy next to a live lot for the archive strip). Point its
+    canonical at the live page so Google sees one lot, not two near-identical
+    ones — but only while that page is itself indexable (live, public, in
+    stock); a canonical to a noindex page would drop both URLs."""
+    lot_id = str(row.get("lot_id") or "")
+    if not lot_id.endswith("-sold") or not inventory.is_sold(row):
+        return None
+    base = lot_id[: -len("-sold")]
+    try:
+        twin = inventory.get(base)
+    except Exception:  # noqa: BLE001 — a lookup failure must not break the page
+        return None
+    if twin and _public_indexable_status(twin):
+        return f"{PUBLIC_BASE_URL}{lot_urls.public_path(twin)}"
+    return None
 
 
 def _hero_src(row: dict) -> str | None:
@@ -580,10 +763,16 @@ def _landing_data() -> dict:
         state = (r.get("state") or "").strip().upper()
         city = (r.get("city") or "").strip().lower()
         return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
-    featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
+    rows = inventory.list_public()
+    featured = sorted(rows, key=_idaho_first)[:12]
     for r in featured:
         r["hero_src"] = _hero_src(r)
-    return {"counts": counts, "featured": featured}
+    # Floor price over EVERY public lot, not the 12 featured — it is the
+    # number the homepage intent line quotes next to the full chair count.
+    prices = [float(r["price_per_chair"]) for r in rows
+              if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
+    return {"counts": counts, "featured": featured,
+            "min_price": min(prices) if prices else None}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -592,13 +781,49 @@ def public_landing(request: Request):
     try:
         data = _landing_data()
         counts, featured = data["counts"], data["featured"]
+        min_price = data.get("min_price")
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
+        min_price = None
     return templates.TemplateResponse(
         request, "landing.html",
-        _public_ctx({"stats": counts, "featured": featured}),
+        _public_ctx({
+            "stats": counts, "featured": featured,
+            "intent": _intent_line(counts, min_price),
+            "site_faq": seo_copy.SITE_FAQ,
+            "site_faq_jsonld": seo_copy.faq_jsonld(seo_copy.SITE_FAQ),
+        }),
     )
+
+
+def _intent_line(counts: dict, min_price: float | None) -> str | None:
+    """The one sentence a "bulk seating" searcher wants above the fold:
+    floor price, how many chairs, how many cities. Empty floor → no line."""
+    chairs = int(counts.get("chairs") or 0)
+    cities = int(counts.get("cities") or 0)
+    if not chairs:
+        return None
+    bits = []
+    if min_price:
+        bits.append(f"Bulk seating from ${min_price:,.0f} per chair")
+    else:
+        bits.append("Bulk seating priced by the chair")
+    bits.append(f"{chairs:,} chairs on the floor")
+    if cities:
+        bits.append(f"{cities} pickup cit{'y' if cities == 1 else 'ies'}")
+    bits.append("local pickup free or nationwide freight")
+    return " · ".join(bits) + "."
+
+
+@app.get("/about", response_class=HTMLResponse)
+def public_about(request: Request):
+    visits.track(request)
+    try:
+        counts = _landing_data()["counts"]
+    except Exception:  # noqa: BLE001 — the page reads fine without numbers
+        counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
+    return templates.TemplateResponse(request, "about.html", _public_ctx({"stats": counts}))
 
 
 def _short_link_redirect(code: str):
@@ -637,16 +862,49 @@ def public_listings(request: Request):
     return templates.TemplateResponse(
         request, "listings.html",
         _public_ctx({"items": items, "sold_items": sold_items,
-                     "cities": cities, "chair_types": chair_types}),
+                     "cities": cities, "chair_types": chair_types,
+                     "itemlist_jsonld": _itemlist_jsonld(items)}),
     )
+
+
+def _itemlist_jsonld(items: list[dict], *, name: str = "Chair lots for sale") -> str:
+    """ItemList of the live lots for /listings and the city pages — tells
+    Google the page is a catalogue of these products, so lot pages are found
+    from it, not only from the sitemap."""
+    data = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": name,
+        "numberOfItems": len(items),
+        "itemListElement": [
+            {"@type": "ListItem", "position": i,
+             "url": f"{PUBLIC_BASE_URL}{lot_urls.public_path(r)}",
+             "name": (r.get("title") or "Chair lot")}
+            for i, r in enumerate(items, start=1)
+        ],
+    }
+    return seo_copy.jsonld(data)
 
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)
 def public_listing_detail(request: Request, lot_id: str):
-    visits.track(request)
-    row = inventory.get(lot_id)
+    """`lot_id` is the slug (canonical) or the ledger id. An id hit on a row
+    that has a slug 301s to the slug URL (query string kept, so feed UTM tags
+    survive) — every Facebook post, feed row and short link ever sent keeps
+    resolving."""
+    row = inventory.get_public(lot_id)
     if not row or row.get("status") in ("hidden",):
+        visits.track(request)
         raise HTTPException(404, "listing not found")
+    if row.get("slug") and lot_id != row["slug"]:
+        # Not tracked: the slug page that follows is the real view, and one
+        # click must not count as two lots.
+        target = lot_urls.public_path(row)
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=301)
+    lot_id = str(row["lot_id"])
+    visits.track(request, lot_id=lot_id)
     _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
@@ -670,21 +928,70 @@ def public_listing_detail(request: Request, lot_id: str):
                 "default_qty": _freight_default_qty(row),
             },
             "nearby": near,
+            "copy": seo_copy.build(row, sold=row["is_sold"]),
+            "city_crumb": _city_crumb(row),
+            "robots_noindex": not _indexable(row, hero, images),
+            "canonical_url": _canonical_twin(row),
             **_detail_seo(row, hero, images),
         }),
     )
 
 
+def _city_crumb(row: dict) -> tuple[str, str] | None:
+    """(label, path) of the lot's primary city page, when that city has one."""
+    city, state = (row.get("city") or "").strip(), (row.get("state") or "").strip()
+    if not city:
+        return None
+    slug = lot_urls.city_slug(city, state)
+    try:
+        if slug in city_pages.index():
+            return (f"{city}, {state}" if state else city, lot_urls.city_path(city, state))
+    except Exception:  # noqa: BLE001 — a crumb is never worth a 500
+        log.exception("city index failed")
+    return None
+
+
 @app.get("/map", response_class=HTMLResponse)
 def public_map_page(request: Request, near: str | None = None, status: str | None = None,
                     radius: float | None = None):
-    """Full-screen public map of our lots (plan 2026-09-15). Shell only: the JS
-    fetches /map/api/points. `near`/`status`/`radius` seed the filter bar."""
+    """Full-screen public map of our lots (plan 2026-09-15). The pins are JS
+    (/map/api/points); the city list under the map is server-rendered so a
+    crawler sees every pickup city and its page."""
     visits.track(request)
+    try:
+        cities = city_pages.listing()
+    except Exception:  # noqa: BLE001 — the map must render without the list
+        log.exception("city listing failed")
+        cities = []
     return templates.TemplateResponse(request, "map.html", _public_ctx({
         "near": (near or "").strip(), "status": status or "available,incoming",
-        "radius": radius or "",
+        "radius": radius or "", "cities": cities,
     }))
+
+
+@app.get("/chairs", response_class=HTMLResponse)
+def public_cities(request: Request):
+    visits.track(request)
+    return templates.TemplateResponse(
+        request, "chairs_index.html", _public_ctx({"cities": city_pages.listing()}),
+    )
+
+
+@app.get("/chairs/{slug}", response_class=HTMLResponse)
+def public_city(request: Request, slug: str):
+    """City landing page: live lots there, sold proof, lots within driving
+    distance, pickup/freight FAQ. Sold-only cities render with noindex."""
+    visits.track(request)
+    page = city_pages.page(slug)
+    if page is None:
+        raise HTTPException(404, "no such city")
+    page["live"] = [_decorate(dict(r)) for r in page["live"]]
+    page["sold"] = [_decorate(dict(r)) for r in page["sold"]]
+    page["itemlist_jsonld"] = _itemlist_jsonld(page["live"], name=f"Chair lots in {page['label']}")
+    return templates.TemplateResponse(
+        request, "city.html",
+        _public_ctx({"page": page, "robots_noindex": not page["indexable"]}),
+    )
 
 
 @app.get("/map/api/points")
@@ -1564,6 +1871,7 @@ async def robots_txt():
         "Disallow: /admin\n"
         "Disallow: /api/\n"
         "Disallow: /deals\n"
+        "Disallow: /reserve/\n"
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
@@ -1579,21 +1887,33 @@ def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
 
 @app.get("/sitemap.xml")
 def sitemap_xml():
+    return Response(content=_sitemap_body(), media_type="application/xml")
+
+
+@readcache.cached(ttl=300)
+def _sitemap_body() -> str:
+    """Crawlers re-fetch the sitemap constantly; two inventory queries per hit
+    is wasted pooler time. Any write through the admin API drops the memo."""
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/map", "/sell", "/terms", "/privacy"):
+    for path in ("/", "/listings", "/map", "/chairs", "/sell", "/about", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
+    # City pages with at least one live lot (sold-only cities are noindex).
+    for rec in city_pages.listing(indexable_only=True):
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{rec['path']}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.
     for row in [*inventory.list_public(), *inventory.list_sold_showcase()]:
+        if _canonical_twin(row):
+            continue  # its page points Google at the live lot; don't submit it
         updated = row.get("updated_at")
         lastmod = None
         if updated is not None:
             # timestamptz comes back as datetime from Postgres; sitemap wants a date
             lastmod = updated.date().isoformat() if hasattr(updated, "date") else str(updated)[:10]
-        body += _sitemap_entry(f"{PUBLIC_BASE_URL}/listings/{row['lot_id']}", lastmod)
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{lot_urls.public_path(row)}", lastmod)
     body += "</urlset>\n"
-    return Response(content=body, media_type="application/xml")
+    return body
 
 
 @app.get("/catalog/facebook.csv")

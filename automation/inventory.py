@@ -17,6 +17,7 @@ Supabase (managed via migrations), not created at runtime.
 """
 from __future__ import annotations
 
+
 import re
 import secrets
 import sys
@@ -198,6 +199,99 @@ def get(lot_id: str) -> dict | None:
             "SELECT * FROM inventory WHERE lot_id = %s", (str(lot_id),)
         ).fetchone()
     return _row_to_dict(row)
+
+
+_slug_column_ready: bool = False
+
+
+def has_slug_column() -> bool:
+    """True once migration 023 (`inventory.slug`) is applied. Only a positive
+    answer is cached (like freight_log.schema_ready): a transient pooler
+    error at startup must not pin "no slug column" for the process lifetime
+    and send every lot page into an id → 301 → 404 loop. Absent/unknown
+    reads as absent, so the storefront keeps serving `/listings/{lot_id}`."""
+    global _slug_column_ready
+    if _slug_column_ready:
+        return True
+    try:
+        row = db.fetch_one(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'inventory' AND column_name = 'slug' LIMIT 1"
+        )
+    except Exception:
+        return False
+    if row is not None:
+        _slug_column_ready = True
+    return _slug_column_ready
+
+
+def get_by_slug(slug: str) -> dict | None:
+    """Lot by its public URL slug (None when the column or the row is absent)."""
+    slug = (slug or "").strip()
+    if not slug or not has_slug_column():
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM inventory WHERE slug = %s", (slug,)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def get_public(key: str) -> dict | None:
+    """The lot behind a public URL key — its slug or its ledger id — in ONE
+    round trip (the pooler handshake, not the query, is the cost). The
+    `slug` key is only present on the returned row when the column exists;
+    callers decide on a redirect from `row.get("slug")`."""
+    key = (key or "").strip()
+    if not key:
+        return None
+    if not has_slug_column():
+        row = get(key)
+        if row is not None:
+            row.pop("slug", None)
+        return row
+    with connect() as conn:
+        hit = conn.execute(
+            "SELECT * FROM inventory WHERE slug = %s OR lot_id = %s "
+            "ORDER BY (slug = %s) DESC LIMIT 1",
+            (key, key, key),
+        ).fetchone()
+    return _row_to_dict(hit)
+
+
+def set_slug(lot_id: str, slug: str) -> None:
+    """Stamp a slug on a row that has none. Never overwrites — a published
+    URL is a promise (scripts/backfill_slugs.py handles collisions)."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE inventory SET slug = %s WHERE lot_id = %s AND slug IS NULL",
+            (slug, str(lot_id)),
+        )
+        conn.commit()
+
+
+def assign_slug(lot_id: str) -> str | None:
+    """Give a freshly inserted row its public slug (no-op before migration 023
+    or when the row already has one). A collision gets a short suffix from
+    the lot id, then a counter — same scheme as scripts/backfill_slugs.py."""
+    from automation import lot_urls  # local: lot_urls must stay import-light
+
+    if not has_slug_column():
+        return None
+    row = get(lot_id)
+    if not row or row.get("slug"):
+        return (row or {}).get("slug")
+
+    def taken(slug: str) -> bool:
+        with connect() as conn:
+            return conn.execute(
+                "SELECT 1 FROM inventory WHERE slug = %s", (slug,)
+            ).fetchone() is not None
+
+    slug = lot_urls.next_free_slug(lot_urls.make_slug(row), str(lot_id), taken)
+    if slug:
+        set_slug(lot_id, slug)
+    return slug
 
 
 def _list_on(conn, status: str | None) -> list[dict]:
@@ -456,6 +550,12 @@ def upsert_from_run(
                 ),
             )
         conn.commit()
+    if existing is None:
+        # New lot → public URL slug (migration 023). Existing rows keep theirs.
+        try:
+            assign_slug(str(lot_id))
+        except Exception:  # noqa: BLE001 — a slug must never fail a run
+            logging.getLogger(__name__).exception("slug assignment failed for %s", lot_id)
     return get(lot_id)  # re-read
 
 
@@ -792,6 +892,12 @@ def insert_manual(
             ),
         )
         conn.commit()
+    # Admin-created lots get their public slug too (migration 023), same as
+    # pipeline-created ones; a slug failure never fails the insert.
+    try:
+        assign_slug(str(lot_id))
+    except Exception:  # noqa: BLE001
+        logging.getLogger(__name__).exception("slug assignment failed for %s", lot_id)
     return get(lot_id)
 
 

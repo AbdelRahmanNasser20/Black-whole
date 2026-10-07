@@ -1,16 +1,20 @@
 {% extends "_public_base.html" %}
-{% block title %}Chair Lots for Sale — Bulk &amp; Wholesale | Black Whole Liquidation{% endblock %}
+{% block title %}Chair Lots for Sale — Bulk &amp; Wholesale | Black Whole{% endblock %}
 {% block meta_description %}Browse current bulk chair lots{% if cities %} with pickup in {{ cities | join(', ') }}{% endif %}. Banquet, stacking, and event seating sold wholesale by the lot.{% endblock %}
 {% block body_class %}page-listings{% endblock %}
+{% block head_extra %}
+{% if itemlist_jsonld %}<script type="application/ld+json">{{ itemlist_jsonld | safe }}</script>{% endif %}
+{% endblock %}
 
 {% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "INVENTORY") }}
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">MANIFEST · ACTIVE</div>
-    <h1 class="page-title"><span class="accent">◉</span> CURRENT INVENTORY</h1>
+    <h1 class="page-title"><span class="accent">◉</span> CHAIR LOTS FOR SALE</h1>
     <p class="page-lede">
-      Every lot on the floor. Counted, priced by the chair, moved by the pallet.
-      Click a card for the full manifest.
+      Every bulk lot on the floor — banquet, stacking and folding chairs, counted,
+      priced by the chair, moved by the pallet. Click a card for the full manifest.
     </p>
   </div>
   <div class="page-head-right mono tiny">
@@ -48,14 +52,14 @@
 <section class="lot-grid" id="lot-grid">
   {% for item in items %}
   <a class="lot-card"
-     href="/listings/{{ item.lot_id }}"
+     href="{{ lot_url(item) }}"
      data-type="{{ item.chair_type or '' }}"
      data-city="{{ item.location_labels | join('|') }}"
      data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
      data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.location_labels | join(' ') }}">
     <div class="lot-img">
       {% if item.hero_src %}
-        <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
+        <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
       {% else %}
         <div class="lot-img-fallback">◉</div>
       {% endif %}
@@ -122,10 +126,10 @@
 
   <div class="lot-grid lot-grid--sold">
     {% for item in sold_items %}
-    <a class="lot-card lot-card--sold" href="/listings/{{ item.lot_id }}">
+    <a class="lot-card lot-card--sold" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}
@@ -174,5 +178,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
 {% endblock %}
