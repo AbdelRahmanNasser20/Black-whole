@@ -882,3 +882,28 @@ a:hover { color: var(--accent); }
 @media (max-width: 600px) {
   .home-faq, .about-prose { padding-left: 16px; padding-right: 16px; }
 }
+
+/* =========================================================================
+   SEO city pages (2026-10-07): /chairs, /chairs/{city}, map city list
+   ========================================================================= */
+.city-index { padding: 32px 48px 56px; }
+.city-index--map { border-top: 1.5px solid var(--text); padding-top: 40px; }
+.city-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0; max-width: 820px; }
+.city-row a { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; padding: 14px 0; border-bottom: 1px solid var(--surface-2); text-decoration: none; color: var(--text); }
+.city-row a:hover .city-name { color: var(--accent); }
+.city-row--quiet .city-name { color: var(--muted); }
+.city-name { font-family: var(--display); font-size: 22px; }
+.city-list--inline { display: flex; flex-wrap: wrap; gap: 10px 18px; max-width: none; }
+.city-list--inline a { text-decoration: none; color: var(--text); border-bottom: 1.5px solid var(--accent); padding-bottom: 2px; }
+.city-list--inline a:hover { color: var(--accent); }
+.floor--nearby { padding: 0 48px 24px; }
+.nearby-list--city { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 32px; max-width: 1100px; }
+.sold-archive--city .lot-grid { padding-top: 16px; }
+.page-city .page-head-right a { text-decoration: none; border-bottom: 2px solid var(--accent); }
+@media (max-width: 900px) {
+  .nearby-list--city { grid-template-columns: 1fr; }
+  .city-index, .floor--nearby { padding-left: 24px; padding-right: 24px; }
+}
+@media (max-width: 600px) {
+  .city-index, .floor--nearby { padding-left: 16px; padding-right: 16px; }
+}

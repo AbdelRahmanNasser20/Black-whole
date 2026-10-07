@@ -52,7 +52,7 @@
 <section class="lot-grid" id="lot-grid">
   {% for item in items %}
   <a class="lot-card"
-     href="/listings/{{ item.lot_id }}"
+     href="{{ lot_url(item) }}"
      data-type="{{ item.chair_type or '' }}"
      data-city="{{ item.location_labels | join('|') }}"
      data-qty="{{ item.quantity_remaining or item.quantity_original or 0 }}"
@@ -126,7 +126,7 @@
 
   <div class="lot-grid lot-grid--sold">
     {% for item in sold_items %}
-    <a class="lot-card lot-card--sold" href="/listings/{{ item.lot_id }}">
+    <a class="lot-card lot-card--sold" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
           <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">

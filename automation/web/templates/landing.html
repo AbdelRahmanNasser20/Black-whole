@@ -101,7 +101,7 @@
   {% if intent %}<p class="intent-line">{{ intent }}</p>{% endif %}
   <div class="featured-track" id="featured-track">
     {% for item in featured %}
-    <a class="lot-card" href="/listings/{{ item.lot_id }}">
+    <a class="lot-card" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
           <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">

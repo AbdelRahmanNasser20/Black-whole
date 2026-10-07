@@ -62,6 +62,7 @@ from .. import db
 from .. import catalog_feed, google_feed, lot_channels
 from .. import inventory
 from .. import lot_images
+from .. import lot_urls
 from .. import favorite_images
 from .. import favorites
 from .. import telegram_alerts
@@ -80,6 +81,7 @@ from . import public_deals
 from . import rate_limit
 from . import public_map
 from . import seo_copy
+from . import city_pages
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -116,6 +118,7 @@ app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
+templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 
@@ -670,7 +673,9 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         "@context": "https://schema.org",
         "@type": "Product",
         "name": title,
-        "sku": row.get("lot_id"),
+        # The slug, never the ledger id: a `gd-{asset}-{account}` sku pastes
+        # straight back into GovDeals and finds the auction.
+        "sku": row.get("slug") or row.get("lot_id"),
         "offers": offer,
     }
     imgs = [u for u in (_absolute(hero), *map(_absolute, images)) if u]
@@ -724,7 +729,7 @@ def _canonical_twin(row: dict) -> str | None:
     except Exception:  # noqa: BLE001 — a lookup failure must not break the page
         return None
     if twin and _public_indexable_status(twin):
-        return f"{PUBLIC_BASE_URL}/listings/{base}"
+        return f"{PUBLIC_BASE_URL}{lot_urls.public_path(twin)}"
     return None
 
 
@@ -860,18 +865,18 @@ def public_listings(request: Request):
     )
 
 
-def _itemlist_jsonld(items: list[dict]) -> str:
-    """ItemList of the live lots for /listings — tells Google the page is a
-    catalogue of these products, so lot pages are found from it, not only
-    from the sitemap."""
+def _itemlist_jsonld(items: list[dict], *, name: str = "Chair lots for sale") -> str:
+    """ItemList of the live lots for /listings and the city pages — tells
+    Google the page is a catalogue of these products, so lot pages are found
+    from it, not only from the sitemap."""
     data = {
         "@context": "https://schema.org",
         "@type": "ItemList",
-        "name": "Chair lots for sale",
+        "name": name,
         "numberOfItems": len(items),
         "itemListElement": [
             {"@type": "ListItem", "position": i,
-             "url": f"{PUBLIC_BASE_URL}/listings/{r['lot_id']}",
+             "url": f"{PUBLIC_BASE_URL}{lot_urls.public_path(r)}",
              "name": (r.get("title") or "Chair lot")}
             for i, r in enumerate(items, start=1)
         ],
@@ -881,10 +886,20 @@ def _itemlist_jsonld(items: list[dict]) -> str:
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)
 def public_listing_detail(request: Request, lot_id: str):
+    """`lot_id` is the slug (canonical) or the ledger id. An id hit on a row
+    that has a slug 301s to the slug URL (query string kept, so feed UTM tags
+    survive) — every Facebook post, feed row and short link ever sent keeps
+    resolving."""
     visits.track(request)
-    row = inventory.get(lot_id)
+    row = inventory.get_by_slug(lot_id) or inventory.get(lot_id)
     if not row or row.get("status") in ("hidden",):
         raise HTTPException(404, "listing not found")
+    if row.get("slug") and lot_id != row["slug"]:
+        target = lot_urls.public_path(row)
+        if request.url.query:
+            target += f"?{request.url.query}"
+        return RedirectResponse(target, status_code=301)
+    lot_id = str(row["lot_id"])
     _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
@@ -909,6 +924,7 @@ def public_listing_detail(request: Request, lot_id: str):
             },
             "nearby": near,
             "copy": seo_copy.build(row, sold=row["is_sold"]),
+            "city_crumb": _city_crumb(row),
             "robots_noindex": not _indexable(row, hero, images),
             "canonical_url": _canonical_twin(row),
             **_detail_seo(row, hero, images),
@@ -916,16 +932,61 @@ def public_listing_detail(request: Request, lot_id: str):
     )
 
 
+def _city_crumb(row: dict) -> tuple[str, str] | None:
+    """(label, path) of the lot's primary city page, when that city has one."""
+    city, state = (row.get("city") or "").strip(), (row.get("state") or "").strip()
+    if not city:
+        return None
+    slug = lot_urls.city_slug(city, state)
+    try:
+        if slug in city_pages.index():
+            return (f"{city}, {state}" if state else city, lot_urls.city_path(city, state))
+    except Exception:  # noqa: BLE001 — a crumb is never worth a 500
+        log.exception("city index failed")
+    return None
+
+
 @app.get("/map", response_class=HTMLResponse)
 def public_map_page(request: Request, near: str | None = None, status: str | None = None,
                     radius: float | None = None):
-    """Full-screen public map of our lots (plan 2026-09-15). Shell only: the JS
-    fetches /map/api/points. `near`/`status`/`radius` seed the filter bar."""
+    """Full-screen public map of our lots (plan 2026-09-15). The pins are JS
+    (/map/api/points); the city list under the map is server-rendered so a
+    crawler sees every pickup city and its page."""
     visits.track(request)
+    try:
+        cities = city_pages.listing()
+    except Exception:  # noqa: BLE001 — the map must render without the list
+        log.exception("city listing failed")
+        cities = []
     return templates.TemplateResponse(request, "map.html", _public_ctx({
         "near": (near or "").strip(), "status": status or "available,incoming",
-        "radius": radius or "",
+        "radius": radius or "", "cities": cities,
     }))
+
+
+@app.get("/chairs", response_class=HTMLResponse)
+def public_cities(request: Request):
+    visits.track(request)
+    return templates.TemplateResponse(
+        request, "chairs_index.html", _public_ctx({"cities": city_pages.listing()}),
+    )
+
+
+@app.get("/chairs/{slug}", response_class=HTMLResponse)
+def public_city(request: Request, slug: str):
+    """City landing page: live lots there, sold proof, lots within driving
+    distance, pickup/freight FAQ. Sold-only cities render with noindex."""
+    visits.track(request)
+    page = city_pages.page(slug)
+    if page is None:
+        raise HTTPException(404, "no such city")
+    page["live"] = [_decorate(dict(r)) for r in page["live"]]
+    page["sold"] = [_decorate(dict(r)) for r in page["sold"]]
+    page["itemlist_jsonld"] = _itemlist_jsonld(page["live"], name=f"Chair lots in {page['label']}")
+    return templates.TemplateResponse(
+        request, "city.html",
+        _public_ctx({"page": page, "robots_noindex": not page["indexable"]}),
+    )
 
 
 @app.get("/map/api/points")
@@ -1830,8 +1891,11 @@ def _sitemap_body() -> str:
     is wasted pooler time. Any write through the admin API drops the memo."""
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/map", "/sell", "/about", "/terms", "/privacy"):
+    for path in ("/", "/listings", "/map", "/chairs", "/sell", "/about", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
+    # City pages with at least one live lot (sold-only cities are noindex).
+    for rec in city_pages.listing(indexable_only=True):
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{rec['path']}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.
     for row in [*inventory.list_public(), *inventory.list_sold_showcase()]:
@@ -1842,7 +1906,7 @@ def _sitemap_body() -> str:
         if updated is not None:
             # timestamptz comes back as datetime from Postgres; sitemap wants a date
             lastmod = updated.date().isoformat() if hasattr(updated, "date") else str(updated)[:10]
-        body += _sitemap_entry(f"{PUBLIC_BASE_URL}/listings/{row['lot_id']}", lastmod)
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{lot_urls.public_path(row)}", lastmod)
     body += "</urlset>\n"
     return body
 

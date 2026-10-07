@@ -17,6 +17,7 @@ Supabase (managed via migrations), not created at runtime.
 """
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets
 import sys
@@ -197,6 +198,71 @@ def get(lot_id: str) -> dict | None:
             "SELECT * FROM inventory WHERE lot_id = %s", (str(lot_id),)
         ).fetchone()
     return _row_to_dict(row)
+
+
+@lru_cache(maxsize=1)
+def has_slug_column() -> bool:
+    """True once migration 022 (`inventory.slug`) is applied. Cached per
+    process like the other column probes; any failure reads as absent so the
+    storefront keeps serving `/listings/{lot_id}` URLs."""
+    try:
+        row = db.fetch_one(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'inventory' AND column_name = 'slug' LIMIT 1"
+        )
+        return row is not None
+    except Exception:
+        return False
+
+
+def get_by_slug(slug: str) -> dict | None:
+    """Lot by its public URL slug (None when the column or the row is absent)."""
+    slug = (slug or "").strip()
+    if not slug or not has_slug_column():
+        return None
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM inventory WHERE slug = %s", (slug,)
+        ).fetchone()
+    return _row_to_dict(row)
+
+
+def set_slug(lot_id: str, slug: str) -> None:
+    """Stamp a slug on a row that has none. Never overwrites — a published
+    URL is a promise (scripts/backfill_slugs.py handles collisions)."""
+    with connect() as conn:
+        conn.execute(
+            "UPDATE inventory SET slug = %s WHERE lot_id = %s AND slug IS NULL",
+            (slug, str(lot_id)),
+        )
+        conn.commit()
+
+
+def assign_slug(lot_id: str) -> str | None:
+    """Give a freshly inserted row its public slug (no-op before migration 022
+    or when the row already has one). A collision gets a short suffix from
+    the lot id, then a counter — same scheme as scripts/backfill_slugs.py."""
+    from automation import lot_urls  # local: lot_urls must stay import-light
+
+    if not has_slug_column():
+        return None
+    row = get(lot_id)
+    if not row or row.get("slug"):
+        return (row or {}).get("slug")
+    base = lot_urls.make_slug(row)
+    suffix = hashlib.sha1(str(lot_id).encode()).hexdigest()[:4]
+    candidates = [base, lot_urls.slugify(f"{base}-{suffix}")]
+    candidates += [lot_urls.slugify(f"{base}-{suffix}-{n}") for n in range(2, 6)]
+    for slug in candidates:
+        with connect() as conn:
+            taken = conn.execute(
+                "SELECT 1 FROM inventory WHERE slug = %s", (slug,)
+            ).fetchone()
+        if taken:
+            continue
+        set_slug(lot_id, slug)
+        return slug
+    return None
 
 
 def _list_on(conn, status: str | None) -> list[dict]:
@@ -455,6 +521,12 @@ def upsert_from_run(
                 ),
             )
         conn.commit()
+    if existing is None:
+        # New lot → public URL slug (migration 022). Existing rows keep theirs.
+        try:
+            assign_slug(str(lot_id))
+        except Exception:  # noqa: BLE001 — a slug must never fail a run
+            logging.getLogger(__name__).exception("slug assignment failed for %s", lot_id)
     return get(lot_id)  # re-read
 
 

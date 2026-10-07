@@ -117,10 +117,10 @@ def test_detail_has_breadcrumb_list(client):
     crumbs = [b for b in _jsonld_blocks(r.text) if b.get("@type") == "BreadcrumbList"]
     assert len(crumbs) == 1
     items = crumbs[0]["itemListElement"]
-    assert [i["item"] for i in items] == [
-        "https://black-whole.com/", "https://black-whole.com/listings",
-        "https://black-whole.com/listings/10340",
-    ]
+    urls = [i["item"] for i in items]
+    # Home / Inventory / (city page, when the city has one) / lot
+    assert urls[:2] == ["https://black-whole.com/", "https://black-whole.com/listings"]
+    assert urls[-1] == "https://black-whole.com/listings/10340"
     assert items[-1]["name"] == "Burgundy Banquet Chairs"
     assert 'aria-label="Breadcrumb"' in r.text
 

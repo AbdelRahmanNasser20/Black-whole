@@ -24,7 +24,7 @@ import csv
 import io
 from collections.abc import Iterable
 
-from . import catalog_feed, lot_images
+from . import catalog_feed, lot_images, lot_urls
 
 FEED_COLUMNS = [
     "id", "title", "description", "link", "image_link", "additional_image_link",
@@ -90,7 +90,7 @@ def feed_row(row: dict, base_url: str | None = None) -> dict | None:
         "id": lot_id,
         "title": title,
         "description": _description(row, title),
-        "link": f"{base}/listings/{lot_id}?{UTM_QUERY}",
+        "link": f"{base}{lot_urls.public_path(row)}?{UTM_QUERY}",
         "image_link": image,
         "additional_image_link": _additional_images(row, image),
         "availability": AVAILABILITY,
