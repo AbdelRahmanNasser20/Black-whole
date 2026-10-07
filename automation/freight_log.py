@@ -31,6 +31,7 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
+from . import attribution as attribution_mod
 from . import db
 
 log = logging.getLogger(__name__)
@@ -104,8 +105,13 @@ def insert_storefront_quote(
     client_ip: str | None = None,
     unquotable_reason: str | None = None,
     lot_quantity_remaining: int | None = None,
+    attribution: dict | None = None,
 ) -> int | None:
     """Append one storefront request. Returns its id, or None if it was not saved.
+
+    ``attribution`` is the browser's first-touch source (see
+    `automation/attribution.py`); stored on the 021 schema once migration 022
+    has added the ``attr_*`` columns, silently dropped before that.
 
     ``quote`` is a `freight_estimate.get_freight_estimate` dict, or None for a
     lane we could not price (then ``unquotable_reason`` says why). Its ``raw``
@@ -124,20 +130,25 @@ def insert_storefront_quote(
         priced = bool(quote)
 
         if schema_ready():
+            # Column names come from attribution.COLUMNS (a fixed tuple),
+            # never from the payload — safe to splice into the statement.
+            attr_cols, attr_vals = attribution_mod.insert_columns("freight_quotes", attribution)
+            attr_sql = "".join(f", {c}" for c in attr_cols)
+            attr_ph = ", %s" * len(attr_cols)
             row = db.fetch_one(
-                """
+                f"""
                 INSERT INTO freight_quotes (
                     source, thread_url, contact_id, lot_id, origin_zip, dest_zip,
                     quantity, mode, ltl_low, ltl_high, partial_low, partial_high,
                     miles, transit_days, provider, accessorials, raw_response,
                     buyer_email, buyer_phone, valid_until,
-                    unquotable_reason, lot_quantity_remaining
+                    unquotable_reason, lot_quantity_remaining{attr_sql}
                 ) VALUES (
                     'storefront', NULL, NULL, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s::jsonb, %s::jsonb,
                     %s, %s, %s,
-                    %s, %s
+                    %s, %s{attr_ph}
                 )
                 RETURNING id
                 """,
@@ -161,6 +172,7 @@ def insert_storefront_quote(
                     quote.get("valid_until"),
                     None if priced else (unquotable_reason or "unquotable"),
                     lot_quantity_remaining,
+                    *attr_vals,
                 ),
             )
             return int(row["id"]) if row else None

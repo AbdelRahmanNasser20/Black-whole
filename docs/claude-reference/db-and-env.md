@@ -28,4 +28,5 @@ from automation import db   # db.connect, db.fetch_one, db.fetch_all, db.execute
 - macOS only paths assumed (`~/Desktop/Banquet chiars Pictures/`).
 - `.env` carries `DEWATERMARK_API_KEY` and (optional) `GEMINI_API_KEY`. Already gitignored.
 - Persistent Playwright profile lives at `~/.listing_automation/chrome_profile/`. Logged into FB + eBay there.
+- Migration `scripts/sql/022_lead_attribution.sql` is **PENDING** (not applied to prod): adds nullable `attr_source / attr_medium / attr_campaign / attr_referrer / attr_landing` varchar(200) to `inquiries`, `subscribers`, `freight_quotes`, `deposits`. `automation/attribution.py::columns_ready(table)` probes for `attr_landing` once per table per process (positive cached) and the writers omit the columns until then. Weekly funnel report: `scripts/lead_funnel_report.py`.
 - A/B compare logs and ratings live in Supabase table `llm_compare_logs` (one row per dual-extractor run, `id` = unix-ts). The old `~/.listing_automation/logs/llm_compare_*.json` + `compare_ratings.json` files are dormant — kept on disk as a backup but not read or written.

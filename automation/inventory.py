@@ -28,6 +28,7 @@ from typing import Any
 from psycopg.types.json import Jsonb
 
 from . import db
+from . import attribution as attribution_mod
 from .config import ATTACHMENTS_ROOT
 
 # Re-export the connection opener so favorites.py (and any other caller) can do
@@ -805,6 +806,7 @@ def create_inquiry(
     message: str | None = None,
     lot_id: str | None = None,
     quantity_interested: int | None = None,
+    attribution: dict | None = None,
 ) -> dict:
     if kind not in ("buy", "sell"):
         raise ValueError("kind must be 'buy' or 'sell'")
@@ -813,20 +815,26 @@ def create_inquiry(
     if not email and not phone:
         raise ValueError("email or phone required")
     now = _now()
+    cols = [
+        "kind", "lot_id", "name", "email", "phone", "quantity_interested",
+        "message", "status", "created_at",
+    ]
+    vals: list[Any] = [
+        kind, str(lot_id) if lot_id else None, name.strip(),
+        (email or "").strip() or None, (phone or "").strip() or None,
+        quantity_interested, (message or "").strip() or None, "new", now,
+    ]
+    # First-touch attribution (migration 022). Empty until applied — the
+    # helper omits the columns when they are not there yet.
+    extra_cols, extra_vals = attribution_mod.insert_columns("inquiries", attribution)
+    cols += extra_cols
+    vals += extra_vals
+    placeholders = ", ".join(["%s"] * len(vals))
     with connect() as conn:
         cur = conn.execute(
-            """
-            INSERT INTO inquiries (
-                kind, lot_id, name, email, phone, quantity_interested,
-                message, status, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, 'new', %s)
-            RETURNING id
-            """,
-            (
-                kind, str(lot_id) if lot_id else None, name.strip(),
-                (email or "").strip() or None, (phone or "").strip() or None,
-                quantity_interested, (message or "").strip() or None, now,
-            ),
+            f"INSERT INTO inquiries ({', '.join(cols)}) "
+            f"VALUES ({placeholders}) RETURNING id",
+            tuple(vals),
         )
         inquiry_id = cur.fetchone()["id"]
         conn.commit()
@@ -913,6 +921,7 @@ def create_subscriber(
     delivery: str | None = None,
     notes: str | None = None,
     source: str = "site_listings",
+    attribution: dict | None = None,
 ) -> dict:
     if not (email or "").strip() and not (phone or "").strip():
         raise ValueError("email or phone required")
@@ -945,6 +954,10 @@ def create_subscriber(
     if has_token_col:
         cols.append("unsubscribe_token")
         vals.append(token)
+    # First-touch attribution (migration 022) — omitted until the columns exist.
+    extra_cols, extra_vals = attribution_mod.insert_columns("subscribers", attribution)
+    cols += extra_cols
+    vals += extra_vals
 
     placeholders = ", ".join(["%s"] * len(vals))
     with connect() as conn:
