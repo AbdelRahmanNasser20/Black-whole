@@ -70,6 +70,8 @@ def client(monkeypatch):
     monkeypatch.setattr(web_app.inventory, "list_sold_showcase", lambda limit=None: [dict(SOLD)])
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: dict(rows[lot_id]) if lot_id in rows else None)
     monkeypatch.setattr(web_app.inventory, "get_by_slug", lambda s: dict(slugs[s]) if s in slugs else None)
+    monkeypatch.setattr(web_app.inventory, "get_public",
+                        lambda k: dict(slugs[k]) if k in slugs else (dict(rows[k]) if k in rows else None))
     monkeypatch.setattr(web_app.inventory, "stats",
                         lambda: {"lots": 2, "chairs": 2800, "cities": 2, "moved": 3000})
     monkeypatch.setattr(public_map, "all_points", lambda: [dict(p) for p in POINTS])
@@ -209,6 +211,81 @@ def test_cities_index_and_map_list(client):
     assert html.index("pittsburgh-pa") < html.index("phoenix-az")  # most live chairs first
     m = client.get("/map").text
     assert "PICKUP CITIES" in m and 'href="/chairs/pittsburgh-pa"' in m
+
+
+# ── review fixes (PR #129) ──
+
+def test_next_free_slug_keeps_the_suffix_on_long_slugs():
+    base = "2500-wire-frame-stacking-chairs-chrome-frame-linkable-padded-seat-conference"  # 76 chars
+    assert lot_urls.next_free_slug(base, "gd-1-1", lambda s: False) == base
+    taken = {base}
+    first = lot_urls.next_free_slug(base, "gd-1-1", taken.__contains__)
+    assert first != base and len(first) <= lot_urls.SLUG_MAX and first.endswith("-" + first.rsplit("-", 1)[1])
+    taken.add(first)
+    second = lot_urls.next_free_slug(base, "gd-1-1", taken.__contains__)
+    assert second not in taken and len(second) <= lot_urls.SLUG_MAX
+    assert lot_urls.next_free_slug("x", "id", lambda s: True) is None  # gives up, never loops
+
+
+def test_slug_column_probe_caches_only_a_positive_answer(monkeypatch):
+    inv = web_app.inventory
+    monkeypatch.setattr(inv, "_slug_column_ready", False)
+    calls = []
+
+    def flaky(sql, params=None):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("pooler hiccup")
+        return {"?column?": 1}
+
+    monkeypatch.setattr(inv.db, "fetch_one", flaky)
+    assert inv.has_slug_column() is False      # transient failure → absent for now
+    assert inv.has_slug_column() is True       # …not pinned: the next call asks again
+    assert inv.has_slug_column() is True and len(calls) == 2  # positive answer cached
+
+
+def test_id_redirect_is_not_counted_as_a_view(client, monkeypatch):
+    tracked = []
+    monkeypatch.setattr(web_app.visits, "track", lambda request, lot_id=None: tracked.append((request.url.path, lot_id)) or True)
+    client.get("/listings/gd-56-9685", follow_redirects=False)
+    assert tracked == []
+    client.get("/listings/2500-wire-frame-stacking-chairs-pittsburgh-pa")
+    assert tracked == [("/listings/2500-wire-frame-stacking-chairs-pittsburgh-pa", "gd-56-9685")]
+
+
+def test_city_nearby_never_repeats_a_lot_already_on_the_page(client, monkeypatch):
+    multi = dict(LIVE, locations=[{"city": "Pittsburgh", "state": "PA"}, {"city": "Cleveland", "state": "OH"}])
+    monkeypatch.setattr(web_app.inventory, "list_public", lambda: [multi, dict(NOSLUG)])
+    pts = [dict(p) for p in POINTS] + [{**POINTS[0], "id": "a2", "city": "Cleveland", "state": "OH", "lat": 41.50, "lng": -81.69}]
+    monkeypatch.setattr(public_map, "all_points", lambda: pts)
+    readcache.invalidate_all()
+    html = client.get("/chairs/pittsburgh-pa").text
+    nearby = html.split("WITHIN DRIVING DISTANCE")[1].split("</section>")[0]
+    assert "2500-wire-frame-stacking-chairs-pittsburgh-pa" not in nearby
+    assert 'href="/listings/cle-1"' in nearby
+
+
+def test_outbound_writers_use_the_public_slug():
+    from automation import auction_sync, lot_channels
+    from automation.alerts import blast
+    from automation.channels import sync as channel_sync
+    desc = lot_channels.fb_description(blurb="x", city="Pittsburgh", state="PA", quantity=10,
+                                       lot_id="gd-56-9685", unit="chair", profile_id=None,
+                                       slug="2500-wire-frame-stacking-chairs-pittsburgh-pa")
+    assert "/listings/2500-wire-frame-stacking-chairs-pittsburgh-pa" in desc
+    assert "SKU 2500-wire-frame-stacking-chairs-pittsburgh-pa" in desc and "gd-56-9685" not in desc
+    entry = lot_channels.plan_entry(lot_id="gd-56-9685", title="t", price=25, city="Pittsburgh", state="PA",
+                                    zip_code=None, quantity=10, blurb="x", photo_urls=[], unit="chair",
+                                    profile_id=None, slug=LIVE["slug"])
+    assert entry["site_link"].endswith("/listings/" + LIVE["slug"])
+    assert channel_sync._site_url(LIVE).endswith("/listings/" + LIVE["slug"])
+    assert channel_sync._site_url(NOSLUG).endswith("/listings/9006")
+    sub = {"name": "Pat", "email": "p@example.com", "unsubscribe_token": None}
+    msg = blast.compose_email(sub, dict(LIVE, quantity_remaining=10))
+    assert "/listings/" + LIVE["slug"] in str(vars(msg))
+    assert "/listings/gd-56-9685" not in str(vars(msg))
+    text = auction_sync.relist_message(LIVE, None, new_auction=True)
+    assert "/listings/" + LIVE["slug"] in text and "gd-56-9685" not in text
 
 
 def test_city_copy_never_leaks_storage_note(client, monkeypatch):

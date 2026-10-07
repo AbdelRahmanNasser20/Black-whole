@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import config  # noqa: F401  (loads .env)
-from . import db, inventory, listing_images, lot_images, progress
+from . import db, inventory, listing_images, lot_images, lot_urls, progress
 from .catalog_feed import FEED_COLUMNS, build_feed_rows, state_code
 from .channels import store as channel_store
 
@@ -201,10 +201,14 @@ def default_title(quantity: int | None, part: Part, chair_type: str | None,
 
 
 def fb_description(*, blurb: str, city: str, state: str, quantity: int | None,
-                   lot_id: str, unit: str, profile_id: str | None) -> str:
+                   lot_id: str, unit: str, profile_id: str | None,
+                   slug: str | None = None) -> str:
     """Same shape as every hand-written entry in the relist plan, so buyers'
-    messages (which quote the description) and the verifier see one format."""
+    messages (which quote the description) and the verifier see one format.
+    The link and the SKU line use the public slug when the lot has one — a
+    `gd-{asset}-{account}` id pastes straight back into GovDeals."""
     st = state_code(state)
+    public_key = slug or lot_id
     lines = [blurb.strip(), ""]
     lines.append(f"📍 Location: {city}, {st} (local pickup; delivery quotes on request)")
     if quantity:
@@ -218,19 +222,20 @@ def fb_description(*, blurb: str, city: str, state: str, quantity: int | None,
         "  2. Pickup or delivery",
         "  3. Your city / ZIP",
         "",
-        f"More photos and full details: {SITE_BASE}/listings/{lot_id}",
+        f"More photos and full details: {SITE_BASE}{lot_urls.public_path({'lot_id': lot_id, 'slug': slug})}",
     ]
     if profile_id:
         noun = "lots" if unit == "table" else "chair lots"
         lines.append(f"All our {noun}: https://www.facebook.com/marketplace/profile/{profile_id}/")
-    lines += ["", f"SKU {lot_id}"]
+    lines += ["", f"SKU {public_key}"]
     return "\n".join(lines)
 
 
 def plan_entry(*, lot_id: str, title: str, price: float, city: str, state: str,
                zip_code: str | None, quantity: int | None, blurb: str,
                photo_urls: list[str], unit: str, profile_id: str | None,
-               notes: str = "", fb_city: str | None = None, fb_state: str | None = None) -> dict:
+               notes: str = "", fb_city: str | None = None, fb_state: str | None = None,
+               slug: str | None = None) -> dict:
     """One `listings[]` element for scripts/fb_relist_plan_*.json."""
     is_table = unit == "table"
     entry = {
@@ -245,8 +250,8 @@ def plan_entry(*, lot_id: str, title: str, price: float, city: str, state: str,
         "zip": zip_code or "",
         "quantity_wording": f"{quantity:,} available" if quantity else "",
         "description": fb_description(blurb=blurb, city=city, state=state, quantity=quantity,
-                                      lot_id=lot_id, unit=unit, profile_id=profile_id),
-        "site_link": f"{SITE_BASE}/listings/{lot_id}",
+                                      lot_id=lot_id, unit=unit, profile_id=profile_id, slug=slug),
+        "site_link": f"{SITE_BASE}{lot_urls.public_path({'lot_id': lot_id, 'slug': slug})}",
         "cover_url": photo_urls[0] if photo_urls else "",
         "photo_urls": list(photo_urls),
         "tags": (["banquet tables", "round tables", "folding tables", "event tables", "bulk", "wholesale"]
@@ -590,7 +595,7 @@ def add_lot(url: str, *, price: float | None = None, split: str | None = None,
             photo_urls=photo_urls, unit=unit, profile_id=pid,
             notes=f"GovDeals asset {asset} / acct {account}, auction closes {ends}. "
                   f"Ledger status active_bid — not owned yet.",
-            fb_city=fb_city, fb_state=fb_state,
+            fb_city=fb_city, fb_state=fb_state, slug=row.get("slug"),
         )
         if part.photos:
             entry["photo_indexes"] = list(part.photos)

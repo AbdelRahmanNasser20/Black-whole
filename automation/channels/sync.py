@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from .. import inventory, site_settings
+from .. import inventory, lot_urls, site_settings
 from ..catalog_feed import site_base_url
 from ..publish import registry
 from . import APPROVAL_CHANNELS, BROWSER_CHANNELS, CHANNELS, FEED_CHANNELS
@@ -119,8 +119,8 @@ def _public_row(row: dict) -> dict:
     return {k: v for k, v in row.items() if k not in _PRIVATE_FIELDS}
 
 
-def _site_url(lot_id: str) -> str:
-    return f"{site_base_url()}/listings/{lot_id}"
+def _site_url(row: dict) -> str:
+    return f"{site_base_url()}{lot_urls.public_path(row)}"
 
 
 class _Pacer:
@@ -158,7 +158,7 @@ class _Pacer:
 
 def _apply_feed(action: Action, row: dict) -> None:
     h = payload_hash(row, action.channel)
-    url = _site_url(action.lot_id) if action.channel == "site" else None
+    url = _site_url(row) if action.channel == "site" else None
     if action.op in ("list", "update"):
         store.upsert(action.lot_id, action.channel, state="live", url=url, payload_hash=h)
     elif action.op == "delist":

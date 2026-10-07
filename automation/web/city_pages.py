@@ -99,15 +99,18 @@ def listing(*, indexable_only: bool = False) -> list[dict]:
     return sorted(recs, key=lambda r: (-r["chairs"], -r["moved"], r["label"]))
 
 
-def nearby(city: str, state: str, *, exclude_slug: str,
+def nearby(city: str, state: str, *, exclude_slug: str, exclude_lots: set[str] | None = None,
            miles: float = NEARBY_MILES, limit: int = NEARBY_LIMIT) -> list[dict]:
-    """Unsold map points within `miles` of the city, one per lot, nearest first."""
+    """Unsold map points within `miles` of the city, one per lot, nearest
+    first. Lots already shown on the page (`exclude_lots`) never reappear via
+    one of their other locations."""
     lat, lng, _ = geo.resolve_place(city, state, None)
     if lat is None:
         return []
+    exclude_lots = exclude_lots or set()
     best: dict[str, dict] = {}
     for p in public_map.all_points():
-        if p["bucket"] == "sold" or p.get("lot_id") is None:
+        if p["bucket"] == "sold" or p.get("lot_id") is None or p["lot_id"] in exclude_lots:
             continue
         if lot_urls.city_slug(p.get("city"), p.get("state")) == exclude_slug:
             continue
@@ -178,8 +181,9 @@ def page(slug: str) -> dict | None:
     if rec is None:
         return None
     rec = dict(rec)
+    on_page = {str(r.get("lot_id")) for r in rec["live"] + rec["sold"]}
     try:
-        rec["nearby"] = nearby(rec["city"], rec["state"], exclude_slug=slug)
+        rec["nearby"] = nearby(rec["city"], rec["state"], exclude_slug=slug, exclude_lots=on_page)
     except Exception:  # noqa: BLE001 — the page must render without geo
         rec["nearby"] = []
     rec["intro"] = intro(rec)

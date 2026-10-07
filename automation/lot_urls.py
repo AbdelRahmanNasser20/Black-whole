@@ -66,6 +66,27 @@ def make_slug(row: dict) -> str:
     return slugify(" ".join(bits)) or slugify(str(row.get("lot_id") or "lot"))
 
 
+def next_free_slug(base: str, lot_id: str, is_taken) -> str | None:
+    """The slug to store for a row whose natural slug is `base`: `base` if
+    free, else `base-xxxx` (4 hex chars from the lot id), else `base-xxxx-N`.
+    `base` is shortened first so the suffix always survives SLUG_MAX — the
+    one collision scheme shared by inventory.assign_slug and
+    scripts/backfill_slugs.py. `is_taken(slug) -> bool` is the caller's."""
+    import hashlib
+
+    base = slugify(base) or "lot"
+    if not is_taken(base):
+        return base
+    suffix = hashlib.sha1(str(lot_id).encode()).hexdigest()[:4]
+    for n in range(0, 50):
+        tail = f"-{suffix}" if n == 0 else f"-{suffix}-{n + 1}"
+        head = slugify(base, max_len=SLUG_MAX - len(tail))
+        candidate = f"{head}{tail}"
+        if not is_taken(candidate):
+            return candidate
+    return None
+
+
 def public_path(row: dict) -> str:
     """Site-relative lot URL: the slug when the row has one, else the id."""
     slug = (row or {}).get("slug")

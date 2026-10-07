@@ -20,7 +20,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 
 from automation import config  # noqa: F401  (loads .env)
-from automation import inventory
+from automation import inventory, lot_urls
 
 BRAND = "Black Whole"
 SITE = "https://black-whole.com"
@@ -60,7 +60,7 @@ def row_for(item: dict) -> dict[str, str]:
         "availability": "in stock" if qty > 0 else "out of stock",
         "condition": "used",
         "price": f"{price:.2f} USD",
-        "link": f"{SITE}/listings/{lot_id}",
+        "link": f"{SITE}{lot_urls.public_path(item)}",
         "image_link": item.get("hero_image_url") or "",
         "brand": BRAND,
         "google_product_category": GOOGLE_CATEGORY,

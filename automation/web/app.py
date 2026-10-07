@@ -890,16 +890,19 @@ def public_listing_detail(request: Request, lot_id: str):
     that has a slug 301s to the slug URL (query string kept, so feed UTM tags
     survive) — every Facebook post, feed row and short link ever sent keeps
     resolving."""
-    visits.track(request)
-    row = inventory.get_by_slug(lot_id) or inventory.get(lot_id)
+    row = inventory.get_public(lot_id)
     if not row or row.get("status") in ("hidden",):
+        visits.track(request)
         raise HTTPException(404, "listing not found")
     if row.get("slug") and lot_id != row["slug"]:
+        # Not tracked: the slug page that follows is the real view, and one
+        # click must not count as two lots.
         target = lot_urls.public_path(row)
         if request.url.query:
             target += f"?{request.url.query}"
         return RedirectResponse(target, status_code=301)
     lot_id = str(row["lot_id"])
+    visits.track(request, lot_id=lot_id)
     _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
