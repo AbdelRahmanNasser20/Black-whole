@@ -77,7 +77,7 @@ Why this and not more:
 ```
 - Read-only SQL (no writes). Columns: `visits`, `people` (visitor-days), `lot_views`, then leads by kind (`contact`, `subscr`, `freight`, `clicks`, `checkout`), `leads`, `conv%`, `paid`, `paid_usd`; then the lot pages with the most lead events.
 - How to read it: one line per channel, sorted by leads. **Compare `leads` week to week per channel** — a channel whose `people` go up but `leads` do not is traffic, not buyers.
-- Leads show as `unattributed` until the migration is applied (operator gate — do it once):
+- Migration 022 is **applied (2026-10-07)**. Leads written before that date stay `unattributed`. On a fresh database apply it once:
   ```
   .venv/bin/python scripts/apply_sql.py scripts/sql/022_lead_attribution.sql
   ```
