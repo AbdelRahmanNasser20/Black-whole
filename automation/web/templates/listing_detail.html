@@ -172,22 +172,23 @@
         scraped, never storage_note. #}
     <div class="lot-copy">
       <div class="section-rule"></div>
-      <h2 class="section-label mono tiny">SPECS</h2>
-      <table class="specs-table">
-        <tbody>
-        {% for label, value in copy.specs %}
-          <tr><th scope="row">{{ label }}</th><td>{{ value }}</td></tr>
-        {% endfor %}
-        </tbody>
-      </table>
-
-      <div class="section-rule"></div>
       <h2 class="section-label mono tiny">{% if item.is_sold %}WHO BOUGHT SETS LIKE THIS{% else %}GOOD FOR{% endif %}</h2>
       <p>{{ copy.good_for }}</p>
 
       <div class="section-rule"></div>
-      <h2 class="section-label mono tiny">PICKUP &amp; FREIGHT</h2>
+      <h2 class="section-label mono tiny">{% if copy.incoming %}ARRIVAL &amp; FREIGHT{% else %}PICKUP &amp; FREIGHT{% endif %}</h2>
       <p>{{ copy.pickup_freight }}</p>
+      {% if copy.freight_facts %}
+      {#- Only what the spec sheet above does not already say: whole-lot
+          price, frame, pallets, weight. #}
+      <table class="specs-table">
+        <tbody>
+        {% for label, value in copy.freight_facts %}
+          <tr><th scope="row">{{ label }}</th><td>{{ value }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
 
       <div class="section-rule"></div>
       <h2 class="section-label mono tiny">QUESTIONS BUYERS ASK</h2>

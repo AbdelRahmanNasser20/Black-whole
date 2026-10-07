@@ -683,8 +683,7 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         "seo_title": seo_title,
         "seo_description": lead,
         "og_image": _absolute(hero) or (imgs[0] if imgs else None),
-        # </ escaped so a scraped description can't close the <script> tag
-        "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
+        "product_jsonld": seo_copy.jsonld(product),
         # Visible trail + BreadcrumbList come from the _crumbs.html macro.
         "crumb_name": _truncate_words(_short_title(title), 60, ellipsis=""),
     }
@@ -757,10 +756,16 @@ def _landing_data() -> dict:
         state = (r.get("state") or "").strip().upper()
         city = (r.get("city") or "").strip().lower()
         return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
-    featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
+    rows = inventory.list_public()
+    featured = sorted(rows, key=_idaho_first)[:12]
     for r in featured:
         r["hero_src"] = _hero_src(r)
-    return {"counts": counts, "featured": featured}
+    # Floor price over EVERY public lot, not the 12 featured — it is the
+    # number the homepage intent line quotes next to the full chair count.
+    prices = [float(r["price_per_chair"]) for r in rows
+              if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
+    return {"counts": counts, "featured": featured,
+            "min_price": min(prices) if prices else None}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -769,32 +774,32 @@ def public_landing(request: Request):
     try:
         data = _landing_data()
         counts, featured = data["counts"], data["featured"]
+        min_price = data.get("min_price")
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
+        min_price = None
     return templates.TemplateResponse(
         request, "landing.html",
         _public_ctx({
             "stats": counts, "featured": featured,
-            "intent": _intent_line(counts, featured),
+            "intent": _intent_line(counts, min_price),
             "site_faq": seo_copy.SITE_FAQ,
             "site_faq_jsonld": seo_copy.faq_jsonld(seo_copy.SITE_FAQ),
         }),
     )
 
 
-def _intent_line(counts: dict, featured: list[dict]) -> str | None:
+def _intent_line(counts: dict, min_price: float | None) -> str | None:
     """The one sentence a "bulk seating" searcher wants above the fold:
     floor price, how many chairs, how many cities. Empty floor → no line."""
-    prices = [float(r["price_per_chair"]) for r in featured
-              if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
     chairs = int(counts.get("chairs") or 0)
     cities = int(counts.get("cities") or 0)
     if not chairs:
         return None
     bits = []
-    if prices:
-        bits.append(f"Bulk seating from ${min(prices):,.0f} per chair")
+    if min_price:
+        bits.append(f"Bulk seating from ${min_price:,.0f} per chair")
     else:
         bits.append("Bulk seating priced by the chair")
     bits.append(f"{chairs:,} chairs on the floor")
@@ -871,7 +876,7 @@ def _itemlist_jsonld(items: list[dict]) -> str:
             for i, r in enumerate(items, start=1)
         ],
     }
-    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    return seo_copy.jsonld(data)
 
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)

@@ -10,10 +10,17 @@ and the auction never answers: what the chairs are good for, how they move
 contains. Nothing here is scraped, nothing touches the DB, and no two lots
 share a paragraph — the phrasing varies by a stable hash of the lot id.
 
-Pure functions only. `build(row, *, sold)` returns a dict the template
-renders; `faq_jsonld()` serialises the FAQ for Google's FAQPage markup.
-`inventory.storage_note` is never read here — the facility address and gate
-code stay private.
+Three states, because the copy makes promises:
+- live     — on the floor: pickup today, we hold while you get approval.
+- incoming — `active_bid` / `won_pickup`: bought or being bought, not staged
+             yet. Reservations yes; "come load it today" never.
+- sold     — past tense, next-lot CTA.
+
+`build(row, *, sold, incoming)` returns a dict the template renders;
+`jsonld()` serialises any structured-data block safely. Weight and pallet
+maths come from freight_estimate.calibration_from_row so the copy can never
+disagree with the freight widget on the same page. `inventory.storage_note`
+is never read — the facility address and gate code stay private.
 """
 
 from __future__ import annotations
@@ -24,11 +31,9 @@ import re
 import zlib
 from typing import Any
 
-# Keep in sync with automation/freight_estimate.py DEFAULT_CALIBRATION. The
-# per-chair weight is still the unmeasured placeholder (see that file), so the
-# copy always calls the number an estimate.
-DEFAULT_LBS_PER_CHAIR = 13.0
-DEFAULT_CHAIRS_PER_PALLET = 35.0
+from automation import freight_estimate, inventory, lot_channels
+
+INCOMING_STATUSES = frozenset({"active_bid", "won_pickup"})
 
 _KIND_RULES: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("folding", ("fold",)),
@@ -56,11 +61,16 @@ _KIND_BUYERS: dict[str, tuple[str, ...]] = {
     "event": ("churches", "event venues", "schools", "rental companies"),
 }
 
-_KIND_LABEL = {
-    "banquet": "banquet chairs", "church": "church chairs", "stacking": "stacking chairs",
-    "folding": "folding chairs", "conference": "conference chairs",
-    "dining": "dining chairs", "event": "event chairs",
+_KIND_WORD = {
+    "banquet": "banquet", "church": "church", "stacking": "stacking",
+    "folding": "folding", "conference": "conference", "dining": "dining", "event": "event",
 }
+
+
+def jsonld(data: dict) -> str:
+    """Serialise a structured-data block for a <script type=ld+json>. `</`
+    is escaped so no scraped title or description can close the tag."""
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
 
 
 def kind(row: dict) -> str:
@@ -70,6 +80,12 @@ def kind(row: dict) -> str:
         if any(n in text for n in needles):
             return name
     return "event"
+
+
+def kind_label(row: dict) -> str:
+    """`banquet chairs`, `banquet tables`, `folding chairs` … — the family
+    plus the unit the rest of the page already uses (lot_channels.unit_word)."""
+    return f"{_KIND_WORD[kind(row)]} {lot_channels.unit_word(row)}s"
 
 
 def _pick(lot_id: Any, options: tuple[str, ...], salt: str = "") -> str:
@@ -99,135 +115,140 @@ def _money(n: float) -> str:
     return f"${n:,.0f}"
 
 
-def _city(row: dict) -> str:
-    city = (row.get("city") or "").strip()
-    state = (row.get("state") or "").strip()
-    return ", ".join(p for p in (city, state) if p)
-
-
-def _unit_word(row: dict) -> str:
-    """`chair` unless the lot is obviously tables — mirrors lot_channels.unit_word
-    without importing it (this module stays dependency-free for tests)."""
-    title = (row.get("title") or "").lower()
-    if "table" in title and "chair" not in title:
-        return "table"
-    return "chair"
+def _where(row: dict) -> str:
+    """Every city the lot sits in, as prose: `Atlanta, GA`, `Atlanta, GA and
+    Nashville, TN`, `A, B and C` — the same list the spec sheet shows."""
+    labels = inventory.location_labels(row)
+    if not labels:
+        return ""
+    if len(labels) == 1:
+        return labels[0]
+    return f"{'; '.join(labels[:-1])} and {labels[-1]}"
 
 
 def _qty(row: dict, sold: bool) -> int | None:
-    return _int(row.get("quantity_original") if sold
-                else (row.get("quantity_remaining") or row.get("quantity_original")))
+    """Sold → the original count. Live/incoming → what is left; a row that is
+    out of stock (remaining = 0) advertises nothing, matching the SoldOut
+    availability in the Product JSON-LD on the same page."""
+    if sold:
+        return _int(row.get("quantity_original"))
+    remaining = row.get("quantity_remaining")
+    if remaining is None:
+        return _int(row.get("quantity_original"))
+    return _int(remaining)
 
 
-# ───────────────────────────── specs ─────────────────────────────
+# ───────────────────────────── freight facts ─────────────────────────────
 
-def specs(row: dict, *, sold: bool) -> list[tuple[str, str]]:
-    """Label/value pairs for the SPECS table. Only fields that exist render —
-    a half-imported folder row gets a short table, never a row of dashes."""
+def freight_facts(row: dict, *, sold: bool) -> list[tuple[str, str]]:
+    """Label/value pairs the spec sheet above does NOT already show: whole-lot
+    price, frame, pallets and weight. Only fields that exist render."""
     out: list[tuple[str, str]] = []
     qty = _qty(row, sold)
     price = _float(row.get("price_per_chair"))
-    unit = _unit_word(row)
-    if qty:
-        out.append(("Lot size" if sold else "Available", f"{qty:,} {unit}s"))
-    if price and not sold:
-        out.append((f"Price per {unit}", _money(price)))
-        if qty:
-            out.append(("Whole lot", f"{_money(price * qty)} (before freight)"))
-    if row.get("chair_type"):
-        out.append(("Type", str(row["chair_type"]).strip()))
+    unit = lot_channels.unit_word(row)
+    cal = freight_estimate.calibration_from_row(row)
+    if price and qty and not sold:
+        out.append(("Whole lot", f"{_money(price * qty)} (before freight)"))
     if row.get("chair_frame"):
         out.append(("Frame", str(row["chair_frame"]).strip()))
-    if row.get("subtitle"):
-        out.append(("Seat & finish", str(row["subtitle"]).strip().rstrip(".")))
-    dims = (row.get("dimensions") or row.get("dim_in") or "").strip()
-    if dims:
-        out.append(("Dimensions", dims))
-    weight = _float(row.get("chair_weight_lb"))
-    if weight:
-        out.append((f"Weight per {unit}", f"{weight:g} lb (weighed)"))
-    per_pallet = _float(row.get("chairs_per_pallet")) or DEFAULT_CHAIRS_PER_PALLET
     if qty:
-        out.append(("Pallets", f"≈ {math.ceil(qty / per_pallet)} at {per_pallet:g} per pallet"))
-    city = _city(row)
-    if city:
-        out.append(("Sourced from" if sold else "Pickup city", city))
-    out.append(("Condition", "Used, commercial grade — inspected, see photos"))
+        pallets = freight_estimate.handling_units(qty, cal)
+        out.append(("Pallets", f"≈ {pallets} at {cal.chairs_per_pallet:g} per pallet"))
+        weight = freight_estimate.total_weight_lb(qty, cal)
+        out.append((f"Weight per {unit}",
+                    f"{cal.lbs_per_chair:g} lb" + (" (weighed)" if not cal.lbs_per_chair_estimated else " (estimate)")))
+        out.append(("Lot weight", f"≈ {weight:,.0f} lb"))
     return out
 
 
 # ───────────────────────────── good for ─────────────────────────────
 
-def good_for(row: dict, *, sold: bool) -> str:
+def good_for(row: dict, *, sold: bool, incoming: bool = False) -> str:
     k = kind(row)
-    label = _KIND_LABEL[k]
+    label = kind_label(row)
+    unit = lot_channels.unit_word(row)
     buyers = _KIND_BUYERS[k]
     lot_id = row.get("lot_id")
     qty = _qty(row, sold)
-    city = _city(row)
+    where = _where(row)
     b1, b2, b3 = buyers[0], buyers[1], buyers[2 % len(buyers)]
 
     opener = _pick(lot_id, (
-        f"A lot this size is what {b1} ask us for most",
+        f"A lot like this is what {b1} ask us for most",
         f"Sets like this usually go to {b1} or {b2}",
         f"The typical buyer for matched {label} in this quantity is one of {b1}",
         f"We see matched {label} like these land with {b1}, {b2} and {b3}",
     ), "opener")
     why = _pick(lot_id, (
         "one finish, one frame, one delivery — no mixing three catalog orders to seat a room",
-        "every chair matches, so a hall, sanctuary or ballroom reads as one set instead of a patchwork",
-        "you get a uniform set at a liquidation price instead of paying new-catalog money per chair",
-        "the whole room is seated from one lot, with spares left over for the back row",
+        "every piece matches, so a hall, sanctuary or ballroom reads as one set instead of a patchwork",
+        "you get a uniform set at a liquidation price instead of paying new-catalog money per piece",
+        "the whole room is furnished from one lot, with spares left over for the back row",
     ), "why")
     size = ""
-    if qty:
-        rooms = max(1, qty // 150)
+    if qty and qty >= 150:
+        rooms = qty // 150
         size = _pick(lot_id, (
             f" {qty:,} seats covers roughly {rooms} full {'room' if rooms == 1 else 'rooms'} of 150, or one large hall with overflow.",
             f" At {qty:,} {label}, that is enough for a main hall plus a fellowship room and spares.",
             f" {qty:,} is a whole-building count — sanctuary, overflow and classrooms from one set.",
         ), "size")
-    where = ""
-    if city and not sold:
-        where = _pick(lot_id, (
-            f" Pickup is in {city}; buyers within a few hours' drive usually send a box truck or trailer, everyone else gets a freight estimate from the form above.",
-            f" The chairs are in {city}. Drive-up pickup is free; further out we palletise and quote LTL freight to your dock or church lot.",
-            f" They sit in {city} today — load them yourself locally, or we wrap them on pallets and ship anywhere in the continental US.",
-        ), "where")
+    elif qty:
+        size = _pick(lot_id, (
+            f" {qty:,} is a single-room count — a fellowship hall, a classroom block, or a top-up for a rental fleet.",
+            f" At {qty:,} {label}, this fits one meeting room or youth hall, or replaces the worst of an existing set.",
+            f" {qty:,} seats a small sanctuary or a banquet room, and it is a sensible first lot for a venue trying us out.",
+        ), "size")
+    tail = ""
     if sold:
-        where = _pick(lot_id, (
+        tail = _pick(lot_id, (
             " This set is gone, but we buy matched lots like it every month — tell us the count and city and we will flag the next one before it is listed.",
             " Sold. The next comparable lot usually surfaces within weeks; leave a note below and you hear about it first.",
         ), "sold")
-    return f"{opener}: {why}.{size}{where}"
+    elif incoming and where:
+        tail = _pick(lot_id, (
+            f" This lot is on its way to {where}; reserve now and collect once it lands, or get a freight estimate from the form above.",
+            f" The {unit}s are headed for {where} — reservations are open before they arrive, and freight is quoted per ZIP.",
+        ), "incoming")
+    elif where:
+        tail = _pick(lot_id, (
+            f" Pickup is in {where}; buyers within a few hours' drive usually send a box truck or trailer, everyone else gets a freight estimate from the form above.",
+            f" The {unit}s are in {where}. Drive-up pickup is free; further out we palletise and quote LTL freight to your dock or church lot.",
+            f" They sit in {where} today — load them yourself locally, or we wrap them on pallets and ship anywhere in the continental US.",
+        ), "where")
+    return f"{opener}: {why}.{size}{tail}"
 
 
 # ───────────────────────────── pickup & freight ─────────────────────────────
 
-def pickup_freight(row: dict, *, sold: bool) -> str:
+def pickup_freight(row: dict, *, sold: bool, incoming: bool = False) -> str:
     qty = _qty(row, sold)
-    unit = _unit_word(row)
-    city = _city(row)
-    per_pallet = _float(row.get("chairs_per_pallet")) or DEFAULT_CHAIRS_PER_PALLET
-    lbs = _float(row.get("chair_weight_lb"))
-    measured = lbs is not None
-    lbs = lbs or DEFAULT_LBS_PER_CHAIR
+    unit = lot_channels.unit_word(row)
+    where = _where(row)
+    cal = freight_estimate.calibration_from_row(row)
     parts: list[str] = []
     if sold:
-        parts.append(f"This lot {('shipped from ' + city) if city else 'has shipped'}.")
+        parts.append(f"This lot {('shipped from ' + where) if where else 'has shipped'}.")
         parts.append("Pickup is free on every lot we list, and freight is quoted per ZIP before you commit.")
         return " ".join(parts)
-    if city:
-        parts.append(f"Local pickup in {city} is free — bring a box truck, trailer or a few vans and we load with you.")
+    if incoming:
+        parts.append(
+            (f"These {unit}s are on their way to {where}" if where else f"These {unit}s are on their way")
+            + " — reserve now and collect once they land; we confirm the date before you drive."
+        )
+    elif where:
+        parts.append(f"Local pickup in {where} is free — bring a box truck, trailer or a few vans and we load with you.")
     else:
         parts.append("Local pickup is free; ask for the exact address once you have reserved.")
     if qty:
-        pallets = math.ceil(qty / per_pallet)
-        weight = qty * lbs
+        pallets = freight_estimate.handling_units(qty, cal)
+        weight = freight_estimate.total_weight_lb(qty, cal)
         parts.append(
             f"For freight, {qty:,} {unit}s stack onto about {pallets} pallet{'s' if pallets != 1 else ''} "
-            f"({per_pallet:g} per pallet) at an estimated {weight:,.0f} lb total"
-            + ("." if measured else f" — {lbs:g} lb per {unit} is an estimate until we weigh one.")
+            f"({cal.chairs_per_pallet:g} per pallet) at an estimated {weight:,.0f} lb total"
+            + ("." if not cal.lbs_per_chair_estimated
+               else f" — {cal.lbs_per_chair:g} lb per {unit} is an estimate until we weigh one.")
         )
     parts.append("Partial loads ship LTL with liftgate delivery; a full set may be cheaper as a dedicated truck — the estimate form above prices your ZIP, and we confirm the final number before anything moves.")
     return " ".join(parts)
@@ -235,11 +256,11 @@ def pickup_freight(row: dict, *, sold: bool) -> str:
 
 # ───────────────────────────── FAQ ─────────────────────────────
 
-def faq(row: dict, *, sold: bool) -> list[tuple[str, str]]:
+def faq(row: dict, *, sold: bool, incoming: bool = False) -> list[tuple[str, str]]:
     qty = _qty(row, sold)
-    unit = _unit_word(row)
-    label = _KIND_LABEL[kind(row)]
-    city = _city(row)
+    unit = lot_channels.unit_word(row)
+    label = kind_label(row)
+    where = _where(row)
     price = _float(row.get("price_per_chair"))
     items: list[tuple[str, str]] = []
     if sold:
@@ -247,21 +268,27 @@ def faq(row: dict, *, sold: bool) -> list[tuple[str, str]]:
                       "No — this lot has sold. We list comparable sets most weeks; use the form on this page and we will send the next one before it goes public."))
         items.append(("What did a lot like this cost?",
                       (f"This one listed at {_money(price)} per {unit} before freight. " if price else "")
-                      + "Liquidation pricing runs a fraction of catalog price for the same commercial-grade chair."))
+                      + "Liquidation pricing runs a fraction of catalog price for the same commercial-grade piece."))
+        return items
+    items.append((f"Can I buy fewer than {qty:,} {unit}s?" if qty else "Can I buy part of the lot?",
+                  "Usually yes. Lots split by the pallet for local pickup; for freight the minimum is whatever makes the shipping sensible — ask and we will say."))
+    items.append((f"What condition are the {unit}s in?",
+                  "Used commercial seating pulled from a working venue — expect normal wear, not damage. The photos are of the actual lot, and we flag anything beyond that in the notes."))
+    if incoming:
+        items.append((f"When can I collect{(' in ' + where) if where else ''}?",
+                      "This lot is incoming — bought or being bought, not staged yet. Reserve now; we confirm the pickup window the moment it lands, and freight is quoted per ZIP in the meantime."))
+        items.append(("Do you take reservations before it arrives?",
+                      "Yes. Tell us the count you need and we hold it; nothing is charged until the lot lands and you confirm — a refundable deposit locks it when Checkout is open."))
     else:
-        items.append((f"Can I buy fewer than {qty:,} {unit}s?" if qty else "Can I buy part of the lot?",
-                      "Usually yes. Lots split by the pallet for local pickup; for freight the minimum is whatever makes the shipping sensible — ask and we will say."))
-        items.append(("What condition are the chairs in?",
-                      "Used commercial seating pulled from a working venue — expect normal wear, not damage. The photos are of the actual lot, and we flag anything beyond that in the notes."))
-        items.append((f"How does delivery work{(' from ' + city) if city else ''}?",
-                      "Pickup is free. For freight we palletise and shrink-wrap the chairs and ship LTL or by dedicated truck; the estimate form on this page prices your ZIP, and we confirm the final cost before you pay."))
-        items.append(("Do you hold chairs while we get approval?",
+        items.append((f"How does delivery work{(' from ' + where) if where else ''}?",
+                      "Pickup is free. For freight we palletise and shrink-wrap the pieces and ship LTL or by dedicated truck; the estimate form on this page prices your ZIP, and we confirm the final cost before you pay."))
+        items.append((f"Do you hold {unit}s while we get approval?",
                       "Yes. Tell us the count you need and we hold them while your board, pastor or purchasing office signs off — a refundable deposit locks a lot when Checkout is open."))
     return items
 
 
 def faq_jsonld(items: list[tuple[str, str]]) -> str:
-    data = {
+    return jsonld({
         "@context": "https://schema.org",
         "@type": "FAQPage",
         "mainEntity": [
@@ -269,9 +296,7 @@ def faq_jsonld(items: list[tuple[str, str]]) -> str:
              "acceptedAnswer": {"@type": "Answer", "text": a}}
             for q, a in items
         ],
-    }
-    # </ escaped so no answer can close the <script> tag
-    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+    })
 
 
 # ───────────────────────────── site-wide FAQ (home) ─────────────────────────────
@@ -288,16 +313,18 @@ SITE_FAQ: list[tuple[str, str]] = [
 ]
 
 
-def build(row: dict, *, sold: bool) -> dict[str, Any]:
+def build(row: dict, *, sold: bool, incoming: bool | None = None) -> dict[str, Any]:
     """Everything listing_detail.html needs for the original-content sections."""
-    items = faq(row, sold=sold)
-    k = kind(row)
+    if incoming is None:
+        incoming = (not sold) and row.get("status") in INCOMING_STATUSES
+    items = faq(row, sold=sold, incoming=incoming)
     return {
-        "kind": k,
-        "kind_label": _KIND_LABEL[k],
-        "specs": specs(row, sold=sold),
-        "good_for": good_for(row, sold=sold),
-        "pickup_freight": pickup_freight(row, sold=sold),
+        "kind": kind(row),
+        "kind_label": kind_label(row),
+        "incoming": incoming,
+        "freight_facts": freight_facts(row, sold=sold),
+        "good_for": good_for(row, sold=sold, incoming=incoming),
+        "pickup_freight": pickup_freight(row, sold=sold, incoming=incoming),
         "faq": items,
         "faq_jsonld": faq_jsonld(items),
     }

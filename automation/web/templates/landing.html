@@ -92,13 +92,13 @@
   <div class="how-head">
     <div class="section-rule"></div>
     <h2 class="section-title">ON THE FLOOR NOW</h2>
-    {% if intent %}<p class="intent-line">{{ intent }}</p>{% endif %}
     <div class="carousel-nav">
       <button type="button" class="carousel-btn" id="feat-prev" aria-label="previous lots">←</button>
       <button type="button" class="carousel-btn" id="feat-next" aria-label="next lots">→</button>
     </div>
     <a class="see-all mono" href="/listings">SEE ALL →</a>
   </div>
+  {% if intent %}<p class="intent-line">{{ intent }}</p>{% endif %}
   <div class="featured-track" id="featured-track">
     {% for item in featured %}
     <a class="lot-card" href="/listings/{{ item.lot_id }}">
