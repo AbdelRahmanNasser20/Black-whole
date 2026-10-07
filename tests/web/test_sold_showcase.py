@@ -4,6 +4,8 @@ DB-free: `inventory.list_public` / `list_sold_showcase` / `get` are
 monkeypatched, so these exercise routing + templates without a database.
 """
 import pytest
+
+from automation.web import readcache
 from fastapi.testclient import TestClient
 
 from automation import inventory
@@ -52,6 +54,7 @@ def _sold(**over):
 
 @pytest.fixture
 def client(monkeypatch):
+    readcache.invalidate_all()  # the sitemap/landing memo must not leak between tests
     monkeypatch.setattr(inventory, "list_public", lambda: [_live()])
     monkeypatch.setattr(inventory, "list_sold_showcase", lambda *a, **k: [_sold()])
     monkeypatch.setattr(public_map, "nearby", lambda lot_id, **k: {"origin": None, "items": []})
@@ -110,8 +113,12 @@ def test_sold_lot_seo_says_sold_not_available(client, monkeypatch):
     assert "3000 sold" in html
     assert "3000 available" not in html
     assert "https://schema.org/SoldOut" in html
-    # Every city it sat in belongs in the title, not just the primary one.
-    assert "Baltimore, MD · Atlanta, GA · Orlando, FL" in html
+    # Every city it sat in belongs in the SEO text, not just the primary one.
+    # The <title> is capped at the SERP budget (SEO quick wins, 2026-10-07) so
+    # it carries the first city; the full list lives in the meta description.
+    description = html.split('<meta name="description" content="')[1].split('"')[0]
+    assert "Baltimore, MD · Atlanta, GA · Orlando, FL" in description
+    assert "Baltimore, MD" in html.split("<title>")[1].split("</title>")[0]
 
 
 def test_sitemap_includes_sold_lots(client):

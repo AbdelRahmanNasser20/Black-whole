@@ -46,8 +46,15 @@ from ..config import (
     DOWNLOAD_ROOT,
     FACEBOOK_BUSINESS_URL,
     GOOGLE_SITE_VERIFICATION,
+    PUBLIC_ADDRESS_CITY,
+    PUBLIC_ADDRESS_POSTAL,
+    PUBLIC_ADDRESS_REGION,
+    PUBLIC_ADDRESS_STREET,
     PUBLIC_BASE_URL,
+    PUBLIC_CONTACT_EMAIL,
+    PUBLIC_CONTACT_PHONE,
 )
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
@@ -134,6 +141,32 @@ async def _response_headers_middleware(request: Request, call_next):
         else:
             response.headers["Cache-Control"] = "public, max-age=300"
     return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """A browser hitting a dead storefront URL (an old Facebook post, a feed
+    link to a removed lot, a typo) gets a real page with the live lots on it
+    instead of `{"detail": "..."}` — those visitors are buyers, and Google
+    counts a JSON 404 as a soft error on the whole site. API callers and
+    anything not asking for HTML keep the JSON contract unchanged."""
+    wants_html = "text/html" in (request.headers.get("accept") or "")
+    if exc.status_code == 404 and wants_html and not request.url.path.startswith("/api/"):
+        lots = await asyncio.to_thread(_not_found_lots)
+        return templates.TemplateResponse(
+            request, "404.html", _public_ctx({"lots": lots, "robots_noindex": True}),
+            status_code=404,
+        )
+    headers = getattr(exc, "headers", None)
+    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+
+
+def _not_found_lots() -> list[dict]:
+    """Up to six live lots for the 404 page (threadpool: it touches the DB)."""
+    try:
+        return [_decorate(r) for r in inventory.list_public()][:6]
+    except Exception:  # noqa: BLE001 — the 404 page must render without the DB
+        return []
 
 
 # ───────────────────────────── run state ─────────────────────────────
@@ -454,8 +487,95 @@ def _public_ctx(extra: dict) -> dict:
         "base_url": PUBLIC_BASE_URL,
         "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
         "reserve_enabled": _reserve_enabled(),
+        "contact": PUBLIC_CONTACT,
         **extra,
     }
+
+
+# Business identity for the footer + Organization JSON-LD (NAP). Built once;
+# the phone key is simply absent until PUBLIC_CONTACT_PHONE is set.
+PUBLIC_CONTACT: dict = {
+    k: v for k, v in {
+        "email": PUBLIC_CONTACT_EMAIL.strip() or None,
+        "phone": PUBLIC_CONTACT_PHONE.strip() or None,
+        "street": PUBLIC_ADDRESS_STREET.strip() or None,
+        "city": PUBLIC_ADDRESS_CITY.strip() or None,
+        "region": PUBLIC_ADDRESS_REGION.strip() or None,
+        "postal": PUBLIC_ADDRESS_POSTAL.strip() or None,
+    }.items() if v
+}
+
+
+def _breadcrumb_jsonld(trail: list[tuple[str, str]]) -> str:
+    """BreadcrumbList JSON-LD for `trail` = [(name, path), ...]. The last item
+    is the current page. Escaped like the Product block so a scraped title
+    can't close the <script> tag."""
+    items = [
+        {"@type": "ListItem", "position": i, "name": name,
+         "item": f"{PUBLIC_BASE_URL}{path}"}
+        for i, (name, path) in enumerate(trail, start=1)
+    ]
+    data = {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": items}
+    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
+
+
+# <title> budget. Google shows ~60 characters on desktop and truncates the
+# rest with an ellipsis, so the brand goes on the short form and the scraped
+# lot title gets trimmed at a word boundary to fit.
+SEO_TITLE_MAX = 65
+SEO_DESCRIPTION_MAX = 155
+_BRAND_SHORT = "Black Whole"
+_TITLE_QTY_PREFIX = re.compile(r"^\s*(?:lot\s+of\s+)?~?\s*\d[\d,]*\s*(?:×|x)?\s+", re.I)
+_TITLE_TRAILING_PAREN = re.compile(r"\s*\([^()]*\)\s*$")
+
+
+def _short_title(title: str) -> str:
+    """Scraped titles read like `~2,500 Wire Frame Stacking Chairs — Chrome
+    Frame, Dark Plum Pad, Linkable (Pittsburgh, PA)`. Strip the leading count
+    (we add our own) and the trailing `(City, ST)` (we add the location) so
+    the words that are left are the ones a buyer searches for."""
+    t = _TITLE_TRAILING_PAREN.sub("", (title or "").strip())
+    t = _TITLE_QTY_PREFIX.sub("", t)
+    return t.strip(" —–-·,") or (title or "").strip()
+
+
+_SEGMENT_SPLIT = re.compile(r"\s+[—–|·]\s+|,\s+|\s+-\s+")
+
+
+def _truncate_words(text: str, limit: int, ellipsis: str = "…") -> str:
+    """Cut `text` to at most `limit` characters. Prefers dropping whole
+    descriptor segments (`… — Chrome Frame, Dark Plum Pad`) so the part that
+    names the product survives; falls back to a word boundary."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    budget = max(limit - len(ellipsis), 0)
+    kept = ""
+    for seg in _SEGMENT_SPLIT.split(text):
+        candidate = f"{kept}, {seg}" if kept else seg
+        if len(candidate) > budget:
+            break
+        kept = candidate
+    if not kept:
+        kept = text[:budget]
+        kept = kept.rsplit(" ", 1)[0] if " " in kept else kept
+    return kept.rstrip(" ,;:—–-·") + ellipsis
+
+
+def _seo_title(qty, title: str, loc: str) -> str:
+    """`{qty}× {short title} — {City, ST} | Black Whole`, trimmed to the
+    budget by shortening the title part first (never the location or brand).
+    A multi-city location keeps only its first city when it would not fit."""
+    short = _short_title(title)
+    suffix = f" | {_BRAND_SHORT}"
+    prefix = f"{qty}× " if qty else ""
+    for loc_part in (loc, loc.split(" · ")[0] if loc else ""):
+        tail = f" — {loc_part}" if loc_part else ""
+        room = SEO_TITLE_MAX - len(prefix) - len(tail) - len(suffix)
+        if room >= 12 or not loc_part:
+            body = short if len(short) <= room else _truncate_words(short, max(room, 12), ellipsis="")
+            return f"{prefix}{body}{tail}{suffix}"
+    return f"{prefix}{_truncate_words(short, 30, ellipsis='')}{suffix}"
 
 
 def _absolute(url: str | None) -> str | None:
@@ -480,10 +600,7 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
     # A multi-location lot advertises every city it sat in, not just the first.
     loc = " · ".join(inventory.location_labels(row)) or _location_str(row)
 
-    seo_title = f"{qty}× {title}" if qty else title
-    if loc:
-        seo_title += f" — {loc}"
-    seo_title += " | Black Whole Liquidation"
+    seo_title = _seo_title(qty, title, loc)
 
     desc_bits = []
     if qty:
@@ -492,17 +609,27 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         desc_bits.append(f"${row['price_per_chair']:.0f}/chair")
     if loc:
         desc_bits.append(("sourced from " if sold else "pickup in ") + loc)
+    # The lead (count · price · every city) is the part that must survive —
+    # the title only has room for the first city, so a multi-location lot's
+    # other cities live here. The scraped title is shortened first and the
+    # scraped description only fills whatever room is left.
+    name = _truncate_words(_short_title(title), 50, ellipsis="")
     if sold:
-        lead = f"{title} — this lot has sold" + (
+        lead = f"{name} — this lot has sold" + (
             f" ({' · '.join(desc_bits)})." if desc_bits else "."
-        ) + " We buy sets like it every week; ask us about the next one."
+        )
+        tail = " We buy sets like it every week; ask us about the next one."
+        if len(lead) + len(tail) <= SEO_DESCRIPTION_MAX:
+            lead += tail
     else:
-        lead = f"{title} for sale in bulk" + (
+        lead = f"{name} for sale in bulk" + (
             f" — {' · '.join(desc_bits)}." if desc_bits else "."
         )
     body = (row.get("description") or "").strip()
-    if body:
-        lead += " " + (body[:150] + "…" if len(body) > 150 else body)
+    room = SEO_DESCRIPTION_MAX - len(lead) - 1
+    if body and room >= 20:
+        lead += " " + _truncate_words(body, room)
+    lead = _truncate_words(lead, SEO_DESCRIPTION_MAX)
 
     address = {
         k: v for k, v in {
@@ -541,13 +668,52 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
     if body:
         product["description"] = body
 
+    crumb_name = _truncate_words(_short_title(title), 60, ellipsis="")
     return {
         "seo_title": seo_title,
         "seo_description": lead,
         "og_image": _absolute(hero) or (imgs[0] if imgs else None),
         # </ escaped so a scraped description can't close the <script> tag
         "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
+        "breadcrumb_jsonld": _breadcrumb_jsonld([
+            ("Home", "/"), ("Inventory", "/listings"),
+            (crumb_name, f"/listings/{row.get('lot_id')}"),
+        ]),
+        "crumb_name": crumb_name,
     }
+
+
+def _indexable(row: dict, hero: str | None, images: list[str]) -> bool:
+    """Should Google index this lot page? Mirrors the sitemap: a live public
+    lot, or a sold lot that earns a showcase card (real headcount + a photo).
+    Everything else (lost, hidden, half-imported folder rows) still renders
+    for anyone holding a link, but carries noindex so it can't drag the site
+    down as a pile of thin orphan pages."""
+    status = row.get("status")
+    remaining = row.get("quantity_remaining")
+    if status in inventory.PUBLIC_STATUSES and (remaining is None or remaining > 0):
+        return True
+    if inventory.is_sold(row) and (row.get("quantity_original") or 0) > 0 and (hero or images):
+        return True
+    return False
+
+
+def _canonical_twin(row: dict) -> str | None:
+    """A `<lot>-sold` showcase row is the same chairs as `<lot>` (the operator
+    keeps a sold copy next to a live lot for the archive strip). Point its
+    canonical at the live page so Google sees one lot, not two near-identical
+    ones."""
+    lot_id = str(row.get("lot_id") or "")
+    if not lot_id.endswith("-sold") or not inventory.is_sold(row):
+        return None
+    base = lot_id[: -len("-sold")]
+    try:
+        twin = inventory.get(base)
+    except Exception:  # noqa: BLE001 — a lookup failure must not break the page
+        return None
+    if twin and twin.get("status") != "hidden":
+        return f"{PUBLIC_BASE_URL}/listings/{base}"
+    return None
 
 
 def _hero_src(row: dict) -> str | None:
@@ -668,6 +834,8 @@ def public_listing_detail(request: Request, lot_id: str):
                 "default_qty": _freight_default_qty(row),
             },
             "nearby": near,
+            "robots_noindex": not _indexable(row, hero, images),
+            "canonical_url": _canonical_twin(row),
             **_detail_seo(row, hero, images),
         }),
     )
@@ -1562,6 +1730,7 @@ async def robots_txt():
         "Disallow: /admin\n"
         "Disallow: /api/\n"
         "Disallow: /deals\n"
+        "Disallow: /reserve/\n"
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
@@ -1577,6 +1746,13 @@ def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
 
 @app.get("/sitemap.xml")
 def sitemap_xml():
+    return Response(content=_sitemap_body(), media_type="application/xml")
+
+
+@readcache.cached(ttl=300)
+def _sitemap_body() -> str:
+    """Crawlers re-fetch the sitemap constantly; two inventory queries per hit
+    is wasted pooler time. Any write through the admin API drops the memo."""
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     for path in ("/", "/listings", "/map", "/sell", "/terms", "/privacy"):
@@ -1591,7 +1767,7 @@ def sitemap_xml():
             lastmod = updated.date().isoformat() if hasattr(updated, "date") else str(updated)[:10]
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}/listings/{row['lot_id']}", lastmod)
     body += "</urlset>\n"
-    return Response(content=body, media_type="application/xml")
+    return body
 
 
 @app.get("/catalog/facebook.csv")

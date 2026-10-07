@@ -25,7 +25,7 @@ function popupHtml(p) {
   const where = [p.city, p.state].filter(Boolean).join(', ');
   const cta = p.kind === 'favorite' ? 'Message us to reserve →' : 'View lot →';
   return `<div class="map-pop b-${esc(p.bucket)}">
-    ${p.hero ? `<img src="${esc(p.hero)}" alt="" loading="lazy">` : ''}
+    ${p.hero ? `<img src="${esc(p.hero)}" alt="${esc(p.title)}" loading="lazy">` : ''}
     <div class="map-pop-title">${esc(p.title)}</div>
     <div class="mono tiny">${esc(BUCKET_LABEL[p.bucket] || p.bucket)}${p.precision !== 'city' ? ' · approx' : ''} · ${esc(where)}</div>
     <div class="mono">${qty}${price}${p.distance_mi != null ? ` · ${esc(p.distance_mi)} mi` : ''}</div>
@@ -36,7 +36,7 @@ function popupHtml(p) {
 function listItemHtml(p) {
   const where = [p.city, p.state].filter(Boolean).join(', ');
   return `<a class="map-item b-${esc(p.bucket)}" href="${esc(p.url)}" data-id="${esc(p.id)}">
-    ${p.hero ? `<img src="${esc(p.hero)}" alt="" loading="lazy">` : '<span class="map-item-noimg"></span>'}
+    ${p.hero ? `<img src="${esc(p.hero)}" alt="${esc(p.title)}" loading="lazy">` : '<span class="map-item-noimg"></span>'}
     <span class="map-item-body">
       <span class="map-item-title">${esc(p.title)}</span>
       <span class="mono tiny">${esc(BUCKET_LABEL[p.bucket] || p.bucket)} · ${esc(where)}${p.distance_mi != null ? ` · ${esc(p.distance_mi)} mi` : ''}</span>

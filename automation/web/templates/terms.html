@@ -11,6 +11,7 @@
 {% block body_class %}page-terms{% endblock %}
 
 {% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "Terms") }}
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">THE FINE PRINT · PLAIN ENGLISH</div>

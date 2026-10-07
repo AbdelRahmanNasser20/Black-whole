@@ -11,11 +11,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Fraunces:opsz,wght@9..144,300;9..144,400;9..144,600;9..144,800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/ui/tokens.css?v={{ asset_v }}">
-  <link rel="stylesheet" href="/static/site/site.css?v={{ now }}">
+  <link rel="stylesheet" href="/static/site/site.css?v={{ asset_v }}">
 {% endblock %}
 {% block head %}
   <meta name="description" content="{% block meta_description %}Bulk banquet and stacking chairs for sale — wholesale lots from Black Whole Liquidation. Local pickup and nationwide freight.{% endblock %}">
-  <link rel="canonical" href="{{ base_url }}{{ request.url.path }}">
+  <link rel="canonical" href="{{ canonical_url or (base_url ~ request.url.path) }}">
+  {% if robots_noindex %}<meta name="robots" content="noindex,follow">{% endif %}
   {% if google_site_verification %}<meta name="google-site-verification" content="{{ google_site_verification }}">{% endif %}
   <meta property="og:site_name" content="Black Whole Liquidation">
   <meta property="og:type" content="{% block og_type %}website{% endblock %}">
@@ -26,9 +27,14 @@
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "Organization",
+    "@type": ["Organization", "LocalBusiness"],
     "name": "Black Whole Liquidation",
-    "url": {{ (base_url ~ "/") | tojson }}{% if facebook_business_url %},
+    "url": {{ (base_url ~ "/") | tojson }},
+    "description": "Bulk banquet, stacking and event chairs sold by the lot — local pickup or nationwide freight.",
+    "areaServed": "US"{% if contact.email %},
+    "email": {{ contact.email | tojson }}{% endif %}{% if contact.phone %},
+    "telephone": {{ contact.phone | tojson }}{% endif %}{% if contact.street or contact.city %},
+    "address": {"@type": "PostalAddress", "addressCountry": "US"{% if contact.street %}, "streetAddress": {{ contact.street | tojson }}{% endif %}{% if contact.city %}, "addressLocality": {{ contact.city | tojson }}{% endif %}{% if contact.region %}, "addressRegion": {{ contact.region | tojson }}{% endif %}{% if contact.postal %}, "postalCode": {{ contact.postal | tojson }}{% endif %}}{% endif %}{% if facebook_business_url %},
     "sameAs": [{{ facebook_business_url | tojson }}]{% endif %}
   }
   </script>
@@ -95,6 +101,17 @@
         <div class="foot-label">SHIPPING RANGE</div>
         <div>Continental US · Local pickup preferred</div>
       </div>
+      {% if contact %}
+      <div class="foot-col foot-contact">
+        <div class="foot-label">CONTACT</div>
+        {% if contact.email %}<a href="mailto:{{ contact.email }}">{{ contact.email }}</a>{% endif %}
+        {% if contact.phone %}<a href="tel:{{ contact.phone | replace(' ', '') | replace('-', '') | replace('(', '') | replace(')', '') }}">{{ contact.phone }}</a>{% endif %}
+        {% if contact.street or contact.city %}<address class="foot-address">
+          {%- if contact.street %}{{ contact.street }}<br>{% endif -%}
+          {{ contact.city }}{% if contact.region %}, {{ contact.region }}{% endif %} {{ contact.postal or '' }}
+        </address>{% endif %}
+      </div>
+      {% endif %}
       {% if facebook_business_url %}
       <div class="foot-col">
         <div class="foot-label">SOCIAL</div>
