@@ -16,6 +16,10 @@ Rules (keep them):
 - Retention: rows older than SITE_VISITS_RETENTION_DAYS (90) are deleted at
   most once per process per day — the DB sits at the 500 MB free-tier line.
 - Off switch: SITE_VISITS=off.
+- Click-only lead events (a `tel:`/`mailto:` click, posted by site.js to
+  `POST /event`) are stored in the same table as path `/_event/<kind>` with the
+  visitor's first-touch attribution; `summary()` leaves them out and the lead
+  funnel report (`scripts/lead_funnel_report.py`) counts them as leads.
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ from datetime import date
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
+from .. import attribution
 from .. import db
 
 log = logging.getLogger(__name__)
@@ -46,6 +51,9 @@ _BOT_RE = re.compile(
 )
 _TRACKED_EXACT = {"/", "/listings"}
 _TRACKED_PREFIX = ("/listings/", "/chairs", "/about")  # city pages + about (PRs #128/#129)
+# Click-only lead events (POST /event). Stored as path "/_event/<kind>".
+EVENT_KINDS = ("tel_click", "mailto_click")
+EVENT_PREFIX = "/_event/"
 
 _state: dict[str, Any] = {"down_until": 0.0, "retention_day": None}
 
@@ -156,11 +164,46 @@ def track(request, *, lot_id: str | None = None) -> bool:
     return True
 
 
+def track_event(request, payload: dict) -> bool | None:
+    """Store a click-only lead event as a `site_visits` row (path `/_event/<kind>`).
+
+    Returns None for an unknown kind (the caller answers 400), False when the
+    row was dropped (off switch, bot or empty user-agent), True when it was
+    scheduled on the daemon thread. Never touches the DB on the caller's thread.
+    """
+    kind = str(payload.get("kind") or "").strip()
+    if kind not in EVENT_KINDS:
+        return None
+    if not enabled():
+        return False
+    ua = request.headers.get("user-agent") or ""
+    if not ua or _BOT_RE.search(ua):
+        return False
+    attr = attribution.from_payload(payload)
+    headers = dict(request.headers)
+    client_ip = request.client.host if request.client else None
+    fwd = (headers.get("x-forwarded-for") or "").split(",")[0].strip() or None
+    row = {
+        "path": EVENT_PREFIX + kind,
+        "lot_id": _clip(payload.get("lot_id"), 120),
+        "utm_source": _clip(attr["source"]),
+        "utm_medium": _clip(attr["medium"]),
+        "utm_campaign": _clip(attr["campaign"]),
+        "referer_host": _clip(attr["referrer"], 120),
+        "visitor": _visitor_hash(fwd or client_ip, ua),
+        "country": _clip(headers.get("cf-ipcountry"), 2),
+    }
+    _runner(_insert, row)
+    return True
+
+
 def summary(days: int = 30) -> dict:
-    """Admin rollup: views + unique visitors by campaign, by day, by lot, top referers."""
+    """Admin rollup: views + unique visitors by campaign, by day, by lot, top referers.
+    Click-only lead events (`/_event/*`) are left out — they are leads, not views."""
     days = max(1, min(int(days), 365))
     since = ("%s days",)
-    where = "ts >= now() - (%s || ' days')::interval"
+    # `%%` because psycopg formats `%s` params; the literal pattern needs an escaped percent.
+    where = "ts >= now() - (%s || ' days')::interval AND path NOT LIKE '/_event/%%'"
     p = (str(days),)
     by_campaign = db.fetch_all(
         f"SELECT coalesce(utm_source,'(direct)') AS source, coalesce(utm_campaign,'(none)') AS campaign,"

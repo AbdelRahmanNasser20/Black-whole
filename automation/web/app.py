@@ -9,6 +9,7 @@ Routes:
   GET  /image/{folder}/{name} → serve image from a listing folder
   GET  /screenshot/{folder}/{name} → serve a Playwright screenshot
   POST /subscribe             → public alerts signup → subscribers table
+  POST /event                 → public click-only lead event (tel:/mailto:) → site_visits
   GET/PATCH/DELETE /api/subscribers[/{id}] → admin Subscribers tab
 
 Streams stdout from run.py as Server-Sent Events. Parses
@@ -74,6 +75,7 @@ from ..channels import sync as channel_sync
 from .. import stripe_gateway
 from .. import freight_estimate
 from .. import freight_log
+from .. import attribution
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
 from . import deals_query
@@ -2037,8 +2039,10 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
 @app.post("/contact")
 async def public_contact(payload: dict):
     payload = payload or {}
+    attr = attribution.from_payload(payload)   # pure: no I/O on the loop
     try:
         row = await asyncio.to_thread(lambda: inventory.create_inquiry(
+            attribution=attr,
             kind=(payload.get("kind") or "buy").strip(),
             name=(payload.get("name") or "").strip(),
             email=(payload.get("email") or "").strip() or None,
@@ -2085,8 +2089,10 @@ async def _notify_new_subscriber(row: dict) -> None:
 @app.post("/subscribe")
 async def public_subscribe(payload: dict):
     payload = payload or {}
+    attr = attribution.from_payload(payload)   # pure: no I/O on the loop
     try:
         row = await asyncio.to_thread(lambda: inventory.create_subscriber(
+            attribution=attr,
             name=(payload.get("name") or "").strip() or None,
             email=(payload.get("email") or "").strip() or None,
             phone=(payload.get("phone") or "").strip() or None,
@@ -2110,6 +2116,28 @@ async def public_subscribe(payload: dict):
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
+
+
+EVENT_PER_IP_LIMIT = 60   # per hour; a real person clicks a phone number once
+
+
+@app.post("/event")
+def public_event(payload: dict, request: Request):
+    """Click-only lead events (a `tel:` / `mailto:` link in the footer).
+
+    Those clicks never reach the server on their own, so site.js posts a
+    beacon here and it lands in `site_visits` as `/_event/<kind>` with the
+    visitor's first-touch attribution. Public path (outside `/api/`), bot
+    UAs dropped, per-IP rate-limited; the insert runs on the visits daemon
+    thread so this handler is a plain `def` and never touches the DB itself.
+    """
+    ip = rate_limit.client_ip(request)
+    if not rate_limit.allow(f"event:{ip}", limit=EVENT_PER_IP_LIMIT):
+        raise HTTPException(429, "rate_limited")
+    ok = visits.track_event(request, payload or {})
+    if ok is None:
+        raise HTTPException(400, "unknown event kind")
+    return {"ok": bool(ok)}
 
 
 # ── Freight estimate (public, self-serve) ────────────────────────────────────
@@ -2562,6 +2590,7 @@ async def public_freight_estimate(payload: dict, request: Request):
     """
     _freight_rate_ok(request)
     payload = payload or {}
+    attr = attribution.from_payload(payload)   # pure: no I/O on the loop
     lot_id = str(payload.get("lot_id") or "").strip()
     dest_zip = _freight_dest_zip(payload.get("dest_zip"))
 
@@ -2655,6 +2684,7 @@ async def public_freight_estimate(payload: dict, request: Request):
         client_ip=rate_limit.client_ip(request),
         unquotable_reason=reason,
         lot_quantity_remaining=remaining,
+        attribution=attr,
     )
     _spawn(
         _notify_freight_estimate(
@@ -2794,6 +2824,7 @@ async def reserve_checkout(lot_id: str, payload: dict):
     if not _reservable(row):
         raise HTTPException(400, "lot is not reservable")
     payload = payload or {}
+    attr = attribution.from_payload(payload)   # pure: no I/O on the loop
 
     remaining = int(row.get("quantity_remaining") or 0)
     try:
@@ -2830,6 +2861,7 @@ async def reserve_checkout(lot_id: str, payload: dict):
             buyer_name=name,
             buyer_email=email,
             buyer_phone=phone,
+            attribution=attr,
         )
     except ValueError as e:
         raise HTTPException(400, str(e))

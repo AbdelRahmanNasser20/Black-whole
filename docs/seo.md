@@ -66,6 +66,9 @@ Already installed: **Apollo website-visitor pixel** (`_public_base.html`, tracke
 
 Not installed on purpose: Google Analytics (cookie banner + consent work for no extra signal we would act on).
 
+3. **Leads per channel** (does any of this turn into leads?): `docs/analytics_leads_plan.md`. site.js stores the visitor's first-touch source and sends it with every lead POST; the server keeps it on `inquiries` / `subscribers` / `freight_quotes` / `deposits` (migration `scripts/sql/022_lead_attribution.sql`). Weekly: `.venv/bin/python scripts/lead_funnel_report.py --days 7`.
+4. **Cloudflare Zaraz** (free): `zaraz.track('lead', …)` fires from site.js on every lead; a no-op until Zaraz is enabled on the zone (steps in the plan). Web Analytics has no custom events, which is why Zaraz.
+
 ## Later (not built, deliberately)
 
 - Per-city landing pages ("chairs in Boise") — revisit when there are

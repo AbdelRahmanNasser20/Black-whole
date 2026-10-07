@@ -31,6 +31,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any
 
 from . import db, site_settings
+from . import attribution as attribution_mod
 
 DEPOSIT_KINDS = ("deposit", "full")
 DEPOSIT_STATUSES = (
@@ -162,20 +163,26 @@ def create_pending(
     buyer_email: str | None = None,
     buyer_phone: str | None = None,
     currency: str = "usd",
+    attribution: dict | None = None,
 ) -> dict:
     """Row first, Stripe session second — so a session we never see still has a
-    record to reconcile against."""
+    record to reconcile against. ``attribution`` (first-touch source, see
+    `automation/attribution.py`) is stored once migration 022 is applied."""
     if not lot_id or not str(lot_id).strip():
         raise ValueError("lot_id required")
     if not buyer_email and not buyer_phone:
         raise ValueError("email or phone required")
+    # Fixed column names from attribution.COLUMNS — never from the payload.
+    attr_cols, attr_vals = attribution_mod.insert_columns("deposits", attribution)
+    attr_sql = "".join(f", {c}" for c in attr_cols)
+    attr_ph = ", %s" * len(attr_cols)
     return db.fetch_one(
-        """
+        f"""
         INSERT INTO deposits (
             lot_id, kind, quantity, price_per_chair,
             subtotal_cents, amount_cents, deposit_pct, deposit_min_cents,
-            currency, buyer_name, buyer_email, buyer_phone, status
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending')
+            currency, buyer_name, buyer_email, buyer_phone, status{attr_sql}
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending'{attr_ph})
         RETURNING *
         """,
         (
@@ -191,6 +198,7 @@ def create_pending(
             (buyer_name or "").strip() or None,
             (buyer_email or "").strip() or None,
             (buyer_phone or "").strip() or None,
+            *attr_vals,
         ),
     )
 
