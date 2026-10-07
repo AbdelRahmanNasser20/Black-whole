@@ -1,4 +1,4 @@
-"""Give every inventory row a public URL slug (migration 022).
+"""Give every inventory row a public URL slug (migration 023).
 
     .venv/bin/python scripts/backfill_slugs.py            # dry run: prints lot_id → slug
     .venv/bin/python scripts/backfill_slugs.py --apply    # writes rows that have no slug
@@ -26,7 +26,7 @@ def main() -> int:
     args = ap.parse_args()
 
     if not inventory.has_slug_column():
-        print("inventory.slug is missing — apply scripts/sql/022_inventory_slug.sql first")
+        print("inventory.slug is missing — apply scripts/sql/023_inventory_slug.sql first")
         return 2
 
     rows = inventory.list_all()

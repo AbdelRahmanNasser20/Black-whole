@@ -128,7 +128,7 @@ def _pick(seed: str, options: tuple[str, ...]) -> str:
 
 def intro(rec: dict) -> str:
     label = rec["label"]
-    kinds = " and ".join(seo_copy._KIND_LABEL[k] for k in rec["kinds"][:2])
+    kinds = " and ".join(f"{seo_copy._KIND_WORD[k]} chairs" for k in rec["kinds"][:2])
     if rec["live"]:
         n = len(rec["live"])
         lots = f"{n} lot{'s' if n != 1 else ''}"
@@ -186,7 +186,7 @@ def page(slug: str) -> dict | None:
     rec["faq"] = faq(rec)
     rec["faq_jsonld"] = seo_copy.faq_jsonld(rec["faq"])
     rec["title"] = f"Bulk Banquet Chairs for Sale in {rec['label']} | Black Whole"
-    kinds = " and ".join(seo_copy._KIND_LABEL[k] for k in rec["kinds"][:2])
+    kinds = " and ".join(f"{seo_copy._KIND_WORD[k]} chairs" for k in rec["kinds"][:2])
     rec["description"] = (
         f"Used {kinds} in {rec['label']} sold by the lot — "
         + (f"{rec['chairs']:,} chairs on the floor, " if rec["live"] else "")

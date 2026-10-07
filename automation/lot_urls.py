@@ -6,7 +6,7 @@ feeds and the Product JSON-LD `sku`. Google reads it as an opaque code, and
 anyone can paste it back into GovDeals to find the auction (the biggest open
 leak after the image disguise). A lot now gets a descriptive slug
 (`2500-wire-frame-stacking-chairs-pittsburgh-pa`) stored in `inventory.slug`
-(migration 022). The id route still works and 301s to the slug, so every
+(migration 023). The id route still works and 301s to the slug, so every
 Facebook post, feed row and short link ever sent keeps resolving.
 
 Rules:

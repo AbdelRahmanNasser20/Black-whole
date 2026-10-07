@@ -1,6 +1,6 @@
--- 022_inventory_slug.sql — descriptive public URL slug per lot (SEO city pages + clean URLs, 2026-10-07).
+-- 023_inventory_slug.sql — descriptive public URL slug per lot (SEO city pages + clean URLs, 2026-10-07).
 -- STATUS: PENDING — apply with:
---   .venv/bin/python scripts/apply_sql.py scripts/sql/022_inventory_slug.sql
+--   .venv/bin/python scripts/apply_sql.py scripts/sql/023_inventory_slug.sql
 -- then backfill:
 --   .venv/bin/python scripts/backfill_slugs.py --apply
 --

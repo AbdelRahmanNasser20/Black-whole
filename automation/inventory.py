@@ -202,7 +202,7 @@ def get(lot_id: str) -> dict | None:
 
 @lru_cache(maxsize=1)
 def has_slug_column() -> bool:
-    """True once migration 022 (`inventory.slug`) is applied. Cached per
+    """True once migration 023 (`inventory.slug`) is applied. Cached per
     process like the other column probes; any failure reads as absent so the
     storefront keeps serving `/listings/{lot_id}` URLs."""
     try:
@@ -239,7 +239,7 @@ def set_slug(lot_id: str, slug: str) -> None:
 
 
 def assign_slug(lot_id: str) -> str | None:
-    """Give a freshly inserted row its public slug (no-op before migration 022
+    """Give a freshly inserted row its public slug (no-op before migration 023
     or when the row already has one). A collision gets a short suffix from
     the lot id, then a counter — same scheme as scripts/backfill_slugs.py."""
     from automation import lot_urls  # local: lot_urls must stay import-light
@@ -522,7 +522,7 @@ def upsert_from_run(
             )
         conn.commit()
     if existing is None:
-        # New lot → public URL slug (migration 022). Existing rows keep theirs.
+        # New lot → public URL slug (migration 023). Existing rows keep theirs.
         try:
             assign_slug(str(lot_id))
         except Exception:  # noqa: BLE001 — a slug must never fail a run
