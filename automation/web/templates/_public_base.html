@@ -15,7 +15,7 @@
 {% endblock %}
 {% block head %}
   <meta name="description" content="{% block meta_description %}Bulk banquet and stacking chairs for sale — wholesale lots from Black Whole Liquidation. Local pickup and nationwide freight.{% endblock %}">
-  <link rel="canonical" href="{{ canonical_url or (base_url ~ request.url.path) }}">
+  {% if not no_canonical %}<link rel="canonical" href="{{ canonical_url or (base_url ~ request.url.path) }}">{% endif %}
   {% if robots_noindex %}<meta name="robots" content="noindex,follow">{% endif %}
   {% if google_site_verification %}<meta name="google-site-verification" content="{{ google_site_verification }}">{% endif %}
   <meta property="og:site_name" content="Black Whole Liquidation">

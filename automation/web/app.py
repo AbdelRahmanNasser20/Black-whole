@@ -54,6 +54,7 @@ from ..config import (
     PUBLIC_CONTACT_EMAIL,
     PUBLIC_CONTACT_PHONE,
 )
+from fastapi.exception_handlers import http_exception_handler as fastapi_http_exception_handler
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
@@ -151,22 +152,35 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
     counts a JSON 404 as a soft error on the whole site. API callers and
     anything not asking for HTML keep the JSON contract unchanged."""
     wants_html = "text/html" in (request.headers.get("accept") or "")
-    if exc.status_code == 404 and wants_html and not request.url.path.startswith("/api/"):
+    path = request.url.path
+    storefront = not path.startswith(_NON_STOREFRONT_PREFIXES)
+    if exc.status_code == 404 and wants_html and storefront:
         lots = await asyncio.to_thread(_not_found_lots)
         return templates.TemplateResponse(
-            request, "404.html", _public_ctx({"lots": lots, "robots_noindex": True}),
+            request, "404.html",
+            _public_ctx({"lots": lots, "robots_noindex": True, "no_canonical": True}),
             status_code=404,
         )
-    headers = getattr(exc, "headers", None)
-    return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=headers)
+    return await fastapi_http_exception_handler(request, exc)
 
 
+# Paths whose 404 is never a buyer on a dead lot link: assets, JSON APIs,
+# feeds, the local-photo fallback. They keep FastAPI's default response.
+_NON_STOREFRONT_PREFIXES = ("/api/", "/static/", "/deals/api/", "/map/api/",
+                            "/catalog/", "/image/", "/stripe/")
+
+
+@readcache.cached(ttl=60)
 def _not_found_lots() -> list[dict]:
-    """Up to six live lots for the 404 page (threadpool: it touches the DB)."""
+    """Up to six live lots for the 404 page (threadpool: it touches the DB).
+    Memoised like _landing_data — a scanner sweeping /wp-admin, /.env, …
+    with a browser Accept header must not turn into a pooler round trip per
+    probe."""
     try:
-        return [_decorate(r) for r in inventory.list_public()][:6]
+        rows = inventory.list_public()[:6]
     except Exception:  # noqa: BLE001 — the 404 page must render without the DB
         return []
+    return [_decorate(r) for r in rows]
 
 
 # ───────────────────────────── run state ─────────────────────────────
@@ -482,7 +496,6 @@ def _reservable(row: dict | None) -> bool:
 def _public_ctx(extra: dict) -> dict:
     """Common context for every public-page template (footer link etc)."""
     return {
-        "now": int(time.time()),
         "facebook_business_url": FACEBOOK_BUSINESS_URL or None,
         "base_url": PUBLIC_BASE_URL,
         "google_site_verification": GOOGLE_SITE_VERIFICATION or None,
@@ -506,26 +519,20 @@ PUBLIC_CONTACT: dict = {
 }
 
 
-def _breadcrumb_jsonld(trail: list[tuple[str, str]]) -> str:
-    """BreadcrumbList JSON-LD for `trail` = [(name, path), ...]. The last item
-    is the current page. Escaped like the Product block so a scraped title
-    can't close the <script> tag."""
-    items = [
-        {"@type": "ListItem", "position": i, "name": name,
-         "item": f"{PUBLIC_BASE_URL}{path}"}
-        for i, (name, path) in enumerate(trail, start=1)
-    ]
-    data = {"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": items}
-    return json.dumps(data, ensure_ascii=False).replace("</", "<\\/")
-
-
 # <title> budget. Google shows ~60 characters on desktop and truncates the
 # rest with an ellipsis, so the brand goes on the short form and the scraped
 # lot title gets trimmed at a word boundary to fit.
 SEO_TITLE_MAX = 65
 SEO_DESCRIPTION_MAX = 155
 _BRAND_SHORT = "Black Whole"
-_TITLE_QTY_PREFIX = re.compile(r"^\s*(?:lot\s+of\s+)?~?\s*\d[\d,]*\s*(?:×|x)?\s+", re.I)
+# A leading number is a count ("~2,500 Wire Frame…", "Lot of 657 …") unless
+# the next word is a unit of measure ("8 ft Rectangular Tables", "60 in
+# Round Tables") — those are the Augusta table lots and the size stays.
+_TITLE_QTY_PREFIX = re.compile(
+    r"^\s*(?:lot\s+of\s+)?~?\s*\d[\d,]*\s*(?:×|x)?\s+"
+    r"(?!(?:ft|feet|foot|in|inch|inches|cm|mm|m|lb|lbs|ga|gauge|pc|pcs|piece|pieces)\b)",
+    re.I,
+)
 _TITLE_TRAILING_PAREN = re.compile(r"\s*\([^()]*\)\s*$")
 
 
@@ -539,20 +546,23 @@ def _short_title(title: str) -> str:
     return t.strip(" —–-·,") or (title or "").strip()
 
 
-_SEGMENT_SPLIT = re.compile(r"\s+[—–|·]\s+|,\s+|\s+-\s+")
+_SEGMENT_SPLIT = re.compile(r"(\s+[—–|·]\s+|,\s+|\s+-\s+)")
 
 
 def _truncate_words(text: str, limit: int, ellipsis: str = "…") -> str:
     """Cut `text` to at most `limit` characters. Prefers dropping whole
     descriptor segments (`… — Chrome Frame, Dark Plum Pad`) so the part that
-    names the product survives; falls back to a word boundary."""
+    names the product survives, keeping each segment's own separator;
+    falls back to a word boundary."""
     text = (text or "").strip()
     if len(text) <= limit:
         return text
     budget = max(limit - len(ellipsis), 0)
+    parts = _SEGMENT_SPLIT.split(text)  # [seg, sep, seg, sep, …]
     kept = ""
-    for seg in _SEGMENT_SPLIT.split(text):
-        candidate = f"{kept}, {seg}" if kept else seg
+    for i in range(0, len(parts), 2):
+        sep = parts[i - 1] if i else ""
+        candidate = f"{kept}{sep}{parts[i]}"
         if len(candidate) > budget:
             break
         kept = candidate
@@ -668,19 +678,22 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
     if body:
         product["description"] = body
 
-    crumb_name = _truncate_words(_short_title(title), 60, ellipsis="")
     return {
         "seo_title": seo_title,
         "seo_description": lead,
         "og_image": _absolute(hero) or (imgs[0] if imgs else None),
         # </ escaped so a scraped description can't close the <script> tag
         "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
-        "breadcrumb_jsonld": _breadcrumb_jsonld([
-            ("Home", "/"), ("Inventory", "/listings"),
-            (crumb_name, f"/listings/{row.get('lot_id')}"),
-        ]),
-        "crumb_name": crumb_name,
+        # Visible trail + BreadcrumbList come from the _crumbs.html macro.
+        "crumb_name": _truncate_words(_short_title(title), 60, ellipsis=""),
     }
+
+
+def _public_indexable_status(row: dict) -> bool:
+    """A live, public, in-stock lot — the sitemap's first half."""
+    remaining = row.get("quantity_remaining")
+    return (row.get("status") in inventory.PUBLIC_STATUSES
+            and (remaining is None or remaining > 0))
 
 
 def _indexable(row: dict, hero: str | None, images: list[str]) -> bool:
@@ -689,9 +702,7 @@ def _indexable(row: dict, hero: str | None, images: list[str]) -> bool:
     Everything else (lost, hidden, half-imported folder rows) still renders
     for anyone holding a link, but carries noindex so it can't drag the site
     down as a pile of thin orphan pages."""
-    status = row.get("status")
-    remaining = row.get("quantity_remaining")
-    if status in inventory.PUBLIC_STATUSES and (remaining is None or remaining > 0):
+    if _public_indexable_status(row):
         return True
     if inventory.is_sold(row) and (row.get("quantity_original") or 0) > 0 and (hero or images):
         return True
@@ -702,7 +713,8 @@ def _canonical_twin(row: dict) -> str | None:
     """A `<lot>-sold` showcase row is the same chairs as `<lot>` (the operator
     keeps a sold copy next to a live lot for the archive strip). Point its
     canonical at the live page so Google sees one lot, not two near-identical
-    ones."""
+    ones — but only while that page is itself indexable (live, public, in
+    stock); a canonical to a noindex page would drop both URLs."""
     lot_id = str(row.get("lot_id") or "")
     if not lot_id.endswith("-sold") or not inventory.is_sold(row):
         return None
@@ -711,7 +723,7 @@ def _canonical_twin(row: dict) -> str | None:
         twin = inventory.get(base)
     except Exception:  # noqa: BLE001 — a lookup failure must not break the page
         return None
-    if twin and twin.get("status") != "hidden":
+    if twin and _public_indexable_status(twin):
         return f"{PUBLIC_BASE_URL}/listings/{base}"
     return None
 
@@ -1760,6 +1772,8 @@ def _sitemap_body() -> str:
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.
     for row in [*inventory.list_public(), *inventory.list_sold_showcase()]:
+        if _canonical_twin(row):
+            continue  # its page points Google at the live lot; don't submit it
         updated = row.get("updated_at")
         lastmod = None
         if updated is not None:

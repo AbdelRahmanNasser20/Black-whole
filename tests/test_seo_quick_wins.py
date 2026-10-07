@@ -224,6 +224,57 @@ def test_gallery_images_carry_alt_and_dimensions(client, monkeypatch):
     assert 'width="800" height="600"' in client.get("/listings").text
 
 
+# ── review fixes (PR #127) ──
+
+def test_leading_measurement_is_not_treated_as_a_count():
+    assert web_app._short_title("8 ft Rectangular Banquet Tables (Augusta, GA)") == "8 ft Rectangular Banquet Tables"
+    assert web_app._short_title("60 in Round Tables") == "60 in Round Tables"
+    assert web_app._short_title('14 Round Folding Banquet Tables — 60" (Augusta, GA)') == 'Round Folding Banquet Tables — 60"'
+
+
+def test_truncation_keeps_the_original_separators():
+    assert web_app._truncate_words("Baltimore, MD · Atlanta, GA · Orlando, FL", 30) == "Baltimore, MD · Atlanta, GA…"
+    assert web_app._truncate_words("Chairs — Chrome Frame, Dark Plum Pad, Linkable", 22, ellipsis="") == "Chairs — Chrome Frame"
+
+
+def test_twin_keeps_own_canonical_when_base_is_not_indexable(client, monkeypatch):
+    base = dict(ROW, lot_id="gd-1-1", status="lost")
+    twin = dict(ROW, lot_id="gd-1-1-sold", status="lost_sold_out", quantity_remaining=0, quantity_original=50)
+    rows = {"gd-1-1": base, "gd-1-1-sold": twin}
+    monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: rows.get(lot_id))
+    html = client.get("/listings/gd-1-1-sold").text
+    assert 'rel="canonical" href="https://black-whole.com/listings/gd-1-1-sold"' in html
+
+
+def test_sitemap_skips_a_twin_that_canonicalises_elsewhere(client, monkeypatch):
+    live = dict(ROW, lot_id="gd-2-2", status="won_pickup")
+    twin = dict(ROW, lot_id="gd-2-2-sold", status="lost_sold_out", quantity_remaining=0, quantity_original=50)
+    monkeypatch.setattr(web_app.inventory, "list_public", lambda: [live])
+    monkeypatch.setattr(web_app.inventory, "list_sold_showcase", lambda limit=None: [twin])
+    monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: {"gd-2-2": live}.get(lot_id))
+    xml = client.get("/sitemap.xml").text
+    assert "/listings/gd-2-2</loc>" in xml
+    assert "gd-2-2-sold" not in xml
+
+
+def test_asset_and_api_404s_keep_the_default_response(client):
+    for path in ("/static/site/typo.css", "/map/api/nope", "/catalog/nope.csv"):
+        r = client.get(path, headers={"accept": "text/html"})
+        assert r.status_code == 404, path
+        assert "THAT ONE'S GONE" not in r.text, path
+
+
+def test_404_page_has_no_canonical_and_is_memoised(client, monkeypatch):
+    r = client.get("/listings/nope", headers={"accept": "text/html"})
+    assert 'rel="canonical"' not in r.text
+    calls = []
+    monkeypatch.setattr(web_app.inventory, "list_public", lambda: calls.append(1) or [dict(ROW)])
+    readcache.invalidate_all()
+    client.get("/listings/nope", headers={"accept": "text/html"})
+    client.get("/listings/nope2", headers={"accept": "text/html"})
+    assert len(calls) == 1
+
+
 def test_sitemap_is_memoised_but_invalidated_on_write(client, monkeypatch):
     first = client.get("/sitemap.xml").text
     assert "/listings/10340" in first

@@ -10,16 +10,13 @@
 {% endblock %}
 {% block head_extra %}
   <script type="application/ld+json">{{ product_jsonld | safe }}</script>
-  <script type="application/ld+json">{{ breadcrumb_jsonld | safe }}</script>
   <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
   <link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
 {% block body_class %}page-detail{% endblock %}
 
 {% block content %}
-<nav class="crumbs mono tiny" aria-label="Breadcrumb">
-  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> / <span aria-current="page">{{ crumb_name or item.title or 'LOT' }}</span>
-</nav>
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/"), ("Inventory", "/listings")], crumb_name or item.title or 'LOT') }}
 
 <section class="detail-top">
   <div class="detail-gallery">
