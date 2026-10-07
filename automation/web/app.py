@@ -79,6 +79,7 @@ from . import deals_query
 from . import public_deals
 from . import rate_limit
 from . import public_map
+from . import seo_copy
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -682,8 +683,7 @@ def _detail_seo(row: dict, hero: str | None, images: list[str]) -> dict:
         "seo_title": seo_title,
         "seo_description": lead,
         "og_image": _absolute(hero) or (imgs[0] if imgs else None),
-        # </ escaped so a scraped description can't close the <script> tag
-        "product_jsonld": json.dumps(product, ensure_ascii=False).replace("</", "<\\/"),
+        "product_jsonld": seo_copy.jsonld(product),
         # Visible trail + BreadcrumbList come from the _crumbs.html macro.
         "crumb_name": _truncate_words(_short_title(title), 60, ellipsis=""),
     }
@@ -756,10 +756,16 @@ def _landing_data() -> dict:
         state = (r.get("state") or "").strip().upper()
         city = (r.get("city") or "").strip().lower()
         return 0 if state in ("ID", "IDAHO") or "boise" in city else 1
-    featured = sorted(inventory.list_public(), key=_idaho_first)[:12]
+    rows = inventory.list_public()
+    featured = sorted(rows, key=_idaho_first)[:12]
     for r in featured:
         r["hero_src"] = _hero_src(r)
-    return {"counts": counts, "featured": featured}
+    # Floor price over EVERY public lot, not the 12 featured — it is the
+    # number the homepage intent line quotes next to the full chair count.
+    prices = [float(r["price_per_chair"]) for r in rows
+              if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
+    return {"counts": counts, "featured": featured,
+            "min_price": min(prices) if prices else None}
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -768,13 +774,49 @@ def public_landing(request: Request):
     try:
         data = _landing_data()
         counts, featured = data["counts"], data["featured"]
+        min_price = data.get("min_price")
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
+        min_price = None
     return templates.TemplateResponse(
         request, "landing.html",
-        _public_ctx({"stats": counts, "featured": featured}),
+        _public_ctx({
+            "stats": counts, "featured": featured,
+            "intent": _intent_line(counts, min_price),
+            "site_faq": seo_copy.SITE_FAQ,
+            "site_faq_jsonld": seo_copy.faq_jsonld(seo_copy.SITE_FAQ),
+        }),
     )
+
+
+def _intent_line(counts: dict, min_price: float | None) -> str | None:
+    """The one sentence a "bulk seating" searcher wants above the fold:
+    floor price, how many chairs, how many cities. Empty floor → no line."""
+    chairs = int(counts.get("chairs") or 0)
+    cities = int(counts.get("cities") or 0)
+    if not chairs:
+        return None
+    bits = []
+    if min_price:
+        bits.append(f"Bulk seating from ${min_price:,.0f} per chair")
+    else:
+        bits.append("Bulk seating priced by the chair")
+    bits.append(f"{chairs:,} chairs on the floor")
+    if cities:
+        bits.append(f"{cities} pickup cit{'y' if cities == 1 else 'ies'}")
+    bits.append("local pickup free or nationwide freight")
+    return " · ".join(bits) + "."
+
+
+@app.get("/about", response_class=HTMLResponse)
+def public_about(request: Request):
+    visits.track(request)
+    try:
+        counts = _landing_data()["counts"]
+    except Exception:  # noqa: BLE001 — the page reads fine without numbers
+        counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
+    return templates.TemplateResponse(request, "about.html", _public_ctx({"stats": counts}))
 
 
 def _short_link_redirect(code: str):
@@ -813,8 +855,28 @@ def public_listings(request: Request):
     return templates.TemplateResponse(
         request, "listings.html",
         _public_ctx({"items": items, "sold_items": sold_items,
-                     "cities": cities, "chair_types": chair_types}),
+                     "cities": cities, "chair_types": chair_types,
+                     "itemlist_jsonld": _itemlist_jsonld(items)}),
     )
+
+
+def _itemlist_jsonld(items: list[dict]) -> str:
+    """ItemList of the live lots for /listings — tells Google the page is a
+    catalogue of these products, so lot pages are found from it, not only
+    from the sitemap."""
+    data = {
+        "@context": "https://schema.org",
+        "@type": "ItemList",
+        "name": "Chair lots for sale",
+        "numberOfItems": len(items),
+        "itemListElement": [
+            {"@type": "ListItem", "position": i,
+             "url": f"{PUBLIC_BASE_URL}/listings/{r['lot_id']}",
+             "name": (r.get("title") or "Chair lot")}
+            for i, r in enumerate(items, start=1)
+        ],
+    }
+    return seo_copy.jsonld(data)
 
 
 @app.get("/listings/{lot_id}", response_class=HTMLResponse)
@@ -846,6 +908,7 @@ def public_listing_detail(request: Request, lot_id: str):
                 "default_qty": _freight_default_qty(row),
             },
             "nearby": near,
+            "copy": seo_copy.build(row, sold=row["is_sold"]),
             "robots_noindex": not _indexable(row, hero, images),
             "canonical_url": _canonical_twin(row),
             **_detail_seo(row, hero, images),
@@ -1767,7 +1830,7 @@ def _sitemap_body() -> str:
     is wasted pooler time. Any write through the admin API drops the memo."""
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/map", "/sell", "/terms", "/privacy"):
+    for path in ("/", "/listings", "/map", "/sell", "/about", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"
     # should land on our archive page and convert into a next-lot inquiry.

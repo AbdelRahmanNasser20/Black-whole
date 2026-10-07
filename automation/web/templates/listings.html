@@ -2,16 +2,19 @@
 {% block title %}Chair Lots for Sale — Bulk &amp; Wholesale | Black Whole{% endblock %}
 {% block meta_description %}Browse current bulk chair lots{% if cities %} with pickup in {{ cities | join(', ') }}{% endif %}. Banquet, stacking, and event seating sold wholesale by the lot.{% endblock %}
 {% block body_class %}page-listings{% endblock %}
+{% block head_extra %}
+{% if itemlist_jsonld %}<script type="application/ld+json">{{ itemlist_jsonld | safe }}</script>{% endif %}
+{% endblock %}
 
 {% block content %}
 {% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "INVENTORY") }}
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">MANIFEST · ACTIVE</div>
-    <h1 class="page-title"><span class="accent">◉</span> CURRENT INVENTORY</h1>
+    <h1 class="page-title"><span class="accent">◉</span> CHAIR LOTS FOR SALE</h1>
     <p class="page-lede">
-      Every lot on the floor. Counted, priced by the chair, moved by the pallet.
-      Click a card for the full manifest.
+      Every bulk lot on the floor — banquet, stacking and folding chairs, counted,
+      priced by the chair, moved by the pallet. Click a card for the full manifest.
     </p>
   </div>
   <div class="page-head-right mono tiny">
