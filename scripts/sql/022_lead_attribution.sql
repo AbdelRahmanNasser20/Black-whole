@@ -1,5 +1,5 @@
 -- 022 — first-touch lead attribution on every lead table (2026-10-07).
--- Status: PENDING — NOT applied to prod. Apply with
+-- Status: APPLIED to prod 2026-10-07. (Re-)apply with
 --   .venv/bin/python scripts/apply_sql.py scripts/sql/022_lead_attribution.sql
 -- Additive + idempotent. Safe to re-run. Nothing here is NOT NULL, so the
 -- CRM's own INSERTs into freight_quotes keep working untouched.
@@ -9,7 +9,7 @@
 -- the Google feed bring buyers who actually wrote in?" had no answer that did
 -- not depend on a JS beacon a blocker can drop. site.js now stores the
 -- visitor's FIRST-touch source (utm tags, referrer host, landing path) and
--- posts it with every lead; the server stores it on the row.
+-- posts it with every lead. The server stores it on the row.
 --
 -- RAW, NOT BUCKETED. The columns hold what the browser saw
 -- (attr_source='google', attr_referrer='m.facebook.com'); the channel label
