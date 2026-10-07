@@ -19,7 +19,7 @@ Everything below is the detail.
   - `site_visits` rows with `path = '/_event/tel_click'` or `'/_event/mailto_click'` — a click on the phone or email link (the browser posts a tiny beacon to `POST /event`; no new table).
 - **A sale** =
   - `deposits.status IN ('paid','refunded')` with `paid_at` set — money actually moved through Stripe (not live yet: `STRIPE_SECRET_KEY` unset).
-  - Until Stripe is live, a sale is recorded by hand: `freight_quotes.status='won'` on the Sales tab, or a row in `sales` (`thread_url, buyer_name, listing_lot_id, listing_title, sold_at`). The `sales` table has no source column, so hand sales are **counted but not attributed** to a channel. If that matters, add the lead's `attr_*` by hand in the note when closing.
+  - Until Stripe is live, a sale is recorded by hand: `freight_quotes.status='won'` on the Sales tab, or a row in `sales` (`thread_url, buyer_name, listing_lot_id, listing_title, sold_at`). The report prints these on one line (`HAND-RECORDED SALES`) — **counted, not attributed**: the `sales` table has no source column, and most real sales close in a Facebook chat or at pickup, off-site. If you want SEO → sale answered, note the buyer's channel (ask them, or copy the lead's `attr_*`) in the quote note when you mark it won.
 - **Attribution** = the five `attr_*` columns on each lead table (migration 022):
   - `attr_source`, `attr_medium`, `attr_campaign` — the `utm_*` tags on the link the buyer FIRST arrived on.
   - `attr_referrer` — the host that sent them (e.g. `m.facebook.com`), empty = typed/bookmark.
@@ -49,17 +49,17 @@ Everything below is the detail.
 2. Left menu **Analytics & Logs → Web Analytics**.
 3. If it says Enable, click **Enable** (Cloudflare injects the beacon; nothing to deploy).
 4. Weekly read: **Referrers** card (google, facebook, craigslist, ebay) and **Paths** (which lot pages).
-5. Set the date picker to the same window as the report (7 or 30 days).
+5. Set the date picker to the same window as the report (7 or 30 days) and add the filter **Exclude Bots = Yes** — without it the visit number includes the same scanners our own log does.
 
 **B. Zaraz (lead events in the Cloudflare dashboard) — free, 1,000,000 events/month**
 1. dash.cloudflare.com → **black-whole.com** → **Tag Management** (Zaraz).
-2. Click **Get started** if it is the first time. You do **not** need to add a third-party tool.
+2. Click **Get started** if it is the first time, then add **one tool** — Cloudflare only injects the `zaraz` script when at least one tool is enabled ([Zaraz FAQ](https://developers.cloudflare.com/zaraz/faq/)). Cheapest: **Add tool → Custom HTML**, name it `lead-counter`, leave the HTML empty, and give it a **trigger** of type *Track event* with event name `lead` (add a second trigger for `checkout_start`). Save.
 3. **Settings → "Auto-inject script"** must be ON (it is the default). From then on Cloudflare adds `zaraz` to every page it proxies.
-4. The site already calls `zaraz.track('lead', {kind, lot_id, source})` on every contact / subscribe / freight-quote / tel / mailto, and `checkout_start` when Stripe opens. Until step 3 those calls are a silent no-op.
-5. Read it at **Zaraz → Monitoring → Events**: counts by event name (`lead`, `checkout_start`). Click into an event to see `kind` / `lot_id` / `source`. Zaraz does not break events down by referrer — that join is the weekly script (§4).
+4. The site already calls `zaraz.track('lead', {kind, lot_id, source})` on every contact / subscribe / freight-quote / tel / mailto, and `checkout_start` when Stripe opens. Until steps 2–3 those calls are a silent no-op.
+5. Read it at **Zaraz → Monitoring → Events**: counts by event name (`lead`, `checkout_start`). The properties (`kind` / `lot_id` / `source`) are not shown there — they are visible in the browser with `zaraz.debug('<key>')` (Settings → Debug key). The per-channel join is the weekly script (§4), not Zaraz.
 
 **C. Verify within 24 h**
-1. Open black-whole.com from a Google search result on your phone; open a lot; click the phone number.
+1. Open black-whole.com from a Google search result on your phone; open a lot; click the phone number. (The phone/email links arrive with PR #127's footer and PR #128's `/about` — before those merge, use the freight form on a lot page instead: it is a `lead` too.)
 2. Cloudflare → Web Analytics → Referrers shows `google`.
 3. Cloudflare → Zaraz → Monitoring → Events shows 1 `lead`.
 4. `.venv/bin/python scripts/lead_funnel_report.py --days 1` shows 1 click under `google_organic` (after migration 022 for form leads; clicks work before it).

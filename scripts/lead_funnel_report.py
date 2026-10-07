@@ -154,6 +154,18 @@ def q_paid(days: int) -> list[dict]:
         f" count(*) AS n, coalesce(sum(amount_cents),0)/100.0 AS usd FROM deposits WHERE {where} GROUP BY 1,2,3", p)
 
 
+def q_manual_sales(days: int) -> dict:
+    """Sales the operator recorded by hand — a `sales` row, or a freight quote
+    marked `won` on the Sales tab. Counted, never attributed: neither table
+    carries a channel, and most real sales close in a chat or at pickup."""
+    w_sold, p_sold = _window("sold_at", days)
+    w_won, p_won = _window("status_changed_at", days)
+    sales = db.fetch_one(f"SELECT count(*) AS n FROM sales WHERE {w_sold}", p_sold) or {}
+    won = db.fetch_one(
+        f"SELECT count(*) AS n FROM freight_quotes WHERE status = 'won' AND {w_won}", p_won) or {}
+    return {"sales_rows": int(sales.get("n") or 0), "quotes_won": int(won.get("n") or 0)}
+
+
 def q_top_lots(days: int, limit: int = 10) -> list[dict]:
     """Lots with the most lead events (inquiries + storefront quotes + deposits + clicks)."""
     p = (str(days),) * 4
@@ -178,8 +190,13 @@ def collect(days: int) -> dict:
     }
     table = merge(q_visits(days), leads, q_paid(days))
     missing = [t for t in attribution.TABLES if not attribution.columns_ready(t)]
+    try:
+        manual = q_manual_sales(days)
+    except Exception:  # noqa: BLE001 — an older DB without `sales` must not kill the report
+        manual = {"sales_rows": 0, "quotes_won": 0}
     return {"days": days, "channels": table, "total": totals(table),
-            "top_lots": q_top_lots(days), "migration_missing": missing}
+            "top_lots": q_top_lots(days), "migration_missing": missing,
+            "manual_sales": manual}
 
 
 # ─────────────────────────────────── print ───────────────────────────────────
@@ -205,6 +222,9 @@ def render(data: dict) -> str:
         vals[9] = f"{vals[9]:.2f}"
         vals[11] = f"{vals[11]:,.0f}"
         lines.append(fmt.format(name, *vals))
+    manual = data.get("manual_sales") or {}
+    lines += ["", f"HAND-RECORDED SALES — last {days} days (counted, not attributed): "
+              f"{int(manual.get('sales_rows') or 0)} sales rows · {int(manual.get('quotes_won') or 0)} quotes marked won"]
     if data["migration_missing"]:
         lines += ["", f"NOTE: leads are '{UNATTRIBUTED}' for {', '.join(data['migration_missing'])} — "
                   + attribution.MIGRATION_HINT]
