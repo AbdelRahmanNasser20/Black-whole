@@ -29,7 +29,7 @@ from typing import Any
 
 from psycopg.types.json import Jsonb
 
-from .. import config, db
+from .. import config, db, lot_urls
 from . import email_sender as es
 from .matcher import CHANNEL_EMAIL, Match, Skip, match_lot
 
@@ -138,7 +138,7 @@ def compose_email(sub: dict, lot: dict) -> es.EmailMessage:
     qty = lot.get("quantity_remaining")
     price = lot.get("price_per_chair")
     loc = _lot_location(lot)
-    listing_url = f"{config.PUBLIC_BASE_URL.rstrip('/')}/listings/{lot.get('lot_id')}"
+    listing_url = f"{config.PUBLIC_BASE_URL.rstrip('/')}{lot_urls.public_path(lot)}"
     unsub = unsubscribe_url(sub)
 
     subject = f"New chairs near you: {title}"

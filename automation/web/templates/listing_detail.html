@@ -17,7 +17,10 @@
 {% block body_class %}page-detail{% endblock %}
 
 {% block content %}
-{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/"), ("Inventory", "/listings")], crumb_name or item.title or 'LOT') }}
+{% from "_crumbs.html" import crumbs with context %}
+{%- set trail = [("Home", "/"), ("Inventory", "/listings")] -%}
+{%- if city_crumb %}{% set trail = trail + [city_crumb] %}{% endif -%}
+{{ crumbs(trail, crumb_name or item.title or 'LOT') }}
 
 <section class="detail-top">
   <div class="detail-gallery">

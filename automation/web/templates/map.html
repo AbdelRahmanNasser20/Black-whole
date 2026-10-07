@@ -45,6 +45,23 @@
        data-list="#map-list" data-count="#map-count"></div>
   <aside id="map-list" class="map-list" data-state="loading"></aside>
 </section>
+
+{% if cities %}
+{#- Server-rendered so a crawler (which never runs map.js) still sees every
+    pickup city and the page behind it. -#}
+<section class="city-index city-index--map">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">PICKUP CITIES</h2>
+    <a class="see-all mono" href="/chairs">ALL CITIES →</a>
+  </div>
+  <ul class="city-list city-list--inline">
+    {% for c in cities %}
+    <li><a href="{{ c.path }}">{{ c.label }}{% if c.live %} <span class="mono tiny">{{ "{:,}".format(c.chairs) }}</span>{% endif %}</a></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>

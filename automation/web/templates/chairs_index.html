@@ -1,0 +1,42 @@
+{% extends "_public_base.html" %}
+{#- templates/chairs_index.html — /chairs: every pickup city with a page (SEO city pages, 2026-10-07).
+    Context: cities = city_pages.listing() (live-chair count desc). -#}
+{% block title %}Bulk Chairs by City — Pickup Locations | Black Whole{% endblock %}
+{% block meta_description %}Every city where Black Whole has bulk banquet, stacking or folding chair lots staged for free local pickup — plus what has already moved through each one.{% endblock %}
+{% block body_class %}page-cities{% endblock %}
+
+{% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "CITIES") }}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">PICKUP CITIES</div>
+    <h1 class="page-title">CHAIRS BY CITY</h1>
+    <p class="page-lede">
+      Lots are staged where they were bought. Pick a city for what is on the floor there,
+      what is within driving distance, and what has already moved through.
+    </p>
+  </div>
+</section>
+
+<section class="city-index">
+  <ul class="city-list">
+    {% for c in cities %}
+    <li class="city-row{% if not c.live %} city-row--quiet{% endif %}">
+      <a href="{{ c.path }}">
+        <span class="city-name">{{ c.label }}</span>
+        <span class="mono tiny">
+          {%- if c.live %}{{ c.live | length }} LOT{% if c.live | length != 1 %}S{% endif %} · {{ "{:,}".format(c.chairs) }} CHAIRS{% if c.min_price %} · FROM ${{ "%.0f"|format(c.min_price) }}{% endif %}
+          {%- else %}NOTHING ON THE FLOOR{% endif %}
+          {%- if c.moved %} · {{ "{:,}".format(c.moved) }} MOVED{% endif -%}
+        </span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+  <p class="mono tiny">Not near any of these? Freight is quoted per ZIP on every lot page. <a href="/map">SEE THE MAP →</a></p>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+{% endblock %}
