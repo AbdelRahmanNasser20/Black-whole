@@ -157,6 +157,18 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://black-whole.com").rstrip
 # <meta name="google-site-verification" content="...">. See docs/seo.md.
 GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")
 
+# Public business identity (NAP) — rendered in the storefront footer and the
+# Organization/LocalBusiness JSON-LD so search engines can tie the site to a
+# real business (E-E-A-T). The phone is blank until the operator opts in;
+# the address is the registered business address already on the CAN-SPAM
+# footer and WHOIS, never the storage facility (`inventory.storage_note`).
+PUBLIC_CONTACT_EMAIL = os.getenv("PUBLIC_CONTACT_EMAIL", "abdel.nasser@black-whole.com")
+PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "")
+PUBLIC_ADDRESS_STREET = os.getenv("PUBLIC_ADDRESS_STREET", "18220 N 68th St")
+PUBLIC_ADDRESS_CITY = os.getenv("PUBLIC_ADDRESS_CITY", "Phoenix")
+PUBLIC_ADDRESS_REGION = os.getenv("PUBLIC_ADDRESS_REGION", "AZ")
+PUBLIC_ADDRESS_POSTAL = os.getenv("PUBLIC_ADDRESS_POSTAL", "85054")
+
 DEWATERMARK_API_KEY = os.getenv("DEWATERMARK_API_KEY")
 DEWATERMARK_API_URL = "https://platform.dewatermark.ai/api/object_removal/v2/erase_watermark"
 

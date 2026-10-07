@@ -11,14 +11,12 @@
 {% block head_extra %}
   <script type="application/ld+json">{{ product_jsonld | safe }}</script>
   <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
-  <link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
+  <link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
 {% block body_class %}page-detail{% endblock %}
 
 {% block content %}
-<nav class="crumbs mono tiny">
-  <a href="/">HOME</a> / <a href="/listings">INVENTORY</a> / <span>{{ item.title or 'LOT' }}</span>
-</nav>
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/"), ("Inventory", "/listings")], crumb_name or item.title or 'LOT') }}
 
 <section class="detail-top">
   <div class="detail-gallery">
@@ -26,7 +24,7 @@
       <div class="gal-main">
         <img id="gal-main-img"
              src="{{ hero or images[0] }}"
-             alt="{{ item.title }}">
+             alt="{{ item.title }}" fetchpriority="high" width="1200" height="900">
         <div class="lot-stamp lot-stamp--big{% if item.is_sold %} lot-stamp--sold{% endif %}">
           {% if item.is_sold %}SOLD
           {%- elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE
@@ -37,7 +35,7 @@
       <div class="gal-thumbs">
         {% for img in images %}
           <button class="gal-thumb" data-src="{{ img }}" aria-label="view image">
-            <img src="{{ img }}" alt="" loading="lazy">
+            <img src="{{ img }}" alt="{{ item.title }} — photo {{ loop.index }}" loading="lazy" width="200" height="150">
           </button>
         {% endfor %}
       </div>
@@ -228,6 +226,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
-<script type="module" src="/static/site/map.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+<script type="module" src="/static/site/map.js?v={{ asset_v }}"></script>
 {% endblock %}

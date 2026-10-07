@@ -1,12 +1,13 @@
 {% extends "_public_base.html" %}
-{% block title %}Where the chairs are — Black Whole Liquidation{% endblock %}
+{% block title %}Chair Lot Map — Where the Chairs Are | Black Whole{% endblock %}
 {% block meta_description %}Every Black Whole chair lot on one map — available, incoming and sold. Search near your city.{% endblock %}
 {% block body_class %}page-map{% endblock %}
 {% block head_extra %}
 <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
-<link rel="stylesheet" href="/static/site/map.css?v={{ now }}">
+<link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
 {% endblock %}
 {% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "MAP") }}
 <section class="page-head">
   <div class="section-rule"></div>
   <h1 class="display">Where the chairs are</h1>
@@ -46,6 +47,6 @@
 </section>
 {% endblock %}
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
-<script type="module" src="/static/site/map.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+<script type="module" src="/static/site/map.js?v={{ asset_v }}"></script>
 {% endblock %}

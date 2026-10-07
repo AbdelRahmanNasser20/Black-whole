@@ -1,0 +1,59 @@
+{% extends "_public_base.html" %}
+{#- templates/404.html — rendered by app.py::_http_exception_handler for any storefront URL that
+    doesn't exist (old Facebook post, feed link to a pulled lot, typo). Context: `lots` = up to six
+    live lots from inventory.list_public() (may be empty when the DB is down). Always noindex. -#}
+{% block title %}Page not found | Black Whole Liquidation{% endblock %}
+{% block meta_description %}That lot or page isn't here any more. Browse the chair lots on the floor right now, or tell us what you need.{% endblock %}
+{% block body_class %}page-404{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">404 · NOT ON THE FLOOR</div>
+    <h1 class="page-title">THAT ONE'S GONE</h1>
+    <p class="page-lede">
+      The lot or page you followed isn't here any more — sold, pulled, or the link
+      was wrong. The chairs below are. Tell us what you need and we'll point you
+      at the closest match.
+    </p>
+    <p>
+      <a class="btn btn-primary" href="/listings">BROWSE CURRENT LOTS →</a>
+      <a class="btn btn-ghost" href="/#contact">TELL US WHAT YOU NEED</a>
+    </p>
+  </div>
+</section>
+
+{% if lots %}
+<section class="floor">
+  <div class="section-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">ON THE FLOOR NOW</h2>
+  </div>
+  <div class="lot-grid">
+    {% for item in lots %}
+    <a class="lot-card" href="/listings/{{ item.lot_id }}">
+      <div class="lot-img">
+        {% if item.hero_src %}
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+        {% else %}
+          <div class="lot-img-fallback">◉</div>
+        {% endif %}
+      </div>
+      <div class="lot-body">
+        <div class="lot-title">{{ item.title }}</div>
+        <div class="lot-meta mono tiny">
+          {%- if item.location_labels %}{{ item.location_labels | join(' · ') }}{% endif -%}
+          {%- if item.quantity_remaining %} · {{ "{:,}".format(item.quantity_remaining) }} {{ item.unit }}S{% endif -%}
+          {%- if item.price_per_chair %} · ${{ "%.0f" | format(item.price_per_chair) }}/EA{% endif -%}
+        </div>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+{% endblock %}

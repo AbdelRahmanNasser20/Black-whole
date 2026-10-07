@@ -1,0 +1,18 @@
+{#- templates/_crumbs.html — visible breadcrumb trail + BreadcrumbList JSON-LD (SEO quick wins, 2026-10-07).
+    Usage: {% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/"), ("Inventory", "/listings")], "Current page") }}
+    `trail` = [(name, path), ...] for the ancestors; `current` is the page itself (no link). The JSON-LD is
+    built here from the same list so the markup and the visible trail can never drift apart. -#}
+{% macro crumbs(trail, current) -%}
+<nav class="crumbs mono tiny" aria-label="Breadcrumb">
+  {%- for name, path in trail %}<a href="{{ path }}">{{ name | upper }}</a> / {% endfor -%}
+  <span aria-current="page">{{ current }}</span>
+</nav>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "BreadcrumbList", "itemListElement": [
+  {%- for name, path in trail %}
+  {"@type": "ListItem", "position": {{ loop.index }}, "name": {{ name | tojson }}, "item": {{ (base_url ~ path) | tojson }}},
+  {%- endfor %}
+  {"@type": "ListItem", "position": {{ trail | length + 1 }}, "name": {{ current | tojson }}, "item": {{ (base_url ~ request.url.path) | tojson }}}
+]}
+</script>
+{%- endmacro %}

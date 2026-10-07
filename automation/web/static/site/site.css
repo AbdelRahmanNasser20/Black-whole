@@ -765,6 +765,8 @@ a:hover { color: var(--accent); }
 .foot-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.22em; color: var(--foot-muted); margin-bottom: 8px; }
 .foot-col a { color: var(--bg); text-decoration: none; border-bottom: 1px solid var(--accent); padding-bottom: 1px; }
 .foot-col a:hover { color: var(--accent); }
+.foot-address { font-style: normal; line-height: 1.5; }
+.page-404 .page-head .btn { margin: 18px 10px 0 0; }
 .foot-rule { height: 1px; background: var(--foot-rule); margin: 0 0 18px 0; }
 .foot-meta {
   display: flex; justify-content: space-between;

@@ -1,9 +1,10 @@
 {% extends "_public_base.html" %}
-{% block title %}Chair Lots for Sale — Bulk &amp; Wholesale | Black Whole Liquidation{% endblock %}
+{% block title %}Chair Lots for Sale — Bulk &amp; Wholesale | Black Whole{% endblock %}
 {% block meta_description %}Browse current bulk chair lots{% if cities %} with pickup in {{ cities | join(', ') }}{% endif %}. Banquet, stacking, and event seating sold wholesale by the lot.{% endblock %}
 {% block body_class %}page-listings{% endblock %}
 
 {% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "INVENTORY") }}
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">MANIFEST · ACTIVE</div>
@@ -55,7 +56,7 @@
      data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.location_labels | join(' ') }}">
     <div class="lot-img">
       {% if item.hero_src %}
-        <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
+        <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
       {% else %}
         <div class="lot-img-fallback">◉</div>
       {% endif %}
@@ -125,7 +126,7 @@
     <a class="lot-card lot-card--sold" href="/listings/{{ item.lot_id }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy">
+          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}
@@ -174,5 +175,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/site.js?v={{ now }}"></script>
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
 {% endblock %}

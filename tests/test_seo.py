@@ -8,6 +8,8 @@ import json
 from datetime import datetime, timezone
 
 import pytest
+
+from automation.web import readcache
 from fastapi.testclient import TestClient
 
 import importlib
@@ -43,6 +45,7 @@ ROW = {
 
 @pytest.fixture
 def client(monkeypatch):
+    readcache.invalidate_all()  # the sitemap/landing memo must not leak between tests
     monkeypatch.setattr(web_app.inventory, "list_public", lambda: [dict(ROW)])
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: dict(ROW) if lot_id == "10340" else None)
     monkeypatch.setattr(web_app.inventory, "stats", lambda: {"lots": 1, "chairs": 100, "cities": 1})
@@ -55,6 +58,7 @@ def test_robots_txt(client):
     assert r.status_code == 200
     assert "Disallow: /admin" in r.text
     assert "Disallow: /api/" in r.text
+    assert "Disallow: /reserve/" in r.text
     assert "Sitemap: https://black-whole.com/sitemap.xml" in r.text
 
 
@@ -74,7 +78,7 @@ def test_detail_page_meta_and_jsonld(client):
     r = client.get("/listings/10340")
     assert r.status_code == 200
     html = r.text
-    assert "<title>100× Burgundy Banquet Chairs — Athens, GA | Black Whole Liquidation</title>" in html
+    assert "<title>100× Burgundy Banquet Chairs — Athens, GA | Black Whole</title>" in html
     assert 'rel="canonical" href="https://black-whole.com/listings/10340"' in html
     assert 'property="og:image" content="https://cdn.example.com/10340.jpg"' in html
 
