@@ -907,3 +907,14 @@ a:hover { color: var(--accent); }
 @media (max-width: 600px) {
   .city-index, .floor--nearby { padding-left: 16px; padding-right: 16px; }
 }
+
+/* new-retail price anchor (automation/retail_anchor.py) */
+.lot-retail {
+  font-size: 9px; letter-spacing: 0.15em; color: var(--muted);
+  margin-top: 2px;
+}
+.retail-anchor { margin-top: 6px; }
+.retail-anchor > span { color: var(--muted); letter-spacing: 0.12em; }
+.retail-sources summary { cursor: pointer; color: var(--muted); margin-top: 4px; }
+.retail-sources ul { margin: 6px 0 4px; padding-left: 18px; font-size: 13px; }
+.retail-sources p { color: var(--muted); margin: 0; }

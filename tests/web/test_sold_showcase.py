@@ -18,6 +18,8 @@ from automation.web.app import app
 def _no_auth(monkeypatch):
     monkeypatch.delenv("ADMIN_PASSWORD", raising=False)
     auth_svc.reset_caches()
+    # Keep get_public() on the patched inventory.get path (no prod reads).
+    monkeypatch.setattr(inventory, "has_slug_column", lambda: False)
     yield
     auth_svc.reset_caches()
 
