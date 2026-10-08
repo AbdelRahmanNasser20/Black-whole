@@ -78,6 +78,7 @@
           {% if item.price_per_chair %}
             <div class="lot-price-num">${{ "%.0f"|format(item.price_per_chair) }}</div>
             <div class="lot-price-label">/ {{ item.unit }}</div>
+            {% if item.retail %}<div class="lot-retail mono">NEW ${{ "%.0f"|format(item.retail.low) }}–${{ "{:,.0f}".format(item.retail.high) }}</div>{% endif %}
           {% else %}
             <div class="lot-price-num">—</div>
             <div class="lot-price-label">INQUIRE</div>

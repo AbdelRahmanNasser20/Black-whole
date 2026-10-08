@@ -72,6 +72,20 @@
       <div>
         <dt>{% if item.is_sold %}SOLD AT / {{ item.unit }}{% else %}PRICE / {{ item.unit }}{% endif %}</dt>
         <dd class="big-num">{% if item.price_per_chair %}${{ "%.0f"|format(item.price_per_chair) }}{% else %}INQUIRE{% endif %}</dd>
+        {% if item.retail %}
+        <div class="retail-anchor">
+          <span class="mono tiny">NEW, THESE RUN ${{ "%.0f"|format(item.retail.low) }} (IMPORT GRADE) TO ${{ "%.0f"|format(item.retail.high) }} (HOTEL GRADE) / CHAIR</span>
+          <details class="retail-sources">
+            <summary class="mono tiny">SOURCES</summary>
+            <ul>
+              {%- for s in item.retail.sources %}
+              <li><a href="{{ s.url }}" rel="nofollow noopener" target="_blank">{{ s.retailer }}</a> — {{ s.product }}: ${{ "%.2f"|format(s.price) }}/chair</li>
+              {%- endfor %}
+            </ul>
+            <p class="mono tiny">New retail prices, checked {{ item.retail.checked }}. Most hotel-grade brands (MTS, Shelby Williams, Mity-Lite) sell by dealer quote only.</p>
+          </details>
+        </div>
+        {% endif %}
         {% if not item.is_sold %}<div class="mono tiny price-freight-note">+ FREIGHT · GET AN EXACT QUOTE BELOW OR <a href="/#contact">CONTACT US</a> · PICKUP FREE</div>{% endif %}
       </div>
       <div>

@@ -27,6 +27,9 @@ def _dark_by_default(monkeypatch):
         site_settings, "get_all",
         lambda: {"deposit_pct": 0.15, "deposit_min_usd": 200},
     )
+    # get_public() goes straight to the DB once the slug column exists; keep
+    # it on the patched inventory.get path so no test reads prod.
+    monkeypatch.setattr(inventory, "has_slug_column", lambda: False)
 
 
 def _lit(monkeypatch):
@@ -271,3 +274,19 @@ def test_returns_short_link_redirects_to_terms_anchor():
     r = _client().get("/returns", follow_redirects=False)
     assert r.status_code == 301
     assert r.headers["location"] == "/terms#returns"
+
+
+# ───────────────────────── lot detail — new-retail anchor ───────────────────
+
+def test_detail_shows_new_retail_anchor_with_sources(lot):
+    r = _client().get("/listings/31225")
+    assert r.status_code == 200
+    assert "NEW, THESE RUN $24 (IMPORT GRADE) TO $749 (HOTEL GRADE)" in r.text
+    assert "uline.com" in r.text
+
+
+def test_sold_lot_has_no_retail_anchor(monkeypatch):
+    row = make_lot(status="sold_out", quantity_remaining=0)
+    monkeypatch.setattr(inventory, "get", lambda lot_id: dict(row) if lot_id == row["lot_id"] else None)
+    r = _client().get("/listings/31225")
+    assert "NEW, THESE RUN" not in r.text

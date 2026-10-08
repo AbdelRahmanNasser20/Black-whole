@@ -68,7 +68,7 @@ from .. import favorite_images
 from .. import favorites
 from .. import telegram_alerts
 from .. import deposits
-from .. import site_settings
+from .. import retail_anchor, site_settings
 from .. import channels as channels_pkg
 from ..channels import store as channel_store
 from ..channels import sync as channel_sync
@@ -767,6 +767,7 @@ def _landing_data() -> dict:
     featured = sorted(rows, key=_idaho_first)[:12]
     for r in featured:
         r["hero_src"] = _hero_src(r)
+        r["retail"] = retail_anchor.anchor(r)
     # Floor price over EVERY public lot, not the 12 featured — it is the
     # number the homepage intent line quotes next to the full chair count.
     prices = [float(r["price_per_chair"]) for r in rows
@@ -845,6 +846,8 @@ def _decorate(row: dict) -> dict:
     row["is_sold"] = inventory.is_sold(row)
     # "CHAIR" on every card was fine until the Augusta round tables (2026-08-26).
     row["unit"] = lot_channels.unit_word(row).upper()
+    # Real new-retail prices beside ours; never on a sold lot (no sale to anchor).
+    row["retail"] = None if row["is_sold"] else retail_anchor.anchor(row)
     return row
 
 
