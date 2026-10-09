@@ -15,10 +15,10 @@ import {card, tickTimers} from '../ui/card.js';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-const KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'sort', 'dir', 'page', 'view'];
+const KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'sort', 'dir', 'page', 'view'];
 const DEFAULTS = {status: 'active', sort: 'ends', page: '1', view: 'list'};
-const FILTER_KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price'];
-const NARROWING_KEYS = ['category', 'state', 'max_bids', 'ending_within', 'min_price', 'max_price'];
+const FILTER_KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price'];
+const NARROWING_KEYS = ['category', 'state', 'site', 'max_bids', 'ending_within', 'min_price', 'max_price'];
 const PER_PAGE = 24;          // divisible by 4/3/2 columns; the server clamps to its own choices and reports back
 const MAX_RESTORE_PAGES = 10; // refresh restores `page` depth by appending pages 1..N, capped
 const CAT_LABELS = {
@@ -26,6 +26,8 @@ const CAT_LABELS = {
   computers_electronics: 'Computers & electronics', other: 'Other',
 };
 const catLabel = v => CAT_LABELS[v] || String(v || '').replace(/_/g, ' ');
+// Site names come from the facets payload (server-owned list, see deals_sources.SITES); fall back to the key.
+const siteLabel = v => ((facets && facets.sites) || []).find(s => s.value === v)?.name || String(v || '');
 
 const st = Object.assign({}, DEFAULTS, Object.fromEntries(
   KEYS.map(k => [k, new URLSearchParams(location.search).get(k)]).filter(([, v]) => v)));
@@ -79,6 +81,7 @@ function syncControls() {
   $('#feed-ending').value = st.ending_within || '';
   $('#feed-sort').value = sortValue();
   $('#feed-state').value = st.state || '';
+  $('#feed-site').value = st.site || '';
   $('#feed-min-price').value = st.min_price || '';
   $('#feed-max-price').value = st.max_price || '';
   $$('#feed-chips .chip[data-cat]').forEach(c => {
@@ -100,6 +103,7 @@ function renderActiveFilters() {
   if (st.q) add('q', `“${st.q}”`);
   if (st.category) add('category', catLabel(st.category));
   if (st.state) add('state', st.state);
+  if (st.site) add('site', siteLabel(st.site));
   if (st.max_bids === '0') add('max_bids', 'no bids'); else if (st.max_bids) add('max_bids', `≤ ${st.max_bids} bids`);
   if (st.ending_within) add('ending_within', `ending < ${st.ending_within >= 24 ? (st.ending_within / 24) + ' d' : st.ending_within + ' h'}`);
   if (st.status && st.status !== DEFAULTS.status) add('status', st.status === 'closed' ? 'closed' : 'live + closed', DEFAULTS.status);
@@ -131,6 +135,11 @@ async function loadChips() {
   sel.querySelectorAll('option:not([value=""])').forEach(o => o.remove());
   (facets.states || []).forEach(f => {
     const o = document.createElement('option'); o.value = f.value; o.textContent = `${f.value} (${fmt.int(f.count)})`; sel.appendChild(o);
+  });
+  const siteSel = $('#feed-site');
+  siteSel.querySelectorAll('option:not([value=""])').forEach(o => o.remove());
+  (facets.sites || []).forEach(f => {
+    const o = document.createElement('option'); o.value = f.value; o.textContent = `${f.name || f.value} (${fmt.int(f.count)})`; siteSel.appendChild(o);
   });
   const s = facets.stats || {};
   $$('#feed-stats [data-stat]').forEach(el => { const v = s[el.dataset.stat]; el.textContent = v == null ? '—' : fmt.int(v); });
@@ -213,6 +222,7 @@ $$('.seg[data-key]').forEach(seg => seg.addEventListener('click', e => {
 $('#feed-ending').addEventListener('change', e => set({ending_within: e.target.value}));
 $('#feed-sort').addEventListener('change', e => { const [sort, dir] = e.target.value.split(':'); set({sort, dir: dir || ''}); });
 $('#feed-state').addEventListener('change', e => set({state: e.target.value}));
+$('#feed-site').addEventListener('change', e => set({site: e.target.value}));
 let priceTimer = null;
 for (const sel of ['#feed-min-price', '#feed-max-price']) $(sel).addEventListener('input', () => {
   clearTimeout(priceTimer);

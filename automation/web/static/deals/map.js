@@ -9,7 +9,7 @@ import {load, api, esc, fmt, skeleton} from '../ui/state.js';
 import {card, tickTimers} from '../ui/card.js';
 
 const $ = (s, r = document) => r.querySelector(s);
-const FILTER_KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price'];
+const FILTER_KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'site'];
 const PINS_CAP_LABEL = '5,000';
 const VIEWPORT_DEBOUNCE_MS = 400;
 
@@ -72,16 +72,19 @@ function filterParams() {
 const filterKey = (p) => [...p.entries()].sort().map(([k, v]) => `${k}=${v}`).join('&');
 
 /* ── pins → map ─────────────────────────────────────────────────────────── */
-function lotUrl(pt) { return `/deals/${pt.asset_id}/${pt.account_id}/${pt.auction_id}`; }
-
+// A deal_lots pin carries viewer_url (the archived-lot page); a pin from another recorder site has none —
+// only its external url + source_name (server-normalised, see deals_sources.py).
 function popupHtml(pt) {
   const place = [pt.city, pt.state].filter(Boolean).map(esc).join(', ');
   const bids = pt.bid_count ?? 0;
+  const extUrl = pt.url || pt.govdeals_url;
+  const links = [];
+  if (pt.viewer_url) links.push(`<a href="${esc(pt.viewer_url)}">View lot</a>`);
+  if (extUrl) links.push(`<a href="${esc(extUrl)}" target="_blank" rel="noopener">${esc(pt.source_name || 'GovDeals')} ↗</a>`);
   return `<strong>${esc(pt.title || 'Untitled lot')}</strong><br>`
     + `${place || '—'}<br>`
-    + `<span class="mono">${esc(fmt.money(pt.current_bid))} · ${esc(fmt.int(bids))} bid${bids === 1 ? '' : 's'} · ⏱ ${esc(fmt.endsIn(pt.end_utc))}</span><br>`
-    + `<a href="${esc(lotUrl(pt))}">View lot</a>`
-    + (pt.govdeals_url ? ` · <a href="${esc(pt.govdeals_url)}" target="_blank" rel="noopener">GovDeals ↗</a>` : '');
+    + `<span class="mono">${esc(fmt.money(pt.current_bid))} · ${esc(fmt.int(bids))} bid${bids === 1 ? '' : 's'} · ⏱ ${esc(fmt.endsIn(pt.end_utc))}</span>`
+    + (links.length ? `<br>${links.join(' · ')}` : '');
 }
 
 async function mountMap() {

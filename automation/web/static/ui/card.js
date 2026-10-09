@@ -31,13 +31,24 @@ export function card(row, {compact = false} = {}) {
   const chips = [];
   if (!compact && row.landed_cost != null) chips.push(`<span class="chip chip-mono">landed ${esc(fmt.money(row.landed_cost))}</span>`);
   if (!compact && !closed && !bids) chips.push('<span class="chip chip-mono">no bids yet</span>');
-  const ext = row.govdeals_url
-    ? `<a class="card-ext" href="${esc(row.govdeals_url)}" target="_blank" rel="noopener" aria-label="Open on GovDeals"><span class="card-ext-word">GovDeals</span> ↗</a>` : '';
-  return `<article class="card${compact ? ' card-compact' : ''}${closed ? ' is-closed' : ''}">
+  // Source badge = the external link's word. Rows from deal_lots carry govdeals_url; rows from the other
+  // recorder sites carry url + source_name (server-normalised, see deals_sources.py).
+  const extUrl = row.url || row.govdeals_url;
+  const source = row.source || 'govdeals';
+  const sourceName = row.source_name || 'GovDeals';
+  const ext = extUrl
+    ? `<a class="card-ext" href="${esc(extUrl)}" target="_blank" rel="noopener" aria-label="Open on ${esc(sourceName)}"><span class="card-ext-word card-source" data-source="${esc(source)}">${esc(sourceName)}</span> ↗</a>` : '';
+  // No viewer page for a non-GovDeals lot: the title goes straight to the source site.
+  const title = esc(row.title || 'Untitled lot');
+  const titleHtml = row.viewer_url
+    ? `<a class="card-title card-link" href="${esc(row.viewer_url)}">${title}</a>`
+    : extUrl ? `<a class="card-title card-link" href="${esc(extUrl)}" target="_blank" rel="noopener">${title}</a>`
+    : `<span class="card-title">${title}</span>`;
+  return `<article class="card${compact ? ' card-compact' : ''}${closed ? ' is-closed' : ''}" data-source="${esc(source)}">
   <div class="card-band"><span class="card-cat">${bandLabel(row)}</span>${ext}${timerHtml(row, nowMs)}</div>
   <div class="card-price-row"><span class="card-price">${esc(fmt.money(price))}</span>${showUnit
     ? `<span class="card-unit">${esc(fmt.int(qty))} × ${esc(fmt.money(row.unit_bid))} /unit</span>` : ''}</div>
-  <a class="card-title card-link" href="${esc(row.viewer_url || '#')}">${esc(row.title || 'Untitled lot')}</a>
+  ${titleHtml}
   <div class="card-meta">${place || '—'} · <span class="card-bids${bids > 0 ? ' has-bids' : ''}">${esc(fmt.int(bids))} bid${bids === 1 ? '' : 's'}</span></div>
   ${chips.length ? `<div class="card-chips">${chips.join('')}</div>` : ''}
 </article>`;
