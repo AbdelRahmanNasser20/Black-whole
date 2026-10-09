@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS deal_verdicts (
   reasoning TEXT,
   rank_score REAL, rank_notes TEXT,
   alerted_at TIMESTAMPTZ,
+  flip JSONB,                     -- deals/flip.py card (025_deal_verdicts_flip.sql)
+  flip_score REAL,                -- 0-100, llm_estimate capped at 49
   PRIMARY KEY (asset_id, account_id, auction_id, analyzed_at)
 );
 CREATE INDEX IF NOT EXISTS ix_verdicts_margin ON deal_verdicts(margin_pct DESC);
