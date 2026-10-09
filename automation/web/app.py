@@ -84,7 +84,7 @@ from . import public_deals
 from . import rate_limit
 from . import public_map
 from . import seo_copy
-from . import city_pages
+from . import city_pages, guides
 from . import auth as auth_svc
 from . import readcache
 from . import visits
@@ -993,6 +993,26 @@ def public_city(request: Request, slug: str):
         request, "city.html",
         _public_ctx({"page": page, "robots_noindex": not page["indexable"]}),
     )
+
+
+@app.get("/guides", response_class=HTMLResponse)
+def public_guides(request: Request):
+    """Buyer-guide index (AI SEO, 2026-10-09) — see automation/web/guides.py."""
+    visits.track(request)
+    return templates.TemplateResponse(
+        request, "guides_index.html", _public_ctx({"guides": guides.listing()}),
+    )
+
+
+@app.get("/guides/{slug}", response_class=HTMLResponse)
+def public_guide(request: Request, slug: str):
+    """One buyer guide: original copy + FAQPage JSON-LD; every stock number on
+    it comes from the ledger at request time (guides.page)."""
+    visits.track(request)
+    page = guides.page(slug)
+    if page is None:
+        raise HTTPException(404, "no such guide")
+    return templates.TemplateResponse(request, "guide.html", _public_ctx({"page": page}))
 
 
 @app.get("/map/api/points")
@@ -2041,6 +2061,57 @@ async def robots_txt():
     )
 
 
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def llms_txt():
+    return _llms_txt_body()
+
+
+@readcache.cached(ttl=300)
+def _llms_txt_body() -> str:
+    """llms.txt (llmstxt.org) — a markdown index for AI crawlers/assistants.
+    Same visibility gates as the sitemap: list_public() lots and indexable
+    city pages only; storage_note and anything auth-walled never appear."""
+    lines = [
+        "# Black Whole Liquidation",
+        "",
+        "> Bulk used banquet, stacking and event chairs sold by the lot "
+        "(50–1,000+ chairs per lot) across the US. Buyers pick up locally or "
+        "we arrange LTL freight; every live lot page has an instant freight "
+        "estimate. We also buy surplus chair lots from venues, hotels and "
+        "churches.",
+        "",
+        "Key facts:",
+        "- Typical buyers: churches, event venues, wedding/party rental companies.",
+        "- Sold as-is by the lot; per-chair pricing is on each lot page.",
+        f"- All live inventory: {PUBLIC_BASE_URL}/listings (map view: {PUBLIC_BASE_URL}/map)",
+        f"- Selling chairs to us: {PUBLIC_BASE_URL}/sell",
+        "",
+        "## Chair lots for sale",
+    ]
+    for row in inventory.list_public():
+        qty = row.get("quantity_remaining") or row.get("quantity_original")
+        price = row.get("price_per_chair")
+        place = ", ".join(p for p in ((row.get("city") or "").strip(),
+                                      (row.get("state") or "").strip()) if p)
+        facts = " · ".join(
+            f for f in (f"{qty} chairs" if qty else "",
+                        place,
+                        f"${price:g}/chair" if price else "") if f)
+        title = (row.get("title") or "Chair lot").strip()
+        lines.append(f"- [{title}]({PUBLIC_BASE_URL}{lot_urls.public_path(row)}): {facts}")
+    lines += ["", "## Chairs by city"]
+    for rec in city_pages.listing(indexable_only=True):
+        lines.append(f"- [{rec['label']}]({PUBLIC_BASE_URL}{rec['path']}): "
+                     f"{rec['chairs']} chairs available")
+    lines += ["", "## Buyer guides"]
+    for rec in guides.listing():
+        lines.append(f"- [{rec['h1'].title()}]({PUBLIC_BASE_URL}{rec['path']}): {rec['description']}")
+    lines += ["", "## Optional",
+              f"- [About]({PUBLIC_BASE_URL}/about)",
+              f"- [Terms]({PUBLIC_BASE_URL}/terms)"]
+    return "\n".join(lines) + "\n"
+
+
 def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
     tag = f"  <url>\n    <loc>{loc}</loc>\n"
     if lastmod:
@@ -2059,8 +2130,10 @@ def _sitemap_body() -> str:
     is wasted pooler time. Any write through the admin API drops the memo."""
     body = '<?xml version="1.0" encoding="UTF-8"?>\n'
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
-    for path in ("/", "/listings", "/map", "/chairs", "/sell", "/about", "/terms", "/privacy"):
+    for path in ("/", "/listings", "/map", "/chairs", "/guides", "/sell", "/about", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
+    for rec in guides.listing():
+        body += _sitemap_entry(f"{PUBLIC_BASE_URL}{rec['path']}")
     # City pages with at least one live lot (sold-only cities are noindex).
     for rec in city_pages.listing(indexable_only=True):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{rec['path']}")

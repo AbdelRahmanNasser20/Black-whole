@@ -1,0 +1,89 @@
+{% extends "_public_base.html" %}
+{#- templates/guide.html — /guides/{slug} (AI SEO buyer guides, 2026-10-09).
+    Context (app.py::public_guide): page = automation/web/guides.page(slug): title, h1, description, eyebrow,
+    lede, sections[(heading, [html paragraphs])], faq, faq_jsonld, related[], live{lots, chairs, min_price},
+    city_list[{label, path, chairs, lots, min_price}]. Paragraph HTML is authored in guides.py (no DB text
+    passes through it); every number comes from the ledger. storage_note never renders. -#}
+{% block title %}{{ page.title }}{% endblock %}
+{% block meta_description %}{{ page.description }}{% endblock %}
+{% block body_class %}page-guide{% endblock %}
+{% block og_type %}article{% endblock %}
+{% block head_extra %}
+<script type="application/ld+json">{{ page.faq_jsonld | safe }}</script>
+{% endblock %}
+
+{% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/"), ("Guides", "/guides")], page.h1 | title) }}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">{{ page.eyebrow }}</div>
+    <h1 class="page-title">{{ page.h1 }}</h1>
+    <p class="page-lede">{{ page.lede }}</p>
+  </div>
+  <div class="page-head-right mono tiny">
+    {% if page.live.chairs %}<div>{{ "{:,}".format(page.live.chairs) }} CHAIRS ON THE FLOOR</div>{% endif %}
+    {% if page.live.cities %}<div>{{ page.live.cities | length }} PICKUP CIT{% if page.live.cities | length == 1 %}Y{% else %}IES{% endif %}</div>{% endif %}
+    {% if page.live.min_price %}<div>FROM ${{ "%.0f"|format(page.live.min_price) }} / CHAIR</div>{% endif %}
+    <div><a href="/listings">SEE THE LOTS →</a></div>
+  </div>
+</section>
+
+<section class="about-prose guide-prose">
+  <div class="about-grid">
+    {% for heading, paras in page.sections %}
+    <article>
+      <div class="section-rule"></div>
+      <h2 class="section-title">{{ heading }}</h2>
+      {% for p in paras %}<p>{{ p | safe }}</p>{% endfor %}
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+{% if page.slug == 'used-church-chairs-near-me' %}
+<section class="floor guide-cities">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">ON THE FLOOR TODAY, BY CITY</h2>
+    <span class="mono tiny">LIVE INVENTORY · UPDATES AS LOTS SELL</span>
+  </div>
+  {% if page.city_list %}
+  <div class="nearby-list nearby-list--city">
+    {% for c in page.city_list %}
+    <a class="map-item b-available" href="{{ c.path }}">
+      <span class="map-item-body">
+        <span class="map-item-title">{{ c.label }}</span>
+        <span class="mono tiny">{{ "{:,}".format(c.chairs) }} CHAIRS · {{ c.lots }} LOT{% if c.lots != 1 %}S{% endif %}{% if c.min_price %} · FROM ${{ "%.0f"|format(c.min_price) }}/EA{% endif %}</span>
+      </span>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="page-lede">Nothing is on the floor right now. <a href="/listings">Join the alert list</a> and we flag the next lot before it is listed.</p>
+  {% endif %}
+  <p class="mono tiny"><a href="/map">EVERY LOT ON THE MAP →</a> · <a href="/chairs">ALL CITIES →</a></p>
+</section>
+{% endif %}
+
+<section class="home-faq">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">STRAIGHT ANSWERS</h2>
+  </div>
+  <dl class="faq faq--home">
+    {% for q, a in page.faq %}
+    <div class="faq-item"><dt>{{ q }}</dt><dd>{{ a }}</dd></div>
+    {% endfor %}
+  </dl>
+  <p class="mono tiny">
+    {% for r in page.related %}<a href="{{ r.path }}">{{ r.h1 }} →</a> · {% endfor %}<a href="/listings">ALL LOTS →</a> · <a href="/about">HOW WE WORK →</a>
+  </p>
+</section>
+
+{% set subscribe_source = 'site_guide' %}
+{% include "_subscribe_form.html" %}
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+{% endblock %}

@@ -50,7 +50,7 @@ _BOT_RE = re.compile(
     re.I,
 )
 _TRACKED_EXACT = {"/", "/listings"}
-_TRACKED_PREFIX = ("/listings/", "/chairs", "/about")  # city pages + about (PRs #128/#129)
+_TRACKED_PREFIX = ("/listings/", "/chairs", "/about", "/guides")  # city pages + about + guides (PRs #128/#129, AI SEO)
 # Click-only lead events (POST /event). Stored as path "/_event/<kind>".
 EVENT_KINDS = ("tel_click", "mailto_click")
 EVENT_PREFIX = "/_event/"
