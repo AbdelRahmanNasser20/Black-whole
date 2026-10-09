@@ -120,12 +120,12 @@ snapshot actually confirms `closed` or `gone`. A lot leaves the poll set
 | Source          | Access method                                                                 | Sold-price capture |
 |-----------------|--------------------------------------------------------------------------------|---------------------|
 | `purple_wave`   | Official JSON search API (`www.purplewave.com/v1/search/search`), category-id filtered. `sold_sweep()` re-queries with `dateType=past`, `filters=...;sold:Yes`, and a computed `dateRanges=<year>,<year-1>` window (see CRITICAL 1 note in `purple_wave.py`'s docstring — `dateType=past` alone sweeps the oldest slice of an 18-year archive, 0 usable comps). **Pending operator sign-off:** `www.purplewave.com/robots.txt` disallows `/v1/` for crawlers — it's the site's own public frontend API (no auth, no anti-bot challenge encountered), but that disallow line hasn't been explicitly cleared with the operator; flag before scaling volume on this source. | `api_final` — sold sweep returns real winning bids |
-| `municibid`     | Server-rendered search-results HTML with an embedded full-result JSON marker, plus per-card HTML for bid counts (paginated, `bs4`-parsed). `sold_sweep()` hits `StatusFilter=completed_only`. | `api_final` — sold sweep returns real "Final Bid" prices |
-| `mibid`         | Michigan's own Knockout.js homepage embeds the entire 2,000+ auction catalog as a literal JS array; per-lot bid data confirmed via `GET /AuctionBid/GetBasicInfo?guid=`. | `api_final` — `sold_sweep()` filters the embed to `status=4` (closed) and enriches each match with `GetBasicInfo` for a trustworthy final bid + bid count |
+| `municibid`     | **Redesigned site (Next.js), adapter rewritten 2026-10-09; fixtures captured 2026-10-09.** Category browse pages `GET /browse?category=<id>[&status=completed][&page=N]` (24 cards/page, `page` 0-indexed), lot data read from the RSC flight payload (`self.__next_f.push` chunks), no HTML scraping. Sweeps Furniture › Chairs + School Supplies › Desks and Chairs (kept whole) plus Furniture and Office Supplies filtered by `FURNITURE_TERMS` on the title. Detail page `/listing/{id}/{slug}` for `poll()` (bidbox `initial.status`: `Active` / `Successful` / `Unsuccessful`; not-found = HTTP 200 + `NEXT_HTTP_ERROR_FALLBACK;404` digest). **The old `/Search/Results` full-text search is gone and `robots.txt` now disallows `/search`** — the adapter never uses it. `sold_sweep()` reads the completed tab (newest close first) back to `SOLD_SWEEP_LOOKBACK_DAYS` (7) for the two seating subcategories. | `api_final` — completed cards carry the final `currentPrice`, `bidCount` and a `sold` true/false flag |
+| `mibid`         | Michigan's own Knockout.js homepage embeds the entire 2,000+ auction catalog as a literal JS array; per-lot bid data confirmed via `GET /AuctionBid/GetBasicInfo?guid=`. **403s the Egypt IP** → routed through `RECORDER_PROXY_HOSTS` (see "Per-host proxy"). Furniture matches are legitimately 0 most days — a clean 0-match discover is a breaker **success**. | `api_final` — `sold_sweep()` filters the embed to `status=4` (closed) and enriches each match with `GetBasicInfo` for a trustworthy final bid + bid count |
 | `gsa`           | Official `api.data.gov` GSA Auctions JSON API (`GSA_API_KEY`, falls back to the shared `DEMO_KEY`). No closed/sold feed exists — a lot simply drops off the active list. **`bid_count` is really `biddersCount`** (GSA doesn't publish a bid-count field) — it's the number of distinct bidders, not the number of bids; don't read it as a bid-count in comps analysis. | `last_snapshot` — the last observation before a lot vanishes from the active feed is the de-facto close |
 | `govdeals`      | Thin import-only wrapper over `deals.adapters.govdeals.GovDealsAdapter` (the maestro JSON search API already built for the `deals/` closing-price tracker). After close, the per-lot bidbox (`fetch_bid_state`). | `bidbox_final` — see "GovDeals finals"; `last_snapshot` only when the bidbox is purged (204) |
 | `allsurplus`    | Same maestro API as `govdeals` with `businessId` `GI` (`recorder/sources/allsurplus.py`, a `GovDealsSource` subclass): whole GI catalog (~1,470 live, 13 pages, ≤ `RECORDER_ALLSURPLUS_MAX_PAGES` 40) every discover. Any GI asset — even one the GovDeals sweep returns — is recorded here, never under `govdeals`; `AD` lots stay `govdeals`. **Multi-currency** (USD/EUR/GBP/ZAR/CNY/AUD/BRL): `raw.currencyCode` is the lot's currency; never aggregate finals across currencies (`sold_comps.currency`, migration `019_allsurplus_source.sql`, APPLIED to prod 2026-10-02). | `bidbox_final` — same bidbox, same rules |
-| `public_surplus`| Independent plain-HTTP scrape of the server-rendered `publicsurplus.com` search + detail pages (legacy JSP, no JSON API). | `last_snapshot` — **closed/removed lots return HTTP 401** (a login wall), not 404 and not a distinguishable "closed" page, so `poll()` reads a 401 as `status='gone'`. Documented in detail in `recorder/sources/public_surplus.py`'s module docstring. |
+| `public_surplus`| Independent plain-HTTP scrape of the server-rendered `publicsurplus.com` search + detail pages (legacy JSP, no JSON API). **Refuses/times out the Egypt IP** → routed through `RECORDER_PROXY_HOSTS` (see "Per-host proxy"). | `last_snapshot` — **closed/removed lots return HTTP 401** (a login wall), not 404 and not a distinguishable "closed" page, so `poll()` reads a 401 as `status='gone'`. Documented in detail in `recorder/sources/public_surplus.py`'s module docstring. |
 
 ## GovDeals finals (bidbox)
 
@@ -252,9 +252,17 @@ Backoff once open = min(`RECORDER_BREAKER_BASE_MIN` (10) min × 2^k,
 
 | Counts as | |
 |---|---|
-| failed attempt | discover raised or returned 0 observations (every adapter "aborts" that way); a poll batch that raised, was aborted by its `PollBudget`, or had ≥ 80 % of ≥ 3 lots fail (the `BLOCK_SUSPECT_*` thresholds) |
-| success | discover returned observations; a poll batch that inserted ≥ 1 row or had no failed lot |
+| failed attempt | discover raised — `SourceFetchFailed` (the adapter could not fetch: network, 403/429, proxy down, page-shape drift) or any other exception; a poll batch that raised, was aborted by its `PollBudget`, or had ≥ 80 % of ≥ 3 lots fail (the `BLOCK_SUSPECT_*` thresholds) |
+| success | discover returned — observations **or a clean `[]`** (fetched fine, matched 0 lots: mibid's furniture filter is empty most days; before 2026-10-09 that counted as a failure and kept the breaker open); a poll batch that inserted ≥ 1 row or had no failed lot |
 | neither | a few lots failed, nothing new — no change |
+
+**Adapter contract (2026-10-09):** `discover()` raises `recorder.sources.base.SourceFetchFailed`
+when its fetch failed and returns `[]` only when the fetch worked and nothing
+matched. The existing `RECORDER ERROR` / `WARNING` log lines are unchanged;
+`sold_sweep()` and `poll()` still return `[]` on failure (poll health comes
+from `PollBudget`). Pass `url=` to `SourceFetchFailed` so the host's last
+transport error is appended to the breaker's `last_error` — except `gsa`,
+whose error text can carry the api_key.
 
 - `run` loads the breaker once, skips open sources (`poll source=X skipped:
   circuit open until …`, `discover source=X skipped: …`), records every
@@ -295,6 +303,40 @@ Backoff once open = min(`RECORDER_BREAKER_BASE_MIN` (10) min × 2^k,
 - **Restart the web and recorder processes after a deploy** — column-presence
   checks are cached for the process lifetime.
 
+## Per-host proxy (Egypt-blocked sources, 2026-10-09)
+
+**Problem.** From the operator's Egypt IP, `publicsurplus.com` refuses or
+times out every connection and `mibid.michigan.gov` answers HTTP 403 — in the
+same minute GovDeals works fine. Both breakers sat open from 2026-10-02 with
+15 straight failures; mibid's was doubly stuck because its 0-match discover
+counted as a failure (fixed above).
+
+**Fix** (`recorder/sources/base.py`): `polite_get`/`polite_post` route only
+the listed hosts through the Pi's residential US SOCKS5 tunnel.
+
+| Env | Default (set by `scripts/recorder_local.sh` when neither the environment nor `.env` defines it) | Meaning |
+|---|---|---|
+| `RECORDER_PROXY_URL` | `socks5h://127.0.0.1:1081` | the tunnel (`proxy on` / `proxy doctor` on the Mac; `socks5h` = DNS through the proxy) |
+| `RECORDER_PROXY_HOSTS` | `publicsurplus.com,mibid.michigan.gov` | comma list, hostname suffix match (`www.publicsurplus.com` matches; `notpublicsurplus.com` does not) |
+
+- Every other host (GovDeals/AllSurplus maestro, GSA, Purple Wave, Municibid)
+  stays direct — `proxies=` is only passed for a listed host.
+- **A listed host is never fetched direct.** Proxy socket closed, URL unset
+  or malformed → `ProxyUnavailable` (a `ConnectionError`) *before* any network
+  call, with a message naming the proxy and the host; the adapter prints its
+  usual `RECORDER ERROR`, `discover()` raises `SourceFetchFailed`, and the
+  breaker opens with `last_error = "... recorder proxy socks5h://127.0.0.1:1081
+  is not listening ..."`. Public Surplus's sweep stops after the first term
+  (`host_down`), so a dead proxy costs one probe, not six.
+- Unset both variables = everything direct (Render, where the IP is US).
+- Needs `requests[socks]` (PySocks) — in `pyproject.toml`; `.venv` of the
+  main checkout has it.
+- Not verified live yet: the tunnel was down (port 1081 closed) when this
+  shipped, so the Public Surplus fixtures (`tests/recorder/fixtures/public_surplus/`)
+  are the 2026-07 capture. First run with the tunnel up: check the log for
+  `[public_surplus] WARNING: ... 0 active listings` (page-shape drift) vs a
+  real card count.
+
 ## Coverage metric (the Phase-0 done-measure)
 
 `coverage --days N` (default 7) reports, per source, how many lots whose
@@ -313,8 +355,9 @@ one at all — the whole point was never missing a close.
 deliberately excludes closed/gone lots whose `bid_count` came back honestly
 `NULL` rather than `0` — a lot the recorder never got a priced observation
 for isn't a "no-bid close," it's a gap in *our* coverage. Two known sources
-of that gap today: residual `municibid` lots whose `sold_sweep()` enrichment
-call didn't land before the lot dropped off the completed list, and
+of that gap today: residual `municibid` lots from before the 2026-10-09
+adapter rewrite (the old search markup had no per-lot bid count past page 0;
+the new browse cards always carry one), and
 `public_surplus` lots that closed before the recorder's first poll caught
 them (no `sold_sweep()` on that source — see the per-source table above).
 Those lots are missing from `sold_comps` on purpose, not a bug — don't
