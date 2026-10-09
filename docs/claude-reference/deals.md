@@ -90,6 +90,16 @@ Full spec + rationale: `docs/superpowers/plans/2026-07-03-govdeals-deal-tracker-
   - Live smoke 2026-10-09 (read-only): open read 919 rows → 898 public (841 AllSurplus US, 42 Purple Wave, 15 GSA; 875 pinned) in 3.3 s, closed 125 → 123; `deal_lots` had **0 live public lots** that day (the GovDeals crons are not running — see "Site migration half-applied"), so the union is what keeps the page non-empty. Public Surplus / Municibid / MiBid have adapters but no live rows inside the window.
   - Crons: `scripts/deals_cron.sh` rewrites `:5432/` → `:6543/` in `BLACKWHOLE_DB_URL` (Supabase transaction pooler) unless `DEALS_SESSION_POOLER=1` — short-lived crons must not hold the 15 session-pooler slots the web/recorder use.
 
+## Chairs feed (operator) — 2026-10-09
+
+- Summary: ONE operator-only ranked list of every live seating lot with quantity ≥ N (default 50), across GovDeals + every recorder source. Cheapest per chair first. This is what the aggregator exists for. Never public.
+  - Module `automation/web/chairs_feed.py` (`fetch()`); admin `GET /api/deals/chairs?min_qty=50&site=&state=&ending=<hours>&sort=unit_bid|ends|quantity|bid` (plain `def`, `@readcache.cached()`, auth-walled under `/api/`); admin tab **12 Chairs** (`static/admin/chairs.js` + `chairs.css`, URL keys `cmin`/`csite`/`cstate`/`cend`/`csort`, table only); CLI `python -m deals.cli chairs --min-qty 50 [--site X] [--state AZ] [--ending 72] [--sort …] [--limit N] [--json]`.
+  - **Partition, not a second policy.** GovDeals half = `deal_lots WHERE public_deals.seating_where()` — the exact inverse of the category + `\y` title half of `exclusion_where()`, same constants and args. Snapshot half = `deals_sources.lots(seating=True)`: the SAME read + cache as /deals, built twice (`public` / `seating` views) from one set of rows, split on `public_deals.is_excluded`. So a live lot is in exactly one of `/deals` or this feed. Carve-out: operator picks are hidden from /deals always and show here (flag `operator_pick`, ★) when they are seating; a non-seating pick is in neither. `tests/web/test_chairs_feed.py` guards the partition.
+  - Quantity: `lot_quantity(title, description[:600])` (GovDeals has `description`; snapshot rows are title-only), then `chair_quantity`'s noun count ("150 Student Chairs") **plural only** — "UMF Medical 8678 Power Phlebotomy Chair" is a model number (live smoke). No count → `quantity=None`, `quantity_source='unknown'`, never a default 1; those rows show only at `min_qty=0`. `quantity_source` ∈ `title|description|title_noun|description_noun|unknown`.
+  - Ranking: `unit_bid = current_bid / quantity` ascending, NULL (no bid) last, ties by soonest `end_utc`. GovDeals rows add `landed_cost`/`unit_landed` (fee model) + `viewer_url`; other sources leave them null.
+  - A failed half is reported in `errors` (UI shows "Partial: …") and the other still serves; both failing = 503.
+  - Live smoke 2026-10-09 (read-only, `default_transaction_read_only=on`): 401 live seating lots (381 GovDeals, 16 AllSurplus, 3 Purple Wave, 1 GSA); 6 with qty ≥ 50, all GovDeals. Known noise: `seating_furniture` includes non-chair furniture (a work table whose description says "75") — the partition follows the public policy on purpose.
+
 ## Inventory-side auction sync (2026-09-15)
 
 `automation/auction_sync.py` is the third in-process poller, alongside

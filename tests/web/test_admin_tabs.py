@@ -20,11 +20,11 @@ def test_admin_has_no_compare_tab():
     html = TestClient(app).get("/admin").text
     assert 'data-tab="compare"' not in html
     assert 'data-pane="compare"' not in html
-    # 11 rail tabs: the Sales group (2026-10-02) folded Inquiries, Subscribers and Deposits into one tab and added
+    # 12 rail tabs (Chairs, 2026-10-09, is the 12th): the Sales group (2026-10-02) folded Inquiries, Subscribers and Deposits into one tab and added
     # Quotes; Archive is the 11th (regex so `rail-tab-num` spans don't count) — E1 rail markup.
     tabs = re.findall(r'<a class="rail-tab(?: is-active)?" data-tab="([a-z-]+)"', html)
     assert tabs == ["launcher", "drafts", "auctions", "inventory", "sales", "listings-db", "test-scrape",
-                    "deals", "tracking", "channels", "archive"], tabs
+                    "deals", "tracking", "channels", "archive", "chairs"], tabs
     assert "compare" not in tabs
     # Every rail tab has a pane and a shell module — except `sales`, which is a GROUP: it opens one of four views,
     # each of which is still its own pane (and its own `?tab=` value, so old links keep working).
