@@ -1966,6 +1966,67 @@ def public_platform_auctions(
         max_bid=max_bid, ending=ending, sort=sort, page=page, per_page=per_page)
 
 
+# ── liquidator-facing pages (feat/liquidator-platform-ui) ─────────────────
+# Same stance as /platform: direct URL only (noindex, not in the nav, footer or
+# sitemap), handlers read nothing from the database. Every sample is labelled
+# as sample in the server-rendered HTML; plain-English search is only "coming".
+_BANKRUPTCY_SAMPLE_PATH = STATIC_DIR / "site" / "platform" / "bankruptcies.sample.json"
+
+
+def _bankruptcy_samples() -> list[dict]:
+    """The INVENTED bankruptcy fixture (static JSON, no DB). Read per call —
+    it is one small file and the pages that use it are not hot."""
+    try:
+        data = json.loads(_BANKRUPTCY_SAMPLE_PATH.read_text())
+        return list(data.get("filings") or [])
+    except (OSError, ValueError):
+        log.warning("bankruptcy sample fixture unreadable", exc_info=True)
+        return []
+
+
+def _platform_site_rows() -> list[dict]:
+    """Every site name the platform read model knows, with no DB read: the
+    adapter-backed ones (`live`/`paused` is decided in the browser from
+    /platform/api/sites) and the planned ones, which never show as scraped."""
+    rows = [{"key": k, "name": n, "kind": kind, "planned": False}
+            for k, (n, kind) in platform_api.SITES.items()]
+    rows += [{"key": k, "name": n, "kind": kind, "planned": True}
+             for k, (n, kind) in platform_api.PLANNED_SITES.items()]
+    return rows
+
+
+@app.get("/liquidators", response_class=HTMLResponse)
+def public_liquidators(request: Request):
+    """Landing page for liquidation companies: find distressed businesses first
+    (lead side) and sell lots to the buyer network (sell side). The sample
+    lead table is the invented fixture, rendered server-side and labelled."""
+    return templates.TemplateResponse(
+        request, "liquidators.html",
+        _public_ctx({"sample_filings": _bankruptcy_samples()[:6]}),
+    )
+
+
+@app.get("/platform/bankruptcies", response_class=HTMLResponse)
+def public_platform_bankruptcies(request: Request):
+    """Searchable SAMPLE bankruptcy table + filters + an "Ask AI" box that is
+    UI only (it answers a coming-soon state, no network). Data: the static
+    fixture, fetched by the browser; nothing here is a court record."""
+    return templates.TemplateResponse(
+        request, "platform_bankruptcies.html", _public_ctx({}),
+    )
+
+
+@app.get("/platform/deals", response_class=HTMLResponse)
+def public_platform_deals(request: Request):
+    """Unified deal feed across every auction site the recorder observes. The
+    browser reads the policy-gated /platform/api/auctions (+ /platform/api/sites
+    for each site's true status); the contract carries no photos (public_deals
+    policy) so none can render. Planned sites are named and labelled planned."""
+    return templates.TemplateResponse(
+        request, "platform_deals.html", _public_ctx({"sites": _platform_site_rows()}),
+    )
+
+
 @app.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     return (
