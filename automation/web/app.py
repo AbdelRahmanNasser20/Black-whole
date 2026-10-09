@@ -1344,7 +1344,7 @@ async def public_deals_facets():
         raise HTTPException(503, f"facets query failed: {e!r}")
 
 
-# ── Distress cases (/distress) — bankruptcy + WARN closure leads ────────────
+# ── Distress cases — bankruptcy + WARN closure leads (page: /platform/bankruptcies) ──
 # Read model + the public/operator column split: automation/web/public_distress.py.
 # Public JSON lives under /distress/api/ (outside the auth-walled /api/ prefix)
 # and never carries trustee / attorney / party contacts; /api/distress/cases
@@ -1374,10 +1374,10 @@ def _distress_page(admin: bool, **kw) -> dict:
         raise HTTPException(503, f"distress query failed: {e!r}")
 
 
-@app.get("/distress", response_class=HTMLResponse)
+@app.get("/distress")
 async def public_distress_page(request: Request):
-    return templates.TemplateResponse(request, "distress_public.html", {
-        "base_url": PUBLIC_BASE_URL, "per_page_choices": public_distress.PER_PAGE_CHOICES})
+    """One bankruptcies page: /platform/bankruptcies reads /distress/api/*. Old links land there."""
+    return RedirectResponse("/platform/bankruptcies", status_code=302)
 
 
 @app.get("/distress/api/cases")
@@ -2080,9 +2080,10 @@ def public_liquidators(request: Request):
 
 @app.get("/platform/bankruptcies", response_class=HTMLResponse)
 def public_platform_bankruptcies(request: Request):
-    """Searchable SAMPLE bankruptcy table + filters + an "Ask AI" box that is
-    UI only (it answers a coming-soon state, no network). Data: the static
-    fixture, fetched by the browser; nothing here is a court record."""
+    """THE bankruptcy / closure leads page. The browser reads /distress/api/cases
+    + /distress/api/facets (public columns only); on any API failure (503 =
+    migration 024 not applied) or an empty table it falls back to the invented
+    sample fixture and labels it. "Ask AI" is UI only. Handler reads nothing."""
     return templates.TemplateResponse(
         request, "platform_bankruptcies.html", _public_ctx({}),
     )

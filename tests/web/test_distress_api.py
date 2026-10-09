@@ -1,5 +1,5 @@
-"""DB-free tests for /distress: public routes open, contacts never public,
-operator route gated, bad params 400."""
+"""DB-free tests for /distress/api/*: public routes open, contacts never public,
+operator route gated, bad params 400, the old /distress page redirects to /platform/bankruptcies."""
 import importlib
 
 import pytest
@@ -52,7 +52,6 @@ def client(calls):
 
 
 def test_public_routes_need_no_session(client):
-    assert client.get("/distress").status_code == 200
     assert client.get("/distress/api/facets").json()["stats"]["cases"] == 1
     r = client.get("/distress/api/cases?tab=sales&chapter=7&industry=resort&state=tx")
     assert r.status_code == 200 and r.json()["rows"][0]["case_name"] == "Silver Spur Resort LP"
@@ -83,9 +82,28 @@ def test_bad_params_400(client, qs):
     assert client.get(f"/distress/api/cases?{qs}").status_code == 400
 
 
-def test_page_links_nav():
-    html = TestClient(app, base_url="https://testserver").get("/distress").text
-    assert 'href="/deals"' in html and "/static/distress/distress.js" in html
+def test_old_distress_page_redirects_to_platform_bankruptcies(client, calls):
+    r = client.get("/distress", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/platform/bankruptcies"
+    assert calls == []                                   # the redirect reads nothing
+
+
+def test_reader_failure_is_503_the_pages_fallback_signal(client, monkeypatch):
+    def boom(**kw):
+        raise RuntimeError('relation "distress_cases" does not exist')
+    monkeypatch.setattr(pdx, "fetch_page", boom)
+    monkeypatch.setattr(pdx, "fetch_facets", lambda: boom())
+    assert client.get("/distress/api/cases").status_code == 503
+    assert client.get("/distress/api/facets").status_code == 503
+
+
+def test_standalone_page_is_gone():
+    from pathlib import Path
+    web = Path(__file__).resolve().parents[2] / "automation" / "web"
+    assert not (web / "templates" / "distress_public.html").exists()
+    assert not (web / "static" / "distress").exists()
+    for tpl in ("_base.html", "deals_public.html"):
+        assert 'href="/distress"' not in (web / "templates" / tpl).read_text()
 
 
 def test_public_cols_exclude_contacts():

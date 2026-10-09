@@ -1,4 +1,4 @@
-"""Read model for the /distress page (public) and /api/distress/cases (operator).
+"""Read model for /distress/api/* (public; the page is /platform/bankruptcies) and /api/distress/cases (operator).
 
 Same shape as `public_deals.py`: every public read of `distress_cases` passes
 through here, the allow-list is SQL, and the whole-table facets are memoised.
