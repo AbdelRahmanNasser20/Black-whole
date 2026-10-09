@@ -310,8 +310,14 @@ def city_point(city: str | None, state: str | None) -> tuple[float, float] | Non
     return hit
 
 
-def normalise(row: dict, status: str, picks: public_deals.OperatorPicks) -> dict | None:
-    """One DB row → one public record, or None when policy or quality drops it."""
+def normalise(row: dict, status: str, picks: public_deals.OperatorPicks,
+              *, seating: bool = False) -> dict | None:
+    """One DB row → one public record, or None when policy or quality drops it.
+
+    `seating=True` is the operator-only inverse (the admin Chairs feed): keep
+    ONLY the lots `public_deals.is_excluded` hides, operator picks included
+    (flagged `operator_pick`). Same test, same input, so the two views
+    partition the snapshot half exactly."""
     source = str(row.get("source") or "")
     lot_id = str(row.get("source_lot_id") or "")
     spec = SOURCES.get(source)
@@ -327,10 +333,12 @@ def normalise(row: dict, status: str, picks: public_deals.OperatorPicks) -> dict
     if not title or not (city or state):
         return None
     canon = canonical_category(str(row.get("category_code") or "")) if source in MAESTRO else None
-    if public_deals.is_excluded({"title": f"{title} {category or ''}", "canonical_category": canon}):
+    is_seat = public_deals.is_excluded({"title": f"{title} {category or ''}", "canonical_category": canon})
+    if is_seat != seating:
         return None
     url = spec.url(lot_id, row)
-    if public_deals.is_operator_pick(picks, source_lot_id=lot_id, title=title, url=url):
+    pick = public_deals.is_operator_pick(picks, source_lot_id=lot_id, title=title, url=url)
+    if pick and not seating:
         return None
     lat = lng = None
     pt = city_point(city, state)
@@ -342,7 +350,7 @@ def normalise(row: dict, status: str, picks: public_deals.OperatorPicks) -> dict
     outcome = None
     if closed:
         outcome = "no_bid" if bids == 0 else ("sold" if bids else None)
-    return {
+    rec = {
         "id": f"{source}:{lot_id}", "source": source, "source_name": spec.name,
         "source_lot_id": lot_id, "asset_id": None, "account_id": None, "auction_id": None,
         "title": title, "canonical_category": canon, "native_category_name": category,
@@ -353,19 +361,25 @@ def normalise(row: dict, status: str, picks: public_deals.OperatorPicks) -> dict
         "final_bid_count": bids if closed else None, "outcome_complete": closed,
         "first_seen_at": _aware(row.get("first_seen")), "url": url, "viewer_url": None,
     }
+    if seating:
+        rec["operator_pick"] = pick
+    return rec
 
 
-def build(rows: list[dict], status: str, picks: public_deals.OperatorPicks) -> list[dict]:
+def build(rows: list[dict], status: str, picks: public_deals.OperatorPicks,
+          *, seating: bool = False) -> list[dict]:
     out = []
     for row in rows:
-        rec = normalise(row, status, picks)
+        rec = normalise(row, status, picks, seating=seating)
         if rec is not None:
             out.append(rec)
     return out
 
 
 # ── cache ────────────────────────────────────────────────────────────────────
-_cache: dict[str, tuple[float, list[dict]]] = {}
+# One DB read per status feeds BOTH views: `public` (/deals) and `seating`
+# (the operator-only Chairs feed) are built from the same rows + picks.
+_cache: dict[str, tuple[float, dict[str, list[dict]]]] = {}
 _locks = {"open": threading.Lock(), "closed": threading.Lock()}
 _fail_until: dict[str, float] = {}
 
@@ -376,40 +390,45 @@ def clear_cache() -> None:
     _GEO.clear()
 
 
-def _lots(status: str) -> list[dict]:
+def _lots(status: str, view: str = "public") -> list[dict]:
     """Cached set for `open` / `closed`. One loader at a time (no cold-start
     stampede); a failure raises and is remembered for FAIL_BACKOFF so an
-    outage is not re-queried on every page view."""
+    outage is not re-queried on every page view. `view` = `public` | `seating`."""
     now = time.monotonic()
     hit = _cache.get(status)
     if hit and now - hit[0] < CACHE_TTL:
-        return hit[1]
+        return hit[1][view]
     if now < _fail_until.get(status, 0.0):
         raise RuntimeError("deals sources read is backing off")
     with _locks[status]:
         hit = _cache.get(status)
         if hit and time.monotonic() - hit[0] < CACHE_TTL:
-            return hit[1]
+            return hit[1][view]
         try:
             rows, picks = _read(status)
         except Exception:
             _fail_until[status] = time.monotonic() + FAIL_BACKOFF
             raise
-        built = build(rows, status, picks)
+        built = {"public": build(rows, status, picks),
+                 "seating": build(rows, status, picks, seating=True)}
         _cache[status] = (time.monotonic(), built)
-        return built
+        return built[view]
 
 
-def lots(status: str = "active", *, now: datetime | None = None) -> list[dict]:
+def lots(status: str = "active", *, now: datetime | None = None,
+         seating: bool = False) -> list[dict]:
     """Normalised rows for a public status (`active` | `closed` | `all`).
     Open lots whose end passed while the memo was warm are dropped, never
-    shown as live. Raises when the read fails (callers decide the fallback)."""
+    shown as live. Raises when the read fails (callers decide the fallback).
+    `seating=True` returns the operator-only inverse set (admin Chairs feed) —
+    never hand it to a public route."""
     now = now or datetime.now(timezone.utc)
+    view = "seating" if seating else "public"
     out: list[dict] = []
     if status in ("active", "all"):
-        out += [r for r in _lots("open") if r["end_utc"] and r["end_utc"] > now]
+        out += [r for r in _lots("open", view) if r["end_utc"] and r["end_utc"] > now]
     if status in ("closed", "all"):
-        out += _lots("closed")
+        out += _lots("closed", view)
     return [dict(r) for r in out]
 
 

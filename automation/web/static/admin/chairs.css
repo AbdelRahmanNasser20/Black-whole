@@ -1,0 +1,28 @@
+/* static/admin/chairs.css — Chairs tab (12), the operator-only chairs feed. Tokens only (tokens.css), radius 0.
+   Table / badge / controls come from static/ui/components.css; loading/empty/error from skeleton.css. */
+
+.chr-controls {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 12px 0; border-bottom: 1px solid var(--border); margin: 0 0 var(--gap);
+}
+.chr-group { display: flex; align-items: center; gap: 8px; }
+.chr-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .14em; color: var(--accent); }
+.chr-controls input, .chr-controls select {
+  padding: 4px 6px; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font-family: var(--mono); font-size: var(--fs-sm);
+}
+.chr-controls input[type=number] { width: 84px; }
+.chr-controls input[type=text] { width: 48px; text-transform: uppercase; }
+.chr-controls input:focus, .chr-controls select:focus { outline: none; border-color: var(--accent); }
+.chr-count { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); margin-left: auto; }
+
+.chr-errors { font-family: var(--mono); font-size: var(--fs-xs); color: var(--danger); margin: 0 0 var(--gap); }
+
+.chr-list { margin: 0 0 40px; }
+.chr-table .chr-unit { font-weight: 600; color: var(--text); }
+.chr-table .chr-rank { color: var(--muted); }
+.chr-table .chr-sub { display: block; font-size: var(--fs-xs); color: var(--muted); font-weight: 400; }
+.chr-table .chr-title { min-width: 280px; }
+.chr-table .chr-viewer { text-decoration: none; margin-left: 4px; }
+.chr-table .chr-pick { color: var(--accent); }
+.chr-table .chr-src { white-space: nowrap; }
