@@ -1,0 +1,36 @@
+{% extends "_public_base.html" %}
+{#- templates/guides_index.html — /guides (AI SEO buyer guides, 2026-10-09).
+    Context (app.py::public_guides): guides = automation/web/guides.listing(). -#}
+{% block title %}Buyer Guides — Bulk Banquet, Stacking & Church Chairs | Black Whole{% endblock %}
+{% block meta_description %}Plain answers to the questions chair buyers ask: where to buy banquet chairs in bulk, which stacking chair fits a church hall, banquet vs folding for a venue, and where used church chairs are near you.{% endblock %}
+{% block body_class %}page-guides{% endblock %}
+
+{% block content %}
+{% from "_crumbs.html" import crumbs with context %}{{ crumbs([("Home", "/")], "Guides") }}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">BUYER GUIDES · WRITTEN BY THE PEOPLE WHO MOVE THE CHAIRS</div>
+    <h1 class="page-title">STRAIGHT ANSWERS FOR CHAIR BUYERS</h1>
+    <p class="page-lede">The questions a church, venue or planner asks before buying a few hundred chairs — answered without a sales pitch, with live stock linked where it helps.</p>
+  </div>
+  <div class="page-head-right mono tiny"><div><a href="/listings">SEE THE LOTS →</a></div></div>
+</section>
+
+<section class="about-prose guide-index">
+  <div class="about-grid">
+    {% for g in guides %}
+    <article>
+      <div class="section-rule"></div>
+      <div class="mono tiny">{{ g.eyebrow }}</div>
+      <h2 class="section-title"><a href="{{ g.path }}">{{ g.h1 }}</a></h2>
+      <p>{{ g.description }}</p>
+      <p class="mono tiny"><a href="{{ g.path }}">READ THE GUIDE →</a></p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/site.js?v={{ asset_v }}"></script>
+{% endblock %}
