@@ -1,0 +1,122 @@
+{
+  "_note": "SAMPLE DATA for GET /platform. Every buyer, organisation and message here is invented. No real person, contact, phone, email, address or conversation belongs in this file. Stage names follow the CRM's pipeline (needs_reply, qualifying, closing, routing, parked, won, lost). Times are minutes before 'now' so the demo never looks stale.",
+  "sample": true,
+  "stages": [
+    {"key": "needs_reply", "label": "Needs reply"},
+    {"key": "qualifying", "label": "Qualifying"},
+    {"key": "closing", "label": "Closing"},
+    {"key": "routing", "label": "Routing"},
+    {"key": "parked", "label": "Parked"},
+    {"key": "won", "label": "Won"},
+    {"key": "lost", "label": "Lost"}
+  ],
+  "channels": [
+    {"key": "fb_marketplace", "label": "Facebook Marketplace"},
+    {"key": "ebay", "label": "eBay"},
+    {"key": "craigslist", "label": "Craigslist"},
+    {"key": "email", "label": "Email"},
+    {"key": "text", "label": "Text"}
+  ],
+  "buyers": [
+    {
+      "id": "b1", "name": "Marisol R.", "about": "Event rental company", "channel": "fb_marketplace",
+      "lot_id": "L-2041", "wants": "folding tables", "quantity_wanted": 60, "stage": "needs_reply",
+      "next_action": "Approve the reply that confirms 60 tables",
+      "thread": [
+        {"from": "buyer", "mins_ago": 190, "text": "Hi, are the 6 ft folding tables still available?"},
+        {"from": "seller", "mins_ago": 175, "text": "Yes, still available. How many are you looking for?"},
+        {"from": "buyer", "mins_ago": 25, "text": "I need 60 before the 14th. Can you do that many?"}
+      ],
+      "draft": {"text": "Yes, 60 is no problem. They are $28 each. Do you want to pick up, or should I get you a freight quote?", "held_for": "names a price"}
+    },
+    {
+      "id": "b2", "name": "Dwayne K.", "about": "Restaurant owner", "channel": "text",
+      "lot_id": "L-2016", "wants": "stainless prep tables", "quantity_wanted": 4, "stage": "closing",
+      "next_action": "Approve the reply that confirms a pickup time",
+      "thread": [
+        {"from": "buyer", "mins_ago": 1500, "text": "Saw your prep tables. I'd take 4 if they are the 72 inch ones."},
+        {"from": "seller", "mins_ago": 1480, "text": "They are 30 by 72. Four is fine."},
+        {"from": "buyer", "mins_ago": 70, "text": "Good. Can I come Saturday morning with a trailer?"}
+      ],
+      "draft": {"text": "Saturday morning works. I can meet you at 9. I'll send the pickup details the day before.", "held_for": "confirms a pickup time"}
+    },
+    {
+      "id": "b3", "name": "Priya S.", "about": "Charter school operations", "channel": "email",
+      "lot_id": "L-2030", "wants": "student desks", "quantity_wanted": 150, "stage": "closing",
+      "next_action": "Send the invoice once she confirms the count",
+      "thread": [
+        {"from": "buyer", "mins_ago": 4400, "text": "We are opening two new classrooms in January and need about 150 desks. Are yours all the same model?"},
+        {"from": "seller", "mins_ago": 4300, "text": "Same model, same colour. I have a little over 200 left."},
+        {"from": "buyer", "mins_ago": 2900, "text": "Good. I need sign-off from our director, then I can confirm 150."},
+        {"from": "seller", "mins_ago": 2880, "text": "No rush. I'll note 150 against your name so you are first in line."}
+      ]
+    },
+    {
+      "id": "b4", "name": "Hollis T.", "about": "Warehouse manager", "channel": "ebay",
+      "lot_id": "L-2035", "wants": "pallet rack uprights", "quantity_wanted": 64, "stage": "routing",
+      "next_action": "Get a freight quote to his dock",
+      "thread": [
+        {"from": "buyer", "mins_ago": 600, "text": "Would take all 64 uprights if you can ship. We have a dock and a forklift."},
+        {"from": "seller", "mins_ago": 560, "text": "I can ship. Which state are you in? I'll get a freight number."},
+        {"from": "buyer", "mins_ago": 410, "text": "Northern Colorado. Send the quote and I'll decide this week."}
+      ]
+    },
+    {
+      "id": "b5", "name": "Renee A.", "about": "Garage organizer", "channel": "craigslist",
+      "lot_id": "L-2027", "wants": "wire shelving", "quantity_wanted": null, "stage": "qualifying",
+      "next_action": "Ask how many units she needs",
+      "thread": [
+        {"from": "buyer", "mins_ago": 2100, "text": "Do you still have the chrome shelving? What is the least you will sell?"},
+        {"from": "seller", "mins_ago": 2050, "text": "Still have it, and there is no minimum. How many units were you thinking?"}
+      ]
+    },
+    {
+      "id": "b6", "name": "Imani J.", "about": "Community center", "channel": "fb_marketplace",
+      "lot_id": "L-2041", "wants": "folding tables", "quantity_wanted": 40, "stage": "qualifying",
+      "next_action": "Find out where she is, pickup or freight",
+      "thread": [
+        {"from": "buyer", "mins_ago": 3100, "text": "Interested in 40 tables for our hall."},
+        {"from": "seller", "mins_ago": 3080, "text": "Happy to help. Where is the hall? That tells me if pickup makes sense or if I should quote freight."}
+      ]
+    },
+    {
+      "id": "b7", "name": "Gabe M.", "about": "Boutique hotel", "channel": "fb_marketplace",
+      "lot_id": "L-2024", "wants": "luggage carts", "quantity_wanted": 12, "stage": "won",
+      "next_action": "Check back in spring about a second order",
+      "thread": [
+        {"from": "buyer", "mins_ago": 14500, "text": "We'll take 12 carts."},
+        {"from": "seller", "mins_ago": 14400, "text": "Done. I've marked 12 as yours."},
+        {"from": "buyer", "mins_ago": 8700, "text": "Picked up today. They look great, thank you."},
+        {"from": "seller", "mins_ago": 8650, "text": "Glad to hear it. If you open the second property, I'll have more."}
+      ]
+    },
+    {
+      "id": "b8", "name": "Tomasz W.", "about": "Electronics reseller", "channel": "ebay",
+      "lot_id": "L-2033", "wants": "business laptops", "quantity_wanted": 75, "stage": "parked",
+      "next_action": "Tell him when the next laptop lot arrives",
+      "thread": [
+        {"from": "buyer", "mins_ago": 7300, "text": "Any more of the 14 inch laptops coming? I missed the last batch."},
+        {"from": "seller", "mins_ago": 7200, "text": "That lot sold out. I've put you on the list for the next one."}
+      ]
+    },
+    {
+      "id": "b9", "name": "Noor H.", "about": "Summer camp director", "channel": "email",
+      "lot_id": "L-2021", "wants": "cafeteria tables", "quantity_wanted": 20, "stage": "parked",
+      "next_action": "Message her when the lot is picked up and counted",
+      "thread": [
+        {"from": "buyer", "mins_ago": 5200, "text": "I saw the cafeteria tables marked as arriving soon. Can I reserve 20?"},
+        {"from": "seller", "mins_ago": 5100, "text": "They are not in hand yet. I'll write to you the day they land, before they go anywhere else."}
+      ]
+    },
+    {
+      "id": "b10", "name": "Carl B.", "about": "Gym owner", "channel": "text",
+      "lot_id": "L-2012", "wants": "lockers", "quantity_wanted": 25, "stage": "lost",
+      "next_action": "None. Bought elsewhere.",
+      "thread": [
+        {"from": "buyer", "mins_ago": 21000, "text": "Do you have 25 lockers left?"},
+        {"from": "seller", "mins_ago": 20900, "text": "I have 25. Do you want them held?"},
+        {"from": "buyer", "mins_ago": 19800, "text": "Found some closer to me, thanks anyway."}
+      ]
+    }
+  ]
+}

@@ -79,6 +79,7 @@ from .. import attribution
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import platform_api
 from . import public_deals
 from . import rate_limit
 from . import public_map
@@ -1933,6 +1934,168 @@ def archive_lot_analyze(source: str, asset_id: int, account_id: int, auction_id:
 async def public_sell(request: Request):
     return templates.TemplateResponse(
         request, "sell.html", _public_ctx({}),
+    )
+
+
+@app.get("/platform", response_class=HTMLResponse)
+def public_platform(request: Request):
+    """The software behind the store, with a read-only demo (templates/platform.html).
+
+    Deliberately unlinked: chair buyers should not land on a software pitch, so
+    this is not in the storefront nav or the sitemap and the page is `noindex`.
+    The handler reads nothing — the Deal finder tab calls the existing public
+    `/deals/api/*` endpoints from the browser (policy: public_deals.py), the
+    other two tabs load invented sample JSON from `static/site/platform/`, and
+    the request-access form posts to the existing `/contact`.
+    """
+    return templates.TemplateResponse(
+        request, "platform.html",
+        _public_ctx({"platform_sources": list(_PLATFORM_SOURCE_NAMES.values())}),
+    )
+
+
+# Auction sites the recorder knows, in display order. The page renders these
+# names with no DB read; /platform/api/sources adds the live numbers.
+_PLATFORM_SOURCE_NAMES = {
+    "govdeals": "GovDeals",
+    "allsurplus": "AllSurplus",
+    "gsa": "GSA Auctions",
+    "purple_wave": "Purple Wave",
+    "public_surplus": "Public Surplus",
+    "municibid": "Municibid",
+    "mibid": "MiBid",
+}
+_PLATFORM_SOURCES_TTL = 300        # seconds; one grouped read per 5 min, not per page view
+_PLATFORM_LIVE_WINDOW_H = 24
+
+
+@readcache.cached(ttl=_PLATFORM_SOURCES_TTL)
+def _platform_source_rows() -> list[dict]:
+    """One grouped read of `listing_snapshots`. Raises on failure, so a failed
+    read is never memoised (readcache stores return values only)."""
+    return db.fetch_all(
+        "SELECT source, count(DISTINCT source_lot_id) AS lots, max(observed_at) AS last_seen "
+        "FROM listing_snapshots GROUP BY source"
+    )
+
+
+@app.get("/platform/api/sources")
+def public_platform_sources():
+    """Auction sites tracked, for the strip under the /platform hero. Public and
+    read-only (deliberately not under the auth-walled `/api/`). A site is `live`
+    when the recorder observed it in the last 24 hours; anything else is shown
+    as paused. A failed read answers names only — never error text."""
+    names = dict(_PLATFORM_SOURCE_NAMES)
+    try:
+        rows = {r["source"]: r for r in _platform_source_rows()}
+    except Exception:
+        log.warning("platform sources read failed", exc_info=True)
+        return {"ok": False, "sources": [{"key": k, "name": n} for k, n in names.items()]}
+    for key in rows:
+        names.setdefault(key, str(key).replace("_", " ").title())
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    out = []
+    for key, name in names.items():
+        row = rows.get(key) or {}
+        seen = row.get("last_seen")
+        if seen is not None and seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        live = bool(seen and now - seen <= timedelta(hours=_PLATFORM_LIVE_WINDOW_H))
+        out.append({
+            "key": key, "name": name, "live": live,
+            "lots": int(row.get("lots") or 0),
+            "last_seen": seen.isoformat() if seen else None,
+        })
+    return {"ok": True, "tracked": len(out), "live": sum(1 for s in out if s["live"]), "sources": out}
+
+
+@app.get("/platform/api/sites")
+def public_platform_sites():
+    """Every auction site in scope: `live` / `paused` (an adapter exists) or
+    `planned` (roadmap, nothing scraped, `lots: null`). Public, read-only, shares
+    the memoised read behind /platform/api/sources. 503 when that read fails —
+    never a guessed status. Policy: platform_api.py."""
+    try:
+        return platform_api.sites(_platform_source_rows)
+    except Exception:
+        log.warning("platform sites read failed", exc_info=True)
+        return JSONResponse({"ok": False, "error": "unavailable"}, status_code=503)
+
+
+@app.get("/platform/api/auctions")
+def public_platform_auctions(
+    q: str | None = None, site: str | None = None, category: str | None = None,
+    state: str | None = None, status: str = "open", no_bids: str | None = None,
+    max_bid: str | None = None, ending: str | None = None, sort: str = "ending",
+    page: int = 1, per_page: int = 50,
+):
+    """One auctions view across every site the recorder observes. Public and
+    read-only (deliberately not under the auth-walled `/api/`); the read model,
+    its allow-list and the public_deals exclusions live in platform_api.py."""
+    return platform_api.auctions(
+        q=q, site=site, category=category, state=state, status=status, no_bids=no_bids,
+        max_bid=max_bid, ending=ending, sort=sort, page=page, per_page=per_page)
+
+
+# ── liquidator-facing pages (feat/liquidator-platform-ui) ─────────────────
+# Same stance as /platform: direct URL only (noindex, not in the nav, footer or
+# sitemap), handlers read nothing from the database. Every sample is labelled
+# as sample in the server-rendered HTML; plain-English search is only "coming".
+_BANKRUPTCY_SAMPLE_PATH = STATIC_DIR / "site" / "platform" / "bankruptcies.sample.json"
+
+
+def _bankruptcy_samples() -> list[dict]:
+    """The INVENTED bankruptcy fixture (static JSON, no DB). Read per call —
+    it is one small file and the pages that use it are not hot."""
+    try:
+        data = json.loads(_BANKRUPTCY_SAMPLE_PATH.read_text())
+        return list(data.get("filings") or [])
+    except (OSError, ValueError):
+        log.warning("bankruptcy sample fixture unreadable", exc_info=True)
+        return []
+
+
+def _platform_site_rows() -> list[dict]:
+    """Every site name the platform read model knows, with no DB read: the
+    adapter-backed ones (`live`/`paused` is decided in the browser from
+    /platform/api/sites) and the planned ones, which never show as scraped."""
+    rows = [{"key": k, "name": n, "kind": kind, "planned": False}
+            for k, (n, kind) in platform_api.SITES.items()]
+    rows += [{"key": k, "name": n, "kind": kind, "planned": True}
+             for k, (n, kind) in platform_api.PLANNED_SITES.items()]
+    return rows
+
+
+@app.get("/liquidators", response_class=HTMLResponse)
+def public_liquidators(request: Request):
+    """Landing page for liquidation companies: find distressed businesses first
+    (lead side) and sell lots to the buyer network (sell side). The sample
+    lead table is the invented fixture, rendered server-side and labelled."""
+    return templates.TemplateResponse(
+        request, "liquidators.html",
+        _public_ctx({"sample_filings": _bankruptcy_samples()[:6]}),
+    )
+
+
+@app.get("/platform/bankruptcies", response_class=HTMLResponse)
+def public_platform_bankruptcies(request: Request):
+    """Searchable SAMPLE bankruptcy table + filters + an "Ask AI" box that is
+    UI only (it answers a coming-soon state, no network). Data: the static
+    fixture, fetched by the browser; nothing here is a court record."""
+    return templates.TemplateResponse(
+        request, "platform_bankruptcies.html", _public_ctx({}),
+    )
+
+
+@app.get("/platform/deals", response_class=HTMLResponse)
+def public_platform_deals(request: Request):
+    """Unified deal feed across every auction site the recorder observes. The
+    browser reads the policy-gated /platform/api/auctions (+ /platform/api/sites
+    for each site's true status); the contract carries no photos (public_deals
+    policy) so none can render. Planned sites are named and labelled planned."""
+    return templates.TemplateResponse(
+        request, "platform_deals.html", _public_ctx({"sites": _platform_site_rows()}),
     )
 
 

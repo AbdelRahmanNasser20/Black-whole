@@ -221,3 +221,92 @@ def fetch_facets() -> dict:
         return {"categories": cats, "states": states, "stats": stats, "cached_at": time.time()}
 
     return _cached("facets", load)
+
+
+# ── operator picks, for public read models that are NOT `deal_lots` ──────────
+# `exclusion_where()` joins on deal_lots' integer keys. A read model built on
+# another table (the recorder's `listing_snapshots`, behind /platform/api/auctions)
+# cannot use it, so the same rule lives here in a table-agnostic form: load the
+# three pick tables once (they are tiny), then test each lot by maestro id pair,
+# by native id, by URL and by title. Matching is deliberately greedy — hiding a
+# lot the operator did not pick costs nothing, showing one he did is the leak.
+PICKS_ROW_CAP = 5000
+_MAESTRO_KEY_RE = re.compile(r"^(\d+)/(\d+)(?:/\d+)?$")
+_ASSET_URL_RE = re.compile(r"/asset/(\d+)/(\d+)")
+
+
+def _norm_title(s: Any) -> str:
+    return re.sub(r"\W+", " ", str(s or "").lower()).strip()
+
+
+def _norm_url(u: Any) -> str:
+    s = str(u or "").strip().lower().split("#", 1)[0]
+    s = re.sub(r"^https?://(www\.)?", "", s)
+    return s.rstrip("/")
+
+
+class OperatorPicks:
+    """Everything the operator has starred / tracked / listed, as lookup sets."""
+    __slots__ = ("pairs", "ids", "urls", "titles")
+
+    def __init__(self, pairs=(), ids=(), urls=(), titles=()):
+        self.pairs = frozenset(pairs)
+        self.ids = frozenset(i for i in ids if i)
+        self.urls = frozenset(u for u in urls if u)
+        self.titles = frozenset(t for t in titles if t)
+
+
+def load_operator_picks(conn) -> OperatorPicks:
+    """Read tracked_lots + auction_favorites + deal_list_items on `conn`.
+    Raises on failure — a caller that cannot load the picks must not publish."""
+    pairs: set[tuple[int, int]] = set()
+    ids: set[str] = set()
+    urls: set[str] = set()
+    titles: set[str] = set()
+
+    def _link(link: Any) -> None:
+        if not link:
+            return
+        urls.add(_norm_url(link))
+        m = _ASSET_URL_RE.search(str(link))
+        if m:
+            pairs.add((int(m.group(1)), int(m.group(2))))
+
+    for r in conn.execute("SELECT asset_id, account_id, title, url FROM tracked_lots LIMIT %s",
+                          (PICKS_ROW_CAP,)).fetchall():
+        pairs.add((int(r["asset_id"]), int(r["account_id"])))
+        titles.add(_norm_title(r.get("title")))
+        _link(r.get("url"))
+    for r in conn.execute("SELECT asset_id, link, title FROM auction_favorites LIMIT %s",
+                          (PICKS_ROW_CAP,)).fetchall():
+        key = str(r.get("asset_id") or "").strip()
+        ids.add(key)
+        ids.add(key.split(":", 1)[-1])          # "bs:<uuid>" → "<uuid>"
+        m = _MAESTRO_KEY_RE.match(key)
+        if m:
+            pairs.add((int(m.group(1)), int(m.group(2))))
+        titles.add(_norm_title(r.get("title")))
+        _link(r.get("link"))
+    for r in conn.execute("SELECT asset_id, account_id FROM deal_list_items LIMIT %s",
+                          (PICKS_ROW_CAP,)).fetchall():
+        pairs.add((int(r["asset_id"]), int(r["account_id"])))
+    return OperatorPicks(pairs, ids, urls, titles)
+
+
+def is_operator_pick(picks: OperatorPicks, *, source_lot_id: Any,
+                     title: Any = None, url: Any = None) -> bool:
+    """True when a lot from ANY source is one the operator marked interest in."""
+    key = str(source_lot_id or "").strip()
+    if key and (key in picks.ids or key.split(":", 1)[-1] in picks.ids):
+        return True
+    m = _MAESTRO_KEY_RE.match(key)
+    if m and (int(m.group(1)), int(m.group(2))) in picks.pairs:
+        return True
+    if url:
+        if _norm_url(url) in picks.urls:
+            return True
+        m = _ASSET_URL_RE.search(str(url))
+        if m and (int(m.group(1)), int(m.group(2))) in picks.pairs:
+            return True
+    t = _norm_title(title)
+    return bool(t and t in picks.titles)
