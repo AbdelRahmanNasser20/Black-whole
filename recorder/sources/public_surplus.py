@@ -144,6 +144,7 @@ from recorder.sources.base import (
     BLOCK_SUSPECT_MIN_FRACTION,
     FURNITURE_TERMS,
     PollBudget,
+    SourceFetchFailed,
     polite_get,
 )
 
@@ -455,7 +456,9 @@ class PublicSurplusSource:
                 f"[public_surplus] RECORDER ERROR: discover() aborted — all {len(FURNITURE_TERMS)} "
                 "FURNITURE_TERMS fetches failed, 0 observations"
             )
-            return []
+            raise SourceFetchFailed(
+                f"discover() aborted — all {len(FURNITURE_TERMS)} FURNITURE_TERMS fetches failed",
+                url=SEARCH_URL)
         result = [_to_observation(c) for c in cards_by_id.values()]
         if not result:
             print(

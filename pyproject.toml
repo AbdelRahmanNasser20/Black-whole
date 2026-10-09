@@ -14,7 +14,7 @@ dependencies = [
     "jinja2>=3.1",
     "uvicorn[standard]>=0.27",
     "sse-starlette>=2.0",
-    "requests>=2.28",
+    "requests[socks]>=2.28", # [socks] = PySocks: recorder per-host SOCKS5 proxy (RECORDER_PROXY_URL)
     "python-dotenv>=1.0",
     "python-dateutil>=2.8.0",
     "python-multipart>=0.0.9",

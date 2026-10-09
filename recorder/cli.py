@@ -60,6 +60,7 @@ from recorder.sources.mibid import MiBidSource
 from recorder.sources.municibid import MunicibidSource
 from recorder.sources.public_surplus import PublicSurplusSource
 from recorder.sources.purple_wave import PurpleWaveSource
+from recorder.sources.base import SourceFetchFailed
 
 # Canonical source-name order — single source of truth for both the CLI's
 # `--source` choices (needed before any adapter is instantiated, so --help
@@ -198,6 +199,14 @@ def cmd_discover(registry: dict, source: str | None = None,
             continue
         try:
             n, seen = _discover_counts(adapter)
+        except SourceFetchFailed as exc:
+            # The adapter could not fetch its source (network, 403/429, proxy
+            # down, page-shape drift) — a failed attempt with a readable reason.
+            print(f"RECORDER ERROR source={name} discover failed: {exc}", file=sys.stderr)
+            failed.append(name)
+            if health_reg is not None:
+                health_reg.record_failure(name, t, f"discover fetch failed: {exc}")
+            continue
         except Exception as exc:  # noqa: BLE001 - one bad source must never kill the sweep
             print(f"RECORDER ERROR source={name} discover failed: {exc!r}", file=sys.stderr)
             failed.append(name)
@@ -205,12 +214,10 @@ def cmd_discover(registry: dict, source: str | None = None,
                 health_reg.record_failure(name, t, f"discover raised: {exc!r}")
             continue
         if health_reg is not None:
-            if seen:
-                health_reg.record_success(name, t, kind="discover")
-            else:
-                # Every adapter "aborts" by printing a RECORDER ERROR and
-                # returning [] — that is a failed attempt, not a quiet day.
-                health_reg.record_failure(name, t, "discover returned 0 observations (aborted)")
+            # A fetch that succeeded and matched 0 lots is a quiet day, not an
+            # outage (mibid's furniture filter is legitimately empty most days).
+            # Fetch failures raise SourceFetchFailed above — they never get here.
+            health_reg.record_success(name, t, kind="discover")
         print(f"discover source={name} inserted={n} observed={seen}")
     if failed:
         print(f"discover: {len(failed)} source(s) failed: {','.join(failed)}", file=sys.stderr)

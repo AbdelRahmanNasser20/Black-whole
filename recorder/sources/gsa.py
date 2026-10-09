@@ -96,7 +96,7 @@ from typing import Any
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, polite_get
+from recorder.sources.base import FURNITURE_TERMS, SourceFetchFailed, polite_get
 
 SOURCE = "gsa"
 
@@ -250,7 +250,8 @@ class GSASource:
         items = _fetch_auctions()
         if items is None:
             print("[gsa] RECORDER ERROR: discover() aborted — fetch failed, 0 observations")
-            return []
+            # No url= on purpose: the transport error text can carry the api_key.
+            raise SourceFetchFailed("discover() aborted — auctions fetch failed (see RECORDER ERROR above)")
         active_furniture = [
             it for it in items
             if str(it.get("auctionStatus", "")).lower() == "active" and _is_furniture(it)

@@ -13,7 +13,7 @@ import requests
 
 from recorder.models import Observation
 from recorder.sources import public_surplus as ps
-from recorder.sources.base import FURNITURE_TERMS
+from recorder.sources.base import FURNITURE_TERMS, SourceFetchFailed
 
 FIXTURES = Path(__file__).parent / "fixtures" / "public_surplus"
 
@@ -176,22 +176,22 @@ def test_discover_dedupes_across_terms(monkeypatch, search_html):
     assert len(ids) == len(set(ids))
 
 
-def test_discover_all_terms_fail_returns_empty_and_prints_loud_error(monkeypatch, capsys):
+def test_discover_all_terms_fail_raises_fetch_failed_and_prints_loud_error(monkeypatch, capsys):
     monkeypatch.setattr(ps, "polite_get", lambda *a, **k: _FakeResponse("", status_code=403))
-    obs = ps.PublicSurplusSource().discover()
-    assert obs == []
+    with pytest.raises(SourceFetchFailed):
+        ps.PublicSurplusSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
     assert "public_surplus" in out
 
 
-def test_discover_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+def test_discover_raises_fetch_failed_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
     def raise_connection_error(*a, **k):
         raise requests.exceptions.ConnectionError("boom")
 
     monkeypatch.setattr(ps, "polite_get", raise_connection_error)
-    obs = ps.PublicSurplusSource().discover()
-    assert obs == []
+    with pytest.raises(SourceFetchFailed):
+        ps.PublicSurplusSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
 
