@@ -174,7 +174,7 @@ import requests
 from bs4 import BeautifulSoup
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, PollBudget, polite_get
+from recorder.sources.base import FURNITURE_TERMS, PollBudget, SourceFetchFailed, polite_get
 
 SOURCE = "municibid"
 
@@ -508,7 +508,9 @@ class MunicibidSource:
                 f"[municibid] RECORDER ERROR: discover() aborted — all {len(FURNITURE_TERMS)} "
                 "FURNITURE_TERMS fetches failed, 0 observations"
             )
-            return []
+            raise SourceFetchFailed(
+                f"discover() aborted — all {len(FURNITURE_TERMS)} FURNITURE_TERMS fetches failed",
+                url=SEARCH_URL)
         out = [
             _to_observation(it, status="active", bid_count=bid_counts.get(lid))
             for lid, it in items_by_id.items()

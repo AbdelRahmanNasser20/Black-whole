@@ -120,11 +120,12 @@ def _patch_lock(monkeypatch, locked=True):
 
 # --- registry completeness --------------------------------------------------
 
-def test_registry_has_all_seven_sources():
+def test_registry_has_all_sources():
     registry = cli.build_registry()
     assert set(registry.keys()) == set(cli.SOURCE_NAMES)
     assert set(cli.SOURCE_NAMES) == {
         "govdeals", "allsurplus", "public_surplus", "purple_wave", "municibid", "mibid", "gsa",
+        "ibid_il", "wisconsin_surplus", "usgovbid", "mnbid",
     }
 
 
@@ -161,6 +162,27 @@ def test_discover_runs_every_source_even_when_one_fails(monkeypatch):
     assert good_a.sold_sweep_calls == 1
     assert good_c.sold_sweep_calls == 1
     assert rc == 1  # nonzero because one source failed
+
+
+def test_discover_fetch_failure_is_isolated_and_nonzero(monkeypatch, capsys):
+    from recorder.sources.base import SourceFetchFailed
+
+    class Blocked(FakeSource):
+        def discover(self):
+            self.discover_calls += 1
+            raise SourceFetchFailed("discover() aborted — all 6 FURNITURE_TERMS fetches failed")
+
+    monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
+    good = FakeSource("a", discover_obs=[_obs()])
+    rc = cli.cmd_discover({"ps": Blocked("ps"), "a": good})
+    assert rc == 1 and good.discover_calls == 1
+    assert "RECORDER ERROR source=ps discover failed: discover() aborted" in capsys.readouterr().err
+
+
+def test_discover_zero_observations_is_a_clean_run(monkeypatch, capsys):
+    monkeypatch.setattr(cli.store, "insert_observations", lambda obs: len(list(obs)))
+    assert cli.cmd_discover({"mibid": FakeSource("mibid")}) == 0
+    assert "discover source=mibid inserted=0 observed=0" in capsys.readouterr().out
 
 
 def test_discover_returns_zero_when_all_sources_succeed(monkeypatch):

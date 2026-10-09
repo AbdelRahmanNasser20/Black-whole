@@ -6,9 +6,26 @@ adapters should hit a source over HTTP — they enforce the >=1s per-host
 throttle and an honest desktop-Chrome User-Agent so we never look like a bot
 storm. Adapters inspect `response.status_code` themselves; these helpers
 never call `raise_for_status()`.
+
+Per-host proxy (2026-10-09): `RECORDER_PROXY_URL` (e.g. `socks5h://127.0.0.1:1081`,
+the Pi's residential US SOCKS5 tunnel) + `RECORDER_PROXY_HOSTS` (comma list of
+hostnames, suffix match: `publicsurplus.com,mibid.michigan.gov`). Only requests
+to a listed host carry `proxies=`; every other host (GovDeals, GSA, Purple
+Wave, Municibid) stays direct. A listed host whose proxy is not listening
+raises `ProxyUnavailable` BEFORE any network call — never a silent direct
+request from a blocked IP (the site would just 403 again and the breaker
+would open with a misleading reason).
+
+Fetch contract for `discover()`: a fetch that FAILED (network, 403/429,
+page-shape drift) raises `SourceFetchFailed`; a fetch that succeeded and
+matched nothing returns `[]`. The breaker (recorder/health.py) counts the
+former as a failed attempt and the latter as a success — mibid's furniture
+filter legitimately matches 0 lots most days.
 """
 from __future__ import annotations
 
+import os
+import socket
 import time
 from typing import Protocol, runtime_checkable
 from urllib.parse import urlparse
@@ -27,6 +44,21 @@ USER_AGENT = (
 )
 
 MIN_HOST_INTERVAL_SECONDS = 1.0
+
+# Per-host overrides of the 1 s floor, keyed by hostname (lowercase, exact).
+# A source whose robots.txt publishes `Crawl-delay` registers it here at
+# import time (`register_host_interval`) so EVERY request to that host —
+# discover, poll, sold sweep, a one-off smoke script — waits at least that
+# long. Never lower than MIN_HOST_INTERVAL_SECONDS.
+HOST_MIN_INTERVAL_SECONDS: dict[str, float] = {}
+
+
+def register_host_interval(host: str, seconds: float) -> None:
+    HOST_MIN_INTERVAL_SECONDS[host.lower()] = max(float(seconds), MIN_HOST_INTERVAL_SECONDS)
+
+
+def host_interval(host: str) -> float:
+    return HOST_MIN_INTERVAL_SECONDS.get(host.lower(), MIN_HOST_INTERVAL_SECONDS)
 
 # Batch-level "this looks systemic, not per-lot" thresholds, shared by
 # public_surplus's 401 block guard and the source breaker (recorder/health.py):
@@ -76,6 +108,94 @@ def _check_rate_limit(host: str) -> None:
 def _note_response(host: str, resp) -> None:
     if getattr(resp, "status_code", None) == 429:
         _rate_limited_until[host] = time.monotonic() + _retry_after_s(resp)
+
+
+class SourceFetchFailed(Exception):
+    """`discover()` could not fetch its source (as opposed to "fetched fine,
+    matched 0 lots", which returns `[]`). The CLI records it as a failed
+    breaker attempt with this message as `last_error`. `url` (optional) names
+    the host whose last transport error gets appended — gsa must NOT pass it
+    (its error text can carry the api_key)."""
+
+    def __init__(self, message: str, *, url: str | None = None):
+        detail = last_failure(url) if url else None
+        super().__init__(f"{message} — last error: {detail}" if detail else message)
+
+
+class ProxyUnavailable(requests.exceptions.ConnectionError):
+    """A host is routed through `RECORDER_PROXY_URL` but the proxy is not
+    reachable (or the URL is unset). Raised before any network call. A
+    ConnectionError on purpose: adapters already read that as "fetch failed",
+    and public_surplus's sweep stops after the first one."""
+
+
+# --- per-host proxy ----------------------------------------------------------
+
+PROXY_URL_ENV = "RECORDER_PROXY_URL"
+PROXY_HOSTS_ENV = "RECORDER_PROXY_HOSTS"
+PROXY_PROBE_TIMEOUT_S = 2.0
+
+# Last transport-level failure per host (exception text or `HTTP <code>`),
+# so SourceFetchFailed can say WHY the breaker is opening.
+_last_failure: dict[str, str] = {}
+
+
+def _hostname(url_or_host: str) -> str:
+    parsed = urlparse(url_or_host if "//" in url_or_host else f"//{url_or_host}")
+    return (parsed.hostname or "").lower()
+
+
+def proxy_hosts() -> list[str]:
+    raw = os.getenv(PROXY_HOSTS_ENV) or ""
+    return [h.strip().lower().lstrip(".") for h in raw.split(",") if h.strip()]
+
+
+def is_proxied_host(host: str) -> bool:
+    host = host.lower()
+    return any(host == h or host.endswith("." + h) for h in proxy_hosts())
+
+
+def _socket_open(host: str, port: int, timeout: float = PROXY_PROBE_TIMEOUT_S) -> bool:
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def proxies_for(url: str) -> dict[str, str] | None:
+    """`proxies=` for `requests` when the URL's host is listed in
+    RECORDER_PROXY_HOSTS, else None (direct). Raises ProxyUnavailable when the
+    host is listed but RECORDER_PROXY_URL is unset or its socket is closed."""
+    host = _hostname(url)
+    if not host or not is_proxied_host(host):
+        return None
+    proxy_url = (os.getenv(PROXY_URL_ENV) or "").strip()
+    if not proxy_url:
+        raise ProxyUnavailable(
+            f"{host} is listed in {PROXY_HOSTS_ENV} but {PROXY_URL_ENV} is unset — "
+            "set the proxy URL (socks5h://127.0.0.1:1081) or drop the host from the list; "
+            "never fetched direct")
+    parsed = urlparse(proxy_url)
+    phost, pport = parsed.hostname, parsed.port
+    if not phost or not pport:
+        raise ProxyUnavailable(
+            f"{PROXY_URL_ENV}={proxy_url!r} has no host:port — {host} not fetched")
+    if not _socket_open(phost, pport):
+        raise ProxyUnavailable(
+            f"recorder proxy {proxy_url} is not listening ({PROXY_URL_ENV}); {host} is routed "
+            "through it and was NOT fetched direct — start the tunnel (`proxy on` / "
+            "`proxy doctor`) or drop the host from "
+            f"{PROXY_HOSTS_ENV}")
+    return {"http": proxy_url, "https": proxy_url}
+
+
+def last_failure(url_or_host: str) -> str | None:
+    return _last_failure.get(_hostname(url_or_host))
+
+
+def _note_failure(host: str, text: str) -> None:
+    _last_failure[host.lower()] = text[:300]
 
 
 class PollBudget:
@@ -139,7 +259,7 @@ def _throttle(host: str) -> None:
     now = time.monotonic()
     last = _last_request_at.get(host)
     if last is not None:
-        wait = MIN_HOST_INTERVAL_SECONDS - (now - last)
+        wait = host_interval(host) - (now - last)
         if wait > 0:
             time.sleep(wait)
     _last_request_at[host] = time.monotonic()
@@ -152,19 +272,38 @@ def _headers(extra: dict | None) -> dict:
     return merged
 
 
-def polite_get(url, *, headers=None, params=None, timeout=DEFAULT_TIMEOUT) -> requests.Response:
+def _send(method, url, *, headers, timeout, **kw) -> requests.Response:
     host = urlparse(url).netloc
+    hostname = _hostname(url)
     _check_rate_limit(host)
+    try:
+        proxies = proxies_for(url)        # before the throttle: no sleep for a dead proxy
+    except ProxyUnavailable as e:
+        _note_failure(hostname, str(e))
+        raise
     _throttle(host)
-    resp = requests.get(url, headers=_headers(headers), params=params, timeout=timeout)
+    try:
+        resp = method(url, headers=_headers(headers), timeout=timeout, proxies=proxies, **kw)
+    except requests.exceptions.RequestException as e:
+        _note_failure(hostname, f"{type(e).__name__}: {e}")
+        raise
     _note_response(host, resp)
+    if resp.status_code != 200:
+        _note_failure(hostname, f"HTTP {resp.status_code} on {getattr(resp, 'url', url)}")
     return resp
 
 
-def polite_post(url, *, headers=None, json=None, timeout=DEFAULT_TIMEOUT) -> requests.Response:
-    host = urlparse(url).netloc
-    _check_rate_limit(host)
-    _throttle(host)
-    resp = requests.post(url, headers=_headers(headers), json=json, timeout=timeout)
-    _note_response(host, resp)
-    return resp
+def polite_get(url, *, headers=None, params=None, timeout=DEFAULT_TIMEOUT,
+               session: requests.Session | None = None) -> requests.Response:
+    """`session` (optional): a `requests.Session` whose cookie jar must
+    carry across calls — Maxanet (Wisconsin Surplus / USGovBid) 302s every
+    AJAX partial to /Error/NotFound without the session cookie its landing
+    page sets. Throttle, UA, proxy and failure notes apply exactly as without."""
+    getter = session.get if session is not None else requests.get
+    return _send(getter, url, headers=headers, timeout=timeout, params=params)
+
+
+def polite_post(url, *, headers=None, json=None, timeout=DEFAULT_TIMEOUT,
+                session: requests.Session | None = None) -> requests.Response:
+    poster = session.post if session is not None else requests.post
+    return _send(poster, url, headers=headers, timeout=timeout, json=json)
