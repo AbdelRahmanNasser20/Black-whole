@@ -15,16 +15,55 @@ VERDICT_COLUMNS = ["asset_id","account_id","auction_id","analyzed_at",
     "margin","margin_pct","confidence","reasoning",
     "rank_score","rank_notes","alerted_at"]
 
-_JSON_COLS = {"identity", "comps"}
+# Appended only when migration 025_deal_verdicts_flip.sql has been applied
+# (checked via _has_flip_columns, cached per process like the recorder's
+# _health_cols / freight_log.schema_ready).
+FLIP_COLUMNS = ["flip", "flip_score"]
 
-def verdict_row(v: dict) -> tuple:
+_JSON_COLS = {"identity", "comps", "flip"}
+
+def verdict_row(v: dict, columns: list[str] = VERDICT_COLUMNS) -> tuple:
     out = []
-    for c in VERDICT_COLUMNS:
+    for c in columns:
         val = v.get(c)
         if c in _JSON_COLS and val is not None:
             val = json.dumps(val, default=str)
         out.append(val)
     return tuple(out)
+
+_flip_ready = False
+_flip_noted = False
+
+def _has_flip_columns() -> bool:
+    """True once migration 025 added flip/flip_score to deal_verdicts.
+
+    Only a positive answer is cached (same reasoning as freight_log
+    .schema_ready): a DB blip must not pin the process to the old INSERT
+    forever, and the operator may apply the migration without a redeploy."""
+    global _flip_ready, _flip_noted
+    if _flip_ready:
+        return True
+    try:
+        row = db.fetch_one(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'deal_verdicts' "
+            "AND column_name = 'flip' LIMIT 1")
+    except Exception:  # noqa: BLE001 — no DB ⇒ behave like the old schema
+        return False
+    if row is None:
+        if not _flip_noted:
+            print("VERDICT NOTE: deal_verdicts has no flip columns "
+                  "(migration 025_deal_verdicts_flip.sql not applied) — "
+                  "inserting verdicts without flip/flip_score")
+            _flip_noted = True
+        return False
+    _flip_ready = True
+    return True
+
+def reset_schema_cache() -> None:
+    """Tests only."""
+    global _flip_ready, _flip_noted
+    _flip_ready = _flip_noted = False
 
 def init_verdict_schema() -> None:
     with open(DDL_FILE) as f:
@@ -33,9 +72,11 @@ def init_verdict_schema() -> None:
         db.execute(stmt)
 
 def insert_verdict(v: dict) -> None:
-    cols = ",".join(VERDICT_COLUMNS)
-    ph = ",".join(["%s"] * len(VERDICT_COLUMNS))
-    db.execute(f"INSERT INTO deal_verdicts ({cols}) VALUES ({ph})", verdict_row(v))
+    columns = VERDICT_COLUMNS + (FLIP_COLUMNS if _has_flip_columns() else [])
+    cols = ",".join(columns)
+    ph = ",".join(["%s"] * len(columns))
+    db.execute(f"INSERT INTO deal_verdicts ({cols}) VALUES ({ph})",
+               verdict_row(v, columns))
 
 def lots_for_analysis(now: datetime, *, max_bid: float, window_h: int,
                       limit: int) -> list[dict]:

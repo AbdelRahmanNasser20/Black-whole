@@ -64,6 +64,19 @@ def test_degrades_when_comps_unavailable(monkeypatch):
     assert v["method"] == "llm_estimate" and v["confidence"] == "low"
     assert v["est_resale"] == 150.0 * 40          # est_per_unit × qty (no discount claim)
 
+def test_verdict_carries_flip_analysis(monkeypatch):
+    from deals import analyze
+    _ident(monkeypatch)
+    comps = [Comp(str(i), "leap v2 chair", 100.0, None, "") for i in range(5)]
+    monkeypatch.setattr(analyze, "judge_comps", lambda ident, c: comps)
+    provider = FakeComps(CompsResult("q", 5, 100.0, comps, False))
+    v = analyze_lot(_lot(bid_count=2), provider, FeeModel(), {})
+    assert isinstance(v["flip_score"], int) and 0 <= v["flip_score"] <= 100
+    assert v["flip"]["demand"] == "warm"
+    assert set(v["flip"]["max_bid"]) == {"25", "50", "100"}
+    text = format_verdict_alert(_lot(), v, distance=None)
+    assert f"flip {v['flip_score']}/100" in text and "demand warm" in text
+
 def test_degrades_when_no_provider(monkeypatch):
     from deals import analyze
     _ident(monkeypatch)
