@@ -83,6 +83,7 @@ from . import platform_api
 from . import public_deals
 from . import rate_limit
 from . import public_map
+from . import public_distress
 from . import seo_copy
 from . import city_pages
 from . import auth as auth_svc
@@ -173,7 +174,7 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
 
 # Paths whose 404 is never a buyer on a dead lot link: assets, JSON APIs,
 # feeds, the local-photo fallback. They keep FastAPI's default response.
-_NON_STOREFRONT_PREFIXES = ("/api/", "/static/", "/deals/api/", "/map/api/",
+_NON_STOREFRONT_PREFIXES = ("/api/", "/static/", "/deals/api/", "/distress/api/", "/map/api/",
                             "/catalog/", "/image/", "/stripe/")
 
 
@@ -1343,6 +1344,77 @@ async def public_deals_facets():
         raise HTTPException(503, f"facets query failed: {e!r}")
 
 
+# ── Distress cases — bankruptcy + WARN closure leads (page: /platform/bankruptcies) ──
+# Read model + the public/operator column split: automation/web/public_distress.py.
+# Public JSON lives under /distress/api/ (outside the auth-walled /api/ prefix)
+# and never carries trustee / attorney / party contacts; /api/distress/cases
+# (session-gated) does. Writer: `python -m deals.cli distress-sync`.
+
+def _distress_args(tab, chapter, source, industry, radius_mi):
+    from deals.distress import INDUSTRY_TAGS
+    if tab not in public_distress.TABS:
+        raise HTTPException(400, "tab must be leads|sales")
+    if chapter and chapter not in public_distress.CHAPTERS:
+        raise HTTPException(400, "chapter must be 7|11")
+    if source and source not in public_distress.SOURCES:
+        raise HTTPException(400, "source must be courtlistener|warn")
+    if industry and industry not in INDUSTRY_TAGS:
+        raise HTTPException(400, f"industry must be one of {','.join(INDUSTRY_TAGS)}")
+    if radius_mi is not None and not (0 < radius_mi <= 1000):
+        raise HTTPException(400, "radius_mi must be 1-1000")
+
+
+def _distress_page(admin: bool, **kw) -> dict:
+    _distress_args(kw["tab"], kw["chapter"], kw["source"], kw["industry"], kw["radius_mi"])
+    try:
+        return public_distress.fetch_page(admin=admin, **kw)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"distress query failed: {e!r}")
+
+
+@app.get("/distress")
+async def public_distress_page(request: Request):
+    """One bankruptcies page: /platform/bankruptcies reads /distress/api/*. Old links land there."""
+    return RedirectResponse("/platform/bankruptcies", status_code=302)
+
+
+@app.get("/distress/api/cases")
+@readcache.cached(ttl=60)
+def public_distress_cases(
+    q: str | None = None, industry: str | None = None, state: str | None = None,
+    chapter: str | None = None, source: str | None = None, tab: str = "leads",
+    near: str | None = None, radius_mi: float | None = None,
+    sort: str = "filed", dir: str | None = None, page: int = 1, per_page: int = 25,
+):
+    return _distress_page(False, q=q, industry=industry, state=state, chapter=chapter, source=source,
+                          tab=tab, near=near, radius_mi=radius_mi, sort=sort, dir=dir,
+                          page=page, per_page=per_page)
+
+
+@app.get("/distress/api/facets")
+def public_distress_facets():
+    try:
+        return public_distress.fetch_facets()
+    except Exception as e:
+        raise HTTPException(503, f"distress facets failed: {e!r}")
+
+
+@app.get("/api/distress/cases")
+@readcache.cached(ttl=30)
+def admin_distress_cases(
+    q: str | None = None, industry: str | None = None, state: str | None = None,
+    chapter: str | None = None, source: str | None = None, tab: str = "leads",
+    near: str | None = None, radius_mi: float | None = None,
+    sort: str = "filed", dir: str | None = None, page: int = 1, per_page: int = 25,
+):
+    """Operator view: same filters + trustee, attorneys, parties, ZIP."""
+    return _distress_page(True, q=q, industry=industry, state=state, chapter=chapter, source=source,
+                          tab=tab, near=near, radius_mi=radius_mi, sort=sort, dir=dir,
+                          page=page, per_page=per_page)
+
+
 @app.get("/sources", response_class=HTMLResponse)
 async def sources_page(request: Request):
     """Public "Where the lots come from" page — server-rendered from the
@@ -2008,9 +2080,10 @@ def public_liquidators(request: Request):
 
 @app.get("/platform/bankruptcies", response_class=HTMLResponse)
 def public_platform_bankruptcies(request: Request):
-    """Searchable SAMPLE bankruptcy table + filters + an "Ask AI" box that is
-    UI only (it answers a coming-soon state, no network). Data: the static
-    fixture, fetched by the browser; nothing here is a court record."""
+    """THE bankruptcy / closure leads page. The browser reads /distress/api/cases
+    + /distress/api/facets (public columns only); on any API failure (503 =
+    migration 024 not applied) or an empty table it falls back to the invented
+    sample fixture and labels it. "Ask AI" is UI only. Handler reads nothing."""
     return templates.TemplateResponse(
         request, "platform_bankruptcies.html", _public_ctx({}),
     )

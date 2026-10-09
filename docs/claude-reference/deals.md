@@ -91,3 +91,37 @@ whose auction closed is flipped fake-sold-out, and one that relists is restored
 and announced on Telegram. Full detail:
 `docs/claude-reference/inventory-ledger.md` § "Auction expiry / relist sync".
 Not a Render cron, for the reason in the `tracking.py` bullet above.
+
+## Distress cases — page `/platform/bankruptcies` (2026-10-09, reconciled with PR #133 2026-10-10)
+
+Lead list + sale calendar of failing chair-heavy businesses (hotels, resorts, caterers, event venues, party-rental companies, churches), so the operator can call the trustee / counsel **before** the chairs reach an auction. One page, **`/platform/bankruptcies`** (PR #133's platform UI, now fed by this data), two tabs: **Leads** (every filing) and **Sales** (dockets carrying a sale / 363 / bid-procedures / auction filing). The standalone `/distress` page PR #140 first shipped is gone; `GET /distress` is a 302 to `/platform/bankruptcies`. v1 has no auction-site scraper.
+
+- **Writer:** `.venv/bin/python -m deals.cli distress-sync [--since YYYY-MM-DD] [--dry-run] [--no-warn] [--max-docket-entries N] [--max-pages N] [--no-petitions]` → `deals/distress.py::run_sync`. Default `--since` = 30 days ago. `--dry-run` prints rows, never writes the DB or Telegram.
+- **CourtListener v4 RECAP search** (`type=r`, `order_by=dateFiled desc`), query `(chapter:11 OR chapter:7) AND (hotel OR resort OR lodging OR hospitality OR banquet OR catering OR "event venue" OR "party rental" OR church)`; plus a sale pass (`… AND ("notice of sale" OR "sale motion" OR "bid procedures" OR "363 sale" OR auction)`) whose matching docs come back inline. `COURTLISTENER_TOKEN` (`.env`; the operator has a CourtListener account — copy the API token from the CourtListener profile page into `.env` yourself, never commit it) is optional: anonymous = **5 req/min** then 429 (client spaces calls 12.5 s, honours `Retry-After`, backs off, gives up after 4 retries → `DistressUnavailable`, never "no cases"). `/docket-entries/` answers 401 anonymous — `--max-docket-entries` needs the token. Dev cache: `DISTRESS_CACHE=1` → `~/.listing_automation/distress_cache/` (24 h).
+- **Orgs only** (`debtor_type`): strong org token in the name (LLC/Inc/LP/Corp/Co/Ltd/Hotel/Resort/Lodging/Hospitality/Ministries/…) → org; individual-only forms in the docket → person; "Church" alone needs a second signal (Ch 11, 4+ words, of/the/&) — so "Karen Renee Church" (Ch 7) is dropped. Heuristic, a lead-list flag.
+- **Industry tag**: keyword map on case name + parties (`hotel|resort|catering|event_venue|party_rental|church|restaurant|other`); a 4–6 digit NAICS wins. NAICS/ZIP come from the petition search snippet; the PDF is read only when `pypdf` is installed (it is **not** a dependency today, so no PDF downloads).
+- **WARN**: `https://laborcurrent.com/api/records` (free: 25 calls/day, 7-day delay), industries "Accommodation and Food Services" + "Arts, Entertainment, and Recreation". `WarnBudget` (file counter in the cache dir, like `RunBudget`) stops before call 26 → a run note, never an empty result.
+- **Alerts**: `DISTRESS_ALERTS=1` (default **off**) → Telegram `deals` topic via `automation/telegram_alerts.send_message_sync` for new Ch 7 orgs with a trustee and rows gaining `sale_noticed_at`.
+- **Web**: page `GET /platform/bankruptcies` (`templates/platform_bankruptcies.html` + `static/site/platform/bankruptcies.js`; handler reads nothing). The browser loads `/distress/api/facets` + up to the newest 1,000 rows of `/distress/api/cases` (10 × `per_page=100`) and runs search / state / chapter / industry / filed-within / sort + the Leads/Sales tab in memory. **Fallback:** any API error (503 = migration 024 not applied) or an empty table → the invented `static/site/platform/bankruptcies.sample.json` with a "Sample data, invented" badge + banner, so the page never looks broken. Live rows have no asset estimate, so the assets filter hides and that column shows the court. `GET /distress` → 302 there. JSON: `/distress/api/cases?tab=leads|sales&industry=&state=&chapter=&source=&q=&sort=filed|sale|newest|name&dir=&page=&per_page=`, `/distress/api/facets` (5-min memo). **Public never sees trustee / attorneys / parties / ZIP** — `automation/web/public_distress.py::PUBLIC_COLS`. Operator: `/api/distress/cases` (session-gated) returns them.
+- **Schema** — migration `scripts/sql/024_distress_cases.sql` (**PENDING**, operator applies):
+
+```sql
+CREATE TABLE distress_cases (
+  id BIGSERIAL PRIMARY KEY,
+  source TEXT NOT NULL CHECK (source IN ('courtlistener','warn')),
+  source_key TEXT NOT NULL,          -- courtlistener: docket_id as text / warn: laborcurrent id ("WA-2026-2b90f661")
+  docket_id BIGINT,                  -- NULL for warn; partial UNIQUE index
+  case_name TEXT, court_id TEXT, docket_number TEXT, date_filed DATE,   -- warn: notice_date
+  chapter TEXT, trustee TEXT, debtor_type TEXT CHECK (debtor_type IN ('org','person')),
+  naics TEXT, industry_tag TEXT, city TEXT, state TEXT, zip_code TEXT, lat REAL, lng REAL,
+  parties JSONB, attorneys JSONB, petition_url TEXT, sale_noticed_at DATE, sale_url TEXT,
+  employees_affected INTEGER, effective_date DATE,          -- warn only
+  first_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(), last_seen_at TIMESTAMPTZ,
+  raw JSONB,                         -- bounded by compact_raw(): no snippets, <= 5 docs, <= 8 KB
+  UNIQUE (source, source_key));
+-- indexes: date_filed DESC, state, industry_tag, sale_noticed_at DESC (partial), docket_id (partial unique)
+CREATE TABLE distress_sync_state (source TEXT PRIMARY KEY, last_run_at TIMESTAMPTZ, last_since DATE, note TEXT);
+```
+
+  **WARN key scheme:** WARN rows have no docket, so the upsert key is `(source, source_key)`, not `docket_id`; `source_key` = laborcurrent's record id. Re-syncs never touch `first_seen_at`; `naics/zip/lat/lng/city/sale_*` only move NULL → value. `raw` is capped at write time; if it ever needs more it goes R2-cold like `deal_lots.raw`, never wider in Postgres.
+- **Honest limits:** furniture liquidators source mostly from hotel renovations and relocations, not bankruptcies — this list is a side door. Chairs come loose mainly in **Ch 7 trustee sales and closed properties**; Ch 11 hotels usually keep operating. RECAP only holds documents someone already bought from PACER, so many dockets are thin. A paid alternative with NAICS-filtered lists: Bankruptcy Observer (~$39/mo).

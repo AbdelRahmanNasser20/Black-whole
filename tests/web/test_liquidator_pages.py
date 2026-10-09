@@ -3,7 +3,10 @@
 
 What this guards:
   · every page renders with NO database (the handlers read nothing; the deals page fetches the existing
-    public /platform/api/auctions + /platform/api/sites from the browser);
+    public /platform/api/auctions + /platform/api/sites, the bankruptcies page /distress/api/cases + /facets,
+    from the browser);
+  · /platform/bankruptcies is THE bankruptcies page: real data first, the invented sample only as a labelled
+    fallback when the API fails (503 = migration 024 not applied) or is empty;
   · honest copy: no invented customers or metrics, every sample is labelled as sample in the server-rendered
     HTML, plain-English ("Ask AI") search is only ever "coming" — never claimed live;
   · the bankruptcy fixture is invented and stays that way: obviously fake debtor names, no contact details;
@@ -22,7 +25,7 @@ from fastapi.testclient import TestClient
 
 from automation import inventory
 from automation.web import auth as auth_svc
-from automation.web import platform_api, public_deals
+from automation.web import platform_api, public_deals, public_distress
 from automation.web.app import app
 
 app_module = sys.modules["automation.web.app"]
@@ -51,6 +54,8 @@ def no_db(monkeypatch):
         raise AssertionError("these pages must not touch the database")
     monkeypatch.setattr(public_deals, "fetch_facets", boom)
     monkeypatch.setattr(public_deals, "fetch_page", boom)
+    monkeypatch.setattr(public_distress, "fetch_page", boom)
+    monkeypatch.setattr(public_distress, "fetch_facets", boom)
     monkeypatch.setattr(platform_api, "auctions", boom)
     monkeypatch.setattr(inventory, "list_public", boom)
     monkeypatch.setattr(inventory, "get", boom)
@@ -151,18 +156,60 @@ def test_liquidators_sample_rows_render_server_side_without_db():
 
 # ───────────────────────── /platform/bankruptcies ─────────────────────────
 
-def test_bankruptcies_page_controls_and_sample_banner():
+def test_bankruptcies_page_controls_and_both_banners():
     html = _get("/platform/bankruptcies")
     low = html.lower()
-    assert "sample data, invented" in low
-    assert "not a court record" in low
+    # the mode chip starts neutral; JS flips it to live or sample — the server never claims either
+    assert 'id="bk-mode"' in html
+    assert html.split('id="bk-mode"', 1)[1].split("</span>", 1)[0].split(">", 1)[1].strip() == "Loading"
+    # both honesty banners ship server-side, hidden; the sample one says what it is
+    sample = html.split('id="bk-banner-sample"', 1)[1].split("</p>", 1)[0]
+    assert " hidden" in sample.split(">", 1)[0] and "sample data, invented" in sample.lower()
+    assert "not a court record" in sample.lower()
+    live = html.split('id="bk-banner-live"', 1)[1].split("</p>", 1)[0]
+    assert " hidden" in live.split(">", 1)[0] and "contacts are not shown" in live.lower()
     for control in ("bk-q", "bk-state", "bk-chapter", "bk-industry", "bk-filed", "bk-assets", "bk-sort"):
         assert f'id="{control}"' in html, control
+    # Leads / Sales tabs (the sales tab = cases with a sale notice)
+    assert 'id="bk-tab"' in html and 'data-tab="leads"' in html and 'data-tab="sales"' in html
     assert 'id="bk-rows"' in html and 'id="bk-drawer"' in html
     # the Ask AI box is a form that never leaves the page
     assert 'id="bk-ask-form"' in html and 'id="bk-ask-result"' in html
     assert "coming soon" in low
+
+
+def test_bankruptcies_js_reads_the_api_and_falls_back_to_the_sample():
+    assert "/distress/api/cases" in BK_JS and "/distress/api/facets" in BK_JS
     assert "/static/site/platform/bankruptcies.sample.json" in BK_JS
+    # the sample loads only after the live load failed or came back empty, and flips the sample badge on
+    load = BK_JS.split("async function load()", 1)[1]
+    assert load.index("loadLive()") < load.index("SAMPLE_URL")
+    assert "setMode('sample')" in load and "setMode('live')" in load
+    assert "Sample data, invented" in BK_JS.split("function setMode", 1)[1]
+    # the public API never carries contacts, so the page never reads those fields
+    assert not re.search(r"\.(trustee|attorneys|parties)\b", BK_JS)
+    # the sales tab keys off the docket's sale notice
+    assert "sale_noticed_at" in BK_JS and "f.tab === 'sales'" in BK_JS
+
+
+def test_bankruptcies_page_feed_is_served_offline(monkeypatch):
+    """The two endpoints the page reads, with the reader monkeypatched (no DB)."""
+    from automation.web import readcache
+    readcache.invalidate_all()
+    row = {"id": 9, "source": "courtlistener", "docket_id": 1, "case_name": "Sample Inn LLC", "court_id": "gasb",
+           "docket_number": "26-1", "date_filed": "2026-10-01", "chapter": "11", "industry_tag": "hotel",
+           "city": "Savannah", "state": "GA", "sale_noticed_at": None, "sale_url": None}
+    monkeypatch.setattr(public_distress, "fetch_page",
+                        lambda **kw: {"rows": [row], "total": 1, "page": 1, "per_page": 100, "pages": 1,
+                                      "near": None, "unlocated": 0})
+    monkeypatch.setattr(public_distress, "fetch_facets",
+                        lambda: {"industries": [{"value": "hotel", "count": 1}], "states": [{"value": "GA", "count": 1}],
+                                 "chapters": [], "stats": {"cases": 1}, "last_run": {}, "cached_at": 0})
+    c = _client()
+    body = c.get("/distress/api/cases?sort=filed&dir=desc&page=1&per_page=100").json()
+    assert body["rows"][0]["case_name"] == "Sample Inn LLC"
+    assert c.get("/distress/api/facets").json()["states"][0]["value"] == "GA"
+    readcache.invalidate_all()
 
 
 def test_bankruptcies_ask_ai_is_ui_only():
