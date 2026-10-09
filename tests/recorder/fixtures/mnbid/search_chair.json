@@ -1,0 +1,54 @@
+{
+ "status": "success",
+ "data": {
+  "responseType": 1,
+  "message": "Details successfully retrieved!",
+  "responseData": {
+   "records": [
+    {
+     "id": 16477,
+     "title": "2022 CHRYSLER VOYAGER LX ",
+     "avatar": "file_upload-1791485205395_892755.jpeg",
+     "date_added": "2026-10-08T05:00:00.000Z",
+     "date_closed": "2026-10-16T16:20:00.000Z",
+     "sprice": 250,
+     "rprice": 250,
+     "buynow": 0,
+     "bprice": 0,
+     "wprice": 295,
+     "market_status": "open",
+     "auction": 1,
+     "qty": 1,
+     "sold": 0,
+     "auctionid": 0,
+     "auctiontype": "live",
+     "selltype": "0",
+     "selectedbuyer": null,
+     "bidtype": "normal",
+     "person_auction": 0,
+     "desc_proc": "<p>2022 Chrysler Voyager LX<br>VIN: 2C4RC1CG2NR172038<br>Style / Body: Passenger 4D<br>Engine: 3.6L V6 SMPI Gasoline</p><p><span style=\"background-color:rgb(255,255,255);color:rgb(0,0,0);font-size:16px;\">Vehicle runs and drives, manual wheelchair ramp, AM/FM, AC, CC, PW, PM, PDL, backup camera, scratches and dings</span></p>",
+     "booked": 0,
+     "conditionTypeId": 311,
+     "slot_number": 0,
+     "category": 153,
+     "region": 355,
+     "reserve_met": 1,
+     "future_active": 0,
+     "file_name": "file_upload-1791485205395_892755.jpeg",
+     "bidwinneruser": 0,
+     "bid_or_not": 0,
+     "biddercurrentbid": 0,
+     "bidderproxyant": 0,
+     "current_bid": 295,
+     "incrementamt": 10,
+     "cbidtext": "Current Price",
+     "next_bid": 305,
+     "bidtopstatus": "",
+     "avatarorg": "https://minnbidapi-prod.ecommerce.auction/uploads/product/file_upload-1791485205395_892755.jpeg"
+    }
+   ],
+   "totalRecords": 1,
+   "setDisp": "1-1"
+  }
+ }
+}
