@@ -1,7 +1,7 @@
 # deals/cli.py
 import argparse
 import os
-from datetime import datetime
+from datetime import date, datetime
 from deals import sites
 from deals import profiles as _profiles
 from deals.discover import run_discovery
@@ -108,6 +108,17 @@ def main():
     sub.add_parser("rank")
     sub.add_parser("saved-search-alerts",
                    help="run the saved-search alert sweep once (manual test path)")
+    ds = sub.add_parser("distress-sync",
+                        help="bankruptcy (CourtListener) + WARN closure leads → distress_cases")
+    ds.add_argument("--since", default=None, help="filed_after YYYY-MM-DD (default: 30 days ago)")
+    ds.add_argument("--dry-run", action="store_true",
+                    help="print the rows it would upsert; never writes the DB or Telegram")
+    ds.add_argument("--no-warn", action="store_true", help="skip the laborcurrent WARN feed")
+    ds.add_argument("--max-docket-entries", type=int, default=0,
+                    help="scan up to N dockets' entries for sale notices (needs COURTLISTENER_TOKEN)")
+    ds.add_argument("--max-pages", type=int, default=5, help="search pages (20 hits each)")
+    ds.add_argument("--no-petitions", action="store_true",
+                    help="skip petition PDF downloads (NAICS / ZIP enrichment)")
     sub.add_parser("init-schema")
     a = ap.parse_args()
     prof = resolve_profile(getattr(a, "profile", None))
@@ -221,6 +232,15 @@ def main():
     elif a.cmd == "saved-search-alerts":
         from deals.saved_search_alerts import run_saved_search_alerts
         print(f"sent {run_saved_search_alerts()} alert(s)")
+    elif a.cmd == "distress-sync":
+        from deals import distress
+        since = date.fromisoformat(a.since) if a.since else None
+        try:
+            print(distress.run_sync(since=since, dry_run=a.dry_run, warn=not a.no_warn,
+                                    max_docket_entries=a.max_docket_entries, max_pages=a.max_pages,
+                                    petitions=not a.no_petitions))
+        except distress.DistressUnavailable as e:
+            raise SystemExit(f"distress-sync failed: {e}")
 
 if __name__ == "__main__":
     main()

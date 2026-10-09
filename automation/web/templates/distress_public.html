@@ -1,0 +1,109 @@
+{#- automation/web/templates/distress_public.html — /distress: bankruptcy + WARN closure leads (public).
+    Same shell as /deals (_base.html). Data comes from /distress/api/* (public_distress.py owns the
+    column allow-list — trustee / attorney / party contacts never reach this page). Writer: deals.cli distress-sync. -#}
+{% set nav_active = 'distress' %}
+{% extends "_base.html" %}
+{% block title %}Distress — hotel, venue & church bankruptcies{% endblock %}
+{% block head %}
+<meta name="description" content="Chapter 7 / 11 filings and WARN closures of hotels, resorts, caterers, event venues, party-rental companies and churches.">
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="/static/deals/feed.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/distress/distress.css?v={{ asset_v }}">
+{% endblock %}
+
+{% block topbar_center %}
+<form class="topbar-search" role="search" id="ds-search" autocomplete="off">
+  <input type="search" id="ds-q" name="q" placeholder="Search debtor — hotel, catering, church…" aria-label="Search cases">
+</form>
+{% endblock %}
+{% block topbar_nav %}
+<a href="/deals">Deals</a>
+<a href="/distress" aria-current="page">Distress</a>
+<a href="/sources">Sources</a>
+{% endblock %}
+
+{% block rail %}
+<div id="ds-rail" class="feed-rail">
+  <div class="rail-group">
+    <span class="rail-group-title" id="ds-chapter-label">Chapter</span>
+    <div class="seg" role="group" aria-labelledby="ds-chapter-label" data-key="chapter">
+      <button class="seg-btn is-active" type="button" data-value="">Any</button>
+      <button class="seg-btn" type="button" data-value="7">Ch 7</button>
+      <button class="seg-btn" type="button" data-value="11">Ch 11</button>
+    </div>
+    <p class="hint">Chapter 7 = a trustee sells everything. That is where chairs come loose.</p>
+  </div>
+  <div class="rail-group">
+    <span class="rail-group-title" id="ds-source-label">Source</span>
+    <div class="seg" role="group" aria-labelledby="ds-source-label" data-key="source">
+      <button class="seg-btn is-active" type="button" data-value="">All</button>
+      <button class="seg-btn" type="button" data-value="courtlistener">Court</button>
+      <button class="seg-btn" type="button" data-value="warn">WARN</button>
+    </div>
+  </div>
+  <div class="rail-group">
+    <label class="rail-group-title" for="ds-state">State</label>
+    <select class="select" id="ds-state" data-key="state"><option value="">All states</option></select>
+  </div>
+  <div class="rail-group feed-rail-actions">
+    <button class="btn btn-ghost btn-small" type="button" id="ds-clear">Clear all filters</button>
+    <button class="btn btn-primary btn-small feed-rail-done" type="button" data-rail-close>Done</button>
+  </div>
+</div>
+{% endblock %}
+
+{% block content %}
+<details class="feed-about" id="ds-about">
+  <summary><span class="feed-about-kicker">What this is</span> <span class="feed-about-title">Chairs before they reach the auction.</span></summary>
+  <div class="feed-about-body">
+    <div class="feed-about-copy">
+      <p>Hotels, resorts, caterers, event venues, party-rental companies and churches that filed Chapter 7 or 11, or posted a WARN closure notice. A trustee or the closing business sells the banquet chairs and FF&amp;E — often before anything is listed on GovDeals.</p>
+      <ol class="feed-how">
+        <li><b>Leads</b> — every matching filing, newest first</li>
+        <li><b>Sales</b> — dockets that already carry a sale, 363, bid-procedures or auction filing</li>
+      </ol>
+      <p class="hint">Court data: CourtListener RECAP (only what someone has bought from PACER). Closures: state WARN notices, 7-day delay.</p>
+    </div>
+    <dl class="feed-stats" id="ds-stats">
+      <div><dt>Cases</dt><dd data-stat="cases">—</dd></div>
+      <div><dt>Bankruptcies</dt><dd data-stat="bankruptcies">—</dd></div>
+      <div><dt>Chapter 7</dt><dd data-stat="chapter_7">—</dd></div>
+      <div><dt>Sale noticed</dt><dd data-stat="sales">—</dd></div>
+      <div><dt>WARN closures</dt><dd data-stat="closures">—</dd></div>
+    </dl>
+  </div>
+</details>
+
+<div class="seg ds-tabs" role="tablist" data-key="tab">
+  <button class="seg-btn is-active" type="button" role="tab" data-value="leads">Leads</button>
+  <button class="seg-btn" type="button" role="tab" data-value="sales">Sales</button>
+</div>
+
+<div class="chips" id="ds-chips" aria-label="Industry"></div>
+
+<div class="controls feed-controls">
+  <button class="btn btn-ghost btn-small feed-filters-btn" type="button" data-rail-open>Filters</button>
+  <select class="select" id="ds-sort" aria-label="Sort">
+    <option value="filed">Filed: newest</option>
+    <option value="filed:asc">Filed: oldest</option>
+    <option value="sale">Sale notice: newest</option>
+    <option value="newest">First seen</option>
+    <option value="name">Name A–Z</option>
+  </select>
+  <span class="result-count" id="ds-count" aria-live="polite"></span>
+</div>
+
+<div id="ds-list" class="ds-list" aria-live="polite"></div>
+<div class="load-more feed-more-wrap"><button id="ds-more" class="btn" type="button" hidden>Load more</button></div>
+{% endblock %}
+
+{% block footer %}
+<footer class="footer feed-footer">
+  <p class="footer-note">Public court records via CourtListener (Free Law Project) and state WARN notices. Not legal advice; not affiliated with any court.</p>
+  <p class="footer-note">© 2026 Black Whole</p>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/distress/distress.js?v={{ asset_v }}"></script>
+{% endblock %}

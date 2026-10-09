@@ -32,6 +32,7 @@ try { var r = localStorage.getItem('ui.rail'); if (r === 'closed' || r === 'open
   <nav class="topbar-nav" aria-label="Primary">
     {% block topbar_nav %}
     <a href="/deals"{% if nav_active == 'deals' %} aria-current="page"{% endif %}>Deals</a>
+    <a href="/distress"{% if nav_active == 'distress' %} aria-current="page"{% endif %}>Distress</a>
     <a href="/sources"{% if nav_active == 'sources' %} aria-current="page"{% endif %}>Sources</a>
     <a href="/admin"{% if nav_active == 'admin' %} aria-current="page"{% endif %}>Admin</a>
     {% endblock %}

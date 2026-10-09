@@ -1,0 +1,485 @@
+{
+ "count": 32,
+ "next": null,
+ "previous": "https://www.courtlistener.com/api/rest/v4/search/?cursor=cz0xMzQ2NjgyMzAwMDAwMC4wJnM9NzQ4ODg4MDYmcj0xJnQ9ciZkPTIwMjYtMTAtMDkmcD0x&filed_after=2026-09-25&order_by=dateFiled+desc&q=%28chapter%3A11+OR+chapter%3A7%29+AND+%28hotel+OR+resort+OR+lodging+OR+hospitality+OR+banquet+OR+catering+OR+%22event+venue%22+OR+%22party+rental%22+OR+church%29&type=r",
+ "results": [
+  {
+   "assignedTo": "Madeleine C. Wanslee",
+   "assigned_to_id": 8683,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "McAuley & Company LLC",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, D. Arizona",
+   "court_citation_string": "Bankr. D. Ariz.",
+   "court_id": "arb",
+   "dateArgued": null,
+   "dateFiled": "2026-09-30",
+   "dateTerminated": null,
+   "docketNumber": "2:26-bk-09969",
+   "docket_absolute_url": "/docket/74888806/mcauley-company-llc/",
+   "docket_id": 74888806,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-02T15:34:20.961406Z",
+    "date_created": "2026-10-01T00:01:59.752298Z",
+    "score": {
+     "bm25": 13466823000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "844955",
+   "party": [
+    "McAuley & Company LLC"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74888806/19/mcauley-company-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480380791,
+     "document_number": 19,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-02",
+     "entry_number": 19,
+     "filepath_local": null,
+     "id": 496082506,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-03T00:04:38.250690Z",
+      "date_created": "2026-10-03T00:04:38.158086Z"
+     },
+     "pacer_doc_id": "024057188712",
+     "page_count": null,
+     "short_description": "Lodging Proposed Order (Notice of)",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74888806/5/mcauley-company-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480074899,
+     "document_number": 5,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-09-30",
+     "entry_number": 5,
+     "filepath_local": null,
+     "id": 495764241,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-02T15:34:20.927163Z",
+      "date_created": "2026-10-01T00:35:52.366180Z"
+     },
+     "pacer_doc_id": "024057176420",
+     "page_count": null,
+     "short_description": "Lodging Proposed Order (Notice of)",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74888806/26/mcauley-company-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480863348,
+     "document_number": 26,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-07",
+     "entry_number": 26,
+     "filepath_local": null,
+     "id": 496580460,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-07T21:32:22.152131Z",
+      "date_created": "2026-10-07T21:32:15.443205Z"
+     },
+     "pacer_doc_id": "024057207779",
+     "page_count": null,
+     "short_description": "Lodging Proposed Order (Notice of)",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "COTTERMAN, JOSEPH ELDON"
+  },
+  {
+   "assignedTo": "Jerrold N. Poslusny Jr.",
+   "assigned_to_id": 8884,
+   "attorney": [
+    "Victor Druziako"
+   ],
+   "attorney_id": [
+    16148561
+   ],
+   "caseName": "Michael John Ayars, III",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, D. New Jersey",
+   "court_citation_string": "Bankr. D.N.J.",
+   "court_id": "njb",
+   "dateArgued": null,
+   "dateFiled": "2026-09-30",
+   "dateTerminated": null,
+   "docketNumber": "26-21152",
+   "docket_absolute_url": "/docket/74888044/michael-john-ayars-iii/",
+   "docket_id": 74888044,
+   "firm": [
+    "Law Office of Victor Druziako, PC"
+   ],
+   "firm_id": [
+    347587
+   ],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-02T01:58:12.816535Z",
+    "date_created": "2026-09-30T23:33:52.764931Z",
+    "score": {
+     "bm25": 13466823000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "1147987",
+   "party": [
+    "Brian Thomas",
+    "U.S. Trustee",
+    "Michael John Ayars, III"
+   ],
+   "party_id": [
+    23848272,
+    23848270,
+    23848271
+   ],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74888044/1/michael-john-ayars-iii/",
+     "attachment_number": null,
+     "description": "Chapter 7 Voluntary Petition Filed by Victor Druziako on behalf of Michael John Ayars III. (Druziako, Victor) (Entered: 09/30/2026)",
+     "docket_entry_id": 480068662,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-09-30",
+     "entry_number": 1,
+     "filepath_local": "recap/gov.uscourts.njb.1147987/gov.uscourts.njb.1147987.1.0.pdf",
+     "id": 495757779,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-02T02:26:48.161596Z",
+      "date_created": "2026-09-30T23:33:52.974467Z"
+     },
+     "pacer_doc_id": "118071599453",
+     "page_count": 61,
+     "short_description": "Voluntary Petition (Chapter 7)",
+     "snippet": "             Case 26-21152-JNP                            Doc 1     Filed 09/30/26 Entered 09/30/26 19:08:54                         Desc Main\n                                                                    Document     Page 1 of 61\n Fill in this information to identify your case:\n\n     United S"
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "Thomas, Brian"
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "The Cathedral of New Faith Christian Church",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, N.D. Alabama",
+   "court_citation_string": "Bankr. N.D. Ala.",
+   "court_id": "alnb",
+   "dateArgued": null,
+   "dateFiled": "2026-09-30",
+   "dateTerminated": null,
+   "docketNumber": "26-03348",
+   "docket_absolute_url": "/docket/74880731/the-cathedral-of-new-faith-christian-church/",
+   "docket_id": 74880731,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-01T16:05:47.781242Z",
+    "date_created": "2026-09-30T20:10:05.265697Z",
+    "score": {
+     "bm25": 13466823000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "746732",
+   "party": [
+    "The Cathedral of New Faith Christian Church"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74880731/9/the-cathedral-of-new-faith-christian-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480144343,
+     "document_number": 9,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-01",
+     "entry_number": 9,
+     "filepath_local": null,
+     "id": 495838593,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-01T16:05:47.902662Z",
+      "date_created": "2026-10-01T16:05:47.488223Z"
+     },
+     "pacer_doc_id": "018052038001",
+     "page_count": null,
+     "short_description": "Notice of Deficient Filing and Show Cause Hearing",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74880731/4/the-cathedral-of-new-faith-christian-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480139881,
+     "document_number": 4,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-01",
+     "entry_number": 4,
+     "filepath_local": null,
+     "id": 495833987,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-01T16:05:47.829504Z",
+      "date_created": "2026-10-01T15:34:30.295630Z"
+     },
+     "pacer_doc_id": "018052037310",
+     "page_count": null,
+     "short_description": "Notice of Appointment of Subchapter V Trustee",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74880731/5/the-cathedral-of-new-faith-christian-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480139547,
+     "document_number": 5,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-01",
+     "entry_number": 5,
+     "filepath_local": null,
+     "id": 495833653,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-01T16:05:47.829504Z",
+      "date_created": "2026-10-01T15:34:18.060658Z"
+     },
+     "pacer_doc_id": "018052037634",
+     "page_count": null,
+     "short_description": "Motion to Pay",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "Caraway, (SBRA) John M"
+  },
+  {
+   "assignedTo": "Alfredo R. Perez",
+   "assigned_to_id": null,
+   "attorney": [
+    "Imaan Patel",
+    "Charles A Beckham, Jr",
+    "Ha Minh Nguyen",
+    "Kelli S. Norfleet"
+   ],
+   "attorney_id": [
+    16137659,
+    16174141,
+    16137126,
+    16155379
+   ],
+   "caseName": "Leslie's, Inc.",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, S.D. Texas",
+   "court_citation_string": "Bankr. S.D. Tex.",
+   "court_id": "txsb",
+   "dateArgued": null,
+   "dateFiled": "2026-09-30",
+   "dateTerminated": null,
+   "docketNumber": "26-90795",
+   "docket_absolute_url": "/docket/74873524/leslies-inc/",
+   "docket_id": 74873524,
+   "firm": [
+    "Office of the United States Trustee",
+    "Haynes and Boone LLP",
+    "Haynes and Boone, LLP"
+   ],
+   "firm_id": [
+    1387775,
+    636852,
+    603926,
+    618911
+   ],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-09-30T14:20:16.186299Z",
+    "date_created": "2026-09-30T13:29:29.467489Z",
+    "score": {
+     "bm25": 13466823000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "501172",
+   "party": [
+    "US Trustee",
+    "Leslie's, Inc."
+   ],
+   "party_id": [
+    23826747,
+    23826748
+   ],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74873524/13/leslies-inc/",
+     "attachment_number": null,
+     "description": "Emergency Motion Debtors' Emergency Motion for Entry of an Order (I) Authorizing the Debtors to Maintain and Administer Their Existing Customer Programs and Honor Certain Prepetition Obligations Related Thereto and (II) Granting Related Relief Filed by Debtor Leslie's, Inc. Hearing scheduled for 10/1/2026 at 01:00 PM at telephone and video conference. (Attachments: # 1 Proposed Order) (Beckham, Charles) (Entered: 09/30/2026)",
+     "docket_entry_id": 479939258,
+     "document_number": 13,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-09-30",
+     "entry_number": 13,
+     "filepath_local": "recap/gov.uscourts.txsb.501172/gov.uscourts.txsb.501172.13.0.pdf",
+     "id": 495626058,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-01T15:12:56.779366Z",
+      "date_created": "2026-09-30T16:37:55.407874Z"
+     },
+     "pacer_doc_id": "178055226496",
+     "page_count": 23,
+     "short_description": "",
+     "snippet": "             Case 26-90795 Document 13 Filed in TXSB on 09/30/26 Page 1 of 23\n\n\n\n\n                               UNITED STATES BANKRUPTCY COURT\n                                 SOUTHERN DISTRICT OF TEXAS\n                                       HOUSTON DIVISION\n\n                                       "
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "Britanie Dawn Church",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, D. Utah",
+   "court_citation_string": "Bankr. D. Utah",
+   "court_id": "utb",
+   "dateArgued": null,
+   "dateFiled": "2026-09-29",
+   "dateTerminated": null,
+   "docketNumber": "26-26111",
+   "docket_absolute_url": "/docket/74871274/britanie-dawn-church/",
+   "docket_id": 74871274,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-09-30T00:13:05.894596Z",
+    "date_created": "2026-09-30T00:13:05.775349Z",
+    "score": {
+     "bm25": 13466736000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "482863",
+   "party": [
+    "Britanie Dawn Church"
+   ],
+   "party_id": [],
+   "recap_documents": [],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "GABRIEL BARTOLO MENDOZA and LESLIE ALICIA MENDOZA",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, D. Arizona",
+   "court_citation_string": "Bankr. D. Ariz.",
+   "court_id": "arb",
+   "dateArgued": null,
+   "dateFiled": "2026-09-29",
+   "dateTerminated": null,
+   "docketNumber": "4:26-bk-09895",
+   "docket_absolute_url": "/docket/74871237/gabriel-bartolo-mendoza-and-leslie-alicia-mendoza/",
+   "docket_id": 74871237,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-09-30T07:02:29.376415Z",
+    "date_created": "2026-09-30T00:05:49.463291Z",
+    "score": {
+     "bm25": 13466736000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "844880",
+   "party": [
+    "GABRIEL BARTOLO MENDOZA",
+    "LESLIE ALICIA MENDOZA"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74871237/10/gabriel-bartolo-mendoza-and-leslie-alicia-mendoza/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480221979,
+     "document_number": 10,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-01",
+     "entry_number": 10,
+     "filepath_local": null,
+     "id": 495918448,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-01T22:04:51.093377Z",
+      "date_created": "2026-10-01T22:04:50.876845Z"
+     },
+     "pacer_doc_id": "024057182264",
+     "page_count": null,
+     "short_description": "Lodging Proposed Order (Notice of)",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "KARTCHNER, STANLEY J"
+  }
+ ]
+}
