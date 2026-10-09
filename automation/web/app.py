@@ -2041,6 +2041,54 @@ async def robots_txt():
     )
 
 
+@app.get("/llms.txt", response_class=PlainTextResponse)
+def llms_txt():
+    return _llms_txt_body()
+
+
+@readcache.cached(ttl=300)
+def _llms_txt_body() -> str:
+    """llms.txt (llmstxt.org) — a markdown index for AI crawlers/assistants.
+    Same visibility gates as the sitemap: list_public() lots and indexable
+    city pages only; storage_note and anything auth-walled never appear."""
+    lines = [
+        "# Black Whole Liquidation",
+        "",
+        "> Bulk used banquet, stacking and event chairs sold by the lot "
+        "(50–1,000+ chairs per lot) across the US. Buyers pick up locally or "
+        "we arrange LTL freight; every live lot page has an instant freight "
+        "estimate. We also buy surplus chair lots from venues, hotels and "
+        "churches.",
+        "",
+        "Key facts:",
+        "- Typical buyers: churches, event venues, wedding/party rental companies.",
+        "- Sold as-is by the lot; per-chair pricing is on each lot page.",
+        f"- All live inventory: {PUBLIC_BASE_URL}/listings (map view: {PUBLIC_BASE_URL}/map)",
+        f"- Selling chairs to us: {PUBLIC_BASE_URL}/sell",
+        "",
+        "## Chair lots for sale",
+    ]
+    for row in inventory.list_public():
+        qty = row.get("quantity_remaining") or row.get("quantity_original")
+        price = row.get("price_per_chair")
+        place = ", ".join(p for p in ((row.get("city") or "").strip(),
+                                      (row.get("state") or "").strip()) if p)
+        facts = " · ".join(
+            f for f in (f"{qty} chairs" if qty else "",
+                        place,
+                        f"${price:g}/chair" if price else "") if f)
+        title = (row.get("title") or "Chair lot").strip()
+        lines.append(f"- [{title}]({PUBLIC_BASE_URL}{lot_urls.public_path(row)}): {facts}")
+    lines += ["", "## Chairs by city"]
+    for rec in city_pages.listing(indexable_only=True):
+        lines.append(f"- [{rec['label']}]({PUBLIC_BASE_URL}{rec['path']}): "
+                     f"{rec['chairs']} chairs available")
+    lines += ["", "## Optional",
+              f"- [About]({PUBLIC_BASE_URL}/about)",
+              f"- [Terms]({PUBLIC_BASE_URL}/terms)"]
+    return "\n".join(lines) + "\n"
+
+
 def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
     tag = f"  <url>\n    <loc>{loc}</loc>\n"
     if lastmod:
