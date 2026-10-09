@@ -116,4 +116,8 @@ def enrich(row: dict, fees: FeeModel) -> dict:
         f"https://www.govdeals.com/en/asset/{row['asset_id']}/{row['account_id']}"
     )
     row["viewer_url"] = f"/deals/{row['asset_id']}/{row['account_id']}/{row['auction_id']}"
+    # Same shape as a `deals_sources` row so /deals codes against one contract.
+    row["source"] = "govdeals"
+    row["source_name"] = "GovDeals"
+    row["url"] = row["govdeals_url"]
     return row

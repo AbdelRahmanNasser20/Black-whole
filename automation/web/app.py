@@ -79,7 +79,7 @@ from .. import attribution
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
 from . import deals_query
-from . import public_deals
+from . import deals_sources, public_deals
 from . import rate_limit
 from . import public_map
 from . import seo_copy
@@ -1288,6 +1288,14 @@ async def geo_zip(zip: str):
 _PUBLIC_STATUSES = ("active", "closed", "all")
 
 
+def _public_site(site: str | None) -> str | None:
+    """`site` filter: a known recorder source key, or 400. Empty = every site."""
+    site = (site or "").strip().lower() or None
+    if site is not None and site not in deals_sources.SITES:
+        raise HTTPException(400, "site must be one of " + ", ".join(deals_sources.SITES))
+    return site
+
+
 @app.get("/deals", response_class=HTMLResponse)
 async def public_deals_page(request: Request):
     return templates.TemplateResponse(request, "deals_public.html", {
@@ -1300,17 +1308,18 @@ async def public_deals_lots(
     q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None,
-    max_price: float | None = None, bbox: str | None = None,
+    max_price: float | None = None, bbox: str | None = None, site: str | None = None,
     sort: str = "ends", dir: str | None = None, page: int = 1, per_page: int = 25,
 ):
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
+    site = _public_site(site)
     try:
         return await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
-            sort=sort, dir=dir, page=page, per_page=per_page)
+            site=site, sort=sort, dir=dir, page=page, per_page=per_page)
     except HTTPException:
         raise
     except Exception as e:
@@ -1322,14 +1331,16 @@ async def public_deals_pins(
     q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None, max_price: float | None = None,
+    site: str | None = None,
 ):
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
+    site = _public_site(site)
     try:
         return await asyncio.to_thread(
             public_deals.fetch_pins, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
-            min_price=min_price, max_price=max_price)
+            min_price=min_price, max_price=max_price, site=site)
     except Exception as e:
         raise HTTPException(503, f"pins query failed: {e!r}")
 
