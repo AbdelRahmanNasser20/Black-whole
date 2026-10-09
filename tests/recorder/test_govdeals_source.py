@@ -21,6 +21,7 @@ from deals.mapping import asset_to_lot
 from deals.models import Snapshot, lot_key
 from recorder.models import Observation
 from recorder.sources import govdeals
+from recorder.sources.base import SourceFetchFailed
 
 FIXTURES = Path(__file__).parent / "fixtures" / "govdeals"
 
@@ -344,7 +345,7 @@ def test_discover_partial_failure_keeps_lots_collected_before_the_error(furnitur
     assert "RECORDER ERROR" in out
 
 
-def test_discover_all_sweeps_fail_returns_empty_and_prints_loud_error(furniture_scope, monkeypatch, capsys):
+def test_discover_all_sweeps_fail_raises_fetch_failed_and_prints_loud_error(furniture_scope, monkeypatch, capsys):
     def fake_discover(self, *, category_ids="", search_text="", max_pages=60, end_before=None):
         def gen():
             raise requests.exceptions.ConnectionError("boom")
@@ -352,8 +353,8 @@ def test_discover_all_sweeps_fail_returns_empty_and_prints_loud_error(furniture_
         return gen()
 
     monkeypatch.setattr(govdeals.GovDealsAdapter, "discover", fake_discover)
-    obs = govdeals.GovDealsSource().discover()
-    assert obs == []
+    with pytest.raises(SourceFetchFailed):
+        govdeals.GovDealsSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
     assert "govdeals" in out
