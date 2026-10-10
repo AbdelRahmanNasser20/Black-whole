@@ -25,6 +25,7 @@ dependencies = [
     "beautifulsoup4>=4.12", # canonical eBay sold-page parser (deals/ebay_parse.py)
     "stripe>=9",            # Checkout deposits; imported ONLY by stripe_gateway.py, and only when STRIPE_SECRET_KEY is set
     "pgeocode>=0.5",        # offline city/zip → lat/lng for public map pins (automation/alerts/geo.py)
+    "anthropic>=0.75",      # price anchors daily search (automation/price_anchors.py)
 ]
 
 [project.optional-dependencies]
