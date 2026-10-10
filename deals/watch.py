@@ -10,12 +10,23 @@ from deals.watcher_logic import schedule_lane, next_poll_delay, detect_outcome, 
 class PollReport:
     polled: int = 0; snapshotted: int = 0; finalized: int = 0; requeued: int = 0
 
-def poll_once(adapter, now: datetime, extra_where: tuple[str, list] | None = None) -> PollReport:
+# A foreign site's refetch reads the lot page itself, which keeps serving a
+# closed lot (TXAuction) — so "absent from the firehose" never happens there.
+# These statuses on a fresh snapshot mean the auction is over: finalize now.
+CLOSED_STATUSES = {"CLO": None, "RNM": Outcome.RESERVE_NOT_MET}
+
+def poll_once(adapter, now: datetime, extra_where: tuple[str, list] | None = None,
+              site: str = "govdeals") -> PollReport:
     rep = PollReport()
     # keep the bare call when no profile is given (existing callers + test fakes)
-    due = due_for_poll(now, extra_where) if extra_where else due_for_poll(now)
+    if site != "govdeals":
+        due = due_for_poll(now, extra_where, site=site)
+    else:
+        due = due_for_poll(now, extra_where) if extra_where else due_for_poll(now)
     if not due:
         return rep
+    if hasattr(adapter, "remember"):
+        adapter.remember(due)          # synthesized ids → the site's own lot ids
     keys = [(l.asset_id, l.account_id, l.auction_id) for l in due]
     present = adapter.refetch(keys)
     for lot in due:
@@ -39,8 +50,18 @@ def poll_once(adapter, now: datetime, extra_where: tuple[str, list] | None = Non
                 set_poll_schedule(key, now + timedelta(seconds=delay), lane.value)
                 rep.requeued += 1
             continue
-        append_snapshot(snap)
+        if site == "govdeals":
+            append_snapshot(snap)
+        else:
+            append_snapshot(snap, site)
         rep.snapshotted += 1
+        if site != "govdeals" and snap.status in CLOSED_STATUSES:
+            outcome, complete = detect_outcome(snap, dropped=True)
+            outcome = CLOSED_STATUSES[snap.status] or outcome
+            record_outcome(key, outcome.value, snap.current_bid, snap.bid_count,
+                           snap.end_utc, complete)
+            rep.finalized += 1
+            continue
         lane = schedule_lane(snap.end_utc, now)          # re-read end_utc absorbs extensions
         delay = next_poll_delay(snap.end_utc, now, lane)
         update_live_state(key, snap, now + timedelta(seconds=delay), lane.value)

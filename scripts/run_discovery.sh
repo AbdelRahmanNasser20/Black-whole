@@ -34,4 +34,19 @@ python auction_extractors/bidspotter_automation.py \
 echo "[discovery] transfer staged listings -> Supabase"
 python scripts/transfer_listings_to_supabase.py
 
+# TXAuction (Gaston & Sheehan) is a deals/ adapter, not an auction_extractors
+# scraper: discover -> deal_lots, watch-once -> finals off the lot pages, then
+# mirror the live chair lots into auction_listings so the Auctions tab shows
+# them next to GovDeals. Plain HTTP (SSR pages, no browser). Each step is
+# non-fatal: a TXAuction failure must never cost us the rows synced above.
+echo "[discovery] TXAuction discover -> deal_lots"
+python -m deals.cli discover --site txauction --profile chairs \
+  || echo "[discovery] TXAuction discover FAILED — continuing"
+echo "[discovery] TXAuction watch-once"
+python -m deals.cli watch-once --site txauction \
+  || echo "[discovery] TXAuction watch-once FAILED — continuing"
+echo "[discovery] TXAuction mirror -> auction_listings"
+python -m deals.cli mirror-auctions --site txauction --profile chairs \
+  || echo "[discovery] TXAuction mirror FAILED — continuing"
+
 echo "[discovery] done"
