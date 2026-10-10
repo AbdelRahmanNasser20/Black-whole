@@ -94,6 +94,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Don't switch `DEALS_LLM_PROVIDER` to cerebras without buying credits (HTTP 402). Gemini prepay is spent.
 - Render secrets (`TELEGRAM_*`, `COMPS_*`) are set in the dashboard; values are never committed.
 - **Public `/deals` never shows auction photos, verdicts, home distance, seating lots, or any lot in `tracked_lots`/`auction_favorites`/`deal_list_items`.** The policy is `automation/web/public_deals.py` — add exclusions there (env `PUBLIC_DEALS_EXCLUDE_*`), never in a template. Public JSON lives under `/deals/api/`, not `/api/`. SQL regexes use `\y` word boundaries (Postgres reads `\b` as backspace).
+- **TXAuction** (`deals/adapters/txauction.py`, site `txauction`, ordinal 10): parses only the SSR `__APOLLO_STATE__` blob — never `/api/` or `/asset/` (robots.txt); 403/429 stops the run. Daily via `scripts/run_discovery.sh` (discover → watch-once → `mirror-auctions` into `auction_listings` as `tx:<lot>`); detail `deals.md` § TXAuction.
 - Tracking list (`tracked_lots`): polling runs **in the web process** (`_tracking_loop`), not a Render cron; closed = `assetStatusCd != 'STA'` or clock+15 min; on close `record_outcome` writes the exact final into `deal_lots`. Detail: `docs/claude-reference/deals.md`.
 
 **Ops:**

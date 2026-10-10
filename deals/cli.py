@@ -35,6 +35,14 @@ def sweep_categories(arg: str | None, env: dict) -> list[str]:
         return [c.strip() for c in raw.split(",") if c.strip()]
     return DEFAULT_CATEGORIES
 
+# Sites whose adapter actually filters by a native category id (the maestro
+# API). Every other adapter ignores `category_ids`, so sweeping it once per id
+# would just repeat the same search N times.
+CATEGORY_SITES = ("govdeals", "allsurplus")
+
+def site_categories(site: str, cats: list[str]) -> list[str]:
+    return cats if site in CATEGORY_SITES else [""]
+
 def profile_arg(p):
     """--profile <slug>: a research_profiles row (deals/profiles.py). Unset
     (and no DEALS_PROFILE env) = today's chairs-shaped behaviour."""
@@ -102,6 +110,14 @@ def main():
     rawa.add_argument("--no-null", action="store_true",
                     help="export and verify only; leave raw in place")
     wo = sub.add_parser("watch-once"); profile_arg(wo)
+    wo.add_argument("--site", default="govdeals", choices=list(sites.SITES),
+                    help="poll one site's due lots (default govdeals — the 20-min Render cron)")
+    ma = sub.add_parser("mirror-auctions",
+                        help="copy a foreign site's live profile-matching deal_lots into "
+                             "auction_listings (the Auctions tab's table)")
+    ma.add_argument("--site", default="txauction", choices=list(sites.SITES))
+    ma.add_argument("--dry-run", action="store_true", help="print the rows, write nothing, no LLM")
+    profile_arg(ma)
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
     dg = sub.add_parser("digest"); profile_arg(dg)
@@ -112,7 +128,7 @@ def main():
     a = ap.parse_args()
     prof = resolve_profile(getattr(a, "profile", None))
     pw = _profiles.deal_lots_where(prof) if prof else None
-    # non-discover commands are GovDeals-only for now; discover picks per --site
+    # discover / watch-once / mirror-auctions pick per --site; the rest are GovDeals-only
     adapter = sites.get_adapter(getattr(a, "site", None) or "govdeals") \
         if getattr(a, "site", "govdeals") != "all" else None
     if a.cmd == "init-schema":
@@ -137,7 +153,8 @@ def main():
                         break
                 print(f"[dry-run] {key}: {n} lot(s), nothing written")
                 continue
-            rep = run_discovery(sites.get_adapter(key), categories=cats, max_pages=a.max_pages,
+            rep = run_discovery(sites.get_adapter(key), categories=site_categories(key, cats),
+                                max_pages=a.max_pages,
                                 archive_predicate=pred)
             print(f"[{key}] {rep}" if a.site == "all" else rep)
     elif a.cmd == "archive-active":
@@ -205,7 +222,10 @@ def main():
         print(run_archive_raw(limit=a.limit, lag_hours=a.lag_hours,
                               null_after=not a.no_null))
     elif a.cmd == "watch-once":
-        print(poll_once(adapter, datetime.now().astimezone(), extra_where=pw))
+        print(poll_once(adapter, datetime.now().astimezone(), extra_where=pw, site=a.site))
+    elif a.cmd == "mirror-auctions":
+        from deals.listings_bridge import mirror
+        print(mirror(a.site, prof or _profiles.resolve(None), dry_run=a.dry_run))
     elif a.cmd == "backfill-outcomes":
         from deals.backfill import run_backfill
         print(f"closed {run_backfill()} lots")

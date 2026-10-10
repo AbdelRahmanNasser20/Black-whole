@@ -38,3 +38,27 @@ def test_lot_row_foreign_site_round_trips(make_lot):
     assert row[LOT_COLUMNS.index("site")] == "marknet"
     assert row[LOT_COLUMNS.index("native_id")] == "47644/12"
     assert row[LOT_COLUMNS.index("account_id")] == -4
+
+
+def test_row_to_lot_round_trips_a_foreign_row(make_lot):
+    from deals.models import synth_ids
+    from deals.store import row_to_lot
+    ids = synth_ids("txauction", "31431/57702", ordinal=10)
+    lot = make_lot(asset_id=ids[0], account_id=ids[1], auction_id=ids[2], site="txauction",
+                   native_id="31431/57702", raw={"auction_lot_id": "57702"})
+    row = dict(zip(LOT_COLUMNS, lot_row(lot)))
+    row["raw"] = lot.raw                      # psycopg hands JSONB back as a dict
+    back = row_to_lot(row)
+    assert back == lot
+
+
+def test_due_for_poll_filters_by_site(monkeypatch):
+    from deals import store
+    cap = []
+    monkeypatch.setattr(store.db, "fetch_all", lambda sql, params=(): cap.append((sql, params)) or [])
+    now = datetime(2026, 7, 3, 12, tzinfo=timezone.utc)
+    store.due_for_poll(now)
+    store.due_for_poll(now, site="txauction")
+    (gd_sql, gd_p), (tx_sql, tx_p) = cap
+    assert "site = %s" in gd_sql and gd_p[0] == "govdeals" and gd_sql.startswith("SELECT raw ")
+    assert tx_p[0] == "txauction" and "native_id" in tx_sql   # stored columns, not maestro raw

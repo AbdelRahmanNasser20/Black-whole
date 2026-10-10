@@ -27,3 +27,12 @@ credentials for bidding accounts. Budget: one session.
 
 Rules that override everything: logged-out only; honor Crawl-delay (min 2 s); stop on 403 or
 challenge; no accounts; geo note — record state per lot so ingestion can filter GA/LA/IL/AZ+300mi.
+
+Pattern note — SSR sites with an inline GraphQL cache (first seen: txauction.com, 2026-10-10):
+if the probe reports `access: embedded-json (__APOLLO_STATE__)`, parse that blob, not the DOM.
+`extract_apollo_state()` in deals/adapters/txauction.py is the template: one regex
+`window\.__APOLLO_STATE__\s*=\s*(\{.*?\});?\s*</script>` → json; entities are flat
+(`Type.<id>`), lists are `{"__ref": "Type.<id>"}`, and the page's queries are the
+`ROOT_QUERY` keys (`lots({...})`, `lot({...})`). Never call the site's `/api/` GraphQL
+endpoint even though the blob shows its shape — check robots.txt first. Also note the
+probe's `legal: crawl-delay=N` reads ANY Crawl-delay line; check which User-agent it is for.

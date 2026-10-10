@@ -155,22 +155,53 @@ def update_live_state(key, s: Snapshot, next_poll_at, lane: str) -> None:
         WHERE asset_id=%s AND account_id=%s AND auction_id=%s""",
         (s.bid_count, s.current_bid, s.end_utc, next_poll_at, lane, *key))
 
-def due_for_poll(now: datetime, extra_where: tuple[str, list] | None = None) -> list[Lot]:
+def row_to_lot(r: dict) -> Lot:
+    """A deal_lots row → Lot from the stored columns (foreign sites: their
+    `raw` is not maestro-shaped, so mapping.asset_to_lot can't rebuild them)."""
+    def f(v, default=0.0):
+        return float(v) if v is not None else default
+    return Lot(
+        asset_id=r["asset_id"], account_id=r["account_id"], auction_id=r["auction_id"],
+        title=r.get("title") or "", description=r.get("description") or "",
+        native_category_id=r.get("native_category_id") or "",
+        native_category_name=r.get("native_category_name") or "",
+        canonical_category=r.get("canonical_category") or "other",
+        end_utc=r["end_utc"], bid_count=int(r.get("bid_count") or 0),
+        opening_bid=f(r.get("opening_bid")), current_bid=f(r.get("current_bid")),
+        currency_code=r.get("currency_code") or "USD", high_bidder=int(r.get("high_bidder") or 0),
+        has_reserve=bool(r.get("has_reserve")), reserve_not_met=bool(r.get("reserve_not_met")),
+        reserve_price=r.get("reserve_price"), is_free=bool(r.get("is_free")),
+        seller=r.get("seller") or "", city=r.get("city") or "", state=r.get("state") or "",
+        zip=r.get("zip") or "", lat=r.get("lat"), lng=r.get("lng"),
+        hero_image_url=r.get("hero_image_url") or "", status=r.get("status") or "",
+        is_sold=bool(r.get("is_sold")), raw=r.get("raw") or {},
+        llm_category=r.get("llm_category"),
+        llm_category_confidence=r.get("llm_category_confidence"),
+        category_agreement=r.get("category_agreement"),
+        site=r.get("site") or "govdeals", native_id=r.get("native_id") or "",
+    )
+
+def due_for_poll(now: datetime, extra_where: tuple[str, list] | None = None,
+                 site: str = "govdeals") -> list[Lot]:
+    """Lots of ONE site due for a poll. The site filter is what keeps the
+    GovDeals watch cron from handing a foreign row to mapping.asset_to_lot and
+    then to maestro (synthesized ids mean nothing there)."""
     from deals.mapping import asset_to_lot
     # `raw IS NOT NULL` guards against a cold-archived row leaking in: raw is
     # nulled once a lot closes and its blob is exported to R2, and
     # asset_to_lot(None) would raise AttributeError, killing the whole pass.
     # `extra_where` = a research-profile fragment (deals/profiles.deal_lots_where).
-    where = ("outcome_complete IS NOT TRUE AND raw IS NOT NULL "
+    where = ("site = %s AND outcome_complete IS NOT TRUE AND raw IS NOT NULL "
              "AND (next_poll_at IS NULL OR next_poll_at<=%s)")
-    params: list = [now]
+    params: list = [site, now]
     if extra_where and extra_where[0] != "TRUE":
         where += f" AND ({extra_where[0]})"; params += list(extra_where[1])
-    rows = db.fetch_all(f"SELECT raw FROM deal_lots WHERE {where}", tuple(params))
+    cols = "raw" if site == "govdeals" else ",".join(LOT_COLUMNS)
+    rows = db.fetch_all(f"SELECT {cols} FROM deal_lots WHERE {where}", tuple(params))
     lots = []
     for r in rows:
         try:
-            lots.append(asset_to_lot(r["raw"]))
+            lots.append(asset_to_lot(r["raw"]) if site == "govdeals" else row_to_lot(r))
         except (ValueError, AttributeError, TypeError, KeyError) as e:
             print(f"deals.store.due_for_poll: skipping malformed stored row: {e}", file=sys.stderr)
     return lots

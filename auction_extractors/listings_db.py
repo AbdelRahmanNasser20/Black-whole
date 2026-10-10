@@ -92,10 +92,15 @@ def extract_asset_id(url: str) -> str:
     PublicSurplus: ``/sms/auction/view?auc=<aucId>`` → ``ps:<aucId>``.
     BidSpotter: ``bidspotter.com/…/lot-<lotGuid>`` → ``bs:<lotGuid>``
                 (relists mint a new GUID, so one key = one auction round).
+    TXAuction: ``txauction.com/auctions/<auctionId>/lot/<lotId>`` → ``tx:<lotId>``
+               (rows come from deals/listings_bridge.py, not a scraper here).
 
     Returns empty string if the URL matches none (uncacheable).
     """
     u = url or ""
+    m = re.search(r"txauction\.com/auctions/\d+/lot/(\d+)", u)
+    if m:
+        return f"tx:{m.group(1)}"
     m = re.search(r"/asset/(\d+)/(\d+)", u)
     if m:
         return f"{m.group(1)}/{m.group(2)}"

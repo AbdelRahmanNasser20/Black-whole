@@ -172,7 +172,8 @@
     <div class="hero-eyebrow">FEED / AUCTION CANDIDATES</div>
     <h1 class="hero-title">Pick a lot. <em>Launch</em> the pipeline. Queue more.</h1>
     <p class="hero-sub">
-      Live (and archived) bulk lots for the selected research profile, from GovDeals + Public Surplus.
+      Live (and archived) bulk lots for the selected research profile — GovDeals, Public Surplus, BidSpotter
+      and TXAuction in one list, each card badged with its source.
       Quantities verified by <span class="lex done">LLM</span>,
       condition scored <span class="lex running">1-10</span>. Hit <strong>Launch</strong>
       to run <span class="hero-mono">extract → list</span> against it.
@@ -180,14 +181,6 @@
   </div>
 
   <form class="auction-controls" id="auction-form" onsubmit="return false;">
-    <div class="ac-group">
-      <span class="ac-label" title="Which scraper cache to draw from">SOURCE</span>
-      <div class="seg" id="auc-source">
-        <button type="button" class="seg-btn is-active" data-value="gd">GovDeals</button>
-        <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
-        <button type="button" class="seg-btn" data-value="bs">BidSpotter</button>
-      </div>
-    </div>
     <div class="ac-group">
       <span class="ac-label" title="Research profile: keyword set + quantity floor + sweep categories (research_profiles)">PROFILE</span>
       <div class="seg" id="auc-profile" data-state="loading" aria-busy="true"><span class="sk sk-pill" aria-hidden="true"></span><span class="sk sk-pill" aria-hidden="true"></span><span class="sk sk-pill" aria-hidden="true"></span></div>
@@ -707,6 +700,7 @@
         <button type="button" class="seg-btn" data-value="gd">GovDeals</button>
         <button type="button" class="seg-btn" data-value="ps">Public Surplus</button>
         <button type="button" class="seg-btn" data-value="bs">BidSpotter</button>
+        <button type="button" class="seg-btn" data-value="tx">TXAuction</button>
       </div>
     </div>
     <div class="ac-group">
