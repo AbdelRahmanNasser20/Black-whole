@@ -213,6 +213,12 @@ _POSITIONAL_EXPLICIT_PATTERNS: tuple[tuple[str, str], ...] = (
     # number ("ACCESSIBLE VAN (5173)") or a room/lot number floating elsewhere
     # in the title cannot reach it.
     (r"(?i)chairs?\s*\(\s*(\d{1,4})\s*\)", "chairs (N)"),
+    # "(500) MTS Seating Omega Stacker event chairs" — TXAuction (Gaston &
+    # Sheehan) opens every multi-unit lot with its count in parentheses. Only
+    # at the very START of the title, and only when the plural "chairs" follows
+    # within the same clause (no sentence stop / paren in between), so
+    # "(5173) ACCESSIBLE VAN" and "(2) desks, 1 chair" stay unread.
+    (r"(?i)^\s*\(\s*(\d{1,4})\s*\)[^().;\n]{0,80}?\bchairs\b", "(N) … chairs (leading)"),
 )
 
 # A number next to a chair word is only a count if it is a plausible one. The
