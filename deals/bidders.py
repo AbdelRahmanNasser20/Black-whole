@@ -29,9 +29,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 # Non-GovDeals favorites are keyed with a source prefix by the Auctions tab
-# (`ps:` Public Surplus, `bs:` BidSpotter). Neither site exposes a bidbox, so
+# (`ps:` Public Surplus, `bs:` BidSpotter, `tx:` TXAuction). None exposes a bidbox, so
 # they are skipped rather than mis-parsed into bogus asset ids.
-_FOREIGN_PREFIXES = ("ps:", "bs:")
+_FOREIGN_PREFIXES = ("ps:", "bs:", "tx:")
 
 
 @dataclass
