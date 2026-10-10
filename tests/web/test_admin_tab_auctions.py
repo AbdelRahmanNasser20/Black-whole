@@ -1,7 +1,8 @@
 """E-auctions contract (plan §10 E2–E10, tab = auctions): the pane ships a server-side skeleton twin inside
 data-state="loading" (no "Loading…" text), its CSS lives in static/admin/auctions.css (no hex), every read in
 auctions.js goes through UI.load / UI.api and every mutation through UI.pending, and filter state lives in the
-URL (source, q, profile, map) with shell.js's param semantics — no localStorage toggle."""
+URL (q, profile, map) with shell.js's param semantics — no localStorage toggle. One combined list across every
+source (no source selector; a legacy ?source= is dropped), each card badged with its site, close times readable."""
 import re
 import subprocess
 from pathlib import Path
@@ -77,8 +78,37 @@ def test_js_uses_ui_primitives_and_url_params():
     assert "markStale(" in src and "clearStale(" in src
     assert "localStorage.setItem" not in src, "?map= replaces localStorage.admin.aucMapOn"
     assert "'admin.aucMapOn'" in src and "localStorage.removeItem(" in src, "one-time migration of the old key"
-    for key in ("source", "q", "profile", "map"):
+    for key in ("source", "q", "profile", "map"):   # source is written as null: it drops a legacy ?source=
         assert re.search(rf"setParams\(\{{[^}}]*\b{key}\b", src), f"URL key {key} not written"
+    assert "setParams({source: null" in src
     assert "30000" in src, "favorites poll stays 30 s"
     r = subprocess.run(["node", "--check", "--input-type=module"], input=src, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_one_combined_list_with_source_badges():
+    pane = _pane()
+    assert 'id="auc-source"' not in pane, "the per-source selector is gone"
+    for name in ("GovDeals", "Public Surplus", "BidSpotter", "TXAuction"):
+        assert name in pane, f"hero copy names {name}"
+    src = JS.read_text()
+    assert "auc.source" not in src and "#auc-source" not in src
+    assert "source: 'all'" in src, "/api/auctions is asked for every source"
+    assert "badge badge-src src-${src}" in src
+    assert src.count("sourceBadge(") >= 3, "grid card, map popup and favorite card all carry the badge"
+    assert "by_source?.[auc.source]" not in src, "empty-state/summary use the cache totals"
+    css = CSS.read_text()
+    for cls in (".badge-src.src-gd", ".badge-src.src-ps", ".badge-src.src-bs", ".badge-src.src-tx",
+                ".ends-red", ".ends-yellow", ".ends-over"):
+        assert cls in css, cls
+
+
+def test_cards_use_readable_close_times_and_repaint_each_minute():
+    src = JS.read_text()
+    assert re.search(r"import \{[^}]*\bfmtClose\b[^}]*\} from '\./shared\.js'", src)
+    assert "fmtClose(iso)" in src and "fmtClose(fav.end_date_iso)" in src
+    assert "60000" in src and "renderAuctions()" in src
+    shared = (STATIC / "admin/shared.js").read_text()
+    assert "export {fmtClose} from './fmt_time.js'" in shared
+    assert "tx: 'TXAuction'" in shared and "export function sourceOfLink(" in shared
+    assert TestClient(app).get("/static/admin/fmt_time.js").status_code == 200

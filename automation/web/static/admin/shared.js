@@ -2,6 +2,8 @@
 // Cross-tab calls go through `hooks` (a tab registers what another tab needs) — tabs never import each other.
 import {toast, api as apiFetch} from '../ui/state.js';
 export {toast, apiFetch};
+// Readable auction close times — a pure module of its own (node-testable); tabs reach it through here.
+export {fmtClose} from './fmt_time.js';
 
 export const hooks = {};
 const applyState = (...a) => hooks.applyState(...a);
@@ -74,7 +76,15 @@ export function escapeHtml(s) {
 }
 export function escapeAttr(s) { return escapeHtml(s); }
 
-export const SOURCE_NAMES = { gd: 'GovDeals', ps: 'Public Surplus', bs: 'BidSpotter' };
+export const SOURCE_NAMES = { gd: 'GovDeals', ps: 'Public Surplus', bs: 'BidSpotter', tx: 'TXAuction' };
+
+// Which auction site a lot URL belongs to — 'gd' | 'ps' | 'bs' | 'tx' | 'other' (mirrors auctions_supabase.source_of_link).
+const SOURCE_HOSTS = [['gd', 'govdeals.com'], ['ps', 'publicsurplus.com'], ['bs', 'bidspotter.com'], ['tx', 'txauction.com']];
+export function sourceOfLink(link) {
+  const low = String(link || '').toLowerCase();
+  for (const [key, host] of SOURCE_HOSTS) if (low.includes(host)) return key;
+  return 'other';
+}
 
 export function _ageInDays(isoStr) {
   if (!isoStr) return null;

@@ -32,9 +32,36 @@ from auction_extractors.top_chairs import (  # noqa: E402
     title_claimed_quantity,
 )
 
-Source = Literal["gd", "ps", "bs"]
+Source = Literal["all", "gd", "ps", "bs", "tx"]
 
-_SOURCE_FRAG = {"gd": "govdeals.com", "ps": "publicsurplus.com", "bs": "bidspotter.com"}
+_SOURCE_FRAG = {"gd": "govdeals.com", "ps": "publicsurplus.com", "bs": "bidspotter.com",
+                "tx": "txauction.com"}
+SOURCE_NAMES = {"gd": "GovDeals", "ps": "Public Surplus", "bs": "BidSpotter", "tx": "TXAuction"}
+SOURCES = ("all", *_SOURCE_FRAG)
+
+
+def source_of_link(link: str | None) -> str:
+    """'gd' | 'ps' | 'bs' | 'tx' | 'other' — which site a cached row came from."""
+    low = (link or "").lower()
+    for key, frag in _SOURCE_FRAG.items():
+        if frag in low:
+            return key
+    return "other"
+
+
+def _link_clause(source: str) -> tuple[str, tuple]:
+    """`AND link ILIKE …` for one source; nothing for 'all'."""
+    if source == "all":
+        return "", ()
+    return "AND link ILIKE %s", (f"%{_SOURCE_FRAG[source]}%",)
+
+
+def _end_utc_iso(end_date) -> str:
+    """Close time as ISO-8601 UTC ('…Z') for the card's readable countdown, via
+    the one end-date parser (naive = US/Eastern). Unparseable → ''."""
+    from .favorites import _parse_end_date
+    dt = _parse_end_date(end_date)
+    return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if dt else ""
 
 _SELECT_COLS = (
     "asset_id, link, title, description, quantity, quantity_source, "
@@ -56,7 +83,7 @@ def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | No
     (LLM: 1, low) never reached the Auctions tab although it was starred.
     ``seen_within_days`` only narrows that second query.
     """
-    frag = _SOURCE_FRAG[source]
+    link_sql, link_args = _link_clause(source)
     floor = max(1, profile.min_quantity if min_quantity is None else int(min_quantity))
     pwhere, pargs = _profiles.auction_listings_where(profile, min_quantity)
     rows = db.fetch_all(
@@ -66,10 +93,10 @@ def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | No
         WHERE {pwhere}
           AND quantity <= %s
           AND quantity_source = ANY(%s)
-          AND link ILIKE %s
+          {link_sql}
         ORDER BY quantity DESC
         """,
-        (*pargs, _SANE_MAX_QUANTITY, list(TRUSTED_QUANTITY_SOURCES), f"%{frag}%"),
+        (*pargs, _SANE_MAX_QUANTITY, list(TRUSTED_QUANTITY_SOURCES), *link_args),
     )
     kwhere, kargs = _profiles.auction_listings_where(profile, quantity_floor=False)
     seen_sql, seen_args = "", ()
@@ -84,11 +111,11 @@ def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | No
           AND (quantity IS NULL OR quantity < %s)
           AND (quantity_source <> ALL(%s) OR quantity_confidence = ANY(%s))
           AND title ~ '[0-9]'
-          AND link ILIKE %s
+          {link_sql}
           {seen_sql}
         """,
         (*kargs, floor, list(TRUSTED_QUANTITY_SOURCES), list(UNSURE_CONFIDENCES),
-         f"%{frag}%", *seen_args),
+         *link_args, *seen_args),
     )
     for r in unsure:
         claim = title_claimed_quantity(r)
@@ -107,13 +134,13 @@ def _load_from_supabase(profile: Profile, source: Source, min_quantity: int | No
     return rows
 
 
-def get_top_lots(profile: Profile, source: Source = "gd", n: int = 15,
+def get_top_lots(profile: Profile, source: Source = "all", n: int = 15,
                  min_quantity: int | None = None, include_condition: bool = True,
                  active_only: bool = True, max_stale_days: int = 2) -> list[dict]:
     """Top-n cached lots matching `profile`. Same row shape as get_top_chairs;
     `category` is the profile slug, `category_keyword` the keyword that hit."""
-    if source not in _SOURCE_FRAG:
-        raise ValueError(f"source must be one of {sorted(_SOURCE_FRAG)}, got {source!r}")
+    if source not in SOURCES:
+        raise ValueError(f"source must be one of {list(SOURCES)}, got {source!r}")
     items = _load_from_supabase(profile, source, min_quantity,
                                 seen_within_days=max_stale_days if active_only else None)
     for it in items:
@@ -136,6 +163,7 @@ def get_top_lots(profile: Profile, source: Source = "gd", n: int = 15,
         enrich = [{"title": it.get("title") or "", "condition": None, "condition_note": None} for it in top]
     out = []
     for i, (it, en) in enumerate(zip(top, enrich), start=1):
+        src = source_of_link(it.get("link"))
         out.append({
             "rank": i, "quantity": int(it.get("quantity") or 0),
             "title": en["title"], "raw_title": it.get("title") or "",
@@ -149,6 +177,8 @@ def get_top_lots(profile: Profile, source: Source = "gd", n: int = 15,
             "condition_note": en["condition_note"] if include_condition else None,
             "quantity_unverified": bool(it.get("quantity_unverified")),
             "llm_quantity": it.get("llm_quantity"),
+            "source": src, "source_name": SOURCE_NAMES.get(src, "Other"),
+            "end_utc": _end_utc_iso(it.get("end_date")),
         })
     return out
 
@@ -178,13 +208,15 @@ def cache_stats() -> dict:
                  WHEN link ILIKE %s THEN 'gd'
                  WHEN link ILIKE %s THEN 'ps'
                  WHEN link ILIKE %s THEN 'bs'
+                 WHEN link ILIKE %s THEN 'tx'
                  ELSE 'other'
                END AS src,
                count(*) AS n,
                max(last_seen_at) AS newest
         FROM auction_listings GROUP BY 1
         """,
-        (f"%{_SOURCE_FRAG['gd']}%", f"%{_SOURCE_FRAG['ps']}%", f"%{_SOURCE_FRAG['bs']}%"),
+        (f"%{_SOURCE_FRAG['gd']}%", f"%{_SOURCE_FRAG['ps']}%", f"%{_SOURCE_FRAG['bs']}%",
+         f"%{_SOURCE_FRAG['tx']}%"),
     )
 
     def _iso(v):

@@ -147,3 +147,17 @@
   .staleness-banner { flex-wrap: wrap; }
   .staleness-banner .btn-primary { margin-left: 0; }
 }
+
+/* ── source badge (one combined list; shared .badge from ui/components.css + a per-source colour) ── */
+.badge-src { height: 18px; padding: 0 6px; letter-spacing: .06em; }
+.badge-src.src-gd    { color: var(--accent); }
+.badge-src.src-ps    { color: var(--success); }
+.badge-src.src-bs    { color: var(--warn); }
+.badge-src.src-tx    { color: var(--info); }
+.badge-src.src-other { color: var(--muted); }
+
+/* ── readable close time (fmt_time.js fmtClose → cls) ── */
+.auction-ends .ends-ok     { color: var(--text); }
+.auction-ends .ends-yellow { color: var(--warn); font-weight: bold; }
+.auction-ends .ends-red    { color: var(--danger); font-weight: bold; }
+.auction-ends .ends-over   { color: var(--muted); }

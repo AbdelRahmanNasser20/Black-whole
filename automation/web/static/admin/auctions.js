@@ -1,19 +1,19 @@
 // static/admin/auctions.js — Auctions tab (plan §10 E-auctions).
 // Reads go through UI.load (skeleton → ready|empty|error, Retry re-runs the same fetcher), mutations through
 // UI.pending, the 30 s favorites poll keeps old content and marks it stale on failure, the scrape SSE marks the
-// strip stale on `error` and clears on `open`. Filter state lives in the URL (source, q, profile, map) — shell.js param semantics.
-import {$, $$, toast, esc, SOURCE_NAMES, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks, getParams, setParams} from './shared.js';
+// strip stale on `error` and clears on `open`. Filter state lives in the URL (q, profile, map) — shell.js param semantics.
+// One combined list across every source (GovDeals, Public Surplus, BidSpotter, TXAuction); each card carries a source
+// badge. The old per-source selector is gone — a legacy ?source= is dropped from the URL on the first write.
+import {$, $$, toast, esc, SOURCE_NAMES, sourceOfLink, fmtClose, _ageInDays, _fmtAge, _fmtRemaining, queueRuns, hooks, getParams, setParams} from './shared.js';
 import {api, load as uiLoad, pending, markStale, clearStale, renderEmpty} from '../ui/state.js';
 
 let scrapeES;
 
 // ───────── state ─────────
 
-const SOURCES = ['gd', 'ps', 'bs'];
 const LEGACY_MAP_KEY = 'admin.aucMapOn';   // pre-E-auctions localStorage toggle — read once, moved into ?map=, deleted
 
 const auc = {
-  source: 'gd',
   q: '',                  // client-side title filter (URL `q`)
   profile: '',            // research profile slug (research_profiles); '' = default
   profiles: [],           // rows from /api/profiles
@@ -29,11 +29,10 @@ const auc = {
   map: null,              // AdminMap handle (lazy-mounted)
 };
 
-// ───────── URL params (source, q, profile, map) ─────────
+// ───────── URL params (q, profile, map) ─────────
 
 function readParams() {
   const p = getParams();
-  auc.source = SOURCES.includes(p.source) ? p.source : 'gd';
   auc.q = (p.q || '').trim();
   auc.profile = p.profile || auc.profile;
   if (auc.profiles.length && !auc.profiles.some(x => x.slug === auc.profile)) auc.profile = auc.defaultProfile;
@@ -41,11 +40,10 @@ function readParams() {
 }
 
 function writeParams() {
-  setParams({source: auc.source, q: auc.q || null, profile: auc.profile || null, map: auc.mapOn ? '1' : '0'});
+  setParams({source: null, q: auc.q || null, profile: auc.profile || null, map: auc.mapOn ? '1' : '0'});
 }
 
 function syncControls() {
-  $$('#auc-source .seg-btn').forEach(b => b.classList.toggle('is-active', b.dataset.value === auc.source));
   const q = $('#auc-q');
   if (q && q.value !== auc.q) q.value = auc.q;
   if (auc.profiles.length) renderProfileSeg();
@@ -59,7 +57,22 @@ function _assetIdFromLink(link) {
   if (m) return `ps:${m[1]}`;
   m = link.match(/bidspotter\.com\/.*\/lot-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/);
   if (m) return `bs:${m[1]}`;
+  m = link.match(/txauction\.com\/auctions\/\d+\/lot\/(\d+)/);
+  if (m) return `tx:${m[1]}`;
   return '';
+}
+
+function sourceBadge(link) {
+  const src = sourceOfLink(link);
+  const name = SOURCE_NAMES[src] || 'Other';
+  return `<span class="badge badge-src src-${src}" title="${esc(name)}">${esc(name)}</span>`;
+}
+
+// Readable close time; falls back to the scraper's own text when the end is unknown/unparseable.
+function closeHtml(iso, fallback) {
+  const c = fmtClose(iso);
+  if (c.label) return `<span class="${c.cls}" title="${esc(c.title)}">${esc(c.label)}</span>`;
+  return fallback ? esc(fallback) : '';
 }
 
 // Build an eBay sold-listings search URL from an auction row (medical profile: demand-side comps).
@@ -304,12 +317,11 @@ function gridFragment(items) {
 
 // Plain-text reasons the current filters could be hiding everything (feeds the summary line and the empty state).
 function filterReasons(maxStaleDays) {
-  const srcKey = auc.source;
-  const ageDays = _ageInDays(auc.stats?.by_source?.[srcKey]?.newest_seen_at);
+  const ageDays = _ageInDays(auc.stats?.newest_seen_at);
   const activeOnly = !$('#auc-expired').checked;
   const reasons = [];
   if (activeOnly && ageDays != null && ageDays > maxStaleDays) {
-    reasons.push(`staleness (newest ${srcKey} row is ${_fmtAge(ageDays)}, filter hides anything past ${maxStaleDays} days)`);
+    reasons.push(`staleness (newest row is ${_fmtAge(ageDays)}, filter hides anything past ${maxStaleDays} days)`);
   }
   if (Number($('#auc-min-qty').value) > 50) reasons.push(`min-units set to ${$('#auc-min-qty').value}`);
   if (activeOnly) reasons.push('“Show ended auctions” is off');
@@ -318,17 +330,16 @@ function filterReasons(maxStaleDays) {
 
 // Empty-state copy for "the API returned no lots" (cache empty vs filters too tight).
 function cacheEmptyArgs(maxStaleDays) {
-  const srcName = SOURCE_NAMES[auc.source] || auc.source;
-  const total = auc.stats?.by_source?.[auc.source]?.count ?? 0;
+  const total = auc.stats?.total ?? 0;
   if (!auc.stats || total === 0) {
-    return {glyph: '◌', title: `Cache is empty for ${srcName}`,
+    return {glyph: '◌', title: 'The auction cache is empty',
       body: 'Run the scraper to fill it, then the ranked lots show up here.',
-      cta: {label: 'Scrape now', onClick: (e) => startScrape(auc.source, false, e.currentTarget)}};
+      cta: {label: 'Scrape now', onClick: (e) => startScrape('both', false, e.currentTarget)}};
   }
   const reasons = filterReasons(maxStaleDays);
   const activeOnly = !$('#auc-expired').checked;
-  return {glyph: '⌀', title: `No ${srcName} lots match these filters`,
-    body: `${total.toLocaleString()} ${auc.source} lots in cache, filters excluded all of them.`
+  return {glyph: '⌀', title: 'No lots match these filters',
+    body: `${total.toLocaleString()} lots in cache across every source, filters excluded all of them.`
       + (reasons.length ? ` Likely culprit: ${reasons.join(' · ')}.` : ' Try lowering the filters.'),
     cta: activeOnly
       ? {label: 'Show ended auctions', onClick: () => { $('#auc-expired').checked = true; loadAuctions(); }}
@@ -357,7 +368,7 @@ async function loadAuctions() {
 
   if (!auc.profiles.length) await loadProfiles();
   const qs = new URLSearchParams({
-    source: auc.source,
+    source: 'all',
     n: $('#auc-n').value,
     min_qty: $('#auc-min-qty').value,
     condition: useCond ? '1' : '0',
@@ -398,11 +409,10 @@ function renderFilterSummary(shownCount, maxStaleDays) {
   if (!summary) return;
   const stats = auc.stats;
   if (!stats || !stats.total) { summary.hidden = true; return; }
-  const srcKey = auc.source;
-  const srcCount = stats.by_source?.[srcKey]?.count ?? 0;
-  if (shownCount > 0 && shownCount < srcCount) {
+  const total = stats.total ?? 0;
+  if (shownCount > 0 && shownCount < total) {
     summary.hidden = false;
-    summary.textContent = `Showing ${shownCount} of ${srcCount.toLocaleString()} ${srcKey} lots (ranked by quantity).`;
+    summary.textContent = `Showing ${shownCount} of ${total.toLocaleString()} cached lots, all sources (ranked by quantity).`;
   } else {
     summary.hidden = true;   // the zero case is the grid's empty state
   }
@@ -436,6 +446,7 @@ function auctionMapPopup(it) {
     ? `<img class="amap-popup-img" src="${esc(it.image_url)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()">`
     : '';
   return `${img}
+    ${sourceBadge(it.link)}<br>
     <strong>${esc(_titleOf(it) || '—')}</strong><br>
     ${(it.quantity || 0).toLocaleString()} × ${it.price ? esc(it.price) : ''}<br>
     ${loc ? `📍 ${esc(loc)}${it.geo_precision === 'state' ? ' <em>(state-level pin)</em>' : ''}<br>` : ''}
@@ -520,7 +531,7 @@ function renderAuctionCard(it) {
     ? `<img src="${esc(it.image_url)}" alt="" loading="lazy" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'auction-img-fallback',textContent:'🪑'}))">`
     : `<div class="auction-img-fallback">🪑</div>`;
 
-  const ends = it.end_date || it.time_left || '';
+  const ends = closeHtml(it.end_utc, it.time_left || it.end_date || '');
   const isGovDeals = (it.link || '').includes('govdeals.com');
   const launchDisabled = !isGovDeals;
   const launchTitle = isGovDeals
@@ -544,6 +555,7 @@ function renderAuctionCard(it) {
     <div class="auction-body">
       <h3 class="auction-title">${esc(_titleOf(it) || '—')}</h3>
       <div class="auction-meta">
+        ${sourceBadge(it.link)}
         <span class="auction-qty">${(it.quantity||0).toLocaleString()} ×</span>
         ${it.quantity_unverified ? `<span class="auction-unverified" title="Count read from the title; the quantity LLM said ${esc(String(it.llm_quantity ?? 'nothing'))}. Check the listing.">unverified</span>` : ''}
         ${it.price ? `<span class="auction-price">${esc(it.price)}</span>` : ''}
@@ -551,7 +563,7 @@ function renderAuctionCard(it) {
       </div>
       ${locLine ? `<div class="auction-loc">📍 ${esc(locLine)}</div>` : ''}
       ${(it.contact_phone || it.contact_email) ? `<div class="auction-contact">☎ ${esc([it.contact_phone, it.contact_email].filter(Boolean).join(' · '))}</div>` : ''}
-      ${ends ? `<div class="auction-ends">⏱ ${esc(ends)}</div>` : ''}
+      ${ends ? `<div class="auction-ends">⏱ ${ends}</div>` : ''}
       ${it.condition_note ? `<div class="auction-note">${esc(it.condition_note)}</div>` : ''}
       <div class="auction-actions">
         <a href="${esc(it.link)}" target="_blank" rel="noopener" class="auction-link">↗ source</a>
@@ -683,7 +695,8 @@ function renderFavoritesHead() {
 function favCardsHtml() { return auc.favorites.map(_renderFavoriteCard).join(''); }
 
 function _renderFavoriteCard(fav) {
-  const remaining = _fmtRemaining(fav.seconds_until_end);
+  const close = fmtClose(fav.end_date_iso);
+  const remaining = close.label || _fmtRemaining(fav.seconds_until_end);
   const isExpired = fav.seconds_until_end != null && fav.seconds_until_end <= 0;
   const noEnd = fav.seconds_until_end == null;
   const stateCls = isExpired ? 'expired' : (noEnd ? 'no-end' : 'live');
@@ -708,8 +721,9 @@ function _renderFavoriteCard(fav) {
       <div class="fav-card-body">
         <a href="${esc(fav.link)}" target="_blank" rel="noopener" class="fav-card-title">${esc(fav.title || '—')}</a>
         <div class="fav-card-meta">
+          ${sourceBadge(fav.link)}
           <span class="fav-qty">${(fav.quantity || 0).toLocaleString()} ×</span>
-          <span class="fav-remaining ${stateCls}">${esc(remaining)}</span>
+          <span class="fav-remaining ${stateCls}" title="${esc(close.title)}">${esc(remaining)}</span>
         </div>
         ${fav.location ? `<div class="auction-loc">📍 ${esc(fav.location)}</div>` : ''}
         <div class="fav-dots" title="Alert schedule (filled = sent)">${dots}</div>
@@ -741,15 +755,6 @@ export function mount() {
       if (legacy === 'off' && getParams().map == null) setParams({map: '0'});
     }
   } catch (_) {}
-
-  $$('#auc-source .seg-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      auc.source = btn.dataset.value;
-      syncControls();
-      writeParams();
-      loadAuctions();
-    });
-  });
 
   $('#auc-profile').addEventListener('click', (e) => {
     const btn = e.target.closest('.seg-btn'); if (!btn) return;
@@ -907,6 +912,13 @@ export function mount() {
     const pane = $('[data-pane="auctions"]');
     if (pane && !pane.hidden && document.visibilityState === 'visible') loadFavorites({poll: true});
   }, 30000);
+
+  // "3d 4h left" goes stale on screen: re-paint the cards from state once a minute while the pane is visible.
+  // No fetch — renderAuctions() is the same no-network repaint the star/search/map paths use.
+  setInterval(() => {
+    const pane = $('[data-pane="auctions"]');
+    if (pane && !pane.hidden && document.visibilityState === 'visible' && auc.items.length) renderAuctions();
+  }, 60000);
 }
 
 export function load() {
