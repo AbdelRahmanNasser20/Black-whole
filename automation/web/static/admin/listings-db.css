@@ -50,6 +50,7 @@
 .src-pill.src-gd    { color: var(--accent); }
 .src-pill.src-ps    { color: var(--info); }
 .src-pill.src-bs    { color: var(--accent-2); }
+.src-pill.src-tx    { color: var(--success); }
 .src-pill.src-other { color: var(--dim); }
 
 /* ── controls ── */

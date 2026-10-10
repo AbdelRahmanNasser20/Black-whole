@@ -7,7 +7,7 @@
 import {$, $$, toast, escapeHtml, escapeAttr, _ageInDays, _fmtAge, queueRuns, getParams, setParams} from './shared.js';
 import {load as uiLoad, pending, api} from '../ui/state.js';
 
-const SOURCES = ['all', 'gd', 'ps', 'bs'];
+const SOURCES = ['all', 'gd', 'ps', 'bs', 'tx'];
 const Q_DEBOUNCE_MS = 350;
 
 const _ldb = {
@@ -148,7 +148,7 @@ function tableHtml(rows) {
 }
 
 function rowHtml(r) {
-  const srcClass = ['gd', 'ps', 'bs'].includes(r.source) ? `src-${r.source}` : 'src-other';
+  const srcClass = ['gd', 'ps', 'bs', 'tx'].includes(r.source) ? `src-${r.source}` : 'src-other';
   const qty = r.quantity == null ? '—' : r.quantity.toLocaleString();
   const title = r.title || '(untitled)';
   const endStr = _fmtEndDate(r);

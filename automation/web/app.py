@@ -100,10 +100,13 @@ try:
     # identical to the old SQLite path — only the data source changed.
     from ..auctions_supabase import (
         browse_listings, get_top_chairs, get_top_lots, cache_stats as _auctions_cache_stats,
+        source_of_link, SOURCES as AUCTION_SOURCES,
     )
 except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
     get_top_lots = None
+    source_of_link = None
+    AUCTION_SOURCES = ("all", "gd", "ps", "bs", "tx")
     browse_listings = None
     _auctions_cache_stats = None
 
@@ -3851,7 +3854,7 @@ _AUCTIONS_TTL = 600.0  # seconds
 
 @app.get("/api/auctions")
 async def list_auctions(
-    source: str = "gd",
+    source: str = "all",
     n: int = 15,
     min_qty: int | None = None,
     condition: int = 0,
@@ -3862,11 +3865,12 @@ async def list_auctions(
 ):
     """Top cached lots for a research profile (`profile=<slug>`; default =
     the default profile, i.e. chairs). Legacy `category=banquet|medical`
-    still works and maps onto a profile."""
+    still works and maps onto a profile. `source` defaults to `all` — the
+    Auctions tab shows one combined list with a source badge per card."""
     if get_top_lots is None:
         raise HTTPException(503, "auction_extractors package not available")
-    if source not in ("gd", "ps", "bs"):
-        raise HTTPException(400, "source must be 'gd', 'ps', or 'bs'")
+    if source not in AUCTION_SOURCES:
+        raise HTTPException(400, f"source must be one of {', '.join(AUCTION_SOURCES)}")
     # legacy sub-tab param → profile slug (banquet == default chairs profile)
     if not profile and category not in (None, "", "all"):
         if category not in ("banquet", "medical"):
@@ -4012,9 +4016,13 @@ def _asset_id_from_link(link: str) -> str:
     GovDeals: ``/asset/<a>/<b>`` → ``"<a>/<b>"``.
     PublicSurplus: ``?auc=<n>`` → ``"ps:<n>"``.
     BidSpotter: ``bidspotter.com/…/lot-<guid>`` → ``"bs:<guid>"``.
+    TXAuction: ``txauction.com/auctions/<a>/lot/<l>`` → ``"tx:<l>"``.
     """
     if not link:
         return ""
+    m = re.search(r"txauction\.com/auctions/\d+/lot/(\d+)", link)
+    if m:
+        return f"tx:{m.group(1)}"
     m = re.search(r"/asset/(\d+)/(\d+)", link)
     if m:
         return f"{m.group(1)}/{m.group(2)}"
@@ -4402,7 +4410,7 @@ def auctions_cache_stats():
 
 @app.get("/api/listings")
 async def list_raw_listings(
-    source: str = "all",           # 'all' | 'gd' | 'ps' | 'bs'
+    source: str = "all",           # 'all' | 'gd' | 'ps' | 'bs' | 'tx'
     q: str = "",                   # text search over title + description
     min_qty: int = 1,
     max_qty: int = 99999,
@@ -4430,14 +4438,8 @@ async def list_raw_listings(
         limit=limit, offset=offset,
     )
 
-    def _source_of(link: str) -> str:
-        if "govdeals.com" in link: return "gd"
-        if "publicsurplus.com" in link: return "ps"
-        if "bidspotter.com" in link: return "bs"
-        return "other"
-
     for r in rows:
-        r["source"] = _source_of(r.get("link") or "")
+        r["source"] = source_of_link(r.get("link") or "")
         # Truncate description so the network payload stays small.
         desc = r.get("description") or ""
         if len(desc) > 400:
