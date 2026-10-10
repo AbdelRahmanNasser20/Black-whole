@@ -158,6 +158,21 @@ services:
       - key: LLM_PROVIDER_BACKFILL
         value: groq
 
+  # ── Price anchors — other sellers' banquet chairs priced above ours ──────
+  # Claude Haiku 5.5 + Anthropic web search, ~$0.15-0.30/run. Needs
+  # ANTHROPIC_API_KEY + R2_* in blackwhole-secrets (photos → private bucket)
+  # and migration 026 applied. Blueprint is not auto-synced: create this cron
+  # by hand in Render the first time.
+  - type: cron
+    name: price-anchors
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "30 13 * * *"      # 13:30 UTC daily (06:30 Phoenix)
+    autoDeploy: true
+    dockerCommand: sh scripts/price_anchors_cron.sh run
+    envVars:
+      - fromGroup: blackwhole-secrets
+
   # ── 3. Deals tracker — continuous loop (2026-07-17 spec) ────────────────
   - type: cron
     name: deals-discover

@@ -102,6 +102,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 ## Key paths / commands / env
 - Run: `python run.py --login-only` (first time) → `python -m automation.web` → site `http://127.0.0.1:8765/`, admin `/admin`.
 - Pipeline: `python run.py <govdeals-url>` (`--price`, `--skip-*`, `--force-republish`).
+- Price anchors (other sellers' banquet chairs priced above ours → `price_anchors`, migration 026 APPLIED 2026-10-10): `.venv/bin/python scripts/price_anchors.py run [--dry-run] | list [--tier hotel] | photos | seed <json>`. Daily Render cron `price-anchors` = Claude Haiku 5.5 + web search; needs `ANTHROPIC_API_KEY` + `R2_*` in `blackwhole-secrets`. Photos go to the PRIVATE bucket only — other sellers' photos are never shown as our stock.
 - `.env` (gitignored): `DEWATERMARK_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`, `BLACKWHOLE_DB_URL`, `R2_*`, `SUPABASE_STORAGE_URL/KEY`, `GROQ_API_KEY` + `DEALS_LLM_PROVIDER=groq`, `TELEGRAM_BOT_TOKEN/CHAT_ID`. `auction_extractors/.env`: Ollama + `HEADLESS=0`.
 - Chrome profile: `~/.listing_automation/chrome_profile/` (logged into FB + eBay). Photos: `~/Desktop/Banquet chiars Pictures/`.
 - Photos onto a lot: `scripts/backfill_listing_images.py --lot|--missing`; `scripts/import_deal_images.py --lot <key>`.
