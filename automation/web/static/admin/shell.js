@@ -17,12 +17,13 @@ import * as tracking from './tracking.js';
 import * as deposits from './deposits.js';
 import * as channels from './channels.js';
 import * as archive from './archive.js';
+import * as chairs from './chairs.js';
 import {applyState, connectStream} from './launcher.js';
 import {setScrapeStrip, connectScrapeStream} from './auctions.js';
 
 // Every `?tab=` value and its module. There are more TABS than rail entries: the four Sales views are separate
 // panes/modules (each keeps its own URL keys and its old `?tab=` link) that share ONE rail tab.
-const TABS = {launcher, drafts, auctions, inventory, quotes, inquiries, subscribers, 'listings-db': listingsDb, 'test-scrape': testScrape, deals, tracking, deposits, channels, archive};
+const TABS = {launcher, drafts, auctions, inventory, quotes, inquiries, subscribers, 'listings-db': listingsDb, 'test-scrape': testScrape, deals, tracking, deposits, channels, archive, chairs};
 const DEFAULT_TAB = 'launcher';
 const LEGACY_TAB_KEY = 'admin.lastTab';   // pre-E1 localStorage key — read once, moved into the URL, deleted
 

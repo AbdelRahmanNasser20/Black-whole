@@ -156,7 +156,7 @@ from zoneinfo import ZoneInfo
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, PollBudget, polite_get
+from recorder.sources.base import FURNITURE_TERMS, PollBudget, SourceFetchFailed, polite_get
 
 SOURCE = "mibid"
 
@@ -375,7 +375,7 @@ class MiBidSource:
         items = _fetch_raw_auctions()
         if items is None:
             print("[mibid] RECORDER ERROR: discover() aborted — fetch failed, 0 observations")
-            return []
+            raise SourceFetchFailed("discover() aborted — homepage fetch failed", url=HOME_URL)
         matches = [
             it for it in items
             if _status_from_code(it.get("status")) == "active"

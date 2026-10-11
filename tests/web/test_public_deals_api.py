@@ -87,3 +87,48 @@ def test_viewer_404s_excluded_lot_for_public_only(client, monkeypatch):
 
 def test_robots_disallows_deals(client):
     assert "Disallow: /deals" in client.get("/robots.txt").text
+
+
+# ───────────────────────── every recorder source (deals_sources) ─────────────────────────
+
+def test_site_filter_passes_through_and_unknown_site_is_400(client, monkeypatch):
+    pins = {}
+    monkeypatch.setattr(pd, "fetch_pins", lambda **kw: pins.update(kw) or {"points": [], "capped": False})
+    body = client.get("/deals/api/lots?site=GSA").json()
+    assert body["echo"]["site"] == "gsa"                 # normalised, every known source key is accepted
+    assert client.get("/deals/api/lots").json()["echo"]["site"] is None
+    assert client.get("/deals/api/pins?site=purple_wave").status_code == 200 and pins["site"] == "purple_wave"
+    assert client.get("/deals/api/lots?site=ebay").status_code == 400
+    assert client.get("/deals/api/pins?site=ebay").status_code == 400
+    for key in ("govdeals", "allsurplus", "gsa", "purple_wave", "public_surplus", "municibid", "mibid"):
+        assert client.get(f"/deals/api/lots?site={key}").status_code == 200, key
+
+
+def test_rows_from_any_source_share_one_shape(client, monkeypatch):
+    gsa = {"asset_id": None, "account_id": None, "auction_id": None, "source": "gsa", "source_name": "GSA Auctions",
+           "title": "2016 Ford F-250", "canonical_category": None, "city": "Woodward", "state": "OK",
+           "bid_count": 1, "current_bid": 15000.0, "end_utc": None, "outcome_complete": False,
+           "quantity": 1, "unit_bid": 15000.0, "landed_cost": None,
+           "url": "https://www.gsaauctions.gov/auctions/preview/379244", "viewer_url": None}
+    page = dict(PAGE, rows=[dict(PAGE["rows"][0], source="govdeals", source_name="GovDeals",
+                                 url=PAGE["rows"][0]["govdeals_url"]), gsa], total=2)
+    monkeypatch.setattr(pd, "fetch_page", lambda **kw: page)
+    rows = client.get("/deals/api/lots").json()["rows"]
+    assert [r["source"] for r in rows] == ["govdeals", "gsa"]
+    assert rows[0]["viewer_url"] == "/deals/305/10340/1" and rows[0]["url"] == rows[0]["govdeals_url"]
+    assert rows[1]["viewer_url"] is None and rows[1]["url"].startswith("https://www.gsaauctions.gov/")
+    assert "raw" not in rows[1] and "coEmail" not in rows[1]
+
+
+def test_facets_carry_a_sites_facet(client, monkeypatch):
+    monkeypatch.setattr(pd, "fetch_facets", lambda: {
+        "categories": [], "states": [], "stats": {"tracked": 1},
+        "sites": [{"value": "govdeals", "name": "GovDeals", "count": 8801}, {"value": "gsa", "name": "GSA Auctions", "count": 72}],
+        "cached_at": 0})
+    sites = client.get("/deals/api/facets").json()["sites"]
+    assert [s["value"] for s in sites] == ["govdeals", "gsa"] and sites[1]["name"] == "GSA Auctions"
+
+
+def test_deals_page_has_the_site_control(client):
+    html = client.get("/deals").text
+    assert 'id="feed-site"' in html and 'value="">All sites' in html

@@ -138,6 +138,8 @@ html[data-rail="closed"] .rail-body, html[data-rail="closed"] .rail-title { disp
 .card-cat { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-ext { position: relative; z-index: 2; flex: 0 0 auto; color: var(--dim); text-decoration: none; text-transform: none; letter-spacing: 0; }
 .card-ext:hover { color: var(--accent); }
+.card-source { display: inline-block; padding: 2px 6px; border: 1px solid var(--border); border-radius: 999px; font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }   /* source badge: which site the lot is on */
+.card-source[data-source="govdeals"] { border-color: transparent; padding: 0; text-transform: none; letter-spacing: 0; font-size: inherit; }   /* GovDeals keeps the plain word look */
 .card-timer { flex: 0 0 auto; color: var(--text); font-variant-numeric: tabular-nums; text-transform: none; letter-spacing: 0; }
 .card-timer.is-urgent { color: var(--danger); }
 .card-timer.is-closed { color: var(--dim); }
