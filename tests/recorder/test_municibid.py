@@ -11,7 +11,7 @@ import pytest
 
 from recorder.models import Observation
 from recorder.sources import municibid as mb
-from recorder.sources.base import FURNITURE_TERMS
+from recorder.sources.base import FURNITURE_TERMS, SourceFetchFailed
 
 FIXTURES = Path(__file__).parent / "fixtures" / "municibid"
 
@@ -399,9 +399,10 @@ def test_poll_unrecognized_page_shape_is_a_fetch_failure(monkeypatch, capsys):
 
 # --- HTTP / fetch-failure handling --------------------------------------------------------
 
-def test_discover_returns_empty_when_all_terms_fail(monkeypatch, capsys):
+def test_discover_raises_fetch_failed_when_all_terms_fail(monkeypatch, capsys):
     monkeypatch.setattr(mb, "polite_get", lambda *a, **k: _FakeResponse("", status_code=403))
-    assert mb.MunicibidSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        mb.MunicibidSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
 
@@ -434,17 +435,19 @@ def test_discover_warns_loudly_on_healthy_but_empty_result(monkeypatch, capsys):
     assert "0 active furniture listings" in out
 
 
-def test_discover_returns_empty_on_missing_markers_script(monkeypatch):
+def test_discover_raises_fetch_failed_on_missing_markers_script(monkeypatch):
     monkeypatch.setattr(mb, "polite_get", lambda *a, **k: _FakeResponse("<html>no marker here</html>"))
-    assert mb.MunicibidSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        mb.MunicibidSource().discover()
 
 
-def test_discover_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+def test_discover_raises_fetch_failed_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
     def raise_connection_error(*a, **k):
         raise mb.requests.exceptions.ConnectionError("boom")
 
     monkeypatch.setattr(mb, "polite_get", raise_connection_error)
-    assert mb.MunicibidSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        mb.MunicibidSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
 

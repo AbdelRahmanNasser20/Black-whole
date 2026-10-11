@@ -96,7 +96,7 @@ from typing import Any
 import requests
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS, polite_get  # noqa: F401  (FURNITURE_TERMS kept per contract; unused — see docstring)
+from recorder.sources.base import FURNITURE_TERMS, SourceFetchFailed, polite_get  # noqa: F401  (FURNITURE_TERMS kept per contract; unused — see docstring)
 
 SOURCE = "purple_wave"
 
@@ -220,7 +220,7 @@ class PurpleWaveSource:
         items = _fetch_search()
         if items is None:
             print("[purple_wave] RECORDER ERROR: discover() aborted — fetch failed, 0 observations")
-            return []
+            raise SourceFetchFailed("discover() aborted — search fetch failed", url=SEARCH_URL)
         out = [_to_observation(it) for it in items]
         result = [o for o in out if o is not None]
         if not result:

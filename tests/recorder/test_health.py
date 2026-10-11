@@ -169,12 +169,14 @@ def test_429_fails_fast_until_retry_after(monkeypatch):
 # --- cli ------------------------------------------------------------------------
 
 class _Src:
-    def __init__(self, name, poll_obs=None, stats=None, discover_obs=None, fail_poll=False):
+    def __init__(self, name, poll_obs=None, stats=None, discover_obs=None, fail_poll=False,
+                 fail_discover=False):
         self.SOURCE = name
         self.poll_calls = self.discover_calls = 0
         self._poll_obs, self._stats = poll_obs or [], stats
         self._discover_obs = discover_obs or []
         self._fail_poll = fail_poll
+        self._fail_discover = fail_discover
         self.last_poll_stats = None
         self.polled_rows = []
 
@@ -188,6 +190,8 @@ class _Src:
 
     def discover(self):
         self.discover_calls += 1
+        if self._fail_discover:
+            raise base.SourceFetchFailed("discover() aborted — fetch failed")
         return list(self._discover_obs)
 
     def sold_sweep(self):
@@ -266,13 +270,27 @@ def test_run_skips_discover_for_open_source_and_uses_last_discover_for_staleness
     assert {r["source"]: r["state"] for r in db_stubs} == {"mibid": "closed"}
 
 
-def test_run_empty_discover_counts_as_failure(monkeypatch, db_stubs):
+def test_run_empty_discover_counts_as_success(monkeypatch, db_stubs):
+    """Fetched fine, matched 0 lots (mibid most days) = a quiet day, not an
+    outage: the breaker resets and last_discover_at moves."""
+    monkeypatch.setattr(store, "tracked_active", lambda: [])
+    monkeypatch.setattr(store, "newest_observed_at", lambda s: None)
+    monkeypatch.setattr(store, "load_source_health", lambda: {
+        "ps": {"state": "closed", "consecutive_failures": 2, "last_error": "earlier"}})
+    cli.cmd_run({"ps": _Src("ps")}, discover_stale_hours=6, now=NOW)
+    row = db_stubs[0]
+    assert (row["state"], row["consecutive_failures"], row["last_error"]) == ("closed", 0, None)
+    assert row["last_discover_at"] == NOW and row["last_success_at"] == NOW
+
+
+def test_run_fetch_failed_discover_counts_as_failure(monkeypatch, db_stubs, capsys):
     monkeypatch.setattr(store, "tracked_active", lambda: [])
     monkeypatch.setattr(store, "newest_observed_at", lambda s: None)
     monkeypatch.setattr(store, "load_source_health", lambda: {})
-    cli.cmd_run({"ps": _Src("ps")}, discover_stale_hours=6, now=NOW)
+    cli.cmd_run({"ps": _Src("ps", fail_discover=True)}, discover_stale_hours=6, now=NOW)
     assert db_stubs[0]["consecutive_failures"] == 1
-    assert "aborted" in db_stubs[0]["last_error"]
+    assert db_stubs[0]["last_error"] == "discover fetch failed: discover() aborted — fetch failed"
+    assert "RECORDER ERROR source=ps discover failed: discover() aborted" in capsys.readouterr().err
 
 
 def test_run_without_table_uses_in_memory_breaker(monkeypatch, db_stubs, capsys):
@@ -343,7 +361,7 @@ def test_health_file_fallback_persists_across_runs(monkeypatch, db_stubs, tmp_pa
     monkeypatch.setattr(store, "tracked_active", lambda: [])
     monkeypatch.setattr(store, "newest_observed_at", lambda s: None)
     monkeypatch.setattr(store, "load_source_health", lambda: None)
-    src = _Src("ps")                       # empty discover = failed attempt
+    src = _Src("ps", fail_discover=True)   # fetch failed = failed attempt
     for _ in range(3):
         cli.cmd_run({"ps": src}, discover_stale_hours=6, now=NOW)
     assert health.load_file(path)["ps"]["state"] == "open"
@@ -418,7 +436,8 @@ def test_public_surplus_discover_stops_after_a_connect_failure(monkeypatch):
         raise requests.exceptions.ConnectTimeout("connect timeout=10")
 
     monkeypatch.setattr(public_surplus, "polite_get", dead)
-    assert public_surplus.PublicSurplusSource().discover() == []
+    with pytest.raises(base.SourceFetchFailed):
+        public_surplus.PublicSurplusSource().discover()
     assert len(calls) == 1
 
 
@@ -440,3 +459,84 @@ def test_health_upsert_sql_with_and_without_last_discover_at():
     assert "last_discover_at" not in base_sql and base_sql.count("%s") == len(store._HEALTH_COLS)
     full = store._health_upsert_sql(store._HEALTH_COLS + ("last_discover_at",))
     assert "last_discover_at = EXCLUDED.last_discover_at" in full
+
+
+# --- per-host proxy (RECORDER_PROXY_URL / RECORDER_PROXY_HOSTS) -----------------
+
+PROXY = "socks5h://127.0.0.1:1081"
+
+
+@pytest.fixture
+def proxy_env(monkeypatch):
+    monkeypatch.setenv(base.PROXY_URL_ENV, PROXY)
+    monkeypatch.setenv(base.PROXY_HOSTS_ENV, "publicsurplus.com, mibid.michigan.gov")
+    monkeypatch.setattr(base, "_throttle", lambda host: None)
+    base._rate_limited_until.clear()
+    base._last_failure.clear()
+    sent = []
+    monkeypatch.setattr(base.requests, "get",
+                        lambda url, **k: sent.append((url, k["proxies"])) or _Resp(200))
+    return sent
+
+
+def test_only_listed_hosts_are_proxied(monkeypatch, proxy_env):
+    monkeypatch.setattr(base, "_socket_open", lambda h, p, timeout=0: True)
+    base.polite_get("https://www.publicsurplus.com/sms/browse/search")   # suffix match
+    base.polite_get("https://mibid.michigan.gov/")
+    base.polite_get("https://maestro.govdeals.com/search")               # direct
+    base.polite_get("https://notpublicsurplus.com/x")                    # no partial-label match
+    assert [p for _, p in proxy_env] == [{"http": PROXY, "https": PROXY},
+                                         {"http": PROXY, "https": PROXY}, None, None]
+
+
+def test_proxy_down_fails_loud_before_any_request(monkeypatch, proxy_env):
+    monkeypatch.setattr(base, "_socket_open", lambda h, p, timeout=0: False)
+    with pytest.raises(base.ProxyUnavailable) as exc:
+        base.polite_get("https://www.publicsurplus.com/sms/browse/search")
+    assert "not listening" in str(exc.value) and "NOT fetched direct" in str(exc.value)
+    assert proxy_env == []                                               # never went direct
+    assert isinstance(exc.value, base.requests.exceptions.ConnectionError)
+    base.polite_get("https://maestro.govdeals.com/search")               # unlisted host unaffected
+    assert len(proxy_env) == 1
+    # the reason reaches the breaker through SourceFetchFailed
+    err = base.SourceFetchFailed("discover() aborted", url="https://www.publicsurplus.com/x")
+    assert "not listening" in str(err)
+
+
+def test_proxy_hosts_without_url_is_a_config_error_not_a_direct_fetch(monkeypatch, proxy_env):
+    monkeypatch.delenv(base.PROXY_URL_ENV)
+    with pytest.raises(base.ProxyUnavailable, match="RECORDER_PROXY_URL is unset"):
+        base.polite_get("https://www.publicsurplus.com/sms/browse/search")
+    assert proxy_env == []
+
+
+def test_no_proxy_env_means_everything_direct(monkeypatch, proxy_env):
+    monkeypatch.delenv(base.PROXY_URL_ENV)
+    monkeypatch.delenv(base.PROXY_HOSTS_ENV)
+    base.polite_get("https://www.publicsurplus.com/sms/browse/search")
+    assert [p for _, p in proxy_env] == [None]
+
+
+def test_socket_probe_against_real_ports():
+    import socket
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    try:
+        assert base._socket_open("127.0.0.1", port, timeout=1)
+    finally:
+        srv.close()
+    assert not base._socket_open("127.0.0.1", port, timeout=1)
+
+
+def test_proxy_down_opens_public_surplus_breaker_with_readable_reason(monkeypatch, proxy_env, db_stubs):
+    monkeypatch.setattr(base, "_socket_open", lambda h, p, timeout=0: False)
+    reg = health.Registry({})
+    src = public_surplus.PublicSurplusSource()
+    with pytest.raises(base.SourceFetchFailed, match="not listening"):
+        src.discover()
+    assert proxy_env == []                      # host_down short-circuit: one probe, no direct fetch
+    cli.cmd_discover({"public_surplus": src}, health_reg=reg, now=NOW)
+    h = reg.get("public_surplus")
+    assert h.consecutive_failures == 1 and "not listening" in h.last_error

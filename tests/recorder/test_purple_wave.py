@@ -11,6 +11,7 @@ import pytest
 
 from recorder.models import Observation
 from recorder.sources import purple_wave as pw
+from recorder.sources.base import SourceFetchFailed
 
 FIXTURES = Path(__file__).parent / "fixtures" / "purple_wave"
 
@@ -249,22 +250,25 @@ def test_poll_empty_lots_makes_no_request(monkeypatch):
 
 # --- HTTP failure handling --------------------------------------------------------
 
-def test_discover_returns_empty_on_403_without_raising(monkeypatch):
+def test_discover_raises_fetch_failed_on_403(monkeypatch):
     monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse(None, status_code=403))
-    assert pw.PurpleWaveSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        pw.PurpleWaveSource().discover()
 
 
-def test_discover_returns_empty_on_non_list_payload(monkeypatch):
+def test_discover_raises_fetch_failed_on_non_list_payload(monkeypatch):
     monkeypatch.setattr(pw, "polite_get", lambda *a, **k: _FakeResponse({"unexpected": "shape"}))
-    assert pw.PurpleWaveSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        pw.PurpleWaveSource().discover()
 
 
-def test_discover_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+def test_discover_raises_fetch_failed_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
     def raise_connection_error(*a, **k):
         raise pw.requests.exceptions.ConnectionError("boom")
 
     monkeypatch.setattr(pw, "polite_get", raise_connection_error)
-    assert pw.PurpleWaveSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        pw.PurpleWaveSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
 
