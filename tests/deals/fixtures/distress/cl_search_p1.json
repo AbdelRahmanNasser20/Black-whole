@@ -1,0 +1,1112 @@
+{
+ "count": 32,
+ "next": "https://www.courtlistener.com/api/rest/v4/search/?cursor=cz0xMzQ2NjkwOTAwMDAwMC4wJnM9NzQ5MDUzNzUmdD1yJmQ9MjAyNi0xMC0wOSZwPTI%3D&filed_after=2026-09-25&order_by=dateFiled+desc&q=%28chapter%3A11+OR+chapter%3A7%29+AND+%28hotel+OR+resort+OR+lodging+OR+hospitality+OR+banquet+OR+catering+OR+%22event+venue%22+OR+%22party+rental%22+OR+church%29&type=r",
+ "previous": null,
+ "results": [
+  {
+   "assignedTo": "Elizabeth D. Katz",
+   "assigned_to_id": 8824,
+   "attorney": [
+    "Steffani M. Pelton",
+    "Eric K. Bradford",
+    "David B. Madoff"
+   ],
+   "attorney_id": [
+    16166560,
+    16165762,
+    16165765
+   ],
+   "caseName": "Southbridge Associates LLC",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, D. Massachusetts",
+   "court_citation_string": "Bankr. D. Mass.",
+   "court_id": "mab",
+   "dateArgued": null,
+   "dateFiled": "2026-10-06",
+   "dateTerminated": null,
+   "docketNumber": "26-41208",
+   "docket_absolute_url": "/docket/74927117/southbridge-associates-llc/",
+   "docket_id": 74927117,
+   "firm": [
+    "Madoff & Khoury LLP",
+    "Eric K. Bradford"
+   ],
+   "firm_id": [
+    113424,
+    1356825,
+    113370
+   ],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-07T13:44:51.904967Z",
+    "date_created": "2026-10-06T21:13:52.982874Z",
+    "score": {
+     "bm25": 13467341000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "527474",
+   "party": [
+    "Richard King",
+    "Southbridge Associates LLC"
+   ],
+   "party_id": [
+    23878888,
+    23878885
+   ],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74927117/1/southbridge-associates-llc/",
+     "attachment_number": null,
+     "description": "Chapter 11 Voluntary Petition Non-Individual with deficiencies. Includes Corporate Vote, Corporate Ownership Statement and Matrix. Filing Fee in the Amount of $1738 Filed by Southbridge Associates LLC. (Madoff, David) (Entered: 10/06/2026)",
+     "docket_entry_id": 480712986,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-06",
+     "entry_number": 1,
+     "filepath_local": "recap/gov.uscourts.mab.527474/gov.uscourts.mab.527474.1.0.pdf",
+     "id": 496426443,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-07T13:47:20.671786Z",
+      "date_created": "2026-10-06T21:34:35.903505Z"
+     },
+     "pacer_doc_id": "094036009836",
+     "page_count": 12,
+     "short_description": "Voluntary Petition (Chapter 11)",
+     "snippet": "Case 26-41208 Doci1 Filed 10/06/26 Entered 10/06/26 17:11:50 Desc Main\nDocument Page 1of12\n\nAM amaal Mi nicolenirh cola com Cevaleh im lit Mer tts\n\nUnited States Bankruptcy Court for the:\n\nDISTRICT OF MASSACHUSETTS\n\nCase number (if known) Chapter 11\n\nO Check if this is an\namended filing\n\nOfficial Fo"
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": "Klinette H. Kindred",
+   "assigned_to_id": 8987,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "Great Atlantic Grill, Inc",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, E.D. Virginia",
+   "court_citation_string": "Bankr. E.D. Va.",
+   "court_id": "vaeb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-06",
+   "dateTerminated": null,
+   "docketNumber": "26-12404",
+   "docket_absolute_url": "/docket/74923282/great-atlantic-grill-inc/",
+   "docket_id": 74923282,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-07T16:22:13.746488Z",
+    "date_created": "2026-10-06T14:21:49.570208Z",
+    "score": {
+     "bm25": 13467341000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "792849",
+   "party": [
+    "Great Atlantic Grill, Inc"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74923282/1/great-atlantic-grill-inc/",
+     "attachment_number": null,
+     "description": "Chapter 7 Voluntary Petition Individual filed by James Yim Victory of Hanmi Center for Justice on behalf of Great Atlantic Grill, Inc (Victory, James)",
+     "docket_entry_id": 480630285,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-06",
+     "entry_number": 1,
+     "filepath_local": "recap/gov.uscourts.vaeb.792849/gov.uscourts.vaeb.792849.1.0.pdf",
+     "id": 496342025,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-07T16:23:05.189717Z",
+      "date_created": "2026-10-06T14:33:06.278874Z"
+     },
+     "pacer_doc_id": "188044756759",
+     "page_count": 26,
+     "short_description": "Chapter 7 Voluntary Petition",
+     "snippet": "              Case 26-12404-KHK                  Doc 1      Filed 10/06/26 Entered 10/06/26 10:14:28                               Desc Main\n                                                            Document Page 1 of 26\n\nFill in this information to identify the case:\n\nUnited States Bankruptcy Cou"
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "King, Donald F."
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "Janam Taccoa Lodging LLC",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, N.D. Georgia",
+   "court_citation_string": "Bankr. N.D. Ga.",
+   "court_id": "ganb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-05",
+   "dateTerminated": null,
+   "docketNumber": "26-63515",
+   "docket_absolute_url": "/docket/74922099/janam-taccoa-lodging-llc/",
+   "docket_id": 74922099,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-06T03:30:07.952807Z",
+    "date_created": "2026-10-06T02:50:16.767279Z",
+    "score": {
+     "bm25": 13467255000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "1306777",
+   "party": [
+    "Janam Taccoa Lodging LLC"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74922099/2/janam-taccoa-lodging-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480650201,
+     "document_number": 2,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-06",
+     "entry_number": 2,
+     "filepath_local": null,
+     "id": 496362294,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-06T16:34:51.694156Z",
+      "date_created": "2026-10-06T16:33:04.288222Z"
+     },
+     "pacer_doc_id": "054091041915",
+     "page_count": null,
+     "short_description": "Notice of Appearance",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480593507,
+     "document_number": null,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": null,
+     "filepath_local": null,
+     "id": 496303179,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-06T03:30:07.942498Z",
+      "date_created": "2026-10-06T03:02:52.086225Z"
+     },
+     "pacer_doc_id": "",
+     "page_count": null,
+     "short_description": "Autodocket of Credit Card",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74922099/1/janam-taccoa-lodging-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480593631,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 1,
+     "filepath_local": null,
+     "id": 496303303,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-06T03:30:07.942498Z",
+      "date_created": "2026-10-06T03:03:07.935901Z"
+     },
+     "pacer_doc_id": "054091036297",
+     "page_count": null,
+     "short_description": "Initial Docs01: Voluntary Petition (Chapter 11)",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": "Scott H. Gan",
+   "assigned_to_id": 8679,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "BAM BAM BBQ, LLC",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, D. Arizona",
+   "court_citation_string": "Bankr. D. Ariz.",
+   "court_id": "arb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-05",
+   "dateTerminated": null,
+   "docketNumber": "4:26-bk-10148",
+   "docket_absolute_url": "/docket/74921876/bam-bam-bbq-llc/",
+   "docket_id": 74921876,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-06T00:33:39.199356Z",
+    "date_created": "2026-10-06T00:20:50.877472Z",
+    "score": {
+     "bm25": 13467255000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "845142",
+   "party": [
+    "BAM BAM BBQ, LLC"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74921876/6/bam-bam-bbq-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480971925,
+     "document_number": 6,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-08",
+     "entry_number": 6,
+     "filepath_local": null,
+     "id": 496692584,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-08T18:35:35.133257Z",
+      "date_created": "2026-10-08T18:35:34.011325Z"
+     },
+     "pacer_doc_id": "024057212530",
+     "page_count": null,
+     "short_description": "Lodging Proposed Order (Notice of)",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "KARTCHNER, STANLEY J"
+  },
+  {
+   "assignedTo": "Wendy A. Kinsella",
+   "assigned_to_id": 14474,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "Rising Hope Church",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, N.D. New York",
+   "court_citation_string": "Bankr. N.D.N.Y.",
+   "court_id": "nynb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-05",
+   "dateTerminated": null,
+   "docketNumber": "26-30920",
+   "docket_absolute_url": "/docket/74918746/rising-hope-church/",
+   "docket_id": 74918746,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-05T19:32:12.307175Z",
+    "date_created": "2026-10-05T18:42:30.730514Z",
+    "score": {
+     "bm25": 13467255000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "403674",
+   "party": [
+    "Rising Hope Church"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74918746/2/rising-hope-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480534158,
+     "document_number": 2,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 2,
+     "filepath_local": null,
+     "id": 496242401,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T19:32:12.257311Z",
+      "date_created": "2026-10-05T19:05:54.855829Z"
+     },
+     "pacer_doc_id": "124020227079",
+     "page_count": null,
+     "short_description": "Update Ch 11 Deficiency Deadlines",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74918746/1/rising-hope-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480534176,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 1,
+     "filepath_local": null,
+     "id": 496242419,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T19:32:12.257311Z",
+      "date_created": "2026-10-05T19:05:55.363050Z"
+     },
+     "pacer_doc_id": "124020227071",
+     "page_count": null,
+     "short_description": "Voluntary Petition (Chapter 11) for Attorney Use",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480572243,
+     "document_number": null,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": null,
+     "filepath_local": null,
+     "id": 496281412,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T22:01:52.313079Z",
+      "date_created": "2026-10-05T22:01:52.192955Z"
+     },
+     "pacer_doc_id": "",
+     "page_count": null,
+     "short_description": "Receipt Number and Filing Fee - Generic",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": "Maria L. Oxholm",
+   "assigned_to_id": 8840,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "Karen Renee Church",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, E.D. Michigan",
+   "court_citation_string": "Bankr. E.D. Mich.",
+   "court_id": "mieb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-05",
+   "dateTerminated": null,
+   "docketNumber": "26-50939",
+   "docket_absolute_url": "/docket/74915812/karen-renee-church/",
+   "docket_id": 74915812,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-05T15:33:45.505398Z",
+    "date_created": "2026-10-05T15:22:43.790449Z",
+    "score": {
+     "bm25": 13467255000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "1038850",
+   "party": [
+    "Karen Renee Church"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74915812/7/karen-renee-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480493349,
+     "document_number": 7,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 7,
+     "filepath_local": null,
+     "id": 496200622,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T15:33:33.733451Z",
+      "date_created": "2026-10-05T15:33:22.949530Z"
+     },
+     "pacer_doc_id": "096074733524",
+     "page_count": null,
+     "short_description": "Auto Assignment Meeting of Creditors 7",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74915812/6/karen-renee-church/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480493390,
+     "document_number": 6,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 6,
+     "filepath_local": null,
+     "id": 496200663,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T15:33:37.824282Z",
+      "date_created": "2026-10-05T15:33:30.627024Z"
+     },
+     "pacer_doc_id": "096074733390",
+     "page_count": null,
+     "short_description": "Statement of Intention for Individuals Filing Under Chapter 7",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480493391,
+     "document_number": null,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": null,
+     "filepath_local": null,
+     "id": 496200664,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T15:33:37.930126Z",
+      "date_created": "2026-10-05T15:33:30.751024Z"
+     },
+     "pacer_doc_id": "",
+     "page_count": null,
+     "short_description": "Statement About Your Social Security Numbers",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "Miller, Timothy J."
+  },
+  {
+   "assignedTo": "Christopher Lopez",
+   "assigned_to_id": 8975,
+   "attorney": [
+    "Omar Jesus Alaniz"
+   ],
+   "attorney_id": [
+    16155687
+   ],
+   "caseName": "True Food Kitchen Holdings, LLC <b><font color=\"red\">Jointly Administered under 26-90806.</font></b>",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, S.D. Texas",
+   "court_citation_string": "Bankr. S.D. Tex.",
+   "court_id": "txsb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-04",
+   "dateTerminated": null,
+   "docketNumber": "26-90808",
+   "docket_absolute_url": "/docket/74914777/true-food-kitchen-holdings-llc-bfont-colorredjointly-administered/",
+   "docket_id": 74914777,
+   "firm": [
+    "Reed Smith LLP",
+    "Office of United States Trustee",
+    "Office of the United States Trustee"
+   ],
+   "firm_id": [
+    632322,
+    630051,
+    603926
+   ],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-08T22:10:20.511838Z",
+    "date_created": "2026-10-05T04:53:07.256808Z",
+    "score": {
+     "bm25": 13467168000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "501409",
+   "party": [
+    "US Trustee",
+    "True Food Kitchen Holdings, LLC"
+   ],
+   "party_id": [
+    23860805,
+    23860358
+   ],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74914777/11/frc-balance-llc/",
+     "attachment_number": null,
+     "description": "Corporate Ownership Statement (Rule 7007.1) (Filed By FRC Balance, LLC ). (Attachments: # 1 Exhibit A - Organizational Chart) (Alaniz, Omar) (Entered: 10/05/2026)",
+     "docket_entry_id": 480473835,
+     "document_number": 11,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 11,
+     "filepath_local": "recap/gov.uscourts.txsb.501409/gov.uscourts.txsb.501409.11.0.pdf",
+     "id": 496180436,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-08T22:10:21.184749Z",
+      "date_created": "2026-10-05T13:31:29.704445Z"
+     },
+     "pacer_doc_id": "178055252698",
+     "page_count": 2,
+     "short_description": "",
+     "snippet": "          Case 26-90806 Document 11 Filed in TXSB on 10/05/26 Page 1 of 2\n\n\n\n\n                        IN THE UNITED STATES BANKRUPTCY COURT\n                          FOR THE SOUTHERN DISTRICT OF TEXAS\n                                   HOUSTON DIVISION\n\n                                              "
+    },
+    {
+     "absolute_url": "/docket/74914777/2/1/true-food-kitchen-holdings-llc/",
+     "attachment_number": 1,
+     "description": "Motion for Joint Administration Filed by Debtor True Food Kitchen Holdings, LLC (Attachments: # 1 Proposed Order) (Alaniz, Omar) (Entered: 10/05/2026)",
+     "docket_entry_id": 480473163,
+     "document_number": 2,
+     "document_type": "Attachment",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 2,
+     "filepath_local": "recap/gov.uscourts.txsb.501409/gov.uscourts.txsb.501409.2.1.pdf",
+     "id": 496179786,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-08T22:10:21.184749Z",
+      "date_created": "2026-10-05T13:25:28.044976Z"
+     },
+     "pacer_doc_id": "178055252635",
+     "page_count": 6,
+     "short_description": "Proposed Order",
+     "snippet": "        Case 26-90808 Document 2-1 Filed in TXSB on 10/05/26 Page 1 of 6\n\n\n\n\n                    IN THE UNITED STATES BANKRUPTCY COURT\n                      FOR THE SOUTHERN DISTRICT OF TEXAS\n                               HOUSTON DIVISION\n\n-------------------------------------------------------- \u00a7\n"
+    },
+    {
+     "absolute_url": "/docket/74914777/1/true-food-kitchen-holdings-llc/",
+     "attachment_number": null,
+     "description": "Chapter 11 Voluntary Petition Non-Individual Fee Amount $1738 Filed by True Food Kitchen Holdings, LLC. (Alaniz, Omar) (Entered: 10/04/2026)",
+     "docket_entry_id": 480473159,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-04",
+     "entry_number": 1,
+     "filepath_local": "recap/gov.uscourts.txsb.501409/gov.uscourts.txsb.501409.1.0_1.pdf",
+     "id": 496179703,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-08T22:10:21.184749Z",
+      "date_created": "2026-10-05T13:22:57.953042Z"
+     },
+     "pacer_doc_id": "178055251207",
+     "page_count": 8,
+     "short_description": "",
+     "snippet": "                           Case 26-90806 Document 1 Filed in TXSB on 10/04/26 Page 1 of 8\n\n\nFill in this information to identify the case:\n\n\nUnited States Bankruptcy Court for the:\n\nSOUTHERN DISTRICT OF TEXAS\n\nCase number (if known)                                                      Chapter      1"
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": "Christopher Lopez",
+   "assigned_to_id": 8975,
+   "attorney": [
+    "Omar Jesus Alaniz",
+    "Jayson B. Ruff",
+    "Jana Smith Whitworth"
+   ],
+   "attorney_id": [
+    16162440,
+    16162441,
+    16162442
+   ],
+   "caseName": "FRC Balance, LLC",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, S.D. Texas",
+   "court_citation_string": "Bankr. S.D. Tex.",
+   "court_id": "txsb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-04",
+   "dateTerminated": null,
+   "docketNumber": "26-90806",
+   "docket_absolute_url": "/docket/74914772/frc-balance-llc/",
+   "docket_id": 74914772,
+   "firm": [
+    "Reed Smith LLP",
+    "Office of United States Trustee",
+    "Office of the United States Trustee"
+   ],
+   "firm_id": [
+    632322,
+    630051,
+    603926
+   ],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-06T17:19:54.888927Z",
+    "date_created": "2026-10-05T04:33:23.169717Z",
+    "score": {
+     "bm25": 13467168000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "501407",
+   "party": [
+    "US Trustee",
+    "FRC Balance, LLC"
+   ],
+   "party_id": [
+    23872345,
+    23872346
+   ],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74914772/2/1/frc-balance-llc/",
+     "attachment_number": 1,
+     "description": "Motion for Joint Administration Filed by Debtor FRC Balance, LLC (Attachments: # 1 Proposed Order) (Alaniz, Omar) (Entered: 10/05/2026)",
+     "docket_entry_id": 480658979,
+     "document_number": 2,
+     "document_type": "Attachment",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 2,
+     "filepath_local": "recap/gov.uscourts.txsb.501407/gov.uscourts.txsb.501407.2.1.pdf",
+     "id": 496384874,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-06T18:24:42.411737Z",
+      "date_created": "2026-10-06T18:24:42.014553Z"
+     },
+     "pacer_doc_id": "178055252611",
+     "page_count": 6,
+     "short_description": "",
+     "snippet": "        Case 26-90806 Document 2-1 Filed in TXSB on 10/05/26 Page 1 of 6\n\n\n\n\n                    IN THE UNITED STATES BANKRUPTCY COURT\n                      FOR THE SOUTHERN DISTRICT OF TEXAS\n                               HOUSTON DIVISION\n\n-------------------------------------------------------- \u00a7\n"
+    },
+    {
+     "absolute_url": "/docket/74914772/1/frc-balance-llc/",
+     "attachment_number": null,
+     "description": "Chapter 11 Voluntary Petition Non-Individual Fee Amount $1738 Filed by FRC Balance, LLC. (Alaniz, Omar) (Entered: 10/04/2026)",
+     "docket_entry_id": 480658977,
+     "document_number": 1,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-04",
+     "entry_number": 1,
+     "filepath_local": "recap/gov.uscourts.txsb.501407/gov.uscourts.txsb.501407.1.0_1.pdf",
+     "id": 496371187,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-06T17:24:36.067552Z",
+      "date_created": "2026-10-06T17:19:56.970476Z"
+     },
+     "pacer_doc_id": "178055251201",
+     "page_count": 8,
+     "short_description": "",
+     "snippet": "                           Case 26-90806 Document 1 Filed in TXSB on 10/04/26 Page 1 of 8\n\n\nFill in this information to identify the case:\n\n\nUnited States Bankruptcy Court for the:\n\nSOUTHERN DISTRICT OF TEXAS\n\nCase number (if known)                                                      Chapter      1"
+    },
+    {
+     "absolute_url": "/docket/74914772/4/frc-balance-llc/",
+     "attachment_number": null,
+     "description": "Emergency Motion for Entry of an Order (I) Authorizing the Debtors to (A) File a Consolidated List of Creditors, (B) File a Consolidated List of the 30 Largest Unsecured Creditors, and (C) Redact Certain Personal Identification Information; (II) Approving the Form and Manner of Notifying Creditors of the Commencement of these Chapter 11 Cases; and (III) Granting Related Relief Filed by Debtor FRC Balance, LLC (Attachments: # 1 Proposed Order) (Alaniz, Omar) (Entered: 10/05/2026)",
+     "docket_entry_id": 480658981,
+     "document_number": 4,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 4,
+     "filepath_local": "recap/gov.uscourts.txsb.501407/gov.uscourts.txsb.501407.4.0.pdf",
+     "id": 496371191,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-06T18:29:00.422633Z",
+      "date_created": "2026-10-06T17:19:57.294553Z"
+     },
+     "pacer_doc_id": "178055252656",
+     "page_count": 10,
+     "short_description": "",
+     "snippet": "          Case 26-90806 Document 4 Filed in TXSB on 10/05/26 Page 1 of 10\n\n\n\n\n                        IN THE UNITED STATES BANKRUPTCY COURT\n                          FOR THE SOUTHERN DISTRICT OF TEXAS\n                                   HOUSTON DIVISION\n\n                                              "
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "True Food Hospitality, LLC <b><font color=\"red\">Jointly Administered under 26-90806.</font></b>",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, S.D. Texas",
+   "court_citation_string": "Bankr. S.D. Tex.",
+   "court_id": "txsb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-04",
+   "dateTerminated": null,
+   "docketNumber": "26-90805",
+   "docket_absolute_url": "/docket/74914771/true-food-hospitality-llc-bfont-colorredjointly-administered-under/",
+   "docket_id": 74914771,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-08T22:10:22.996395Z",
+    "date_created": "2026-10-05T04:23:31.158448Z",
+    "score": {
+     "bm25": 13467168000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "501406",
+   "party": [
+    "True Food Hospitality, LLC"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74914771/4/true-food-hospitality-llc-bfont-colorredjointly-administered-under/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 481015667,
+     "document_number": 4,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-07",
+     "entry_number": 4,
+     "filepath_local": null,
+     "id": 496737036,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-08T22:10:23.032825Z",
+      "date_created": "2026-10-08T22:10:22.892402Z"
+     },
+     "pacer_doc_id": "178055276836",
+     "page_count": null,
+     "short_description": "BNC Certificate of Mailing",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "American Hospitality Properties REIT II, Inc.",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, N.D. Texas",
+   "court_citation_string": "Bankr. N.D. Tex.",
+   "court_id": "txnb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-04",
+   "dateTerminated": null,
+   "docketNumber": "26-80072",
+   "docket_absolute_url": "/docket/74914157/american-hospitality-properties-reit-ii-inc/",
+   "docket_id": 74914157,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-05T14:40:23.579101Z",
+    "date_created": "2026-10-04T06:01:43.020017Z",
+    "score": {
+     "bm25": 13467168000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "548119",
+   "party": [
+    "American Hospitality Properties REIT II, Inc."
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480483866,
+     "document_number": null,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-04",
+     "entry_number": null,
+     "filepath_local": null,
+     "id": 496190892,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T14:40:23.727113Z",
+      "date_created": "2026-10-05T14:40:23.665387Z"
+     },
+     "pacer_doc_id": "",
+     "page_count": null,
+     "short_description": "Credit Card Receipt",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480429012,
+     "document_number": null,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-04",
+     "entry_number": null,
+     "filepath_local": null,
+     "id": 496132341,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T14:40:23.521888Z",
+      "date_created": "2026-10-04T10:00:09.556325Z"
+     },
+     "pacer_doc_id": "",
+     "page_count": null,
+     "short_description": "none",
+     "snippet": ""
+    },
+    {
+     "absolute_url": "/docket/74914157/3/american-hospitality-properties-reit-ii-inc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480574064,
+     "document_number": 3,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 3,
+     "filepath_local": null,
+     "id": 496283284,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-06T13:35:23.072634Z",
+      "date_created": "2026-10-05T22:13:06.463395Z"
+     },
+     "pacer_doc_id": "176052912377",
+     "page_count": null,
+     "short_description": "Meeting of creditors chapter 11",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "American Hospitality Properties REIT, Inc.",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "11",
+   "court": "United States Bankruptcy Court, N.D. Texas",
+   "court_citation_string": "Bankr. N.D. Tex.",
+   "court_id": "txnb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-04",
+   "dateTerminated": null,
+   "docketNumber": "26-80071",
+   "docket_absolute_url": "/docket/74914151/american-hospitality-properties-reit-inc/",
+   "docket_id": 74914151,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-05T21:02:26.312984Z",
+    "date_created": "2026-10-04T05:30:35.998676Z",
+    "score": {
+     "bm25": 13467168000000.0
+    },
+    "more_docs": true
+   },
+   "pacer_case_id": "548118",
+   "party": [
+    "American Hospitality Properties REIT, Inc."
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74914151/6/american-hospitality-properties-reit-inc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480429387,
+     "document_number": 6,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-04",
+     "entry_number": 6,
+     "filepath_local": "recap/gov.uscourts.txnb.548118/gov.uscourts.txnb.548118.6.0.pdf",
+     "id": 496132725,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-05T21:06:37.386271Z",
+      "date_created": "2026-10-04T12:04:41.324020Z"
+     },
+     "pacer_doc_id": "176052903516",
+     "page_count": 31,
+     "short_description": "Declaration",
+     "snippet": "Case 26-80071-sgj11              Doc 6     Filed 10/04/26 Entered 10/04/26 06:32:27                       Desc Main\n                                          Document      Page 1 of 31\n\n\n    Bradley R. Foxman (Texas Bar No. 24065243)                   George R. Howard (pro hac vice pending)\n    Will"
+    },
+    {
+     "absolute_url": "/docket/74914151/20/american-hospitality-properties-reit-inc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480584617,
+     "document_number": 20,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 20,
+     "filepath_local": "recap/gov.uscourts.txnb.548118/gov.uscourts.txnb.548118.20.0.pdf",
+     "id": 496294105,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-06T15:37:55.864499Z",
+      "date_created": "2026-10-05T23:35:06.060502Z"
+     },
+     "pacer_doc_id": "176052910890",
+     "page_count": 31,
+     "short_description": "Declaration",
+     "snippet": "Case 26-80071-sgj11              Doc 20     Filed 10/05/26 Entered 10/05/26 18:15:31                        Desc Main\n                                           Document     Page 1 of 31\n\n\n     Bradley R. Foxman (Texas Bar No. 24065243)                   George R. Howard (admitted pro hac vice)\n    "
+    },
+    {
+     "absolute_url": "/docket/74914151/19/american-hospitality-properties-reit-inc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480568819,
+     "document_number": 19,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 19,
+     "filepath_local": "recap/gov.uscourts.txnb.548118/gov.uscourts.txnb.548118.19.0.pdf",
+     "id": 496277907,
+     "is_available": true,
+     "meta": {
+      "timestamp": "2026-10-05T22:14:41.411875Z",
+      "date_created": "2026-10-05T21:33:52.291944Z"
+     },
+     "pacer_doc_id": "176052909944",
+     "page_count": 1,
+     "short_description": "Order on motion to appear pro hac vice",
+     "snippet": "          Case 26-80071-sgj11        Doc 19      Filed 10/05/26      Entered 10/05/26 16:24:54           Desc\n                                                    Page 1 of 1\n\n\n\n\n The following constitutes the ruling of the court and has the force and effect therein described.\n\n\n\n\nSigned October 5, 2"
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": ""
+  },
+  {
+   "assignedTo": null,
+   "assigned_to_id": null,
+   "attorney": [],
+   "attorney_id": [],
+   "caseName": "Red Mountain Commercial LLC",
+   "case_name_full": "",
+   "cause": "",
+   "chapter": "7",
+   "court": "United States Bankruptcy Court, D. Arizona",
+   "court_citation_string": "Bankr. D. Ariz.",
+   "court_id": "arb",
+   "dateArgued": null,
+   "dateFiled": "2026-10-02",
+   "dateTerminated": null,
+   "docketNumber": "2:26-bk-10085",
+   "docket_absolute_url": "/docket/74912598/red-mountain-commercial-llc/",
+   "docket_id": 74912598,
+   "firm": [],
+   "firm_id": [],
+   "jurisdictionType": "",
+   "juryDemand": "",
+   "meta": {
+    "timestamp": "2026-10-03T18:00:57.652362Z",
+    "date_created": "2026-10-02T21:33:03.672961Z",
+    "score": {
+     "bm25": 13466995000000.0
+    },
+    "more_docs": false
+   },
+   "pacer_case_id": "845075",
+   "party": [
+    "Red Mountain Commercial LLC"
+   ],
+   "party_id": [],
+   "recap_documents": [
+    {
+     "absolute_url": "/docket/74912598/4/red-mountain-commercial-llc/",
+     "attachment_number": null,
+     "description": "",
+     "docket_entry_id": 480507507,
+     "document_number": 4,
+     "document_type": "PACER Document",
+     "entry_date_filed": "2026-10-05",
+     "entry_number": 4,
+     "filepath_local": null,
+     "id": 496215059,
+     "is_available": false,
+     "meta": {
+      "timestamp": "2026-10-05T17:04:14.889811Z",
+      "date_created": "2026-10-05T17:04:14.537123Z"
+     },
+     "pacer_doc_id": "024057194236",
+     "page_count": null,
+     "short_description": "Lodging Proposed Order (Notice of)",
+     "snippet": ""
+    }
+   ],
+   "referredTo": null,
+   "referred_to_id": null,
+   "suitNature": "",
+   "trustee_str": "BIRDSELL, DAVID A."
+  }
+ ]
+}

@@ -1,12 +1,16 @@
-{#- templates/platform_bankruptcies.html — GET /platform/bankruptcies: the bankruptcy-leads demo.
-    SAMPLE DATA ONLY: static/site/platform/bankruptcies.sample.json, invented, fetched by the browser
-    (static/site/platform/bankruptcies.js). Nothing here is a court record and no court is connected.
-    Search + filters (state, chapter, industry, filed-within, assets) + sort run in memory.
+{#- templates/platform_bankruptcies.html — GET /platform/bankruptcies: THE bankruptcy / closure leads page.
+    Data: the browser reads /distress/api/cases + /distress/api/facets (public_distress.py: public columns
+    only — no trustee / attorney / party contacts). Rows come from `deals.cli distress-sync`
+    (CourtListener bankruptcy dockets + state WARN notices) into `distress_cases` (migration 024).
+    Fallback: if the API errors (503 = migration 024 not applied) or the table is empty, the page loads the
+    invented static/site/platform/bankruptcies.sample.json and shows the "Sample data, invented" badge +
+    banner, so it never looks broken. Leads = every case; Sales = cases whose docket carries a sale notice.
+    Search + filters + sort run in memory on the loaded rows (static/site/platform/bankruptcies.js).
     "Ask AI" is UI only: it never leaves the page and always answers a coming-soon state.
     Direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex. Handler reads nothing. -#}
 {% extends "_public_base.html" %}
-{% block title %}Bankruptcy leads, sample | Black Whole{% endblock %}
-{% block meta_description %}A sample of the bankruptcy-leads table: search, filters and a detail view on invented filings. Demo, no signup.{% endblock %}
+{% block title %}Bankruptcy leads | Black Whole{% endblock %}
+{% block meta_description %}New bankruptcy filings and plant-closure notices, filtered by state, chapter and industry. Public dockets only, no signup.{% endblock %}
 {% block body_class %}page-pt page-bk{% endblock %}
 {% block head_extra %}
   <meta name="robots" content="noindex,nofollow">
@@ -21,14 +25,15 @@
   <div>
     <div class="pt-title-row">
       <h1 class="pt-title">Bankruptcy leads</h1>
-      <span class="pt-chip pt-chip--sample">Sample data, invented</span>
+      <span class="pt-chip pt-chip--soon" id="bk-mode">Loading</span>
     </div>
-    <p class="pt-lede">New Chapter 7 and 11 filings with the industry, the court and the first estimate of assets, filtered to what you buy. This page shows the shape of it on made-up filings.</p>
+    <p class="pt-lede">New Chapter 7 and 11 filings and WARN closure notices with the industry, the court and the place, filtered to what you buy. Sales shows the cases whose docket already carries a sale or auction notice.</p>
   </div>
   <span class="pt-count" id="bk-count" aria-live="polite"></span>
 </header>
 
-<p class="pt-banner"><strong>Not a court record.</strong> Every debtor, case number, court and amount on this page is invented for the demo. No court feed is connected yet.</p>
+<p class="pt-banner" id="bk-banner-sample" hidden><strong>Sample data, invented. Not a court record.</strong> The live court feed did not answer, so this page shows made-up filings to show its shape. Every debtor, case number, court and amount below is invented.</p>
+<p class="pt-banner" id="bk-banner-live" hidden><strong>Public records.</strong> Bankruptcy dockets from CourtListener and state WARN closure notices. Trustee, attorney and party contacts are not shown on this page.</p>
 
 <section class="bk-ask" aria-labelledby="bk-ask-title">
   <div class="bk-ask-head">
@@ -49,6 +54,10 @@
 </section>
 
 <form class="pt-toolbar" id="bk-form" autocomplete="off">
+  <div class="pt-seg" role="group" aria-label="Leads or sales" id="bk-tab">
+    <button class="pt-seg-btn is-active" type="button" data-tab="leads" aria-pressed="true">Leads</button>
+    <button class="pt-seg-btn" type="button" data-tab="sales" aria-pressed="false">Sales</button>
+  </div>
   <input type="search" id="bk-q" placeholder="Search debtor, asset or city" aria-label="Search filings">
   <select id="bk-state" aria-label="State"><option value="">Any state</option></select>
   <select id="bk-chapter" aria-label="Chapter"><option value="">Any chapter</option></select>
@@ -86,12 +95,12 @@
         <th scope="col">Industry</th>
         <th scope="col">Where</th>
         <th scope="col"><button class="pt-sort is-sorted" data-dir="desc" type="button" data-sort="filed">Filed</button></th>
-        <th scope="col" class="num"><button class="pt-sort" type="button" data-sort="est_assets">Est. assets</button></th>
+        <th scope="col" class="num" id="bk-col-assets"><button class="pt-sort" type="button" data-sort="est_assets">Est. assets</button></th>
         <th scope="col">Signal</th>
       </tr>
     </thead>
     <tbody id="bk-rows">
-      <tr class="pt-row-msg"><td colspan="7">Loading sample filings…</td></tr>
+      <tr class="pt-row-msg"><td colspan="7">Loading filings…</td></tr>
     </tbody>
   </table>
 </section>
@@ -99,7 +108,7 @@
 <div class="pt-scrim" id="bk-scrim" hidden></div>
 <aside class="pt-drawer" id="bk-drawer" hidden role="dialog" aria-modal="false" aria-labelledby="bk-drawer-title" tabindex="-1">
   <div class="pt-drawer-top">
-    <span class="pt-chip pt-chip--sample">Sample filing, invented</span>
+    <span class="pt-chip pt-chip--sample" id="bk-drawer-chip">Sample filing, invented</span>
     <button type="button" class="pt-drawer-close" id="bk-drawer-close">Close</button>
   </div>
   <div id="bk-drawer-body"></div>

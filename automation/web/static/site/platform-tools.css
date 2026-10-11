@@ -314,3 +314,6 @@
 }
 
 .pt-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* /platform/bankruptcies toggles live vs sample pieces with [hidden]; chips/banners set display */
+.page-bk [hidden] { display: none !important; }
