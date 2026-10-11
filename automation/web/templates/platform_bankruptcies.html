@@ -1,0 +1,111 @@
+{#- templates/platform_bankruptcies.html — GET /platform/bankruptcies: the bankruptcy-leads demo.
+    SAMPLE DATA ONLY: static/site/platform/bankruptcies.sample.json, invented, fetched by the browser
+    (static/site/platform/bankruptcies.js). Nothing here is a court record and no court is connected.
+    Search + filters (state, chapter, industry, filed-within, assets) + sort run in memory.
+    "Ask AI" is UI only: it never leaves the page and always answers a coming-soon state.
+    Direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex. Handler reads nothing. -#}
+{% extends "_public_base.html" %}
+{% block title %}Bankruptcy leads, sample | Black Whole{% endblock %}
+{% block meta_description %}A sample of the bankruptcy-leads table: search, filters and a detail view on invented filings. Demo, no signup.{% endblock %}
+{% block body_class %}page-pt page-bk{% endblock %}
+{% block head_extra %}
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="stylesheet" href="/static/site/platform-tools.css?v={{ now }}">
+{% endblock %}
+
+{% block content %}
+{% set current = "bankruptcies" %}
+{% include "_platform_nav.html" %}
+
+<header class="pt-head">
+  <div>
+    <div class="pt-title-row">
+      <h1 class="pt-title">Bankruptcy leads</h1>
+      <span class="pt-chip pt-chip--sample">Sample data, invented</span>
+    </div>
+    <p class="pt-lede">New Chapter 7 and 11 filings with the industry, the court and the first estimate of assets, filtered to what you buy. This page shows the shape of it on made-up filings.</p>
+  </div>
+  <span class="pt-count" id="bk-count" aria-live="polite"></span>
+</header>
+
+<p class="pt-banner"><strong>Not a court record.</strong> Every debtor, case number, court and amount on this page is invented for the demo. No court feed is connected yet.</p>
+
+<section class="bk-ask" aria-labelledby="bk-ask-title">
+  <div class="bk-ask-head">
+    <h2 id="bk-ask-title">Ask in plain English</h2>
+    <span class="pt-chip pt-chip--soon">Coming soon</span>
+  </div>
+  <form class="bk-ask-form" id="bk-ask-form" autocomplete="off">
+    <label class="pt-sr" for="bk-ask-q">Your question</label>
+    <input type="text" id="bk-ask-q" name="q" placeholder="Hotels in Georgia that filed this month with ballroom furniture" maxlength="300">
+    <button type="submit" class="btn btn-primary btn-small">ASK</button>
+  </form>
+  <div class="bk-ask-examples" aria-label="Example questions">
+    <button type="button" class="bk-ask-example">Venues with 500+ chairs in the Southeast</button>
+    <button type="button" class="bk-ask-example">Chapter 7 restaurants filed in the last 30 days</button>
+    <button type="button" class="bk-ask-example">Medical equipment over $1M in assets</button>
+  </div>
+  <div class="bk-ask-result" id="bk-ask-result" hidden aria-live="polite"></div>
+</section>
+
+<form class="pt-toolbar" id="bk-form" autocomplete="off">
+  <input type="search" id="bk-q" placeholder="Search debtor, asset or city" aria-label="Search filings">
+  <select id="bk-state" aria-label="State"><option value="">Any state</option></select>
+  <select id="bk-chapter" aria-label="Chapter"><option value="">Any chapter</option></select>
+  <select id="bk-industry" aria-label="Industry"><option value="">Any industry</option></select>
+  <select id="bk-filed" aria-label="Filed within">
+    <option value="">Filed any time</option>
+    <option value="7">Last 7 days</option>
+    <option value="30">Last 30 days</option>
+    <option value="90">Last 90 days</option>
+    <option value="365">Last year</option>
+  </select>
+  <select id="bk-assets" aria-label="Estimated assets">
+    <option value="">Any assets</option>
+    <option value="0-250000">Under $250k</option>
+    <option value="250000-1000000">$250k to $1M</option>
+    <option value="1000000-5000000">$1M to $5M</option>
+    <option value="5000000-">Over $5M</option>
+  </select>
+  <select id="bk-sort" aria-label="Sort">
+    <option value="filed:desc">Newest filing</option>
+    <option value="filed:asc">Oldest filing</option>
+    <option value="est_assets:desc">Assets, high to low</option>
+    <option value="est_assets:asc">Assets, low to high</option>
+    <option value="debtor:asc">Debtor, A to Z</option>
+  </select>
+  <button type="button" class="pt-reset" id="bk-reset">Clear filters</button>
+</form>
+
+<section class="pt-feed" id="bk-feed" aria-label="Filings">
+  <table class="pt-table" id="bk-table">
+    <thead>
+      <tr>
+        <th scope="col"><button class="pt-sort" type="button" data-sort="debtor">Debtor</button></th>
+        <th scope="col">Chapter</th>
+        <th scope="col">Industry</th>
+        <th scope="col">Where</th>
+        <th scope="col"><button class="pt-sort is-sorted" data-dir="desc" type="button" data-sort="filed">Filed</button></th>
+        <th scope="col" class="num"><button class="pt-sort" type="button" data-sort="est_assets">Est. assets</button></th>
+        <th scope="col">Signal</th>
+      </tr>
+    </thead>
+    <tbody id="bk-rows">
+      <tr class="pt-row-msg"><td colspan="7">Loading sample filings…</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<div class="pt-scrim" id="bk-scrim" hidden></div>
+<aside class="pt-drawer" id="bk-drawer" hidden role="dialog" aria-modal="false" aria-labelledby="bk-drawer-title" tabindex="-1">
+  <div class="pt-drawer-top">
+    <span class="pt-chip pt-chip--sample">Sample filing, invented</span>
+    <button type="button" class="pt-drawer-close" id="bk-drawer-close">Close</button>
+  </div>
+  <div id="bk-drawer-body"></div>
+</aside>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/platform/bankruptcies.js?v={{ now }}"></script>
+{% endblock %}

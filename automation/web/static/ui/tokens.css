@@ -1,8 +1,10 @@
 /* static/ui/tokens.css — the one place a colour, font, or size is spelled out.
    Values copied verbatim from app.css:6-28 (admin "industrial terminal" palette), names normalised.
    Hard-coded hex anywhere else under static/ui, static/deals, static/admin, static/site is a review reject
-   (tests/web/test_ui_primitives.py::test_no_hardcoded_hex_outside_tokens). */
-:root {
+   (tests/web/test_ui_primitives.py::test_no_hardcoded_hex_outside_tokens).
+   `[data-theme="dark"]` re-declares the same palette on an element, so a dark island (the /platform demo
+   console) can sit inside the light storefront without spelling a hex anywhere else. */
+:root, [data-theme="dark"] {
   --bg: #0c0c0e;  --surface: #131316;  --surface-2: #1a1a1f;
   --border: #25252c;  --border-strong: #3a3a44;
   --text: #ece8dd;  --muted: #9e988a;  --dim: #5a5650;
