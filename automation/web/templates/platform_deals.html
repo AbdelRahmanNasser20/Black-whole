@@ -1,0 +1,103 @@
+{#- templates/platform_deals.html — GET /platform/deals: one deal feed across every auction site.
+    REAL data via the existing public GET /platform/api/auctions (read model + public_deals policy in
+    automation/web/platform_api.py: no seating lots, nothing the operator starred/tracked, no seller contact,
+    NO PHOTOS — the contract has no image field, so none can render here). Each site's true status comes from
+    GET /platform/api/sites; sites with no adapter (Public Surplus, HiBid, …) are named server-side and
+    labelled "Planned" — never shown as scraped. The handler reads nothing from the database.
+    Direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex. -#}
+{% extends "_public_base.html" %}
+{% block title %}Deal feed, every auction site | Black Whole{% endblock %}
+{% block meta_description %}Surplus auctions from every tracked site in one feed: search, filter by site, category, state and bids. Read-only, no signup.{% endblock %}
+{% block body_class %}page-pt page-pd{% endblock %}
+{% block head_extra %}
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="stylesheet" href="/static/site/platform-tools.css?v={{ now }}">
+{% endblock %}
+
+{% block content %}
+{% set current = "deals" %}
+{% include "_platform_nav.html" %}
+
+<header class="pt-head">
+  <div>
+    <div class="pt-title-row">
+      <h1 class="pt-title">Deal feed</h1>
+      <span class="pt-chip pt-chip--live" id="pd-tag" hidden>Live data</span>
+    </div>
+    <p class="pt-lede">Open auctions from every site the recorder watches, in one list. No photos here on purpose: the lot's own page has them.</p>
+  </div>
+  <span class="pt-count" id="pd-count" aria-live="polite"></span>
+</header>
+
+{# every site in scope, server-rendered; deals.js adds the true status (live / paused / planned) and a count #}
+<ul class="pd-sources" id="pd-sources" aria-label="Auction sites">
+  {% for s in sites %}
+  <li>
+    <button type="button" class="pd-source" data-site="{{ s.key }}" data-planned="{{ 1 if s.planned else 0 }}"
+            aria-pressed="false"{% if s.planned %} disabled title="No adapter yet: nothing from this site is in the feed"{% endif %}>
+      <span>{{ s.name }}</span>
+      {% if s.planned %}<span class="pt-chip pt-chip--planned">Planned</span>{% else %}<span class="pt-chip" data-status></span><span class="pd-source-n"></span>{% endif %}
+    </button>
+  </li>
+  {% endfor %}
+</ul>
+<p class="pd-truth" id="pd-truth" data-mode="">Reading the feed…</p>
+
+<form class="pt-toolbar" id="pd-form" autocomplete="off">
+  <input type="search" id="pd-q" placeholder="Search auction titles" aria-label="Search auctions">
+  <div class="pt-seg" role="group" aria-label="Auction status" id="pd-status">
+    <button class="pt-seg-btn is-active" type="button" data-status="open" aria-pressed="true">Open</button>
+    <button class="pt-seg-btn" type="button" data-status="closed" aria-pressed="false">Closed</button>
+  </div>
+  <select id="pd-site" aria-label="Site"><option value="">Any site</option></select>
+  <select id="pd-category" aria-label="Category"><option value="">Any category</option></select>
+  <select id="pd-state" aria-label="State"><option value="">Any state</option></select>
+  <select id="pd-ending" aria-label="Ending">
+    <option value="">Ending any time</option>
+    <option value="24h">Ending in 24 h</option>
+    <option value="7d">Ending in 7 days</option>
+  </select>
+  <label><input type="checkbox" id="pd-nobids"> No bids</label>
+  <label>Max bid $ <input type="number" id="pd-maxbid" min="0" step="50" inputmode="numeric" style="width:84px"></label>
+  <select id="pd-sort" aria-label="Sort">
+    <option value="ending">Ending soonest</option>
+    <option value="bid_low">Lowest bid</option>
+    <option value="bids">Most bids</option>
+    <option value="newest">Newest</option>
+  </select>
+  <button type="button" class="pt-reset" id="pd-reset">Clear filters</button>
+</form>
+
+<section class="pt-feed" id="pd-feed" aria-label="Auctions">
+  <table class="pt-table" id="pd-table">
+    <thead>
+      <tr>
+        <th scope="col">Lot</th>
+        <th scope="col">Site</th>
+        <th scope="col">Category</th>
+        <th scope="col">Where</th>
+        <th scope="col" class="num">Current bid</th>
+        <th scope="col" class="num">Bids</th>
+        <th scope="col">Ends</th>
+      </tr>
+    </thead>
+    <tbody id="pd-rows">
+      <tr class="pt-row-msg"><td colspan="7">Loading auctions…</td></tr>
+    </tbody>
+  </table>
+  <button class="btn btn-ghost btn-small pt-more" type="button" id="pd-more" hidden>SHOW MORE</button>
+</section>
+
+<div class="pt-scrim" id="pd-scrim" hidden></div>
+<aside class="pt-drawer" id="pd-drawer" hidden role="dialog" aria-modal="false" aria-labelledby="pd-drawer-title" tabindex="-1">
+  <div class="pt-drawer-top">
+    <span class="pt-chip" id="pd-drawer-tag"></span>
+    <button type="button" class="pt-drawer-close" id="pd-drawer-close">Close</button>
+  </div>
+  <div id="pd-drawer-body"></div>
+</aside>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/platform/deals.js?v={{ now }}"></script>
+{% endblock %}

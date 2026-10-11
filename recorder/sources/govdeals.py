@@ -215,7 +215,7 @@ from deals.models import Lot, Snapshot, lot_key
 from deals.tracking import CLOSE_GRACE, LIVE_STATUS
 
 from recorder.models import Observation
-from recorder.sources.base import FURNITURE_TERMS
+from recorder.sources.base import FURNITURE_TERMS, SourceFetchFailed
 
 SOURCE = "govdeals"
 ALLSURPLUS_SOURCE = "allsurplus"
@@ -774,7 +774,7 @@ class GovDealsSource:
         by_key = {lot_key(l.asset_id, l.account_id, l.auction_id): l for l in lots}
         if not ok and not by_key:
             print("[govdeals] RECORDER ERROR: discover() aborted — whole-site sweep failed, 0 observations")
-            return []
+            raise SourceFetchFailed("discover() aborted — whole-site sweep failed")
         if not by_key:
             print("[govdeals] WARNING: discover() found 0 lots in the whole-site sweep — "
                   "check the maestro search for drift")
@@ -818,7 +818,7 @@ class GovDealsSource:
 
         if not any_ok and not by_key:
             print("[govdeals] RECORDER ERROR: discover() aborted — every sweep failed, 0 observations")
-            return []
+            raise SourceFetchFailed("discover() aborted — every furniture sweep failed")
         result = [_lot_to_observation(lot) for lot in by_key.values()]
         if not result:
             print(

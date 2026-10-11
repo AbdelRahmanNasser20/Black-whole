@@ -20,12 +20,15 @@ Knobs: RECORDER_BREAKER_FAILURES (3), RECORDER_BREAKER_BASE_MIN (10),
 RECORDER_BREAKER_MAX_H (24).
 
 What counts (decided by the CLI, recorded here):
-- failed attempt: discover raised or came back with 0 observations (every
-  adapter "aborts" by printing a RECORDER ERROR and returning []); a poll
-  batch that raised, was aborted by its PollBudget, or had ≥ 80 % of its lots
-  fail (≥ 3 lots — the BLOCK_SUSPECT thresholds public_surplus uses).
-- success: discover returned observations; a poll batch that inserted ≥ 1
-  row or had no failed lot.
+- failed attempt: discover raised — `SourceFetchFailed` when the adapter
+  could not fetch its source (network, 403/429, proxy down, page-shape
+  drift), or any other exception; a poll batch that raised, was aborted by
+  its PollBudget, or had ≥ 80 % of its lots fail (≥ 3 lots — the
+  BLOCK_SUSPECT thresholds public_surplus uses).
+- success: discover returned (observations OR a clean `[]` — a fetch that
+  worked and matched 0 lots is a quiet day, not an outage; mibid's furniture
+  filter is empty most days); a poll batch that inserted ≥ 1 row or had no
+  failed lot.
 - anything in between (a few lots failed, nothing new) changes nothing.
 """
 from __future__ import annotations

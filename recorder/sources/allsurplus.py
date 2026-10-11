@@ -25,6 +25,7 @@ from __future__ import annotations
 
 from recorder.models import Observation
 from recorder.sources import govdeals as gd
+from recorder.sources.base import SourceFetchFailed
 
 SOURCE = gd.ALLSURPLUS_SOURCE
 MAX_PAGES_DEFAULT = 40
@@ -51,7 +52,7 @@ class AllSurplusSource(gd.GovDealsSource):
             obs[o.source_lot_id] = o
         if not ok and not obs:
             print("[allsurplus] RECORDER ERROR: discover() aborted — sweep failed, 0 observations")
-            return []
+            raise SourceFetchFailed("discover() aborted — GI sweep failed")
         if not obs:
             print("[allsurplus] WARNING: discover() found 0 GI lots — check the maestro search for drift")
             return []

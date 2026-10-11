@@ -1,0 +1,32 @@
+{
+  "_note": "SAMPLE DATA for the map on GET /platform. Coordinates only, city-level (a city centre, two decimals). The lots are the invented lots in inventory.sample.json and the buyers are the invented buyers in crm.sample.json, joined by id. Buyer cities are invented here. No real lot, buyer, facility or street location belongs in this file.",
+  "sample": true,
+  "radius_mi": 300,
+  "lots": [
+    {"lot_id": "L-2044", "lat": 43.07, "lng": -89.40},
+    {"lot_id": "L-2041", "lat": 39.96, "lng": -83.00},
+    {"lot_id": "L-2038", "lat": 36.15, "lng": -95.99},
+    {"lot_id": "L-2035", "lat": 41.26, "lng": -95.93},
+    {"lot_id": "L-2033", "lat": 38.58, "lng": -121.49},
+    {"lot_id": "L-2030", "lat": 37.54, "lng": -77.44},
+    {"lot_id": "L-2027", "lat": 47.66, "lng": -117.43},
+    {"lot_id": "L-2024", "lat": 35.08, "lng": -106.65},
+    {"lot_id": "L-2021", "lat": 41.59, "lng": -93.62},
+    {"lot_id": "L-2019", "lat": 38.25, "lng": -85.76},
+    {"lot_id": "L-2016", "lat": 34.75, "lng": -92.29},
+    {"lot_id": "L-2012", "lat": 37.69, "lng": -97.34},
+    {"lot_id": "L-2009", "lat": 36.74, "lng": -119.79}
+  ],
+  "buyers": [
+    {"id": "b1", "city": "Cincinnati", "state": "OH", "lat": 39.10, "lng": -84.51},
+    {"id": "b2", "city": "Memphis", "state": "TN", "lat": 35.15, "lng": -90.05},
+    {"id": "b3", "city": "Raleigh", "state": "NC", "lat": 35.78, "lng": -78.64},
+    {"id": "b4", "city": "Fort Collins", "state": "CO", "lat": 40.59, "lng": -105.08},
+    {"id": "b5", "city": "Missoula", "state": "MT", "lat": 46.87, "lng": -113.99},
+    {"id": "b6", "city": "Indianapolis", "state": "IN", "lat": 39.77, "lng": -86.16},
+    {"id": "b7", "city": "Las Cruces", "state": "NM", "lat": 32.31, "lng": -106.78},
+    {"id": "b8", "city": "Reno", "state": "NV", "lat": 39.53, "lng": -119.81},
+    {"id": "b9", "city": "Minneapolis", "state": "MN", "lat": 44.98, "lng": -93.27},
+    {"id": "b10", "city": "Kansas City", "state": "MO", "lat": 39.10, "lng": -94.58}
+  ]
+}

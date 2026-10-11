@@ -11,6 +11,7 @@ import pytest
 
 from recorder.models import Observation
 from recorder.sources import mibid
+from recorder.sources.base import SourceFetchFailed
 
 FIXTURES = Path(__file__).parent / "fixtures" / "mibid"
 
@@ -390,22 +391,25 @@ def test_poll_unrecognized_page_shape_is_a_fetch_failure(monkeypatch, capsys):
 
 # --- HTTP / fetch-failure handling (discover/sold_sweep share _fetch_raw_auctions) ---
 
-def test_discover_returns_empty_on_403_without_raising(monkeypatch):
+def test_discover_raises_fetch_failed_on_403(monkeypatch):
     monkeypatch.setattr(mibid, "polite_get", lambda *a, **k: _FakeResponse(status_code=403))
-    assert mibid.MiBidSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        mibid.MiBidSource().discover()
 
 
-def test_discover_returns_empty_on_missing_marker(monkeypatch):
+def test_discover_raises_fetch_failed_on_missing_marker(monkeypatch):
     monkeypatch.setattr(mibid, "polite_get", lambda *a, **k: _FakeResponse(text="<html>no marker here</html>"))
-    assert mibid.MiBidSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        mibid.MiBidSource().discover()
 
 
-def test_discover_returns_empty_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
+def test_discover_raises_fetch_failed_and_prints_loud_error_on_connection_exception(monkeypatch, capsys):
     def raise_connection_error(*a, **k):
         raise mibid.requests.exceptions.ConnectionError("boom")
 
     monkeypatch.setattr(mibid, "polite_get", raise_connection_error)
-    assert mibid.MiBidSource().discover() == []
+    with pytest.raises(SourceFetchFailed):
+        mibid.MiBidSource().discover()
     out = capsys.readouterr().out
     assert "RECORDER ERROR" in out
 

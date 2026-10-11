@@ -1,0 +1,183 @@
+{
+  "_note": "SAMPLE DATA for GET /platform. Every lot here is invented. Shaped like the admin Inventory tab (lot, quantity, price, status) plus the Channels matrix (one state per lot x channel: off | queued | pending_approval | live | delisted | error). No real lot, cost, hammer price, margin or storage note belongs in this file.",
+  "sample": true,
+  "channels": [
+    {"key": "site", "label": "Site", "kind": "feed"},
+    {"key": "fb_catalog", "label": "FB Catalog", "kind": "feed"},
+    {"key": "google", "label": "Google", "kind": "feed"},
+    {"key": "ebay", "label": "eBay", "kind": "push"},
+    {"key": "fb_marketplace", "label": "FB Marketplace", "kind": "approval"},
+    {"key": "craigslist", "label": "Craigslist", "kind": "push"}
+  ],
+  "lots": [
+    {
+      "lot_id": "L-2044", "title": "Rolling mail carts, canvas basket", "unit": "cart",
+      "city": "Madison", "state": "WI",
+      "quantity_remaining": 150, "quantity_original": 150, "price_per_unit": 40, "status": "active_bid",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 1},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 1},
+        "google": {"state": "live", "synced_hours_ago": 1},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "off"},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2041", "title": "Folding banquet tables, 6 ft, plastic top", "unit": "table",
+      "city": "Columbus", "state": "OH",
+      "quantity_remaining": 180, "quantity_original": 320, "price_per_unit": 28, "status": "listed",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 2},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 2},
+        "google": {"state": "live", "synced_hours_ago": 2},
+        "ebay": {"state": "live", "synced_hours_ago": 5},
+        "fb_marketplace": {"state": "live", "synced_hours_ago": 26},
+        "craigslist": {"state": "live", "synced_hours_ago": 49}
+      }
+    },
+    {
+      "lot_id": "L-2038", "title": "Office task chairs, mesh back, black", "unit": "chair",
+      "city": "Tulsa", "state": "OK",
+      "quantity_remaining": 96, "quantity_original": 140, "price_per_unit": 35, "status": "listed",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 3},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 3},
+        "google": {"state": "live", "synced_hours_ago": 3},
+        "ebay": {"state": "live", "synced_hours_ago": 8},
+        "fb_marketplace": {"state": "pending_approval", "synced_hours_ago": 4},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2035", "title": "Steel pallet racking uprights, 12 ft", "unit": "upright",
+      "city": "Omaha", "state": "NE",
+      "quantity_remaining": 64, "quantity_original": 64, "price_per_unit": 55, "status": "owned",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 6},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 6},
+        "google": {"state": "live", "synced_hours_ago": 6},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "queued", "synced_hours_ago": 1},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2033", "title": "Refurbished 14-inch business laptops", "unit": "laptop",
+      "city": "Sacramento", "state": "CA",
+      "quantity_remaining": 0, "quantity_original": 75, "price_per_unit": 140, "status": "sold_out",
+      "channels": {
+        "site": {"state": "delisted", "synced_hours_ago": 70},
+        "fb_catalog": {"state": "delisted", "synced_hours_ago": 70},
+        "google": {"state": "delisted", "synced_hours_ago": 70},
+        "ebay": {"state": "delisted", "synced_hours_ago": 70},
+        "fb_marketplace": {"state": "delisted", "synced_hours_ago": 70},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2030", "title": "Student desks with attached seat", "unit": "desk",
+      "city": "Richmond", "state": "VA",
+      "quantity_remaining": 210, "quantity_original": 400, "price_per_unit": 18, "status": "listed",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 2},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 2},
+        "google": {"state": "live", "synced_hours_ago": 2},
+        "ebay": {"state": "error", "synced_hours_ago": 9, "last_error": "photo upload timed out"},
+        "fb_marketplace": {"state": "pending_approval", "synced_hours_ago": 30},
+        "craigslist": {"state": "live", "synced_hours_ago": 52}
+      }
+    },
+    {
+      "lot_id": "L-2027", "title": "Wire shelving units, chrome, 48 in", "unit": "unit",
+      "city": "Spokane", "state": "WA",
+      "quantity_remaining": 45, "quantity_original": 60, "price_per_unit": 60, "status": "listed",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 4},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 4},
+        "google": {"state": "live", "synced_hours_ago": 4},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "live", "synced_hours_ago": 96},
+        "craigslist": {"state": "live", "synced_hours_ago": 96}
+      }
+    },
+    {
+      "lot_id": "L-2024", "title": "Hotel luggage carts, brass finish", "unit": "cart",
+      "city": "Albuquerque", "state": "NM",
+      "quantity_remaining": 12, "quantity_original": 30, "price_per_unit": 95, "status": "listed",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 5},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 5},
+        "google": {"state": "live", "synced_hours_ago": 5},
+        "ebay": {"state": "live", "synced_hours_ago": 20},
+        "fb_marketplace": {"state": "live", "synced_hours_ago": 120},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2021", "title": "Cafeteria tables with folding benches", "unit": "table",
+      "city": "Des Moines", "state": "IA",
+      "quantity_remaining": 38, "quantity_original": 38, "price_per_unit": 120, "status": "won_pickup",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 7},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 7},
+        "google": {"state": "live", "synced_hours_ago": 7},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "pending_approval", "synced_hours_ago": 7},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2019", "title": "LED high-bay shop lights", "unit": "light",
+      "city": "Louisville", "state": "KY",
+      "quantity_remaining": 300, "quantity_original": 300, "price_per_unit": 22, "status": "draft",
+      "channels": {
+        "site": {"state": "off"},
+        "fb_catalog": {"state": "off"},
+        "google": {"state": "off"},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "off"},
+        "craigslist": {"state": "off"}
+      }
+    },
+    {
+      "lot_id": "L-2016", "title": "Stainless prep tables, 30 x 72 in", "unit": "table",
+      "city": "Little Rock", "state": "AR",
+      "quantity_remaining": 9, "quantity_original": 24, "price_per_unit": 210, "status": "listed",
+      "channels": {
+        "site": {"state": "live", "synced_hours_ago": 3},
+        "fb_catalog": {"state": "live", "synced_hours_ago": 3},
+        "google": {"state": "live", "synced_hours_ago": 3},
+        "ebay": {"state": "live", "synced_hours_ago": 11},
+        "fb_marketplace": {"state": "live", "synced_hours_ago": 60},
+        "craigslist": {"state": "live", "synced_hours_ago": 60}
+      }
+    },
+    {
+      "lot_id": "L-2012", "title": "Metal lockers, three tier, tan", "unit": "locker",
+      "city": "Wichita", "state": "KS",
+      "quantity_remaining": 0, "quantity_original": 50, "price_per_unit": 45, "status": "sold_out",
+      "channels": {
+        "site": {"state": "delisted", "synced_hours_ago": 200},
+        "fb_catalog": {"state": "delisted", "synced_hours_ago": 200},
+        "google": {"state": "delisted", "synced_hours_ago": 200},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "delisted", "synced_hours_ago": 200},
+        "craigslist": {"state": "delisted", "synced_hours_ago": 200}
+      }
+    },
+    {
+      "lot_id": "L-2009", "title": "Wheeled whiteboards, double sided", "unit": "board",
+      "city": "Fresno", "state": "CA",
+      "quantity_remaining": 26, "quantity_original": 40, "price_per_unit": 75, "status": "hidden",
+      "channels": {
+        "site": {"state": "delisted", "synced_hours_ago": 30},
+        "fb_catalog": {"state": "delisted", "synced_hours_ago": 30},
+        "google": {"state": "delisted", "synced_hours_ago": 30},
+        "ebay": {"state": "off"},
+        "fb_marketplace": {"state": "off"},
+        "craigslist": {"state": "off"}
+      }
+    }
+  ]
+}
