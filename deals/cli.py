@@ -109,7 +109,18 @@ def main():
     sub.add_parser("saved-search-alerts",
                    help="run the saved-search alert sweep once (manual test path)")
     sub.add_parser("init-schema")
+    ch = sub.add_parser("chairs",
+                        help="operator chairs feed: live seating lots with qty >= N, every source, ranked $/chair")
+    ch.add_argument("--min-qty", type=int, default=50)
+    ch.add_argument("--site", default=None, help="one source (govdeals, gsa, purple_wave, ...)")
+    ch.add_argument("--state", default=None, help="two-letter state")
+    ch.add_argument("--ending", type=float, default=None, help="only lots closing within N hours")
+    ch.add_argument("--sort", default="unit_bid", choices=["unit_bid", "ends", "quantity", "bid"])
+    ch.add_argument("--limit", type=int, default=None, help="print at most N rows")
+    ch.add_argument("--json", action="store_true", help="JSON instead of a table")
     a = ap.parse_args()
+    if a.cmd == "chairs":       # read-only; dispatched before the GovDeals adapter (its --site is any source)
+        return run_chairs(a)
     prof = resolve_profile(getattr(a, "profile", None))
     pw = _profiles.deal_lots_where(prof) if prof else None
     # non-discover commands are GovDeals-only for now; discover picks per --site
@@ -221,6 +232,40 @@ def main():
     elif a.cmd == "saved-search-alerts":
         from deals.saved_search_alerts import run_saved_search_alerts
         print(f"sent {run_saved_search_alerts()} alert(s)")
+
+def run_chairs(a, out=None) -> int:
+    """`deals.cli chairs` — twin of GET /api/deals/chairs (same chairs_feed.fetch)."""
+    import json
+    import sys
+    from automation.web import chairs_feed, deals_sources
+    out = out or sys.stdout
+    if a.site and a.site not in deals_sources.SITES:
+        raise SystemExit(f"unknown site {a.site!r}; one of {sorted(deals_sources.SITES)}")
+    res = chairs_feed.fetch(min_qty=a.min_qty, site=a.site, state=a.state,
+                            ending_within=a.ending, sort=a.sort)
+    rows = res["rows"][:a.limit] if a.limit else res["rows"]
+    if a.json:
+        json.dump({**res, "rows": rows}, out, default=str, indent=2)
+        out.write("\n")
+        return 0
+
+    def money(v):
+        return "—" if v is None else f"${float(v):,.2f}"
+
+    for e in res["errors"]:
+        out.write(f"WARNING {e}\n")
+    out.write(f"{res['total']} live seating lot(s) with qty >= {res['min_qty']} "
+              f"(sort {res['sort']}): {res['sites']}\n")
+    for i, r in enumerate(rows, 1):
+        end = r["end_utc"].isoformat(timespec="minutes") if r["end_utc"] else "?"
+        place = ", ".join(x for x in (r["city"], r["state"]) if x) or "?"
+        pick = " *" if r["operator_pick"] else ""
+        out.write(f"{i:>3}. {money(r['unit_bid']):>9}/ea  qty {r['quantity'] or '?':>5} "
+                  f"({r['quantity_source']})  bid {money(r['current_bid'])} x{r['bid_count'] or 0}  "
+                  f"ends {end}  [{r['source']}] {place}{pick}\n"
+                  f"      {r['title']}\n      {r['url'] or ''}\n")
+    return 0
+
 
 if __name__ == "__main__":
     main()

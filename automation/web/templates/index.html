@@ -36,6 +36,7 @@
   <a class="rail-tab" data-tab="tracking" href="?tab=tracking" data-rail-close title="Press 9"><span class="rail-tab-num">09</span><span class="rail-tab-label">Tracking</span></a>
   <a class="rail-tab" data-tab="channels" href="?tab=channels" data-rail-close title="Press 0"><span class="rail-tab-num">10</span><span class="rail-tab-label">Channels</span></a>
   <a class="rail-tab" data-tab="archive" href="?tab=archive" data-rail-close title="Press ] from Channels"><span class="rail-tab-num">11</span><span class="rail-tab-label">Archive</span></a>
+  <a class="rail-tab" data-tab="chairs" href="?tab=chairs" data-rail-close title="Press ] from Archive"><span class="rail-tab-num">12</span><span class="rail-tab-label">Chairs</span></a>
   <div class="rail-keys" aria-hidden="true"><kbd>[</kbd> <kbd>]</kbd> switch · <kbd>1</kbd>–<kbd>0</kbd> jump</div>
 </nav>
 {% endblock %}
@@ -931,6 +932,47 @@
     <span class="ch-hint">one row per lot, one cell per channel · hover a red cell for the error</span>
   </div>
   <div class="table-wrap ch-matrix" id="ch-matrix" data-state="loading">{{ skeleton_rows(6) }}</div>
+</section>
+
+{#- ─────────────────────────── 12 Chairs (operator-only chairs feed) ─────────────────────────── -#}
+<section class="panel" data-pane="chairs" hidden>
+  {#- ADMIN-ONLY: the exact inverse of the public /deals seating exclusion (automation/web/chairs_feed.py).
+      static/admin/chairs.js owns ?cmin= ?csite= ?cstate= ?cend= ?csort=; table only, no map. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
+  <link rel="stylesheet" href="/static/admin/chairs.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">CHAIRS / EVERY LIVE SOURCE</div>
+    <h1 class="hero-title">Every live seating lot, cheapest per chair first.</h1>
+    <p class="hero-sub">
+      GovDeals + every recorder source, quantity read from the title (and description where we have it).
+      Ranked by <span class="lex running">bid ÷ qty</span>; no bid yet sorts last. Never public:
+      these are exactly the lots <span class="lex done">/deals</span> hides.
+    </p>
+  </div>
+
+  <div class="controls chr-controls" id="chr-controls">
+    <label class="chr-group"><span class="chr-label">MIN QTY</span>
+      <input type="number" id="chr-min" min="0" max="100000" step="10" value="50" aria-label="Minimum quantity"></label>
+    <label class="chr-group"><span class="chr-label">SITE</span>
+      <select id="chr-site" aria-label="Source"><option value="">all</option></select></label>
+    <label class="chr-group"><span class="chr-label">STATE</span>
+      <input type="text" id="chr-state" maxlength="2" placeholder="any" aria-label="State" autocomplete="off"></label>
+    <label class="chr-group"><span class="chr-label">ENDING</span>
+      <select id="chr-end" aria-label="Ending within">
+        <option value="">any time</option><option value="24">24 h</option><option value="72">3 days</option><option value="168">7 days</option>
+      </select></label>
+    <label class="chr-group"><span class="chr-label">SORT</span>
+      <select id="chr-sort" aria-label="Sort">
+        <option value="unit_bid">$ / chair</option><option value="ends">ending soonest</option>
+        <option value="quantity">biggest lot</option><option value="bid">lowest bid</option>
+      </select></label>
+    <span class="chr-count" id="chr-count" aria-live="polite"></span>
+    <button type="button" class="btn btn-small" id="chr-refresh">↻ refresh</button>
+  </div>
+  <div class="chr-errors" id="chr-errors" role="status" hidden></div>
+
+  {#- skeleton twin ships in the HTML; static/admin/chairs.js (UI.load) swaps it for the table / empty / error -#}
+  <div class="table-wrap chr-list" id="chr-list" data-state="loading">{{ skeleton_rows(8) }}</div>
 </section>
 
 {#- ─────────────────────────── 13 Archive (private lot archive) ─────────────────────────── -#}

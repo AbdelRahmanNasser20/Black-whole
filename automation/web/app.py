@@ -82,6 +82,7 @@ from . import deals_query
 from . import deals_sources
 from . import platform_api
 from . import public_deals
+from . import chairs_feed
 from . import rate_limit
 from . import public_map
 from . import seo_copy
@@ -1211,6 +1212,32 @@ async def list_deals(
         "facets": {"categories": cats, "states": states},
         "stats": stats,
     }
+
+
+@app.get("/api/deals/chairs")
+@readcache.cached()
+def deals_chairs(
+    min_qty: int = chairs_feed.DEFAULT_MIN_QTY,
+    site: str | None = None,
+    state: str | None = None,
+    ending: float | None = None,
+    sort: str = "unit_bid",
+):
+    """Operator-only Chairs feed: every live seating lot with quantity >=
+    `min_qty` across every live source, ranked by $/chair (`unit_bid`
+    ascending, NULLs last, ties by soonest end). The exact inverse of the
+    public /deals seating exclusion — never expose it under /deals."""
+    if site and site not in deals_sources.SITES:
+        raise HTTPException(400, f"unknown site; one of {sorted(deals_sources.SITES)}")
+    if sort not in chairs_feed.SORTS:
+        raise HTTPException(400, f"sort must be one of {list(chairs_feed.SORTS)}")
+    try:
+        out = chairs_feed.fetch(min_qty=min_qty, site=site or None, state=state or None,
+                                ending_within=ending, sort=sort)
+    except Exception as e:  # both halves failed
+        raise HTTPException(503, f"chairs feed failed: {e!r}")
+    out["site_names"] = deals_sources.SITES
+    return out
 
 
 @app.get("/api/deals/geo")

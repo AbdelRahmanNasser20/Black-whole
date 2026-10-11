@@ -109,6 +109,22 @@ def exclusion_where() -> tuple[str, list]:
     return where, [sorted(EXCLUDED_CATEGORIES), EXCLUDED_TITLE_SQL_RE]
 
 
+def seating_where() -> tuple[str, list]:
+    """The exact SQL inverse of the category + title half of `exclusion_where`
+    (same constants, same args): the operator-only Chairs feed reads
+    `deal_lots WHERE {seating_where}`, /deals reads the NOT of it, so a lot is
+    in exactly one of the two views. NULL-safe: a NULL category is not seating."""
+    return ("(COALESCE(canonical_category = ANY(%s), false) "
+            "OR COALESCE(title, '') ~* %s)",
+            [sorted(EXCLUDED_CATEGORIES), EXCLUDED_TITLE_SQL_RE])
+
+
+def is_seating(row: dict) -> bool:
+    """Python twin of `seating_where` — the category + title half of the
+    public exclusion. Alias kept separate so the Chairs feed reads as intent."""
+    return is_excluded(row)
+
+
 def is_excluded(row: dict) -> bool:
     """Pure half of the policy (category + title). Membership needs the DB —
     see `is_operator_lot` (deal_lots keys) or `is_operator_pick` (any source)."""
