@@ -94,6 +94,15 @@ def test_an_implausible_positional_count_is_an_id() -> None:
     assert explicit_title_quantity("Lot of 9124 chairs") == (9124, "lot of N")
 
 
+def test_leading_parenthesised_count_before_chairs() -> None:
+    """TXAuction (Gaston & Sheehan) opens multi-unit lots with "(N) …"."""
+    assert explicit_title_quantity("(500) MTS Seating Omega Stacker event chairs")[0] == 500
+    assert explicit_title_quantity("(50)  MTS Seating Omega Stacker event chairs")[0] == 50
+    # a leading count only means chairs when the plural "chairs" follows in the same clause
+    assert explicit_title_quantity("(5173) ACCESSIBLE VAN") is None
+    assert explicit_title_quantity("(2) desks. Office chair") is None
+
+
 def test_no_count_means_no_answer() -> None:
     for title in ("Banquet Reception Chairs", "Stacking chairs", "", "   "):
         assert explicit_title_quantity(title) is None, title

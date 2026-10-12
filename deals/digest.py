@@ -17,7 +17,7 @@ ORDER BY end_utc ASC;
 # research-profile fragment can be spliced in (the view has no description
 # column to filter on).
 _CANDIDATE_SQL = """SELECT asset_id, account_id, auction_id, title, current_bid, bid_count,
-       city, state, end_utc, canonical_category
+       city, state, end_utc, canonical_category, site, native_id
 FROM deal_lots
 WHERE outcome_complete IS NOT TRUE AND bid_count = 0 AND is_free = false
   AND currency_code = 'USD' AND end_utc <= now() + interval '24 hours'"""
@@ -37,7 +37,10 @@ def format_digest(rows: list[dict], fees: FeeModel, label: str = "") -> str:
     lines = [f"🪑 {len(rows)} lots closing <24h with 0 bids{tag}:\n"]
     for r in rows[:40]:
         lc = landed_cost(float(r["current_bid"] or 0), qty=1, fees=fees)
-        url = sites.lot_url(r)
+        try:
+            url = sites.lot_url(r)
+        except (AttributeError, KeyError, ValueError):
+            url = "(no link: row lacks native_id)"   # the deal_candidates view predates site/native_id
         lines.append(f"• {r['title'][:50]} — ${r['current_bid']:.0f} ({r['bid_count']} bids), "
                      f"landed ~${lc.total:.0f}, {r['city']}, {r['state']} — {url}")
     return "\n".join(lines)

@@ -30,3 +30,25 @@ def test_publicsurplus_registered_but_disabled(make_lot):
     assert SITES["publicsurplus"].ordinal == 2 and "publicsurplus" not in enabled_sites()
     assert lot_url(make_lot(site="publicsurplus", native_id="4079872")) == \
         "https://www.publicsurplus.com/sms/auction/view?auc=4079872"
+
+
+def test_txauction_registered_enabled(make_lot):
+    from deals.sites import SITES, enabled_sites, lot_url
+    assert SITES["txauction"].ordinal == 10 and "txauction" in enabled_sites()
+    assert lot_url(make_lot(site="txauction", native_id="31431/57702")) == \
+        "https://www.txauction.com/auctions/31431/lot/57702"
+
+
+def test_ordinals_are_unique():
+    from deals.sites import SITES
+    ords = [s.ordinal for s in SITES.values()]
+    assert len(ords) == len(set(ords))
+
+
+def test_lot_url_infers_foreign_site_from_account_id():
+    # the deal_candidates view has no `site` column; account_id = -ordinal says which site
+    from deals.sites import lot_url
+    assert lot_url({"asset_id": 7, "account_id": -10, "auction_id": 0, "native_id": "31431/57702"}) == \
+        "https://www.txauction.com/auctions/31431/lot/57702"
+    assert lot_url({"asset_id": 7, "account_id": -2, "auction_id": 0, "native_id": "4079872"}) == \
+        "https://www.publicsurplus.com/sms/auction/view?auc=4079872"

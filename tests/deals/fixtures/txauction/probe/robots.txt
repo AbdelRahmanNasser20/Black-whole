@@ -1,0 +1,15 @@
+Sitemap: https://www.txauction.com/sitemap.xml
+Sitemap: https://www.txauction.com/sitemap/auctions
+Sitemap: https://www.txauction.com/sitemap/past-auctions
+User-agent: *
+Disallow: /admin/
+Disallow: /api/
+Disallow: /asset/
+
+# Reduce Semrush crawl interval
+User-agent: SemrushBot
+Crawl-delay: 10
+User-agent: SemrushBot-SA
+Crawl-delay: 10
+User-agent: PetalBot
+Crawl-delay: 10
