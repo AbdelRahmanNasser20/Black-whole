@@ -159,9 +159,10 @@ services:
         value: groq
 
   # ── Price anchors — other sellers' banquet chairs priced above ours ──────
-  # Claude Haiku 5.5 + Anthropic web search, ~$0.15-0.30/run. Needs
-  # ANTHROPIC_API_KEY + R2_* in blackwhole-secrets (photos → private bucket)
-  # and migration 026 applied. Blueprint is not auto-synced: create this cron
+  # Free Groq openai/gpt-oss-120b + Groq's built-in browser_search, one request
+  # per topic (PRICE_ANCHORS_MAX_REQUESTS, default 5; free cap ~1,000/day, shared
+  # with the deals LLM key). $0. Needs GROQ_API_KEY + R2_* in blackwhole-secrets
+  # (photos → private bucket) and migration 026 applied. Blueprint is not auto-synced: create this cron
   # by hand in Render the first time.
   - type: cron
     name: price-anchors

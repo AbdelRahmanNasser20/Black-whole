@@ -1,16 +1,23 @@
 """Price anchors: other sellers' banquet-chair listings priced ABOVE ours.
 
 A daily job (``scripts/price_anchors.py run``, Render cron ``price-anchors``) asks
-Claude Haiku — with Anthropic's server-side web search + fetch — for live used
-hotel/banquet chair listings asking >= ``MIN_PRICE`` per chair, plus new-price
-references for the same hotel brands. Rows land in ``public.price_anchors``
-(migration 026), one per listing URL; the photo is copied to the PRIVATE R2
-bucket because it is someone else's photo.
+Groq's free ``openai/gpt-oss-120b`` — with Groq's built-in server-side
+``browser_search`` tool — for live used hotel/banquet chair listings asking
+>= ``MIN_PRICE`` per chair, plus new-price references for the same hotel brands.
+One chat request per research topic (``TOPICS``), capped per run by
+``MAX_REQUESTS`` (the free tier allows ~1,000 requests/day, but each browsing
+request burns 10-30k tokens, so the real ceiling is the daily token budget).
+Rows land in ``public.price_anchors`` (migration 026), one per listing URL; the
+photo is copied to the PRIVATE R2 bucket because it is someone else's photo.
 
 Rules:
 - These are anchors ("others ask $35-$55"), never our stock. Nothing here writes
   to ``inventory`` or any public surface.
 - Our own listings (black-whole.com, our eBay seller) are dropped.
+- **Grounding.** gpt-oss invents plausible eBay item ids, Craigslist post ids and
+  prices (seen live 2026-10-13). A row is kept only when its URL appeared in the
+  tool's own search results / opened pages, and its per-chair price (or the lot
+  total) appears in that source's text. Everything else is rejected, not stored.
 - A row the search stops finding is marked ``gone`` after ``GONE_AFTER_DAYS`` —
   search results vary day to day, so one missed day is not proof it sold.
 - ``status='hidden'`` is an operator decision; a re-run never un-hides a row.
@@ -22,16 +29,21 @@ import json
 import os
 import re
 import sys
+import time
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
 from automation import db
 
-MODEL = os.getenv("PRICE_ANCHORS_MODEL", "claude-haiku-5-5")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+MODEL = os.getenv("PRICE_ANCHORS_MODEL", "openai/gpt-oss-120b")
 MIN_PRICE = float(os.getenv("PRICE_ANCHORS_MIN_PRICE", "28"))
-MAX_SEARCHES = int(os.getenv("PRICE_ANCHORS_MAX_SEARCHES", "12"))
-MAX_FETCHES = int(os.getenv("PRICE_ANCHORS_MAX_FETCHES", "10"))
-MAX_CONTINUATIONS = 4
+# One request = one topic. Hard ceiling keeps a typo far under the 1,000/day cap.
+MAX_REQUESTS = int(os.getenv("PRICE_ANCHORS_MAX_REQUESTS", "5"))
+REQUEST_CEILING = 50
+MAX_RETRIES = 2            # per request, on 429 / 5xx, honouring Retry-After
+MAX_RETRY_WAIT = 90        # seconds; a longer Retry-After = daily budget gone, stop
+REPLY_TOKENS = 6000        # gpt-oss reasoning is billed against this; 4k truncated
 GONE_AFTER_DAYS = 21
 IMAGE_MAX_BYTES = 4_000_000
 R2_PREFIX = "price-anchors/"
@@ -48,34 +60,51 @@ _TEXT_LIMITS = {
     "location": 120, "listed_on": 40, "note": 300,
 }
 
+# Research topics, highest value first. A run takes the first MAX_REQUESTS.
+TOPICS = (
+    "Used MTS Seating, Shelby Williams or Gasser hotel banquet chairs for sale in bulk "
+    "(100+) on Craigslist in big US cities.",
+    "Hotel liquidators and used commercial-furniture dealers selling used hotel banquet "
+    "chairs (MTS, Shelby Williams, Gasser, Falcon, Mity-Lite) in bulk.",
+    "eBay listings of used hotel banquet chairs (MTS, Shelby Williams, Gasser) sold as lots.",
+    "Other used banquet / event / stacking chairs for sale (Chiavari, Holsag, church "
+    "chairs, UsedPews.org, rental-fleet sales).",
+    "NEW dealer or street prices for MTS Seating, Shelby Williams and Gasser banquet "
+    "chairs (at most 4 references; condition=new, tier=new).",
+)
+
 PROMPT = """You research the US used banquet-chair market for a seller of used hotel banquet chairs at $25 per chair.
 
-Find LIVE listings that ask MORE than ${min_price} per chair. Priority order:
-1. Used hotel-grade banquet chairs in bulk (100+, ideally 500-1,000+): MTS Seating, Shelby Williams, Gasser, Falcon, Mity-Lite, Chiavari, Holsag. Sources: eBay, Craigslist (big US cities), hotel liquidators, used-furniture dealers, UsedPews, rental-fleet sales.
-2. Other used banquet/event chairs at ${min_price}+ (any quantity).
-3. NEW prices for the same hotel brands (dealer list or street price) - at most 4 of these.
+Topic for this search: {topic}
 
+Find LIVE listings that ask MORE than ${min_price} per chair. Use browser_search, and open a listing page when you need its price, quantity or photo.
 Skip: anything on black-whole.com, eBay seller "abdel.-3241", office/task chairs, pews, folding plastic chairs, tables.
 Already known (do not repeat unless the price changed): {known}
 
-Use web search, and fetch a listing page when you need its price, quantity or photo. For each listing give the direct URL of its main photo (an i.ebayimg.com / images.craigslist.org / og:image .jpg/.png/.webp URL) when you can find it; otherwise null. Never invent a URL or a number - leave unknown fields null.
+Only report a listing whose URL you actually saw in a search result or opened page - copy it exactly. Never invent a URL, an item id or a number; leave unknown fields null. If you found nothing, reply {{"listings": []}}.
+For each listing give the direct URL of its main photo (an i.ebayimg.com / images.craigslist.org / og:image .jpg/.png/.webp URL) when you saw it; otherwise null.
 
-Reply with ONLY one JSON object, no prose, in this shape:
+Reply with ONLY one JSON object, no table, no prose, in this shape:
 {{"listings": [{{"listing_url": str, "title": str, "seller": str|null, "brand": str|null,
   "condition": "used"|"refurb"|"new", "tier": "hotel"|"event"|"new",
   "source": "ebay"|"craigslist"|"dealer"|"usedpews"|"retail"|"other",
   "qty": int|null, "price_per_chair": number, "location": str|null,
   "listed_on": str|null, "image_url": str|null, "note": str|null}}]}}
-tier = "hotel" for the hotel brands above when used, "event" for other used chairs, "new" for new prices."""
+tier = "hotel" for used MTS/Shelby Williams/Gasser/Falcon/Mity-Lite, "event" for other used chairs, "new" for new prices."""
+
+
+class GroqUnavailable(RuntimeError):
+    """No key, auth failure, or the daily budget is spent — no result, not an empty one."""
 
 
 @dataclass
 class RunResult:
     listings: list[dict] = field(default_factory=list)
     rejected: list[tuple[str, str]] = field(default_factory=list)
-    searches: int = 0
-    input_tokens: int = 0
-    output_tokens: int = 0
+    requests: int = 0          # chat requests sent to Groq (the free-tier unit)
+    searches: int = 0          # browser_search calls the model made inside them
+    tokens: int = 0
+    failed_topics: list[tuple[str, str]] = field(default_factory=list)
     stop_reason: str | None = None
 
 
@@ -152,52 +181,132 @@ def normalize(item: dict, *, min_price: float = MIN_PRICE) -> tuple[dict | None,
     return row, None
 
 
+# ── grounding (pure) ─────────────────────────────────────────────────────────
+
+def _url_key(url: str) -> str:
+    """Comparable form of a URL: lower host without www, path without trailing /, no query/fragment."""
+    p = urlparse(str(url or "").strip())
+    return f"{p.netloc.lower().removeprefix('www.')}{p.path.rstrip('/')}"
+
+
+def evidence_from(executed_tools) -> dict[str, str]:
+    """{url_key: text the tool actually returned for it} from Groq's ``executed_tools``."""
+    ev: dict[str, str] = {}
+    for t in executed_tools or []:
+        results = ((t or {}).get("search_results") or {}).get("results") or []
+        for r in results:
+            url = (r or {}).get("url")
+            if not _is_http(url):
+                continue
+            k = _url_key(url)
+            ev[k] = ev.get(k, "") + "\n" + f"{r.get('title') or ''}\n{r.get('content') or ''}"
+    return ev
+
+
+def _numbers(text: str) -> set[float]:
+    return {round(float(n.replace(",", "")), 2)
+            for n in re.findall(r"\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?", text or "")}
+
+
+def grounded(row: dict, evidence: dict[str, str]) -> str | None:
+    """None when the row is backed by what the tool saw, else the rejection reason."""
+    text = evidence.get(_url_key(row["listing_url"]))
+    if text is None:
+        return "url not in search results"
+    nums = _numbers(text)
+    price = row["price_per_chair"]
+    if price in nums:
+        return None
+    if row.get("qty") and round(price * row["qty"], 2) in nums:
+        return None   # source shows the lot total; the model divided it
+    return f"price {price:g} not in source text"
+
+
 # ── model call ───────────────────────────────────────────────────────────────
 
-def _client():
-    import anthropic  # lazy: only the run path needs the SDK
+def _api_key() -> str:
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        raise GroqUnavailable("GROQ_API_KEY is not set")
+    return key
 
-    return anthropic.Anthropic()
+
+def _post(body: dict, *, http=None, sleep=time.sleep) -> dict:
+    """One Groq chat request with bounded Retry-After retries."""
+    import httpx
+
+    http = http or httpx
+    for attempt in range(MAX_RETRIES + 1):
+        resp = http.post(GROQ_URL, json=body, timeout=240,
+                         headers={"Authorization": f"Bearer {_api_key()}"})
+        if resp.status_code == 200:
+            return resp.json()
+        if resp.status_code in (401, 403):
+            raise GroqUnavailable(f"Groq auth failed ({resp.status_code})")
+        retryable = resp.status_code == 429 or resp.status_code >= 500
+        try:
+            wait = float(resp.headers.get("retry-after") or 20)
+        except ValueError:
+            wait = 20.0
+        if not retryable or attempt == MAX_RETRIES:
+            raise RuntimeError(f"Groq HTTP {resp.status_code}: {resp.text[:300]}")
+        if wait > MAX_RETRY_WAIT:
+            raise GroqUnavailable(f"Groq rate limit: retry in {wait:.0f}s (daily budget spent?)")
+        sleep(wait)
+    raise AssertionError("unreachable")
 
 
-def search(*, known_urls: list[str] | None = None, client=None,
-           max_searches: int = MAX_SEARCHES, min_price: float = MIN_PRICE) -> RunResult:
-    """One Haiku research turn with server-side web search/fetch → validated rows."""
-    client = client or _client()
-    known = ", ".join(known_urls[:60]) if known_urls else "none"
-    messages = [{"role": "user", "content": PROMPT.format(min_price=f"{min_price:g}", known=known)}]
-    tools = [
-        {"type": "web_search_20250305", "name": "web_search", "max_uses": max_searches,
-         "user_location": {"type": "approximate", "country": "US"}},
-        {"type": "web_fetch_20250910", "name": "web_fetch", "max_uses": MAX_FETCHES},
-    ]
+def search(*, known_urls: list[str] | None = None, http=None, sleep=time.sleep,
+           max_requests: int = MAX_REQUESTS, min_price: float = MIN_PRICE) -> RunResult:
+    """One Groq browser_search request per topic → grounded, validated, deduped rows."""
+    known = ", ".join(known_urls[:40]) if known_urls else "none"
+    n = max(0, min(max_requests, REQUEST_CEILING, len(TOPICS)))
     res = RunResult()
-    for _ in range(MAX_CONTINUATIONS + 1):
-        resp = client.messages.create(
-            model=MODEL, max_tokens=16000, tools=tools, messages=messages,
-            output_config={"effort": "low"},
-        )
-        u = resp.usage
-        res.input_tokens += getattr(u, "input_tokens", 0) or 0
-        res.output_tokens += getattr(u, "output_tokens", 0) or 0
-        stu = getattr(u, "server_tool_use", None)
-        res.searches += (getattr(stu, "web_search_requests", 0) or 0) if stu else 0
-        res.stop_reason = resp.stop_reason
-        if resp.stop_reason != "pause_turn":
-            break
-        messages = [messages[0], {"role": "assistant", "content": resp.content}]
-    if res.stop_reason == "refusal":
-        raise RuntimeError("model refused the research request")
-    text = "".join(b.text for b in resp.content if getattr(b, "type", "") == "text")
-    payload = extract_json(text)
     seen: set[str] = set()
-    for item in payload.get("listings") or []:
-        row, why = normalize(item, min_price=min_price)
-        if row is None:
-            res.rejected.append((str((item or {}).get("listing_url") if isinstance(item, dict) else item)[:120], why))
-        elif row["listing_url"] not in seen:
-            seen.add(row["listing_url"])
-            res.listings.append(row)
+    for topic in TOPICS[:n]:
+        body = {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": PROMPT.format(
+                topic=topic, min_price=f"{min_price:g}", known=known)}],
+            "tools": [{"type": "browser_search"}],
+            "tool_choice": "required",
+            "reasoning_effort": os.getenv("PRICE_ANCHORS_REASONING_EFFORT", "low"),
+            "max_completion_tokens": REPLY_TOKENS,
+            "temperature": 0,
+        }
+        res.requests += 1
+        try:
+            data = _post(body, http=http, sleep=sleep)
+        except GroqUnavailable:
+            if not res.listings and not res.failed_topics:
+                raise          # nothing worked at all — loud
+            res.failed_topics.append((topic[:60], "budget/auth"))
+            break
+        except Exception as e:  # noqa: BLE001 - one bad topic never kills the run
+            res.failed_topics.append((topic[:60], f"{type(e).__name__}: {e}"[:200]))
+            continue
+        choice = (data.get("choices") or [{}])[0]
+        msg = choice.get("message") or {}
+        res.stop_reason = choice.get("finish_reason")
+        res.tokens += (data.get("usage") or {}).get("total_tokens", 0) or 0
+        tools = msg.get("executed_tools") or []
+        res.searches += sum(1 for t in tools if (t or {}).get("type") == "browser_search")
+        try:
+            payload = extract_json(msg.get("content") or "")
+        except ValueError as e:
+            res.failed_topics.append((topic[:60], f"unparseable reply ({res.stop_reason}): {e}"[:200]))
+            continue
+        evidence = evidence_from(tools)
+        for item in payload.get("listings") or []:
+            row, why = normalize(item, min_price=min_price)
+            if row is not None:
+                why = grounded(row, evidence)
+            if why:
+                label = item.get("listing_url") if isinstance(item, dict) else item
+                res.rejected.append((str(label)[:120], why))
+            elif row["listing_url"] not in seen:
+                seen.add(row["listing_url"])
+                res.listings.append(row)
     return res
 
 
@@ -315,7 +424,3 @@ def list_active(tier: str | None = None) -> list[dict]:
         params.append(tier)
     return db.fetch_all(sql + " ORDER BY tier, price_per_chair DESC", params)
 
-
-def cost_usd(res: RunResult) -> float:
-    """Haiku 5.5 tokens ($0.10 / $0.50 per M) + web search ($10 per 1,000)."""
-    return res.input_tokens * 0.10e-6 + res.output_tokens * 0.50e-6 + res.searches * 0.01

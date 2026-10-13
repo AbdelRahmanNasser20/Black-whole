@@ -5,10 +5,12 @@
   .venv/bin/python scripts/price_anchors.py list [--tier hotel|event|new]
   .venv/bin/python scripts/price_anchors.py photos
 
-`run` = one Claude Haiku research turn (web search + fetch) → upsert into
+`run` = one free Groq gpt-oss-120b request per research topic (built-in
+browser_search; capped by --max-requests / PRICE_ANCHORS_MAX_REQUESTS) → only
+rows grounded in what the search actually returned → upsert into
 public.price_anchors → copy new photos to the private R2 bucket → mark rows not
-seen for 21 days `gone` → one Telegram line. Needs ANTHROPIC_API_KEY, the DB,
-and (for photos) R2_* + LOT_ARCHIVE_R2_BUCKET. Migration 026 must be applied.
+seen for 21 days `gone` → one Telegram line. Needs GROQ_API_KEY, the DB, and
+(for photos) R2_* + LOT_ARCHIVE_R2_BUCKET. Migration 026 must be applied.
 """
 from __future__ import annotations
 
@@ -33,11 +35,13 @@ def _photos() -> str:
 
 def cmd_run(args) -> int:
     known = [] if args.dry_run else pa.known_urls()
-    res = pa.search(known_urls=known, max_searches=args.max_searches)
+    res = pa.search(known_urls=known, max_requests=args.max_requests)
     print(f"{len(res.listings)} listings, {len(res.rejected)} rejected, "
-          f"{res.searches} searches, ~${pa.cost_usd(res):.3f}, stop={res.stop_reason}")
+          f"{res.requests} Groq requests, {res.searches} searches, {res.tokens:,} tokens")
     for url, why in res.rejected:
         print(f"  rejected: {why} — {url}")
+    for topic, why in res.failed_topics:
+        print(f"  topic failed: {why} — {topic}")
     if args.dry_run:
         print(json.dumps(res.listings, indent=2, default=str))
         return 0
@@ -46,7 +50,8 @@ def cmd_run(args) -> int:
     photos = "photos skipped" if args.no_photos else _photos()
     gone = pa.mark_gone()
     line = (f"Price anchors: {len(out)} seen ({new} new), {gone} marked gone, {photos}. "
-            f"~${pa.cost_usd(res):.3f}")
+            f"{res.requests} Groq requests, {len(res.rejected)} rejected"
+            + (f", {len(res.failed_topics)} topics failed" if res.failed_topics else ""))
     print(line)
     try:
         from automation import telegram_alerts as tg
@@ -93,7 +98,8 @@ def main(argv=None) -> int:
     r = sub.add_parser("run")
     r.add_argument("--dry-run", action="store_true", help="search and print; no DB, no photos")
     r.add_argument("--no-photos", action="store_true")
-    r.add_argument("--max-searches", type=int, default=pa.MAX_SEARCHES)
+    r.add_argument("--max-requests", type=int, default=pa.MAX_REQUESTS,
+                   help=f"Groq requests this run (one per topic; ceiling {pa.REQUEST_CEILING})")
     r.set_defaults(fn=cmd_run)
     s = sub.add_parser("seed")
     s.add_argument("path")
