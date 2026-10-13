@@ -1,12 +1,17 @@
 """Price anchors: other sellers' banquet-chair listings priced ABOVE ours.
 
 A daily job (``scripts/price_anchors.py run``, Render cron ``price-anchors``) asks
-Groq's free ``openai/gpt-oss-120b`` — with Groq's built-in server-side
-``browser_search`` tool — for live used hotel/banquet chair listings asking
->= ``MIN_PRICE`` per chair, plus new-price references for the same hotel brands.
-One chat request per research topic (``TOPICS``), capped per run by
-``MAX_REQUESTS`` (the free tier allows ~1,000 requests/day, but each browsing
-request burns 10-30k tokens, so the real ceiling is the daily token budget).
+a free Groq gpt-oss model — with Groq's built-in server-side ``browser_search``
+tool — for live used hotel/banquet chair listings asking >= ``MIN_PRICE`` per
+chair, plus new-price references for the same hotel brands. One chat request per
+research topic (``TOPICS``), capped per run by ``MAX_REQUESTS``.
+
+Budget: the free tier allows 1,000 requests/day but only 200,000 tokens/day PER
+MODEL, and one browsing request burns 10-30k tokens (a 5-topic run measured
+~63k). ``openai/gpt-oss-120b`` is the deals pipeline's model on the same key and
+its daily tokens were already spent when this shipped (2026-10-13), so the
+default here is ``openai/gpt-oss-20b`` — its own 200k bucket. Override with
+``PRICE_ANCHORS_MODEL``.
 Rows land in ``public.price_anchors`` (migration 026), one per listing URL; the
 photo is copied to the PRIVATE R2 bucket because it is someone else's photo.
 
@@ -36,7 +41,8 @@ from urllib.parse import urlparse
 from automation import db
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-MODEL = os.getenv("PRICE_ANCHORS_MODEL", "openai/gpt-oss-120b")
+# Not 120b: that model's 200k tokens/day free bucket is shared with deals/ and runs dry.
+MODEL = os.getenv("PRICE_ANCHORS_MODEL", "openai/gpt-oss-20b")
 MIN_PRICE = float(os.getenv("PRICE_ANCHORS_MIN_PRICE", "28"))
 # One request = one topic. Hard ceiling keeps a typo far under the 1,000/day cap.
 MAX_REQUESTS = int(os.getenv("PRICE_ANCHORS_MAX_REQUESTS", "5"))
@@ -251,7 +257,7 @@ def _post(body: dict, *, http=None, sleep=time.sleep) -> dict:
         if not retryable or attempt == MAX_RETRIES:
             raise RuntimeError(f"Groq HTTP {resp.status_code}: {resp.text[:300]}")
         if wait > MAX_RETRY_WAIT:
-            raise GroqUnavailable(f"Groq rate limit: retry in {wait:.0f}s (daily budget spent?)")
+            raise GroqUnavailable(f"Groq rate limit, retry in {wait:.0f}s: {resp.text[:300]}")
         sleep(wait)
     raise AssertionError("unreachable")
 

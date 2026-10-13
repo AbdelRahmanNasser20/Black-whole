@@ -107,7 +107,7 @@ def test_search_sends_browser_search_and_dedupes():
     res = pa.search(known_urls=["https://known.test/1"], http=http, max_requests=1)
     url, kw = http.calls[0]
     assert url == pa.GROQ_URL and "anthropic" not in url
-    assert kw["json"]["model"] == pa.MODEL == "openai/gpt-oss-120b"
+    assert kw["json"]["model"] == pa.MODEL == "openai/gpt-oss-20b"
     assert kw["json"]["tools"] == [{"type": "browser_search"}]
     assert kw["headers"]["Authorization"] == "Bearer test-key"
     assert "https://known.test/1" in kw["json"]["messages"][0]["content"]
