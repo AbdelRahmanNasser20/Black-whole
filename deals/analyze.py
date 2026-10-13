@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from deals import sites
 from deals.comps import CompsUnavailable, comps_provider_from_env
-from deals.fees import fee_model_from_env
+from deals.fees import fee_model_for_site, fee_model_from_env
+from deals.flip import analyze_flip
 from deals.geo import distance_from_home
 from deals.llm_steps import LlmStepError, extract_identity, judge_comps
 from deals.mapping import asset_to_lot
@@ -41,9 +42,21 @@ def analyze_lot(lot: Lot, comps_provider, fees, env: dict) -> dict:
         est_pu = identity.est_resale_per_unit or 0.0
         val = value_from_estimate(est_pu * identity.quantity, identity.quantity,
                                   lot.current_bid, fees)
+    now = datetime.now().astimezone()
+    try:
+        hours_left = (lot.end_utc - now).total_seconds() / 3600 \
+            if lot.end_utc is not None else None
+    except TypeError:                      # naive end_utc — demand degrades
+        hours_left = None
+    flip = analyze_flip(
+        est_resale=val.est_resale, margin_pct=val.margin_pct,
+        comp_count=len(kept), method=val.method,
+        comp_prices=[c.price for c in kept], bid_count=lot.bid_count,
+        hours_left=hours_left, current_bid=lot.current_bid,
+        fees=fee_model_for_site(lot.site, env))
     return {
         "asset_id": lot.asset_id, "account_id": lot.account_id,
-        "auction_id": lot.auction_id, "analyzed_at": datetime.now().astimezone(),
+        "auction_id": lot.auction_id, "analyzed_at": now,
         "identity": {"brand": identity.brand, "model": identity.model,
                      "item_type": identity.item_type, "quantity": identity.quantity,
                      "condition": identity.condition},
@@ -58,6 +71,7 @@ def analyze_lot(lot: Lot, comps_provider, fees, env: dict) -> dict:
         "reasoning": f"{len(kept)}/{len(all_comps)} comps kept for "
                      f"'{identity.queries[0] if identity.queries else ''}'",
         "rank_score": None, "rank_notes": None, "alerted_at": None,
+        "flip": flip.as_dict(), "flip_score": flip.score,
     }
 
 def should_alert(verdict: dict, env: dict) -> bool:
@@ -70,12 +84,18 @@ def format_verdict_alert(lot: Lot, v: dict, distance: float | None) -> str:
     url = sites.lot_url(lot)
     dist = f" · {distance:.0f} mi away" if distance is not None else ""
     comp_urls = " ".join(c["url"] for c in v.get("comps", [])[:3] if c.get("url"))
+    flip_line = ""
+    f = v.get("flip")
+    if f:
+        flip_line = (f"flip {f['score']}/100 · max bid for 50% margin "
+                     f"${float(f['max_bid']['50']):.0f} · demand {f['demand']}\n")
     return (f"💰 {lot.title[:70]}\n"
             f"bid ${lot.current_bid:.0f} ({lot.bid_count} bids) → "
             f"est. resale ${v['est_resale']:.0f} "
             f"(margin {v['margin_pct']:.0f}%, {v['confidence']}, "
             f"{v['comp_count']} comps)\n"
             f"landed ~${v['landed_cost']:.0f} · {lot.city}, {lot.state}{dist}\n"
+            f"{flip_line}"
             f"{url}\ncomps: {comp_urls}")
 
 def run_analysis(now: datetime | None = None, env: dict | None = None) -> AnalyzeReport:
