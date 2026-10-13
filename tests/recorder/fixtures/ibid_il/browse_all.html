@@ -1,0 +1,1305 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" 
+"https://www.w3.org/TR/html4/strict.dtd">
+<html lang="en" dir="ltr">
+<head>
+<title>iBid</title>
+<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">
+<meta name="description" content="">
+<meta name="keywords" content="">
+
+<link rel="stylesheet" type="text/css" href="https://ibid.illinois.gov/themes/default/style.css">
+<link rel="stylesheet" type="text/css" href="https://ibid.illinois.gov/themes/default/jquery.lightbox.css" media="screen">
+<link rel="stylesheet" type="text/css" href="https://ibid.illinois.gov/includes/calendar.css">
+
+<link rel="alternate" type="application/rss+xml" title="Just Listed" href="https://ibid.illinois.gov/rss.php?feed=1">
+<link rel="alternate" type="application/rss+xml" title="Closing Soon" href="https://ibid.illinois.gov/rss.php?feed=2">
+<link rel="alternate" type="application/rss+xml" title="Big Ticket" href="https://ibid.illinois.gov/rss.php?feed=3">
+<link rel="alternate" type="application/rss+xml" title="Very Expensive" href="https://ibid.illinois.gov/rss.php?feed=4">
+<link rel="alternate" type="application/rss+xml" title="Cheap Items" href="https://ibid.illinois.gov/rss.php?feed=5">
+<link rel="alternate" type="application/rss+xml" title="Popular Items" href="https://ibid.illinois.gov/rss.php?feed=6">
+<link rel="alternate" type="application/rss+xml" title="Hot Items" href="https://ibid.illinois.gov/rss.php?feed=7">
+<link rel="alternate" type="application/rss+xml" title="Buy Now" href="https://ibid.illinois.gov/rss.php?feed=8">
+<script type="text/javascript" src="https://ibid.illinois.gov/loader.php?js=js/jquery.js"></script>
+<link href="js/jquery-ui.css" rel="stylesheet" type="text/css" />
+<script type="text/javascript" src="js/jquery.lightbox.js"></script>
+<script src="js/jquery-ui.min.js" type="text/javascript"></script>
+<script src="js/jquery.ui.datetimepicker.min.js" type="text/javascript"></script>
+<script type="text/javascript">
+	$(function() {
+		$('#startdate').datepicker();
+		$('#enddate').datepicker();
+		$('#beginstartdate').datepicker();
+		$('#beginenddate').datepicker();
+		$('#endstartdate').datepicker();
+		$('#endenddate').datepicker();
+		$('#startdatetime').datetimepicker();
+		$('#enddatetime').datetimepicker();
+		$('.addDatePicker').datepicker();
+		$('.addDateTimePicker').datetimepicker();
+		});
+</script>
+
+<script type="text/javascript">
+	function setItemsToDisplay(e, identifier) {
+		var expire = new Date();
+		expire.setTime(expire.getTime() + 43200000);
+		document.cookie = identifier + "=" + e.options[e.selectedIndex].value + "; expires=" + expire.toGMTString();
+	}
+	
+$(document).ready(function() {
+	$('a.new-window').click(function(){
+		var posY = ($(window).height()-550)/2;
+		var posX = ($(window).width())/2;
+		window.open(this.href, this.alt, "toolbar=0,location=0,directories=0,scrollbars=1,resizable=0,screenX="+posX+",screenY="+posY+",status=0,menubar=0,width=550,height=550");
+		return false;
+	});
+
+	$('a.new-window2').click(function(){
+		var posY = ($(window).height()-550)/2;
+		var posX = ($(window).width())/2;
+		window.open(this.href, this.alt, "toolbar=0,location=0,directories=0,scrollbars=1,resizable=1,screenX="+posX+",screenY="+posY+",status=0,menubar=0,width=950,height=550");
+		return false;
+	});
+	var currenttime = 'Oct 09, 2026 11:44:44 AM';
+	var serverdate = new Date(currenttime);
+	function padlength(what){
+		var output=(what.toString().length==1)? "0"+what : what;
+		return output;
+	}
+	function displaytime(){
+		serverdate.setSeconds(serverdate.getSeconds()+1);
+		var timestring=padlength(serverdate.getHours())+":"+padlength(serverdate.getMinutes())+":"+padlength(serverdate.getSeconds());
+		$(".servertime").html(timestring);
+	}
+	setInterval(displaytime, 1000);
+	$(function() {
+		$('#lightbox a').lightBox();
+	});
+});
+</script>
+</head>
+<body>
+<div class="wrapper rounded-top rounded-bottom">
+	<div class="logo">
+		<a href="https://ibid.illinois.gov/index.php?"><img src="https://ibid.illinois.gov/themes/default/ibid_logo.jpg" border="0" alt="iBid"></a>	</div>
+	<h1 class="welcome">
+		<br><div style='font-size:40px; letter-spacing: 0; font-style: italic; font-family: Times New Roman, Georgia, Serif; font-weight: bold;'>State of Illinois Online Auction</div> 	</h1>
+	<div style="float:right;"><a href="https://www.facebook.com/ibidillinois"><img src="https://ibid.illinois.gov/themes/default/facebook.jpg" border="0" alt="iBid"></a> </div>
+
+	<ul class="tab">
+	<li class="tab"><a href="https://ibid.illinois.gov/index.php?"><span>Home</span></a></li>
+		<li class="tab"><a href="https://ibid.illinois.gov/register.php?"><span>Register now</span></a></li>
+	<li class="tab"><a href="https://ibid.illinois.gov/user_login.php?"><span>Login</span></a></li>
+		<li class="tab"><a href="https://ibid.illinois.gov/stores.php?"><span>Storefronts</span></a></li>	
+		<li class="tab" id="last"><a href="https://ibid.illinois.gov/faqs.php" class="new-window2"><span>Help</span></a></li>
+	<li class="counters">
+				<br> <span class="serverdate">Current system time: Oct 9, 2026</span> <span class="servertime">11:44:44</span>	</li>
+	</ul>
+		
+	<table width="100%">
+		<tbody>
+			<tr>
+				<td class="top_bar">
+					<div class="leftside floatleft">
+						<form name="search" action="https://ibid.illinois.gov/search.php" method="get">
+						<div class="barSearch">
+							<input type="hidden" name="CSRF_TOKEN" value="b15276f1246bac727280c0881df48cd4">
+							<label for="q" title = "Search"> Search </label>							
+							<input type="text" id = "q" name="q" size=15 value="">
+							<input type="submit" name="" value="Go!" class="button" id="go_search">
+							&nbsp;&nbsp;<a href="https://ibid.illinois.gov/adsearch.php?mode=new">Advanced Search</a> 
+						</div>
+						</form>
+					</div>
+					<div class="rightside floatright">
+						<form name="gobrowse" action="browse.php" method="get">
+						<input type="hidden" name="CSRF_TOKEN" value="b15276f1246bac727280c0881df48cd4">
+						<div class="barBrowse">
+							<label for = "id" title = "Browse">Browse </label>
+							<select name="id" id ="id">
+	<option value="">Select your Category</option>
+	<option value=""></option>
+	<option value="0">All categories</option>
+	<option value="441">Agricultural Equipment and Supplies</option>
+	<option value="451">Aircraft and Aircraft Parts</option>
+	<option value="461">Boats and Marine Equipment</option>
+	<option value="471">Communication Equipment</option>
+	<option value="481">Computer Equipment and Accessories</option>
+	<option value="491">Construction Equipment</option>
+	<option value="501">Electrical and Electronic Equipment and Components</option>
+	<option value="511">Fire Trucks and Fire Fighting Equipment</option>
+	<option value="521">Furniture</option>
+	<option value="531">Hand Tools &amp; Shop Equipment</option>
+	<option value="541">Household/Personal</option>
+	<option value="551">Industrial Machinery</option>
+	<option value="561">Jewelry &amp; Exotic Collectibles</option>
+	<option value="571">Lab Equipment</option>
+	<option value="581">Medical, Dental, and Veterinary Equipment and Supplies</option>
+	<option value="591">Miscellaneous</option>
+	<option value="601">Motorcycles &amp; Bicycles</option>
+	<option value="611">Office Equipment and Supplies</option>
+	<option value="691">Paper money and coins</option>
+	<option value="621">Photographic Equipment</option>
+	<option value="631">Tractor Trailers and Manufactured Housing</option>
+	<option value="641">Vehicles</option>
+</select>
+							<input type="submit" name="sub" value="Go!" class="button" id="go_browse">
+						</div>
+						</form>
+					</div>
+				</td>
+			</tr>
+		</tbody>
+	</table>
+	
+</div><div class="content">
+<div class="tableContent2">
+	<div class="titTable2 rounded-top rounded-bottom">
+		<a href="browse.php?id=0">Category</a> : <a href="https://ibid.illinois.gov/browse.php?id=1">All</a>	</div>
+	<div class="table2">
+		<table width="98%" border="0" cellspacing="0" cellpadding="4">
+			<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=441">Agricultural Equipment and Supplies (3)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=451">Aircraft and Aircraft Parts</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=461">Boats and Marine Equipment (1)</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=471">Communication Equipment (1)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=481">Computer Equipment and Accessories (6)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=491">Construction Equipment (1)</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=501">Electrical and Electronic Equipment and Components (2)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=511">Fire Trucks and Fire Fighting Equipment</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=521">Furniture (1)</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=531">Hand Tools &amp; Shop Equipment (13)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=541">Household/Personal (5)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=551">Industrial Machinery (1)</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=561">Jewelry &amp; Exotic Collectibles (2)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=571">Lab Equipment</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=581">Medical, Dental, and Veterinary Equipment and Supplies (3)</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=591">Miscellaneous (25)</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=601">Motorcycles &amp; Bicycles</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=611">Office Equipment and Supplies (2)</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=691">Paper money and coins</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=621">Photographic Equipment</a></td>
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=631">Tractor Trailers and Manufactured Housing</a></td>
+</tr>
+<tr align="left">
+	<td  WIDTH="33%"><a href="https://ibid.illinois.gov/browse.php?id=641">Vehicles (20)</a></td>
+	<td width="33%">&nbsp;</td>
+	<td width="33%">&nbsp;</td>
+</tr>
+		</table>
+		<br>
+		<form name="catsearch" action="?id=1" method="post">
+		<input type="hidden" name="CSRF_TOKEN" value="b15276f1246bac727280c0881df48cd4">
+		<table width="98%" border="0" cellspacing="0" cellpadding="4" class="catsearch">
+			<tr>
+				<td>Search only in this category&nbsp;<input type="text" name="catkeyword" size="20">&nbsp;<input type="submit" name="" value=" Search " class="button">
+				&nbsp;&nbsp;<a href="https://ibid.illinois.gov/adsearch.php?mode=new">Advanced Search</a></td>
+			</tr>
+		</table>
+		</form>
+	<table width="98%" border="0" cellspacing="1" cellpadding="4">
+		<tr>
+			<th width="9%" align="center" height="5">
+				Picture			</th>
+			<th width="49%" height="5" align="center">
+				Auction			</th>
+			<th width="14%" height="5" align="center">
+				Current bid			</th>
+			<th width="14%" height="5" align="center">
+				Bids #			</th>
+			<th width="14%" align="center" height="5">
+				Ends in			</th>
+		</tr>
+		<tr align="center" >
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418316"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418316/thumb-00120260806_140606.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418316 - <a href="https://ibid.illinois.gov/item.php?id=418316">2004 VaXcavator</a> 							</td>
+			<td align="right">
+				$ <strong>10,051.00</strong>			</td>
+			<td align="center">
+				33			</td>
+			<td align="center">
+				5h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418064"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418064/thumb-001processed18B3D075CA1E417392B0AC5998F89C97.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418064 - <a href="https://ibid.illinois.gov/item.php?id=418064">Lot &#35; 21095 - UNTESTED Lot of 7 VIZIO 40&quot; Smart TV</a> 							</td>
+			<td align="right">
+				$ <strong>202.50</strong>			</td>
+			<td align="center">
+				7			</td>
+			<td align="center">
+				5h 15m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417898"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-08/417898/thumb-00111.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417898 - <a href="https://ibid.illinois.gov/item.php?id=417898">Lot &#35; 21093 - Lot of Approx 70 UNTESTED HP I7/I5 PCs</a> 							</td>
+			<td align="right">
+				$ <strong>787.00</strong>			</td>
+			<td align="center">
+				18			</td>
+			<td align="center">
+				5h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417899"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-08/417899/thumb-0011.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417899 - <a href="https://ibid.illinois.gov/item.php?id=417899">Lot &#35; 21094 - Lot of Approx 40 UNTESTED Dell Monitors</a> 							</td>
+			<td align="right">
+				$ <strong>122.50</strong>			</td>
+			<td align="center">
+				13			</td>
+			<td align="center">
+				5h 15m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417952"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/417952/thumb-0018369.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417952 - <a href="https://ibid.illinois.gov/item.php?id=417952">Lot &#35; 20668 - 5 TESTED iPhones 14 128 GB</a> 							</td>
+			<td align="right">
+				$ <strong>910.00</strong>			</td>
+			<td align="center">
+				18			</td>
+			<td align="center">
+				5h 21m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417957"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/417957/thumb-001281.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417957 - <a href="https://ibid.illinois.gov/item.php?id=417957">Lot &#35; 20700 - Pallet of UNTESTED Lenovo Laptops - &#40;275 Approx&#41;</a> 							</td>
+			<td align="right">
+				$ <strong>2,225.00</strong>			</td>
+			<td align="center">
+				20			</td>
+			<td align="center">
+				5h 21m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417959"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/417959/thumb-001229.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417959 - <a href="https://ibid.illinois.gov/item.php?id=417959">Lot &#35; 20701 - Pallet of UNTESTED Lenovo Laptops - &#40;220 Approx&#41;</a> 							</td>
+			<td align="right">
+				$ <strong>2,225.00</strong>			</td>
+			<td align="center">
+				18			</td>
+			<td align="center">
+				5h 40m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418373"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418373/thumb-001IMG_0406.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418373 - <a href="https://ibid.illinois.gov/item.php?id=418373"> BOAT - 2008 Steiger Craft 255DV Miami - Off-Site Sale</a> 							</td>
+			<td align="right">
+				$ <strong>7,650.00</strong>			</td>
+			<td align="center">
+				35			</td>
+			<td align="center">
+				7h 15m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418431"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418431/thumb-001100_0347.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418431 - <a href="https://ibid.illinois.gov/item.php?id=418431">ALLIS CHALMERS FORKLIFT - Off-Site Sale</a> 							</td>
+			<td align="right">
+				$ <strong>505.00</strong>			</td>
+			<td align="center">
+				12			</td>
+			<td align="center">
+				7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418039"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418039/thumb-001C360_2026083109524787.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418039 - <a href="https://ibid.illinois.gov/item.php?id=418039">Lot &#35; 6240 SCHWAB 2500 FILE CABINETS FIRE- RESISTANT - QTY 2</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				7h 15m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418040"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418040/thumb-001C360_2026083109541541.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418040 - <a href="https://ibid.illinois.gov/item.php?id=418040">Lot &#35; 6241 SCHWAB 2500 FILE CABINET FIRE- RESISTANT</a> 							</td>
+			<td align="right">
+				$ <strong>6.25</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				7h 17m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418041"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418041/thumb-001C360_2026090109334094.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418041 - <a href="https://ibid.illinois.gov/item.php?id=418041">Lot &#35; 6242 THURMADUKE HOT FOOD/STEAM TABLE</a> 							</td>
+			<td align="right">
+				$ <strong>5.25</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				7h 19m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418042"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418042/thumb-001C360_2026090109362362.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418042 - <a href="https://ibid.illinois.gov/item.php?id=418042">Lot &#35; 6243 THURMADUKE HOT FOOD/STEAM TABLE</a> 							</td>
+			<td align="right">
+				$ <strong>6.25</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				7h 21m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418044"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418044/thumb-001C360_2026090109431552.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418044 - <a href="https://ibid.illinois.gov/item.php?id=418044">Lot &#35; 6244 WHEELED MEDICAL SHOWER/COMMODE CHAIRS QTY 2</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				7h 23m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418045"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418045/thumb-001C360_2026092314143109.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418045 - <a href="https://ibid.illinois.gov/item.php?id=418045">Lot &#35; 6245 CATERING TRANSPORT CART</a> 							</td>
+			<td align="right">
+				$ <strong>11.25</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				7h 25m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418046"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418046/thumb-001C360_2026090109461562.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418046 - <a href="https://ibid.illinois.gov/item.php?id=418046">Lot &#35; 6246 HOT FOOD/STEAM TABLE</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				7h 27m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418047"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418047/thumb-001C360_2026092314160801.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418047 - <a href="https://ibid.illinois.gov/item.php?id=418047">Lot &#35; 6247 CATERING TRANSPORT CART &amp; SLICER</a> 							</td>
+			<td align="right">
+				$ <strong>158.05</strong>			</td>
+			<td align="center">
+				28			</td>
+			<td align="center">
+				7h 29m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418048"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418048/thumb-001C360_2026090109522144.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418048 - <a href="https://ibid.illinois.gov/item.php?id=418048">Lot &#35; 6248 CAPSAHEALTHCARE SERIES MEDICATION CART</a> 							</td>
+			<td align="right">
+				$ <strong>5.25</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				7h 31m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418049"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418049/thumb-001C360_2026090109533697.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418049 - <a href="https://ibid.illinois.gov/item.php?id=418049">Lot &#35; 6249 CAMBRO MEAL DELIVERY CART</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				7h 33m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418050"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418050/thumb-001C360_2026090109583337.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418050 - <a href="https://ibid.illinois.gov/item.php?id=418050">Lot &#35; 6250 PALLET OF MED - DEFIBRULLATOR, WELCH ALLYN SPOT VITAL SIGNS</a> 							</td>
+			<td align="right">
+				$ <strong>28.37</strong>			</td>
+			<td align="center">
+				9			</td>
+			<td align="center">
+				7h 35m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418051"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418051/thumb-001C360_2026090110034518.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418051 - <a href="https://ibid.illinois.gov/item.php?id=418051">Lot &#35; 6251 RANDELL S/C COUNTER MOUNT DISPLAY CASE MODEL &#35; 40048</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				7h 37m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418387"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418387/thumb-001C360_2026081908075256.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418387 - <a href="https://ibid.illinois.gov/item.php?id=418387">Lot &#35; 6221 CISCO MONITOR SYSTEM WITH STAND - RELSIT</a> 							</td>
+			<td align="right">
+				$ <strong>12.30</strong>			</td>
+			<td align="center">
+				5			</td>
+			<td align="center">
+				7h 39m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418390"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418390/thumb-001C360_2026092907433302.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418390 - <a href="https://ibid.illinois.gov/item.php?id=418390">LOT &#35; 954 TSA VARIOUS TOOLS</a> 							</td>
+			<td align="right">
+				$ <strong>252.51</strong>			</td>
+			<td align="center">
+				12			</td>
+			<td align="center">
+				1d 7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418393"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418393/thumb-001C360_2026092907525931.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418393 - <a href="https://ibid.illinois.gov/item.php?id=418393">LOT &#35; 955 TSA VARIOUS FOLDING POCKET KNIVES</a> 							</td>
+			<td align="right">
+				$ <strong>102.50</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				1d 7h 17m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418394"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418394/thumb-001C360_2026092907552152.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418394 - <a href="https://ibid.illinois.gov/item.php?id=418394">LOT &#35; 956 TSA IGNITERS/ LIGHTERS - VARIOUS</a> 							</td>
+			<td align="right">
+				$ <strong>15.50</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				1d 7h 19m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418395"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418395/thumb-001C360_2026092907564245.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418395 - <a href="https://ibid.illinois.gov/item.php?id=418395">LOT &#35; 957 TSA TOOLS - HUSKY</a> 							</td>
+			<td align="right">
+				$ <strong>18.50</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				1d 7h 21m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418396"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418396/thumb-001C360_2026092908054731.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418396 - <a href="https://ibid.illinois.gov/item.php?id=418396">LOT &#35; 958 TSA ASSORTED CRAFTSMAN HAND TOOLS</a> 							</td>
+			<td align="right">
+				$ <strong>38.00</strong>			</td>
+			<td align="center">
+				7			</td>
+			<td align="center">
+				1d 7h 23m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418397"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418397/thumb-001C360_2026092908081259.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418397 - <a href="https://ibid.illinois.gov/item.php?id=418397">LOT &#35; 959 TSA MISC ASSORTED TREKKING POLES &#40;VARIOUS MAY NOT BE COMPLET</a> 							</td>
+			<td align="right">
+				$ <strong>10.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				1d 7h 25m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418398"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418398/thumb-001C360_2026092908255945.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418398 - <a href="https://ibid.illinois.gov/item.php?id=418398">LOT &#35; 960 TSA NIKE SHOES - SIZES IN PHOTOS</a> 							</td>
+			<td align="right">
+				$ <strong>51.00</strong>			</td>
+			<td align="center">
+				5			</td>
+			<td align="center">
+				1d 7h 27m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418399"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418399/thumb-001C360_2026092908341269.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418399 - <a href="https://ibid.illinois.gov/item.php?id=418399">LOT &#35; 961 TSA SHOW GLOBES</a> 							</td>
+			<td align="right">
+				$ <strong>10.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				1d 7h 29m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418400"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418400/thumb-001C360_2026092908351203.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418400 - <a href="https://ibid.illinois.gov/item.php?id=418400">LOT &#35; 962 TSA KNIVES/ BLADES/ TOOLS/ CORKSCREWS/ MISC. ITEMS</a> 							</td>
+			<td align="right">
+				$ <strong>177.50</strong>			</td>
+			<td align="center">
+				9			</td>
+			<td align="center">
+				1d 7h 31m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418401"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418401/thumb-001C360_2026092908365536.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418401 - <a href="https://ibid.illinois.gov/item.php?id=418401">LOT &#35; 963 TSA JERSEYS MISC - SIGNATURES MAY OR MAY NOT BE AUTHENTIC</a> 							</td>
+			<td align="right">
+				$ <strong>39.00</strong>			</td>
+			<td align="center">
+				7			</td>
+			<td align="center">
+				1d 7h 33m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418402"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418402/thumb-001C360_2026092908424893.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418402 - <a href="https://ibid.illinois.gov/item.php?id=418402">LOT &#35; 964 TSA VARIOUS HAND TOOLS - INCLUDING MILWUAKEE BRAND</a> 							</td>
+			<td align="right">
+				$ <strong>101.00</strong>			</td>
+			<td align="center">
+				7			</td>
+			<td align="center">
+				1d 7h 35m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418403"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418403/thumb-001C360_2026092908464599.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418403 - <a href="https://ibid.illinois.gov/item.php?id=418403">LOT &#35; 965 TSA VARIOUS HAND TOOLS &#40;ORANGE&#41; - INCLUDING RIDGID BRAND</a> 							</td>
+			<td align="right">
+				$ <strong>11.50</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				1d 7h 37m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418404"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418404/thumb-001C360_2026092908511802.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418404 - <a href="https://ibid.illinois.gov/item.php?id=418404">LOT &#35; 966 TSA VARIOUS TOOLS - KLEIN</a> 							</td>
+			<td align="right">
+				$ <strong>10.50</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				1d 7h 39m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418406"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418406/thumb-001C360_2026092908540638.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418406 - <a href="https://ibid.illinois.gov/item.php?id=418406">LOT &#35; 967 TSA   FOLDING POCKET KNIVES</a> 							</td>
+			<td align="right">
+				$ <strong>31.00</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				1d 7h 41m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418483"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418483/thumb-001C360_2026081409464265.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418483 - <a href="https://ibid.illinois.gov/item.php?id=418483">Lot &#35; 6220 WOOD DOUBLE DOOR CABINET RELIST</a> 							</td>
+			<td align="right">
+				$ <strong>16.77</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				1d 7h 41m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418407"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418407/thumb-001C360_2026092908554572.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418407 - <a href="https://ibid.illinois.gov/item.php?id=418407">LOT &#35; 968 TSA VARIOUS HAND TOOLS &#40;BLUE&#41; - INCLUDING KOBALT BRAND</a> 							</td>
+			<td align="right">
+				$ <strong>10.50</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				1d 7h 43m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418484"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418484/thumb-001C360_2026081409264453.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418484 - <a href="https://ibid.illinois.gov/item.php?id=418484">Lot &#35; 6217 WOOD CABINETS RELIST</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				1d 7h 43m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418408"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418408/thumb-001C360_2026092908594894.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418408 - <a href="https://ibid.illinois.gov/item.php?id=418408">LOT &#35; 969 TSA VARIOUS HOUSEHOLD KITCHEN ITEMS</a> 							</td>
+			<td align="right">
+				$ <strong>25.50</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				1d 7h 45m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418409"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418409/thumb-001C360_2026092909025940.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418409 - <a href="https://ibid.illinois.gov/item.php?id=418409">LOT &#35; 970 TSA ASSORTED SCISSORS</a> 							</td>
+			<td align="right">
+				$ <strong>22.50</strong>			</td>
+			<td align="center">
+				6			</td>
+			<td align="center">
+				1d 7h 47m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418410"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418410/thumb-001C360_2026092909052303.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418410 - <a href="https://ibid.illinois.gov/item.php?id=418410">LOT &#35; 971 TSA COLLECTION OF PACKAGED TOOLS</a> 							</td>
+			<td align="right">
+				$ <strong>10.50</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				1d 7h 49m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418411"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418411/thumb-001C360_2026092909074522.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418411 - <a href="https://ibid.illinois.gov/item.php?id=418411">LOT &#35; 972 TSA HOUSEHOLD AND KITCHEN ITEMS</a> 							</td>
+			<td align="right">
+				$ <strong>10.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				1d 7h 51m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418412"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418412/thumb-001C360_2026092909103086.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418412 - <a href="https://ibid.illinois.gov/item.php?id=418412">LOT &#35; 973 TSA GLASSES SUNGLASSES READING GLASSES</a> 							</td>
+			<td align="right">
+				$ <strong>102.50</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				1d 7h 53m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418413"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418413/thumb-001C360_2026092909120967.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418413 - <a href="https://ibid.illinois.gov/item.php?id=418413">LOT &#35; 974 TSA MILWAUKEE 12 VOLT HAND TOOLS &amp; MISC</a> 							</td>
+			<td align="right">
+				$ <strong>102.50</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				1d 7h 55m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418414"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418414/thumb-001C360_2026092909155174.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418414 - <a href="https://ibid.illinois.gov/item.php?id=418414">LOT &#35; 975 TSA HYPER TOUGH HAND TOOLS / MISC</a> 							</td>
+			<td align="right">
+				$ <strong>15.00</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				1d 7h 57m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418415"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418415/thumb-001C360_2026092909215353.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418415 - <a href="https://ibid.illinois.gov/item.php?id=418415">LOT &#35; 976 TSA SONY HEADPHONES - VARIOUS</a> 							</td>
+			<td align="right">
+				$ <strong>31.00</strong>			</td>
+			<td align="center">
+				5			</td>
+			<td align="center">
+				1d 7h 59m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418416"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418416/thumb-001C360_2026092909235685.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418416 - <a href="https://ibid.illinois.gov/item.php?id=418416">LOT &#35; 977 TSA VARIOUS HAND TOOLS &#40;YELLOW&#41; - INCLUDING DEWALT &amp; WAGNER</a> 							</td>
+			<td align="right">
+				$ <strong>18.50</strong>			</td>
+			<td align="center">
+				5			</td>
+			<td align="center">
+				1d 8h 1m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418417"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418417/thumb-001C360_2026092909270259.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418417 - <a href="https://ibid.illinois.gov/item.php?id=418417">LOT &#35; 978 TSA ASSORTED MINI BASEBALL BATS</a> 							</td>
+			<td align="right">
+				$ <strong>10.50</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				1d 8h 3m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418418"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418418/thumb-001C360_2026092909414139.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418418 - <a href="https://ibid.illinois.gov/item.php?id=418418">LOT &#35; 979 TSA VARIOUS HAND TOOLS / MISC</a> 							</td>
+			<td align="right">
+				$ <strong>22.06</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				1d 8h 5m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418481"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418481/thumb-001C360_2026091514173509.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418481 - <a href="https://ibid.illinois.gov/item.php?id=418481">LOT &#35; 913 TSA BOARD GAME, SUPER TRIVIA  &amp; CAPGUN BOTTLE OPENER RELSIT</a> 							</td>
+			<td align="right">
+				$ <strong>10.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				1d 8h 7m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418482"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418482/thumb-001C360_2026091515284823.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418482 - <a href="https://ibid.illinois.gov/item.php?id=418482">LOT &#35; 920 TSA CHAMPION CHECK VALVE, CRIMPER &amp; TENSIONER TOOL RELIST</a> 							</td>
+			<td align="right">
+				$ <strong>10.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				1d 8h 9m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=416569"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-05/416569/thumb-001plow34000.jpg" border=0 /></a>			</td>
+			<td align="left">
+                416569 - <a href="https://ibid.illinois.gov/item.php?id=416569">Western 10ft Pro Plus HD.</a> 							</td>
+			<td align="right">
+				$ <strong>1,500.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				2d 20h 33m 			</td>
+		</tr>
+		<tr align="center" class="alt-row">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=416570"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-05/416570/thumb-001picofwholeplow.png" border=0 /></a>			</td>
+			<td align="left">
+                416570 - <a href="https://ibid.illinois.gov/item.php?id=416570">Western 10ft Pro Plus HD</a> 							</td>
+			<td align="right">
+				$ <strong>3,000.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				2d 20h 33m 			</td>
+		</tr>
+		<tr align="center" >
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=416571"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-05/416571/thumb-001picofwholeplow.png" border=0 /></a>			</td>
+			<td align="left">
+                416571 - <a href="https://ibid.illinois.gov/item.php?id=416571">Western 10ft Pro Plus HD</a> 							</td>
+			<td align="right">
+				$ <strong>3,000.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				2d 20h 33m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418432"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418432/thumb-00120260831_105155_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418432 - <a href="https://ibid.illinois.gov/item.php?id=418432">Lot &#35;56862 2019 FORD TAURUS</a> 							</td>
+			<td align="right">
+				$ <strong>4,026.99</strong>			</td>
+			<td align="center">
+				17			</td>
+			<td align="center">
+				3d 7h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418391"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418391/thumb-001IBIDM68718OCH73.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418391 - <a href="https://ibid.illinois.gov/item.php?id=418391">2009 FORD E-350 CARGO VAN W/VERSALIFT</a> 							</td>
+			<td align="right">
+				$ <strong>560.00</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				3d 8h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418405"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418405/thumb-001IBIDCOMPUTERSPEAKERS.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418405 - <a href="https://ibid.illinois.gov/item.php?id=418405">SURPLUS COMPUTER SPEAKERS</a> 							</td>
+			<td align="right">
+				$ <strong>100.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				3d 8h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418430"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418430/thumb-001IBIDM66188OCH31.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418430 - <a href="https://ibid.illinois.gov/item.php?id=418430">2006 FORD E-350 CARGO VAN W/VERSALIFT</a> 							</td>
+			<td align="right">
+				$ <strong>565.00</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				3d 8h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418438"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418438/thumb-001IBIDM67080CASE.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418438 - <a href="https://ibid.illinois.gov/item.php?id=418438">CASE 465 SKID STEER</a> 							</td>
+			<td align="right">
+				$ <strong>11,050.00</strong>			</td>
+			<td align="center">
+				25			</td>
+			<td align="center">
+				3d 8h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417958"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/417958/thumb-001IBIDMISCPARTSSEPT26.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417958 - <a href="https://ibid.illinois.gov/item.php?id=417958">SURPLUS AUTOMOTIVE AND TRUCK PARTS</a> 							</td>
+			<td align="right">
+				$ <strong>200.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				3d 8h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418539"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418539/thumb-001481001.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418539 - <a href="https://ibid.illinois.gov/item.php?id=418539">2010 Dodge Charger / Eqp &#35; 48100</a> 							</td>
+			<td align="right">
+				$ <strong>2.25</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				3d 20h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418540"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418540/thumb-00153150.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418540 - <a href="https://ibid.illinois.gov/item.php?id=418540">2014 CHEVROLET IMPALA / EQP &#35;53150</a> 							</td>
+			<td align="right">
+				$ <strong>10.25</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				3d 20h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418541"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418541/thumb-00155675.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418541 - <a href="https://ibid.illinois.gov/item.php?id=418541">2017 FORD EXPLORER / EQP &#35;55675</a> 							</td>
+			<td align="right">
+				$ <strong>0.99</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				3d 20h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418542"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418542/thumb-00153770front.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418542 - <a href="https://ibid.illinois.gov/item.php?id=418542">2014 CHEVROLET CAPRICE / EQP &#35;53770</a> 							</td>
+			<td align="right">
+				$ <strong>2,375.00</strong>			</td>
+			<td align="center">
+				8			</td>
+			<td align="center">
+				3d 20h 15m 			</td>
+		</tr>
+		<tr align="center" bgcolor="#3592CF" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=417472"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-07/417472/thumb-001531271.jpg" border=0 /></a>			</td>
+			<td align="left">
+                417472 - <a href="https://ibid.illinois.gov/item.php?id=417472">2014 Chevrolet IMPALA / EQP &#35;53127</a> 							</td>
+			<td align="right">
+				$ <strong>685.00</strong>			</td>
+			<td align="center">
+				6			</td>
+			<td align="center">
+				3d 22h 51m 			</td>
+		</tr>
+		<tr align="center" >
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418388"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418388/thumb-001Screenshot2026092925724PM.png" border=0 /></a>			</td>
+			<td align="left">
+                418388 - <a href="https://ibid.illinois.gov/item.php?id=418388">Vermeer BC1200XL Brush Chipper</a> 							</td>
+			<td align="right">
+				$ <strong>3,605.00</strong>			</td>
+			<td align="center">
+				21			</td>
+			<td align="center">
+				4d 3h 45m 			</td>
+		</tr>
+		<tr align="center" class="alt-row">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418389"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418389/thumb-001Screenshot2026092930811PM.png" border=0 /></a>			</td>
+			<td align="left">
+                418389 - <a href="https://ibid.illinois.gov/item.php?id=418389">1997 Pace American Trailer</a> 							</td>
+			<td align="right">
+				$ <strong>910.00</strong>			</td>
+			<td align="center">
+				19			</td>
+			<td align="center">
+				4d 3h 45m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418447"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418447/thumb-00120260930_101216_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418447 - <a href="https://ibid.illinois.gov/item.php?id=418447">Lot &#35;47019 2009 CHEVY IMPALA</a> 							</td>
+			<td align="right">
+				$ <strong>790.26</strong>			</td>
+			<td align="center">
+				6			</td>
+			<td align="center">
+				4d 7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418448"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418448/thumb-00120260218_111657_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418448 - <a href="https://ibid.illinois.gov/item.php?id=418448">Lot &#35;44643 2006 CHEVY 2500</a> 							</td>
+			<td align="right">
+				$ <strong>610.00</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				4d 7h 25m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418451"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418451/thumb-00120260727_114706_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418451 - <a href="https://ibid.illinois.gov/item.php?id=418451">Lot &#35;52218 2013DODGE GRAND CARAVAN</a> 							</td>
+			<td align="right">
+				$ <strong>1,075.26</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				4d 7h 35m 			</td>
+		</tr>
+		<tr align="center" class="alt-row">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418502"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418502/thumb-0010923_011.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418502 - <a href="https://ibid.illinois.gov/item.php?id=418502">WOODEN DESK WITH HUTCH &#40;IBID HS&#41;</a> 							</td>
+			<td align="right">
+				$ <strong>10.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				5d 4h 45m 			</td>
+		</tr>
+		<tr align="center" >
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418504"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418504/thumb-0010812_011.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418504 - <a href="https://ibid.illinois.gov/item.php?id=418504">LAB EQUIPMENT PARTS &#35;16 &#40;I0319003&#41;</a> 							</td>
+			<td align="right">
+				$ <strong>1.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				5d 4h 48m 			</td>
+		</tr>
+		<tr align="center" class="alt-row">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418509"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418509/thumb-0011007_011.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418509 - <a href="https://ibid.illinois.gov/item.php?id=418509">CUBICLE PARTS &#40;IBID HS&#41;</a> 							</td>
+			<td align="right">
+				$ <strong>200.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				5d 4h 51m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418026"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-09/418026/thumb-00120260729_085226_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418026 - <a href="https://ibid.illinois.gov/item.php?id=418026">Lot &#35;53165 2015 FORD EXPEDITION</a> 							</td>
+			<td align="right">
+				$ <strong>2,000.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				5d 7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418486"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418486/thumb-00120260429_091355_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418486 - <a href="https://ibid.illinois.gov/item.php?id=418486">Lot &#35;107922 2016 FORD ESCAPE</a> 							</td>
+			<td align="right">
+				$ <strong>2,624.95</strong>			</td>
+			<td align="center">
+				4			</td>
+			<td align="center">
+				5d 7h 45m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418485"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418485/thumb-001IMG_3016.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418485 - <a href="https://ibid.illinois.gov/item.php?id=418485">SO-LOW ULTRA- LOW FREEZER - Off-Site Sale</a> 							</td>
+			<td align="right">
+				$ <strong>10.25</strong>			</td>
+			<td align="center">
+				3			</td>
+			<td align="center">
+				7d 7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418517"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418517/thumb-001AIRHANDLER1.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418517 - <a href="https://ibid.illinois.gov/item.php?id=418517">AIR HANDLER - AAON - Off-Site Sale</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				7d 7h 17m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418518"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418518/thumb-001NEGATIVEPRESSUREUNITS1.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418518 - <a href="https://ibid.illinois.gov/item.php?id=418518">NEGATIVE PRESSURE UNITS â QTY 2 - Off-Site Sale</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				1			</td>
+			<td align="center">
+				7d 7h 19m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418488"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418488/thumb-001C360_2026073107384746.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418488 - <a href="https://ibid.illinois.gov/item.php?id=418488">Lot &#35; 6174 FISH TRANSPORT TANK - RELIST</a> 							</td>
+			<td align="right">
+				$ <strong>5.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				7d 8h 3m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418544"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418544/thumb-00120260729_120710_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418544 - <a href="https://ibid.illinois.gov/item.php?id=418544">Lot &#35;52202 2013 DODGE CARAVAN</a> 							</td>
+			<td align="right">
+				$ <strong>810.00</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				10d 7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418545"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418545/thumb-00120260922_110227_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418545 - <a href="https://ibid.illinois.gov/item.php?id=418545">Lot &#35;50290 2012 CHEVY MALIBU</a> 							</td>
+			<td align="right">
+				$ <strong>1,525.00</strong>			</td>
+			<td align="center">
+				10			</td>
+			<td align="center">
+				10d 7h 30m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418551"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418551/thumb-00120260721_111639_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418551 - <a href="https://ibid.illinois.gov/item.php?id=418551">Lot &#35;47094 2009 DODGE GRAND CARAVAN</a> 							</td>
+			<td align="right">
+				$ <strong>750.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				10d 7h 45m 			</td>
+		</tr>
+		<tr align="center" class="alt-row" style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418552"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418552/thumb-00120260921_101917_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418552 - <a href="https://ibid.illinois.gov/item.php?id=418552">Lot &#35;50539 2012 FORD F-150</a> 							</td>
+			<td align="right">
+				$ <strong>1,000.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				10d 8h 0m 			</td>
+		</tr>
+		<tr align="center"  style="font-weight: bold;">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418553"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418553/thumb-00120260624_094052_resized.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418553 - <a href="https://ibid.illinois.gov/item.php?id=418553">Lot &#35;52213 2013 DODGE GRAND CARAVAN</a> 							</td>
+			<td align="right">
+				$ <strong>900.00</strong>			</td>
+			<td align="center">
+				0			</td>
+			<td align="center">
+				11d 7h 15m 			</td>
+		</tr>
+		<tr align="center" class="alt-row">
+			<td align="center">
+				<a href="https://ibid.illinois.gov/item.php?id=418543"><img src="https://s3.amazonaws.com/ibidimages.incircuit.com/uploaded/2026-10/418543/thumb-00107fe79c20b534de2960376a78bf22aa9.jpg" border=0 /></a>			</td>
+			<td align="left">
+                418543 - <a href="https://ibid.illinois.gov/item.php?id=418543">2011 Chevrolet Impala</a> 							</td>
+			<td align="right">
+				$ <strong>600.00</strong>			</td>
+			<td align="center">
+				2			</td>
+			<td align="center">
+				13d 2h 53m 			</td>
+		</tr>
+		<tr align="center">
+			<td colspan="5">86</td>
+		</tr>
+	</table>
+	<table width="100%" cellpadding="0" cellspacing="0" border="0">
+		<tr>
+			<td align="center">
+				Page&nbsp;1&nbsp;of&nbsp;1				<br>
+											</td>
+		</tr>
+	</table>
+	<br><br><br>
+	<table width="98%" border="0" cellspacing="1" cellpadding="4">
+		<tr>
+			<td align="center">
+				<label for="TPL_paging">Items to Display:</label>
+				<select id="TPL_paging" name="TPL_paging" onchange="setItemsToDisplay(this,'ibid_il_paging_pref')">
+					<option value="25">25</option>
+<option value="50">50</option>
+<option value="100">100</option>
+<option value="200" selected>200</option>
+				</select>
+				<input type="button" value="Apply" onclick="window.location.reload()" style="height:22px; width:50px" />
+			</td>
+		</tr>
+	</table>	</div>
+</div>
+</div><br>
+<div class="content">
+	<div class="counters clearleft"> <span class="serverdate">Current system time: Oct 9, 2026</span> <span class="servertime">11:44:44</span></div>
+	<div class="footer">
+		<a href="mailto:cms.ibid@illinois.gov">Contact </a>
+		| <a href="https://ibid.illinois.gov/faqs.php" class="new-window">Help</a>
+<!---		| <a href="https://ibid.illinois.gov/fees.php">Fees</a> --->
+		| <a href="https://ibid.illinois.gov/contents.php?show=aboutus">About Us</a> 
+		| <a href="https://ibid.illinois.gov/contents.php?show=ship">Shipping Information</a> 
+		| <a href="https://ibid.illinois.gov/contents.php?show=terms">Terms &amp; Conditions</a> 
+		<br>
+	</div>
+	<div class="copyright">
+		Powered by AssetWorks &copy; 2010 - 2024 AssetWorks
+	</div>
+	<div class="copyright">
+		10.0.10.206	</div>
+	<div class="copyright" style="color: white">
+		iBid Version: v183	</div>
+</div>
+</body>
+</html>

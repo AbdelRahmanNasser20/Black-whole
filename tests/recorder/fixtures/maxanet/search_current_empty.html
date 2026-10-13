@@ -1,0 +1,39 @@
+.
+<div class="wrapper-contents">
+    <div class="wrapper-main mb-3">
+        <div class="current-auction mb-3">
+            <!--Search Sort Filter-->
+
+
+            <!--Sort Items-->
+            <div class="search-listitem mb-2">
+                    <div class="mb-2">
+                        <div class="bg-white border mt-2 px-1 py-3 flex-wrap">
+                            <div class="text-center">
+                                <span>  No Data Available</span>
+                            </div>
+                        </div>
+                    </div>
+
+            </div>
+
+
+        </div>
+
+
+
+    </div>
+
+
+</div>
+<script>
+    $(document).ready(function () {
+        $('.local-date-time').each(function () {
+            var auctiondate = $(this).data("auc-date");
+            if (auctiondate != "") {
+                var formattedlocaldate = FormatToLocalTime(auctiondate);
+                $(this).text(" : " + formattedlocaldate.split(',')[0] + ' ' + formattedlocaldate.split(',')[1]);
+            }
+        });
+    });
+</script>

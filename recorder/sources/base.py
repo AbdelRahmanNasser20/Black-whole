@@ -45,6 +45,21 @@ USER_AGENT = (
 
 MIN_HOST_INTERVAL_SECONDS = 1.0
 
+# Per-host overrides of the 1 s floor, keyed by hostname (lowercase, exact).
+# A source whose robots.txt publishes `Crawl-delay` registers it here at
+# import time (`register_host_interval`) so EVERY request to that host —
+# discover, poll, sold sweep, a one-off smoke script — waits at least that
+# long. Never lower than MIN_HOST_INTERVAL_SECONDS.
+HOST_MIN_INTERVAL_SECONDS: dict[str, float] = {}
+
+
+def register_host_interval(host: str, seconds: float) -> None:
+    HOST_MIN_INTERVAL_SECONDS[host.lower()] = max(float(seconds), MIN_HOST_INTERVAL_SECONDS)
+
+
+def host_interval(host: str) -> float:
+    return HOST_MIN_INTERVAL_SECONDS.get(host.lower(), MIN_HOST_INTERVAL_SECONDS)
+
 # Batch-level "this looks systemic, not per-lot" thresholds, shared by
 # public_surplus's 401 block guard and the source breaker (recorder/health.py):
 # at least this many lots AND at least this fraction of the batch.
@@ -244,7 +259,7 @@ def _throttle(host: str) -> None:
     now = time.monotonic()
     last = _last_request_at.get(host)
     if last is not None:
-        wait = MIN_HOST_INTERVAL_SECONDS - (now - last)
+        wait = host_interval(host) - (now - last)
         if wait > 0:
             time.sleep(wait)
     _last_request_at[host] = time.monotonic()
@@ -278,9 +293,17 @@ def _send(method, url, *, headers, timeout, **kw) -> requests.Response:
     return resp
 
 
-def polite_get(url, *, headers=None, params=None, timeout=DEFAULT_TIMEOUT) -> requests.Response:
-    return _send(requests.get, url, headers=headers, timeout=timeout, params=params)
+def polite_get(url, *, headers=None, params=None, timeout=DEFAULT_TIMEOUT,
+               session: requests.Session | None = None) -> requests.Response:
+    """`session` (optional): a `requests.Session` whose cookie jar must
+    carry across calls — Maxanet (Wisconsin Surplus / USGovBid) 302s every
+    AJAX partial to /Error/NotFound without the session cookie its landing
+    page sets. Throttle, UA, proxy and failure notes apply exactly as without."""
+    getter = session.get if session is not None else requests.get
+    return _send(getter, url, headers=headers, timeout=timeout, params=params)
 
 
-def polite_post(url, *, headers=None, json=None, timeout=DEFAULT_TIMEOUT) -> requests.Response:
-    return _send(requests.post, url, headers=headers, timeout=timeout, json=json)
+def polite_post(url, *, headers=None, json=None, timeout=DEFAULT_TIMEOUT,
+                session: requests.Session | None = None) -> requests.Response:
+    poster = session.post if session is not None else requests.post
+    return _send(poster, url, headers=headers, timeout=timeout, json=json)
