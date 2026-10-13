@@ -1,0 +1,226 @@
+{#- templates/liquidators.html — GET /liquidators: the landing page for liquidation companies.
+    Two sides: FIND (distressed businesses before anyone else) and SELL (lots to the buyer network).
+    Direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex.
+    Honest copy: no customer counts, no metrics, every sample labelled, plain-English search = "Coming".
+    The sample docket (hero) and the sample lead table are the INVENTED fixture
+    static/site/platform/bankruptcies.sample.json, rendered server-side (no DB read).
+    The form posts to the existing POST /contact with "[LIQUIDATORS PAGE]" leading `message`. -#}
+{% extends "_public_base.html" %}
+{% block title %}Platform for liquidators | Black Whole{% endblock %}
+{% block meta_description %}Find bankrupt and failing businesses before anyone else, then sell the lots to a buyer network of churches, venues and event companies. Demo, no signup.{% endblock %}
+{% block body_class %}page-pt page-lq{% endblock %}
+{% block head_extra %}
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="stylesheet" href="/static/site/platform-tools.css?v={{ now }}">
+{% endblock %}
+
+{% block content %}
+{% set current = "liquidators" %}
+{% include "_platform_nav.html" %}
+
+<section class="lq-hero" id="lq-hero" aria-labelledby="lq-title">
+  <div class="lq-hero-words">
+    <h1 class="lq-title" id="lq-title">
+      Find failing businesses before anyone else.
+      <span class="lq-title-sell">Sell the lots to buyers who are waiting.</span>
+    </h1>
+    <p class="lq-lede">
+      One desk for a liquidation company: new bankruptcy filings and surplus auctions in one feed,
+      and a buyer network of churches, venues and event companies on the other side.
+    </p>
+    <div class="lq-cta">
+      <a class="btn btn-primary" href="#lq-access">REQUEST ACCESS</a>
+      <a class="btn btn-ghost" href="/platform/deals">SEE THE DEAL FEED</a>
+    </div>
+    <p class="lq-hero-foot">Read-only demo. No signup, no price list yet.</p>
+  </div>
+
+  {# the one bold element: a sample docket. Server-rendered from the invented fixture, labelled. #}
+  <aside class="lq-docket" aria-labelledby="lq-docket-title">
+    <div class="lq-docket-head">
+      <span id="lq-docket-title">New filings</span>
+      <span class="pt-chip pt-chip--sample">Sample data, invented</span>
+    </div>
+    <ol class="lq-docket-list">
+      {% for f in sample_filings[:5] %}
+      <li class="lq-docket-row">
+        <span class="lq-docket-case">{{ f.case_no }}</span>
+        <span class="lq-docket-assets">${{ "{:,}".format(f.est_assets) }} assets</span>
+        <span class="lq-docket-name">{{ f.debtor }}</span>
+        <span class="lq-docket-when">{{ f.filed }}</span>
+        <span class="lq-docket-meta">Ch. {{ f.chapter }} · {{ f.industry }} · {{ f.city }}, {{ f.state }} · <span class="lq-docket-signal">{{ f.signal }}</span></span>
+      </li>
+      {% endfor %}
+    </ol>
+    <a class="lq-docket-more" href="/platform/bankruptcies">Open the sample table</a>
+  </aside>
+</section>
+
+<section class="lq-tracks" id="lq-tracks" aria-label="What it does">
+  <div class="lq-track lq-track--find">
+    <p class="lq-track-kicker">Lead side</p>
+    <h2 class="lq-h2">Know the day a business files.</h2>
+    <p class="lq-track-lede">
+      Bankruptcy petitions, trustee sales and surplus auctions, watched for you and filtered down to the asset classes you buy.
+    </p>
+    <dl class="lq-list">
+      <div>
+        <dt>New filings, by state and chapter</dt>
+        <dd>Chapter 7 and 11 petitions with the industry, the court and the first estimate of assets. <span class="pt-chip pt-chip--soon">Planned</span></dd>
+      </div>
+      <div>
+        <dt>Surplus auctions, every site in one feed</dt>
+        <dd>GovDeals, AllSurplus, GSA and Purple Wave today; more sites as adapters land. Filter by category, state, bids and close time. <span class="pt-chip pt-chip--on">Built</span></dd>
+      </div>
+      <div>
+        <dt>Asset-class alerts</dt>
+        <dd>Tell it "banquet chairs, 500 or more, Southeast" and get the filing or lot the day it appears. <span class="pt-chip pt-chip--part">Partly built</span></dd>
+      </div>
+      <div>
+        <dt>Plain-English search</dt>
+        <dd>"Hotels in Georgia that filed this month with ballroom furniture." Not built yet. <span class="pt-chip pt-chip--soon">Coming</span></dd>
+      </div>
+    </dl>
+  </div>
+  <div class="lq-track lq-track--sell">
+    <p class="lq-track-kicker">Sell side</p>
+    <h2 class="lq-h2">Sell the lot to our buyer network.</h2>
+    <p class="lq-track-lede">
+      Churches, venues and event companies buy seating, tables and kitchen equipment in bulk. We keep that list and the conversations in one place.
+    </p>
+    <dl class="lq-list">
+      <div>
+        <dt>Buyer network</dt>
+        <dd>Churches, banquet halls, schools and event rental companies, with what each one asked for and where they are. <span class="pt-chip pt-chip--part">Partly built</span></dd>
+      </div>
+      <div>
+        <dt>List once, everywhere</dt>
+        <dd>One lot goes to the storefront, the Facebook and Google catalogs, Craigslist and eBay, and comes down when it sells. <span class="pt-chip pt-chip--part">Partly built</span></dd>
+      </div>
+      <div>
+        <dt>Buyers near the lot</dt>
+        <dd>A map of past buyers within driving range of each lot, so the first message goes to the right people. <span class="pt-chip pt-chip--on">Built</span></dd>
+      </div>
+      <div>
+        <dt>Freight and deposits</dt>
+        <dd>A freight estimate on the listing and a deposit link, so a far-away buyer can commit. <span class="pt-chip pt-chip--on">Built</span></dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<section class="lq-how" id="lq-how" aria-labelledby="lq-how-title">
+  <div class="lq-how-head">
+    <h2 class="lq-h2" id="lq-how-title">How it works</h2>
+    <p class="lq-how-lede">The same loop we run for our own chair lots, opened up for other liquidators.</p>
+  </div>
+  <ol class="lq-steps">
+    <li class="lq-step">
+      <h3>Watch</h3>
+      <p>Filings and auctions come in from the courts and the auction sites you choose.</p>
+      <span class="pt-chip pt-chip--part">Auctions built, filings planned</span>
+    </li>
+    <li class="lq-step">
+      <h3>Match</h3>
+      <p>Each one is scored against the asset classes, states and lot sizes you buy.</p>
+      <span class="pt-chip pt-chip--part">Partly built</span>
+    </li>
+    <li class="lq-step">
+      <h3>Bid or buy</h3>
+      <p>Landed cost per unit before you bid: price, premium, freight.</p>
+      <span class="pt-chip pt-chip--on">Built</span>
+    </li>
+    <li class="lq-step">
+      <h3>List</h3>
+      <p>One listing goes out to every channel and comes down when the lot sells.</p>
+      <span class="pt-chip pt-chip--part">Partly built</span>
+    </li>
+    <li class="lq-step">
+      <h3>Sell</h3>
+      <p>Buyers near the lot get the first message; every reply lands in one inbox.</p>
+      <span class="pt-chip pt-chip--part">Partly built</span>
+    </li>
+  </ol>
+</section>
+
+<section class="lq-sample" id="lq-sample" aria-labelledby="lq-sample-title">
+  <div class="lq-sample-head">
+    <h2 class="lq-h2" id="lq-sample-title">What a lead looks like</h2>
+    <span class="pt-chip pt-chip--sample">Sample data, invented</span>
+  </div>
+  <table class="pt-table">
+    <thead>
+      <tr>
+        <th scope="col">Debtor</th>
+        <th scope="col">Chapter</th>
+        <th scope="col">Industry</th>
+        <th scope="col">Where</th>
+        <th scope="col">Filed</th>
+        <th scope="col" class="num">Est. assets</th>
+        <th scope="col">Signal</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for f in sample_filings %}
+      <tr>
+        <td class="pt-c-main"><span class="pt-row-main">{{ f.debtor }}</span><span class="pt-row-sub">{{ f.asset_classes[:2] | join(" · ") }}</span></td>
+        <td class="mono" data-label="Chapter">{{ f.chapter }}</td>
+        <td data-label="Industry">{{ f.industry }}</td>
+        <td data-label="Where">{{ f.city }}, {{ f.state }}</td>
+        <td class="mono" data-label="Filed">{{ f.filed }}</td>
+        <td class="num" data-label="Est. assets">${{ "{:,}".format(f.est_assets) }}</td>
+        <td data-label="Signal">{{ f.signal }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="lq-sample-foot">
+    <span>Every name, case number and amount above is made up. The live table will read court filings; none are connected yet.</span>
+    <a href="/platform/bankruptcies">Search the sample table</a>
+  </div>
+</section>
+
+<p class="lq-status" id="lq-status">
+  <span><span class="pt-chip pt-chip--on">Built</span>Deal feed, freight estimates, buyer map.</span>
+  <span><span class="pt-chip pt-chip--part">Partly built</span>Listings, buyer CRM, asset-class alerts.</span>
+  <span><span class="pt-chip pt-chip--soon">Planned</span>Bankruptcy filings, plain-English search.</span>
+</p>
+
+<section class="contact lq-access" id="lq-access">
+  <div class="contact-grid">
+    <div>
+      <div class="section-rule"></div>
+      <h2 class="section-title">REQUEST ACCESS</h2>
+      <p class="contact-lede">Run a liquidation business? Tell me what you buy and where you sell it.</p>
+      <p class="lq-access-note">There is no price list yet. The reply comes by email.</p>
+    </div>
+    <form class="manifest-form" id="lq-access-form" novalidate>
+      <div class="mf-row mf-row--two">
+        <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+        <label><span>EMAIL</span><input name="email" type="email" required autocomplete="email"></label>
+      </div>
+      <div class="mf-row mf-row--two">
+        <label><span>COMPANY</span><input name="company" autocomplete="organization"></label>
+        <label>
+          <span>I WANT TO</span>
+          <select name="interest">
+            <option value="find">Find distressed businesses first</option>
+            <option value="sell">Sell lots to the buyer network</option>
+            <option value="both">Both</option>
+            <option value="other">Something else</option>
+          </select>
+        </label>
+      </div>
+      <label class="mf-row"><span>WHAT DO YOU BUY, AND WHERE DO YOU SELL IT?</span>
+        <textarea name="note" rows="4" placeholder="Asset classes, states, lots a month, which marketplaces you post on."></textarea>
+      </label>
+      <button type="submit" class="btn btn-primary">REQUEST ACCESS</button>
+      <div class="mf-result" hidden></div>
+    </form>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/liquidators.js?v={{ now }}"></script>
+{% endblock %}

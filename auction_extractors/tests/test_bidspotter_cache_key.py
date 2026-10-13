@@ -25,6 +25,13 @@ def test_existing_patterns_unchanged():
         "https://www.publicsurplus.com/sms/auction/view?auc=4020144") == "ps:4020144"
 
 
+def test_txauction_url_maps_to_tx_prefixed_lot_id():
+    # rows written by deals/listings_bridge.py; the slugged and bare lot URLs key the same
+    assert extract_asset_id(
+        "https://www.txauction.com/auctions/31431/lot/57702-lot-11") == "tx:57702"
+    assert extract_asset_id("https://www.txauction.com/auctions/31431/lot/57702") == "tx:57702"
+
+
 def test_garbage_still_uncacheable():
     assert extract_asset_id("") == ""
     assert extract_asset_id("https://example.com/lot-123") == ""

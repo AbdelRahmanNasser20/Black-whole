@@ -1,7 +1,7 @@
 # deals/cli.py
 import argparse
 import os
-from datetime import datetime
+from datetime import date, datetime
 from deals import sites
 from deals import profiles as _profiles
 from deals.discover import run_discovery
@@ -34,6 +34,14 @@ def sweep_categories(arg: str | None, env: dict) -> list[str]:
     if raw.strip():
         return [c.strip() for c in raw.split(",") if c.strip()]
     return DEFAULT_CATEGORIES
+
+# Sites whose adapter actually filters by a native category id (the maestro
+# API). Every other adapter ignores `category_ids`, so sweeping it once per id
+# would just repeat the same search N times.
+CATEGORY_SITES = ("govdeals", "allsurplus")
+
+def site_categories(site: str, cats: list[str]) -> list[str]:
+    return cats if site in CATEGORY_SITES else [""]
 
 def profile_arg(p):
     """--profile <slug>: a research_profiles row (deals/profiles.py). Unset
@@ -102,17 +110,47 @@ def main():
     rawa.add_argument("--no-null", action="store_true",
                     help="export and verify only; leave raw in place")
     wo = sub.add_parser("watch-once"); profile_arg(wo)
+    wo.add_argument("--site", default="govdeals", choices=list(sites.SITES),
+                    help="poll one site's due lots (default govdeals — the 20-min Render cron)")
+    ma = sub.add_parser("mirror-auctions",
+                        help="copy a foreign site's live profile-matching deal_lots into "
+                             "auction_listings (the Auctions tab's table)")
+    ma.add_argument("--site", default="txauction", choices=list(sites.SITES))
+    ma.add_argument("--dry-run", action="store_true", help="print the rows, write nothing, no LLM")
+    profile_arg(ma)
     sub.add_parser("backfill-outcomes")
     sub.add_parser("analyze")
     dg = sub.add_parser("digest"); profile_arg(dg)
     sub.add_parser("rank")
     sub.add_parser("saved-search-alerts",
                    help="run the saved-search alert sweep once (manual test path)")
+    ds = sub.add_parser("distress-sync",
+                        help="bankruptcy (CourtListener) + WARN closure leads → distress_cases")
+    ds.add_argument("--since", default=None, help="filed_after YYYY-MM-DD (default: 30 days ago)")
+    ds.add_argument("--dry-run", action="store_true",
+                    help="print the rows it would upsert; never writes the DB or Telegram")
+    ds.add_argument("--no-warn", action="store_true", help="skip the laborcurrent WARN feed")
+    ds.add_argument("--max-docket-entries", type=int, default=0,
+                    help="scan up to N dockets' entries for sale notices (needs COURTLISTENER_TOKEN)")
+    ds.add_argument("--max-pages", type=int, default=5, help="search pages (20 hits each)")
+    ds.add_argument("--no-petitions", action="store_true",
+                    help="skip petition PDF downloads (NAICS / ZIP enrichment)")
     sub.add_parser("init-schema")
+    ch = sub.add_parser("chairs",
+                        help="operator chairs feed: live seating lots with qty >= N, every source, ranked $/chair")
+    ch.add_argument("--min-qty", type=int, default=50)
+    ch.add_argument("--site", default=None, help="one source (govdeals, gsa, purple_wave, ...)")
+    ch.add_argument("--state", default=None, help="two-letter state")
+    ch.add_argument("--ending", type=float, default=None, help="only lots closing within N hours")
+    ch.add_argument("--sort", default="unit_bid", choices=["unit_bid", "ends", "quantity", "bid"])
+    ch.add_argument("--limit", type=int, default=None, help="print at most N rows")
+    ch.add_argument("--json", action="store_true", help="JSON instead of a table")
     a = ap.parse_args()
+    if a.cmd == "chairs":       # read-only; dispatched before the GovDeals adapter (its --site is any source)
+        return run_chairs(a)
     prof = resolve_profile(getattr(a, "profile", None))
     pw = _profiles.deal_lots_where(prof) if prof else None
-    # non-discover commands are GovDeals-only for now; discover picks per --site
+    # discover / watch-once / mirror-auctions pick per --site; the rest are GovDeals-only
     adapter = sites.get_adapter(getattr(a, "site", None) or "govdeals") \
         if getattr(a, "site", "govdeals") != "all" else None
     if a.cmd == "init-schema":
@@ -137,7 +175,8 @@ def main():
                         break
                 print(f"[dry-run] {key}: {n} lot(s), nothing written")
                 continue
-            rep = run_discovery(sites.get_adapter(key), categories=cats, max_pages=a.max_pages,
+            rep = run_discovery(sites.get_adapter(key), categories=site_categories(key, cats),
+                                max_pages=a.max_pages,
                                 archive_predicate=pred)
             print(f"[{key}] {rep}" if a.site == "all" else rep)
     elif a.cmd == "archive-active":
@@ -205,7 +244,10 @@ def main():
         print(run_archive_raw(limit=a.limit, lag_hours=a.lag_hours,
                               null_after=not a.no_null))
     elif a.cmd == "watch-once":
-        print(poll_once(adapter, datetime.now().astimezone(), extra_where=pw))
+        print(poll_once(adapter, datetime.now().astimezone(), extra_where=pw, site=a.site))
+    elif a.cmd == "mirror-auctions":
+        from deals.listings_bridge import mirror
+        print(mirror(a.site, prof or _profiles.resolve(None), dry_run=a.dry_run))
     elif a.cmd == "backfill-outcomes":
         from deals.backfill import run_backfill
         print(f"closed {run_backfill()} lots")
@@ -221,6 +263,49 @@ def main():
     elif a.cmd == "saved-search-alerts":
         from deals.saved_search_alerts import run_saved_search_alerts
         print(f"sent {run_saved_search_alerts()} alert(s)")
+    elif a.cmd == "distress-sync":
+        from deals import distress
+        since = date.fromisoformat(a.since) if a.since else None
+        try:
+            print(distress.run_sync(since=since, dry_run=a.dry_run, warn=not a.no_warn,
+                                    max_docket_entries=a.max_docket_entries, max_pages=a.max_pages,
+                                    petitions=not a.no_petitions))
+        except distress.DistressUnavailable as e:
+            raise SystemExit(f"distress-sync failed: {e}")
+
+def run_chairs(a, out=None) -> int:
+    """`deals.cli chairs` — twin of GET /api/deals/chairs (same chairs_feed.fetch)."""
+    import json
+    import sys
+    from automation.web import chairs_feed, deals_sources
+    out = out or sys.stdout
+    if a.site and a.site not in deals_sources.SITES:
+        raise SystemExit(f"unknown site {a.site!r}; one of {sorted(deals_sources.SITES)}")
+    res = chairs_feed.fetch(min_qty=a.min_qty, site=a.site, state=a.state,
+                            ending_within=a.ending, sort=a.sort)
+    rows = res["rows"][:a.limit] if a.limit else res["rows"]
+    if a.json:
+        json.dump({**res, "rows": rows}, out, default=str, indent=2)
+        out.write("\n")
+        return 0
+
+    def money(v):
+        return "—" if v is None else f"${float(v):,.2f}"
+
+    for e in res["errors"]:
+        out.write(f"WARNING {e}\n")
+    out.write(f"{res['total']} live seating lot(s) with qty >= {res['min_qty']} "
+              f"(sort {res['sort']}): {res['sites']}\n")
+    for i, r in enumerate(rows, 1):
+        end = r["end_utc"].isoformat(timespec="minutes") if r["end_utc"] else "?"
+        place = ", ".join(x for x in (r["city"], r["state"]) if x) or "?"
+        pick = " *" if r["operator_pick"] else ""
+        out.write(f"{i:>3}. {money(r['unit_bid']):>9}/ea  qty {r['quantity'] or '?':>5} "
+                  f"({r['quantity_source']})  bid {money(r['current_bid'])} x{r['bid_count'] or 0}  "
+                  f"ends {end}  [{r['source']}] {place}{pick}\n"
+                  f"      {r['title']}\n      {r['url'] or ''}\n")
+    return 0
+
 
 if __name__ == "__main__":
     main()

@@ -7,7 +7,7 @@
 {% from "_ui/macros.html" import skeleton_cards %}
 {% block title %}Surplus Radar — live government surplus lots{% endblock %}
 {% block head %}
-<meta name="description" content="Live GovDeals lots with quantity-aware $/unit, landed cost, and recorded outcomes. A side project by Black Whole.">
+<meta name="description" content="Live government surplus lots from GovDeals, GSA Auctions, Purple Wave and more, with quantity-aware $/unit and recorded outcomes. A side project by Black Whole.">
 <meta name="robots" content="noindex,nofollow">
 <link rel="stylesheet" href="/static/deals/feed.css?v={{ asset_v }}">
 <link rel="stylesheet" href="/static/deals/map.css?v={{ asset_v }}">
@@ -37,7 +37,7 @@
       <button class="seg-btn" type="button" data-value="0">No bids</button>
       <button class="seg-btn" type="button" data-value="3">≤ 3</button>
     </div>
-    <p class="hint">Live bid counts from GovDeals.</p>
+    <p class="hint">Live bid counts from each site. Sites that publish no count never match a bids filter.</p>
   </div>
   <div class="rail-group">
     <label class="rail-group-title" for="feed-ending">Ending</label>
@@ -78,7 +78,7 @@
   <summary><span class="feed-about-kicker">What this is</span> <span class="feed-about-title">Government surplus, priced by the unit.</span></summary>
   <div class="feed-about-body">
     <div class="feed-about-copy">
-      <p>Surplus Radar sweeps every live GovDeals auction every six hours, follows each lot to its close, and records how it ended — the no-bids, the $1 wins, the final prices GovDeals itself never publishes.</p>
+      <p>Surplus Radar sweeps every live GovDeals auction every six hours, follows each lot to its close, and records how it ended — the no-bids, the $1 wins, the final prices GovDeals itself never publishes. Lots from GSA Auctions, Purple Wave, AllSurplus (US only) and other public surplus sites ride along from the same recorder.</p>
       <p>It reads the quantity out of the listing text so a "Lot of (286) HP EliteOne" is priced per machine, not per lot, and adds buyer premium so the number you see is what you'd actually pay.</p>
       <ol class="feed-how">
         <li><b>Sweep</b> the whole site through the public search API, every 6 h</li>
@@ -109,6 +109,7 @@
     <option value="bids:desc">Most bids</option>
   </select>
   <select class="select" id="feed-state" aria-label="State"><option value="">All states</option></select>
+  <select class="select" id="feed-site" aria-label="Site"><option value="">All sites</option></select>
   <button class="btn btn-ghost btn-small" type="button" id="feed-view-toggle" aria-pressed="false">Map</button>
   <span class="result-count" id="feed-count" aria-live="polite"></span>
 </div>
@@ -124,7 +125,7 @@
 
 {% block footer %}
 <footer class="footer feed-footer">
-  <p class="footer-note">Surplus Radar aggregates public GovDeals listings and is not affiliated with GovDeals or any agency. Photos stay on GovDeals.</p>
+  <p class="footer-note">Surplus Radar aggregates public surplus listings (GovDeals, GSA Auctions, Purple Wave, AllSurplus and others) and is not affiliated with any of those sites or any agency. Photos stay on the source site.</p>
   <p class="footer-note">© 2026 Black Whole</p>
 </footer>
 {% endblock %}

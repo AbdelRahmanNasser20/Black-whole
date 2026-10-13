@@ -79,9 +79,13 @@ from .. import attribution
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
 from . import deals_query
+from . import deals_sources
+from . import platform_api
 from . import public_deals
+from . import chairs_feed
 from . import rate_limit
 from . import public_map
+from . import public_distress
 from . import seo_copy
 from . import city_pages
 from . import auth as auth_svc
@@ -99,10 +103,13 @@ try:
     # identical to the old SQLite path — only the data source changed.
     from ..auctions_supabase import (
         browse_listings, get_top_chairs, get_top_lots, cache_stats as _auctions_cache_stats,
+        source_of_link, SOURCES as AUCTION_SOURCES,
     )
 except Exception:  # pragma: no cover
     get_top_chairs = None  # unavailable; /api/auctions will 503
     get_top_lots = None
+    source_of_link = None
+    AUCTION_SOURCES = ("all", "gd", "ps", "bs", "tx")
     browse_listings = None
     _auctions_cache_stats = None
 
@@ -123,6 +130,8 @@ templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per proce
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
+from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
+app.include_router(_ebay_deletion_router)
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
@@ -172,7 +181,7 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
 
 # Paths whose 404 is never a buyer on a dead lot link: assets, JSON APIs,
 # feeds, the local-photo fallback. They keep FastAPI's default response.
-_NON_STOREFRONT_PREFIXES = ("/api/", "/static/", "/deals/api/", "/map/api/",
+_NON_STOREFRONT_PREFIXES = ("/api/", "/static/", "/deals/api/", "/distress/api/", "/map/api/",
                             "/catalog/", "/image/", "/stripe/")
 
 
@@ -1211,6 +1220,32 @@ async def list_deals(
     }
 
 
+@app.get("/api/deals/chairs")
+@readcache.cached()
+def deals_chairs(
+    min_qty: int = chairs_feed.DEFAULT_MIN_QTY,
+    site: str | None = None,
+    state: str | None = None,
+    ending: float | None = None,
+    sort: str = "unit_bid",
+):
+    """Operator-only Chairs feed: every live seating lot with quantity >=
+    `min_qty` across every live source, ranked by $/chair (`unit_bid`
+    ascending, NULLs last, ties by soonest end). The exact inverse of the
+    public /deals seating exclusion — never expose it under /deals."""
+    if site and site not in deals_sources.SITES:
+        raise HTTPException(400, f"unknown site; one of {sorted(deals_sources.SITES)}")
+    if sort not in chairs_feed.SORTS:
+        raise HTTPException(400, f"sort must be one of {list(chairs_feed.SORTS)}")
+    try:
+        out = chairs_feed.fetch(min_qty=min_qty, site=site or None, state=state or None,
+                                ending_within=ending, sort=sort)
+    except Exception as e:  # both halves failed
+        raise HTTPException(503, f"chairs feed failed: {e!r}")
+    out["site_names"] = deals_sources.SITES
+    return out
+
+
 @app.get("/api/deals/geo")
 async def deals_geo(
     q: str | None = None,
@@ -1288,6 +1323,14 @@ async def geo_zip(zip: str):
 _PUBLIC_STATUSES = ("active", "closed", "all")
 
 
+def _public_site(site: str | None) -> str | None:
+    """`site` filter: a known recorder source key, or 400. Empty = every site."""
+    site = (site or "").strip().lower() or None
+    if site is not None and site not in deals_sources.SITES:
+        raise HTTPException(400, "site must be one of " + ", ".join(deals_sources.SITES))
+    return site
+
+
 @app.get("/deals", response_class=HTMLResponse)
 async def public_deals_page(request: Request):
     return templates.TemplateResponse(request, "deals_public.html", {
@@ -1300,17 +1343,18 @@ async def public_deals_lots(
     q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None,
-    max_price: float | None = None, bbox: str | None = None,
+    max_price: float | None = None, bbox: str | None = None, site: str | None = None,
     sort: str = "ends", dir: str | None = None, page: int = 1, per_page: int = 25,
 ):
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
+    site = _public_site(site)
     try:
         return await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
-            sort=sort, dir=dir, page=page, per_page=per_page)
+            site=site, sort=sort, dir=dir, page=page, per_page=per_page)
     except HTTPException:
         raise
     except Exception as e:
@@ -1322,14 +1366,16 @@ async def public_deals_pins(
     q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None, max_price: float | None = None,
+    site: str | None = None,
 ):
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
+    site = _public_site(site)
     try:
         return await asyncio.to_thread(
             public_deals.fetch_pins, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
-            min_price=min_price, max_price=max_price)
+            min_price=min_price, max_price=max_price, site=site)
     except Exception as e:
         raise HTTPException(503, f"pins query failed: {e!r}")
 
@@ -1340,6 +1386,77 @@ async def public_deals_facets():
         return await asyncio.to_thread(public_deals.fetch_facets)
     except Exception as e:
         raise HTTPException(503, f"facets query failed: {e!r}")
+
+
+# ── Distress cases — bankruptcy + WARN closure leads (page: /platform/bankruptcies) ──
+# Read model + the public/operator column split: automation/web/public_distress.py.
+# Public JSON lives under /distress/api/ (outside the auth-walled /api/ prefix)
+# and never carries trustee / attorney / party contacts; /api/distress/cases
+# (session-gated) does. Writer: `python -m deals.cli distress-sync`.
+
+def _distress_args(tab, chapter, source, industry, radius_mi):
+    from deals.distress import INDUSTRY_TAGS
+    if tab not in public_distress.TABS:
+        raise HTTPException(400, "tab must be leads|sales")
+    if chapter and chapter not in public_distress.CHAPTERS:
+        raise HTTPException(400, "chapter must be 7|11")
+    if source and source not in public_distress.SOURCES:
+        raise HTTPException(400, "source must be courtlistener|warn")
+    if industry and industry not in INDUSTRY_TAGS:
+        raise HTTPException(400, f"industry must be one of {','.join(INDUSTRY_TAGS)}")
+    if radius_mi is not None and not (0 < radius_mi <= 1000):
+        raise HTTPException(400, "radius_mi must be 1-1000")
+
+
+def _distress_page(admin: bool, **kw) -> dict:
+    _distress_args(kw["tab"], kw["chapter"], kw["source"], kw["industry"], kw["radius_mi"])
+    try:
+        return public_distress.fetch_page(admin=admin, **kw)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(503, f"distress query failed: {e!r}")
+
+
+@app.get("/distress")
+async def public_distress_page(request: Request):
+    """One bankruptcies page: /platform/bankruptcies reads /distress/api/*. Old links land there."""
+    return RedirectResponse("/platform/bankruptcies", status_code=302)
+
+
+@app.get("/distress/api/cases")
+@readcache.cached(ttl=60)
+def public_distress_cases(
+    q: str | None = None, industry: str | None = None, state: str | None = None,
+    chapter: str | None = None, source: str | None = None, tab: str = "leads",
+    near: str | None = None, radius_mi: float | None = None,
+    sort: str = "filed", dir: str | None = None, page: int = 1, per_page: int = 25,
+):
+    return _distress_page(False, q=q, industry=industry, state=state, chapter=chapter, source=source,
+                          tab=tab, near=near, radius_mi=radius_mi, sort=sort, dir=dir,
+                          page=page, per_page=per_page)
+
+
+@app.get("/distress/api/facets")
+def public_distress_facets():
+    try:
+        return public_distress.fetch_facets()
+    except Exception as e:
+        raise HTTPException(503, f"distress facets failed: {e!r}")
+
+
+@app.get("/api/distress/cases")
+@readcache.cached(ttl=30)
+def admin_distress_cases(
+    q: str | None = None, industry: str | None = None, state: str | None = None,
+    chapter: str | None = None, source: str | None = None, tab: str = "leads",
+    near: str | None = None, radius_mi: float | None = None,
+    sort: str = "filed", dir: str | None = None, page: int = 1, per_page: int = 25,
+):
+    """Operator view: same filters + trustee, attorneys, parties, ZIP."""
+    return _distress_page(True, q=q, industry=industry, state=state, chapter=chapter, source=source,
+                          tab=tab, near=near, radius_mi=radius_mi, sort=sort, dir=dir,
+                          page=page, per_page=per_page)
 
 
 @app.get("/sources", response_class=HTMLResponse)
@@ -1861,6 +1978,169 @@ def archive_lot_analyze(source: str, asset_id: int, account_id: int, auction_id:
 async def public_sell(request: Request):
     return templates.TemplateResponse(
         request, "sell.html", _public_ctx({}),
+    )
+
+
+@app.get("/platform", response_class=HTMLResponse)
+def public_platform(request: Request):
+    """The software behind the store, with a read-only demo (templates/platform.html).
+
+    Deliberately unlinked: chair buyers should not land on a software pitch, so
+    this is not in the storefront nav or the sitemap and the page is `noindex`.
+    The handler reads nothing — the Deal finder tab calls the existing public
+    `/deals/api/*` endpoints from the browser (policy: public_deals.py), the
+    other two tabs load invented sample JSON from `static/site/platform/`, and
+    the request-access form posts to the existing `/contact`.
+    """
+    return templates.TemplateResponse(
+        request, "platform.html",
+        _public_ctx({"platform_sources": list(_PLATFORM_SOURCE_NAMES.values())}),
+    )
+
+
+# Auction sites the recorder knows, in display order. The page renders these
+# names with no DB read; /platform/api/sources adds the live numbers.
+_PLATFORM_SOURCE_NAMES = {
+    "govdeals": "GovDeals",
+    "allsurplus": "AllSurplus",
+    "gsa": "GSA Auctions",
+    "purple_wave": "Purple Wave",
+    "public_surplus": "Public Surplus",
+    "municibid": "Municibid",
+    "mibid": "MiBid",
+}
+_PLATFORM_SOURCES_TTL = 300        # seconds; one grouped read per 5 min, not per page view
+_PLATFORM_LIVE_WINDOW_H = 24
+
+
+@readcache.cached(ttl=_PLATFORM_SOURCES_TTL)
+def _platform_source_rows() -> list[dict]:
+    """One grouped read of `listing_snapshots`. Raises on failure, so a failed
+    read is never memoised (readcache stores return values only)."""
+    return db.fetch_all(
+        "SELECT source, count(DISTINCT source_lot_id) AS lots, max(observed_at) AS last_seen "
+        "FROM listing_snapshots GROUP BY source"
+    )
+
+
+@app.get("/platform/api/sources")
+def public_platform_sources():
+    """Auction sites tracked, for the strip under the /platform hero. Public and
+    read-only (deliberately not under the auth-walled `/api/`). A site is `live`
+    when the recorder observed it in the last 24 hours; anything else is shown
+    as paused. A failed read answers names only — never error text."""
+    names = dict(_PLATFORM_SOURCE_NAMES)
+    try:
+        rows = {r["source"]: r for r in _platform_source_rows()}
+    except Exception:
+        log.warning("platform sources read failed", exc_info=True)
+        return {"ok": False, "sources": [{"key": k, "name": n} for k, n in names.items()]}
+    for key in rows:
+        names.setdefault(key, str(key).replace("_", " ").title())
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    out = []
+    for key, name in names.items():
+        row = rows.get(key) or {}
+        seen = row.get("last_seen")
+        if seen is not None and seen.tzinfo is None:
+            seen = seen.replace(tzinfo=timezone.utc)
+        live = bool(seen and now - seen <= timedelta(hours=_PLATFORM_LIVE_WINDOW_H))
+        out.append({
+            "key": key, "name": name, "live": live,
+            "lots": int(row.get("lots") or 0),
+            "last_seen": seen.isoformat() if seen else None,
+        })
+    return {"ok": True, "tracked": len(out), "live": sum(1 for s in out if s["live"]), "sources": out}
+
+
+@app.get("/platform/api/sites")
+def public_platform_sites():
+    """Every auction site in scope: `live` / `paused` (an adapter exists) or
+    `planned` (roadmap, nothing scraped, `lots: null`). Public, read-only, shares
+    the memoised read behind /platform/api/sources. 503 when that read fails —
+    never a guessed status. Policy: platform_api.py."""
+    try:
+        return platform_api.sites(_platform_source_rows)
+    except Exception:
+        log.warning("platform sites read failed", exc_info=True)
+        return JSONResponse({"ok": False, "error": "unavailable"}, status_code=503)
+
+
+@app.get("/platform/api/auctions")
+def public_platform_auctions(
+    q: str | None = None, site: str | None = None, category: str | None = None,
+    state: str | None = None, status: str = "open", no_bids: str | None = None,
+    max_bid: str | None = None, ending: str | None = None, sort: str = "ending",
+    page: int = 1, per_page: int = 50,
+):
+    """One auctions view across every site the recorder observes. Public and
+    read-only (deliberately not under the auth-walled `/api/`); the read model,
+    its allow-list and the public_deals exclusions live in platform_api.py."""
+    return platform_api.auctions(
+        q=q, site=site, category=category, state=state, status=status, no_bids=no_bids,
+        max_bid=max_bid, ending=ending, sort=sort, page=page, per_page=per_page)
+
+
+# ── liquidator-facing pages (feat/liquidator-platform-ui) ─────────────────
+# Same stance as /platform: direct URL only (noindex, not in the nav, footer or
+# sitemap), handlers read nothing from the database. Every sample is labelled
+# as sample in the server-rendered HTML; plain-English search is only "coming".
+_BANKRUPTCY_SAMPLE_PATH = STATIC_DIR / "site" / "platform" / "bankruptcies.sample.json"
+
+
+def _bankruptcy_samples() -> list[dict]:
+    """The INVENTED bankruptcy fixture (static JSON, no DB). Read per call —
+    it is one small file and the pages that use it are not hot."""
+    try:
+        data = json.loads(_BANKRUPTCY_SAMPLE_PATH.read_text())
+        return list(data.get("filings") or [])
+    except (OSError, ValueError):
+        log.warning("bankruptcy sample fixture unreadable", exc_info=True)
+        return []
+
+
+def _platform_site_rows() -> list[dict]:
+    """Every site name the platform read model knows, with no DB read: the
+    adapter-backed ones (`live`/`paused` is decided in the browser from
+    /platform/api/sites) and the planned ones, which never show as scraped."""
+    rows = [{"key": k, "name": n, "kind": kind, "planned": False}
+            for k, (n, kind) in platform_api.SITES.items()]
+    rows += [{"key": k, "name": n, "kind": kind, "planned": True}
+             for k, (n, kind) in platform_api.PLANNED_SITES.items()]
+    return rows
+
+
+@app.get("/liquidators", response_class=HTMLResponse)
+def public_liquidators(request: Request):
+    """Landing page for liquidation companies: find distressed businesses first
+    (lead side) and sell lots to the buyer network (sell side). The sample
+    lead table is the invented fixture, rendered server-side and labelled."""
+    return templates.TemplateResponse(
+        request, "liquidators.html",
+        _public_ctx({"sample_filings": _bankruptcy_samples()[:6]}),
+    )
+
+
+@app.get("/platform/bankruptcies", response_class=HTMLResponse)
+def public_platform_bankruptcies(request: Request):
+    """THE bankruptcy / closure leads page. The browser reads /distress/api/cases
+    + /distress/api/facets (public columns only); on any API failure (503 =
+    migration 024 not applied) or an empty table it falls back to the invented
+    sample fixture and labels it. "Ask AI" is UI only. Handler reads nothing."""
+    return templates.TemplateResponse(
+        request, "platform_bankruptcies.html", _public_ctx({}),
+    )
+
+
+@app.get("/platform/deals", response_class=HTMLResponse)
+def public_platform_deals(request: Request):
+    """Unified deal feed across every auction site the recorder observes. The
+    browser reads the policy-gated /platform/api/auctions (+ /platform/api/sites
+    for each site's true status); the contract carries no photos (public_deals
+    policy) so none can render. Planned sites are named and labelled planned."""
+    return templates.TemplateResponse(
+        request, "platform_deals.html", _public_ctx({"sites": _platform_site_rows()}),
     )
 
 
@@ -3688,7 +3968,7 @@ _AUCTIONS_TTL = 600.0  # seconds
 
 @app.get("/api/auctions")
 async def list_auctions(
-    source: str = "gd",
+    source: str = "all",
     n: int = 15,
     min_qty: int | None = None,
     condition: int = 0,
@@ -3699,11 +3979,12 @@ async def list_auctions(
 ):
     """Top cached lots for a research profile (`profile=<slug>`; default =
     the default profile, i.e. chairs). Legacy `category=banquet|medical`
-    still works and maps onto a profile."""
+    still works and maps onto a profile. `source` defaults to `all` — the
+    Auctions tab shows one combined list with a source badge per card."""
     if get_top_lots is None:
         raise HTTPException(503, "auction_extractors package not available")
-    if source not in ("gd", "ps", "bs"):
-        raise HTTPException(400, "source must be 'gd', 'ps', or 'bs'")
+    if source not in AUCTION_SOURCES:
+        raise HTTPException(400, f"source must be one of {', '.join(AUCTION_SOURCES)}")
     # legacy sub-tab param → profile slug (banquet == default chairs profile)
     if not profile and category not in (None, "", "all"):
         if category not in ("banquet", "medical"):
@@ -3849,9 +4130,13 @@ def _asset_id_from_link(link: str) -> str:
     GovDeals: ``/asset/<a>/<b>`` → ``"<a>/<b>"``.
     PublicSurplus: ``?auc=<n>`` → ``"ps:<n>"``.
     BidSpotter: ``bidspotter.com/…/lot-<guid>`` → ``"bs:<guid>"``.
+    TXAuction: ``txauction.com/auctions/<a>/lot/<l>`` → ``"tx:<l>"``.
     """
     if not link:
         return ""
+    m = re.search(r"txauction\.com/auctions/\d+/lot/(\d+)", link)
+    if m:
+        return f"tx:{m.group(1)}"
     m = re.search(r"/asset/(\d+)/(\d+)", link)
     if m:
         return f"{m.group(1)}/{m.group(2)}"
@@ -4239,7 +4524,7 @@ def auctions_cache_stats():
 
 @app.get("/api/listings")
 async def list_raw_listings(
-    source: str = "all",           # 'all' | 'gd' | 'ps' | 'bs'
+    source: str = "all",           # 'all' | 'gd' | 'ps' | 'bs' | 'tx'
     q: str = "",                   # text search over title + description
     min_qty: int = 1,
     max_qty: int = 99999,
@@ -4267,14 +4552,8 @@ async def list_raw_listings(
         limit=limit, offset=offset,
     )
 
-    def _source_of(link: str) -> str:
-        if "govdeals.com" in link: return "gd"
-        if "publicsurplus.com" in link: return "ps"
-        if "bidspotter.com" in link: return "bs"
-        return "other"
-
     for r in rows:
-        r["source"] = _source_of(r.get("link") or "")
+        r["source"] = source_of_link(r.get("link") or "")
         # Truncate description so the network payload stays small.
         desc = r.get("description") or ""
         if len(desc) > 400:

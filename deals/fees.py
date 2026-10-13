@@ -26,3 +26,25 @@ def fee_model_from_env() -> FeeModel:
         tax_pct=float(os.getenv("DEALS_TAX_PCT", "0")),
         freight=float(os.getenv("DEALS_FREIGHT", "0")),
     )
+
+# Per-site buyer-premium defaults (deals/sites.py keys).
+SITE_BUYER_PREMIUM = {"govdeals": 0.125, "allsurplus": 0.125,
+                      "publicsurplus": 0.10}
+
+def fee_model_for_site(site: str, env: dict | None = None) -> FeeModel:
+    """FeeModel with the buyer premium picked per site.
+
+    Precedence: DEALS_BUYER_PREMIUM_PCT_<SITE> env var > an explicitly set
+    global DEALS_BUYER_PREMIUM_PCT > the SITE_BUYER_PREMIUM table > the
+    global 0.125 default. Tax/freight stay the global env knobs."""
+    env = env if env is not None else os.environ
+    premium = env.get(f"DEALS_BUYER_PREMIUM_PCT_{site.upper()}")
+    if premium is None:
+        premium = env.get("DEALS_BUYER_PREMIUM_PCT")
+    if premium is None:
+        premium = SITE_BUYER_PREMIUM.get(site, 0.125)
+    return FeeModel(
+        buyer_premium_pct=float(premium),
+        tax_pct=float(env.get("DEALS_TAX_PCT", "0")),
+        freight=float(env.get("DEALS_FREIGHT", "0")),
+    )

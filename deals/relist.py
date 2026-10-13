@@ -48,7 +48,7 @@ def scan_for_relists(now: datetime | None = None) -> int:
     now = now or datetime.now().astimezone()
     cats = _alert_categories()
     fresh = db.fetch_all("""SELECT asset_id, account_id, auction_id, title,
-               current_bid, canonical_category
+               current_bid, canonical_category, site, native_id
         FROM deal_lots WHERE relist_of IS NULL AND outcome IS NULL
           AND first_seen_at > %s""", (now - timedelta(days=2),))
     if not fresh:
