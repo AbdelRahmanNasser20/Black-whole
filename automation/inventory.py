@@ -477,8 +477,9 @@ def upsert_from_run(
     """Create/update an inventory row from a completed pipeline run.
 
     Preserves user-editable fields on update: `quantity_remaining`, `status`,
-    `price_per_chair` (if already set), `hero_image` (if already set), and any
-    stored FB/eBay URLs. A re-run should refresh metadata, not stomp edits.
+    `price_per_chair` (if already set), `hero_image` (if already set),
+    `description` (if already set: operator copy beats stale auction text), and
+    any stored FB/eBay URLs. A re-run should refresh metadata, not stomp edits.
 
     `hero_image_url` / `image_urls` are the durable Supabase Storage URLs
     (BLACKWHOLE-6). They REFRESH on each run (a re-upload may improve them) but
@@ -523,7 +524,7 @@ def upsert_from_run(
                     folder_path       = COALESCE(%s, folder_path),
                     sku               = COALESCE(%s, sku),
                     title             = COALESCE(%s, title),
-                    description       = COALESCE(%s, description),
+                    description       = COALESCE(NULLIF(description, ''), %s),
                     city              = COALESCE(%s, city),
                     state             = COALESCE(%s, state),
                     zip_code          = COALESCE(%s, zip_code),
