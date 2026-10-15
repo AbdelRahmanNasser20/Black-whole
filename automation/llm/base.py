@@ -60,7 +60,7 @@ Return EXACTLY this JSON (no prose, no markdown fences):
   "quantity": "integer as string, e.g. '299'",
   "chair_type": "short human phrase, e.g. 'Tan Metal Folding Chairs'",
   "chair_title": "short marketable product label, 2–5 words, e.g. 'Tan Metal Folding Chairs'. Used as BOTH the listing folder name and the listing body title — keep it concise and human. No quantity numbers.",
-  "description_text": "Faithfully summarize what the GovDeals page's product description actually says about the chairs (material, construction, color, dimensions, model, etc. — whatever the source mentions), AND include the condition the source describes. 2–4 short sentences max. Pull condition language directly from the source when present (e.g. 'used, good condition', 'shows visible wear', 'minor scuffs', 'like new'); if the source is silent on condition, write 'Used, good condition with normal wear from prior service.' Do NOT invent material/construction details that the source doesn't mention. Hard rules: no auction/bidding language ('bidders', 'place a bid', 'lot', 'as-is sale'); no meta-commentary ('details not available', 'inspect prior to bidding'); no marketing fluff; no emojis; no hedge words like 'typically' / 'generally'.",
+  "description_text": "Faithfully summarize what the GovDeals page's product description actually says about the chairs (material, construction, color, dimensions, model, etc. — whatever the source mentions), AND include the condition the source describes. 2–4 short sentences max. Pull condition language directly from the source when present (e.g. 'used, good condition', 'shows visible wear', 'minor scuffs', 'like new'); if the source is silent on condition, write 'Used, good condition with normal wear from prior service.' Do NOT invent material/construction details that the source doesn't mention. Hard rules: no auction/bidding language ('bidders', 'place a bid', 'lot', 'as-is sale'); no meta-commentary ('details not available', 'inspect prior to bidding'); no marketing fluff; no emojis; no hedge words like 'typically' / 'generally'; no prices at all and never bulk, volume, tiered or whole-lot pricing or discounts.",
   "dimensions": "e.g. '20\\" wide, 21\\" deep, 33\\" tall' or '' if not shown",
   "suggested_price_per_chair": 20,
   "style_suffix": "short marketing suffix for FB title, e.g. 'Bulk Lot - Local Pickup'",
@@ -87,5 +87,5 @@ Pricing guidance (USD, per chair, typical resale):
 - metal folding: 15
 - wood folding: 18
 - executive / office: 30
-Adjust up if quantity is small (<50), down if very large (>500).
+One plain per-chair price; never adjust it for quantity (no bulk/volume pricing).
 """

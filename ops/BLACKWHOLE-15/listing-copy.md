@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-15 — no bulk prices.** The tier/bulk-discount lines below break the operator's no-bulk-prices rule; never paste them. One plain per-chair price only (see `CLAUDE.md`).
+
 # BLACKWHOLE-15 — Listing copy (PHX lot 9006, Mauve Banquet Chairs)
 
 Grounded in the `inventory` row for lot `9006`. Pickup: **Phoenix, AZ**. Sell price: **$28/chair**.

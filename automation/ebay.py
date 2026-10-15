@@ -38,9 +38,6 @@ async def create_draft(
     # SKU is the GovDeals lot id verbatim — consistent with the inventory
     # ledger and easy to grep when tracking listings back to source.
     sku = lot_id or ""
-    qty_int = int(quantity) if quantity.isdigit() else 1
-    bulk_price = price_each * qty_int
-
     description_html = ebay_description(
         title=title,
         location=location,
@@ -48,7 +45,6 @@ async def create_draft(
         quantity=quantity,
         dimensions=dimensions,
         price_each=price_each,
-        bulk_price=bulk_price,
         description_text=description_text,
         city=city,
         state=state,

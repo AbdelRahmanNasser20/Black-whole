@@ -4,7 +4,12 @@ Both templates take an LLM-generated `description_text` (3–5 sentences of plai
 product prose) and surround it with our standard pickup-logistics boilerplate.
 The rendered string is persisted to `inventory.description` on each run so the
 public site can reuse whatever we posted on the marketplaces.
+
+HARD RULE (operator, 2026-10-15): one plain per-chair price, never a bulk /
+tiered / whole-lot price. Every rendered body passes
+`listing_copy.strip_bulk_pricing` on the way out.
 """
+from .listing_copy import strip_bulk_pricing
 
 FB_DESCRIPTION = """\
 {description_text}
@@ -36,11 +41,9 @@ and community centers.</p>
   <li><strong>Location:</strong> {location} (pickup required)</li>
   {dimensions_li}
 </ul>
-<h3>Pricing:</h3>
+<h3>Price:</h3>
 <ul>
-  <li>Individual: ${price_each} each</li>
-  <li><strong>Take ALL {quantity} for ${bulk_price}
-    (${bulk_price_per_chair}/chair)</strong></li>
+  <li>${price_each} per chair</li>
 </ul>
 <p>Message us for freight shipping quotes. Local pickup available.</p>
 """
@@ -143,17 +146,17 @@ def fb_description(
     text = description_text.strip() or _default_description(chair_type, quantity)
     dims_line = f"\n📏 Dimensions: {dims}" if dims else ""
     loc = _location_line(location, city, state, zip_code)
-    return FB_DESCRIPTION.format(
-        description_text=text,
+    return strip_bulk_pricing(FB_DESCRIPTION.format(
+        description_text=strip_bulk_pricing(text),
         location=loc,
         quantity=quantity,
         dimensions_line=dims_line,
-    )
+    ))
 
 
 def ebay_description(
     title: str, location: str, chair_type: str, quantity: str,
-    dimensions: str, price_each: int, bulk_price: int,
+    dimensions: str, price_each: int,
     description_text: str = "",
     city: str = "",
     state: str = "",
@@ -162,18 +165,14 @@ def ebay_description(
     dims_li = (
         f"<li><strong>Dimensions:</strong> {dimensions}</li>" if dimensions.strip() else ""
     )
-    qty_int = int(quantity) if quantity.isdigit() else 1
-    per_chair = round(bulk_price / max(qty_int, 1), 2)
     text = description_text.strip() or _default_description(chair_type, quantity)
     loc = _location_line(location, city, state, zip_code)
-    return EBAY_DESCRIPTION_HTML.format(
+    return strip_bulk_pricing(EBAY_DESCRIPTION_HTML.format(
         title=title,
-        description_text=text,
+        description_text=strip_bulk_pricing(text),
         location=loc,
         chair_type=chair_type,
         quantity=quantity,
         dimensions_li=dims_li,
         price_each=price_each,
-        bulk_price=bulk_price,
-        bulk_price_per_chair=per_chair,
-    )
+    ))

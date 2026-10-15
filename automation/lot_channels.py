@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import config  # noqa: F401  (loads .env)
-from . import db, inventory, listing_images, lot_images, lot_urls, progress
+from . import db, inventory, listing_copy, listing_images, lot_images, lot_urls, progress
 from .catalog_feed import FEED_COLUMNS, build_feed_rows, state_code
 from .channels import store as channel_store
 
@@ -209,7 +209,8 @@ def fb_description(*, blurb: str, city: str, state: str, quantity: int | None,
     `gd-{asset}-{account}` id pastes straight back into GovDeals."""
     st = state_code(state)
     public_key = slug or lot_id
-    lines = [blurb.strip(), ""]
+    # One plain per-unit price, never a bulk/tier price (operator, 2026-10-15).
+    lines = [listing_copy.strip_bulk_pricing(blurb).strip(), ""]
     lines.append(f"📍 Location: {city}, {st} (local pickup; delivery quotes on request)")
     if quantity:
         lines.append(f"📦 Quantity available: {quantity:,}")

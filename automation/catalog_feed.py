@@ -32,7 +32,7 @@ import io
 import os
 from collections.abc import Iterable
 
-from . import listing_images, lot_images, lot_urls
+from . import listing_copy, listing_images, lot_images, lot_urls
 from .config import PUBLIC_BASE_URL
 
 # Column order copied from Meta's template header, 2026-08-25.
@@ -155,7 +155,8 @@ def _image_link(row: dict) -> str | None:
 
 def _description(row: dict, title: str) -> str:
     """The lot's own description, else a clean fallback from structured fields."""
-    existing = _clean(row.get("description"))
+    # No bulk/tier price ever reaches Meta or Google (operator, 2026-10-15).
+    existing = _clean(listing_copy.strip_bulk_pricing(row.get("description")))
     if existing:
         return existing[:_DESC_MAX]
     loc = ", ".join(p for p in (_clean(row.get("city")), _clean(row.get("state"))) if p)

@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-15 — no bulk prices.** The tier/bulk-discount lines below break the operator's no-bulk-prices rule; never paste them. One plain per-chair price only (see `CLAUDE.md`).
+
 # BLACKWHOLE-17 — Listing copy (INV-001, 242 orange-red banquet chairs, Long Beach CA)
 
 All copy grounded in the `inventory` row for `folder:Orange_Red_Banquet_Chairs_Cypress_242`.

@@ -60,7 +60,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
-from .. import catalog_feed, google_feed, lot_channels
+from .. import catalog_feed, google_feed, listing_copy, lot_channels
 from .. import inventory
 from .. import lot_images
 from .. import lot_urls
@@ -854,6 +854,10 @@ def _decorate(row: dict) -> dict:
     row["is_sold"] = inventory.is_sold(row)
     # "CHAIR" on every card was fine until the Augusta round tables (2026-08-26).
     row["unit"] = lot_channels.unit_word(row).upper()
+    # One plain per-unit price on the site, never a bulk/tier price
+    # (operator, 2026-10-15) — covers the page body, meta description and JSON-LD.
+    if row.get("description"):
+        row["description"] = listing_copy.strip_bulk_pricing(row["description"])
     return row
 
 

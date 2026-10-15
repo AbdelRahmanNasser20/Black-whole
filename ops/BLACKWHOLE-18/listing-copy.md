@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-15 — no bulk prices.** The tier/bulk-discount lines below break the operator's no-bulk-prices rule; never paste them. One plain per-chair price only (see `CLAUDE.md`).
+
 # BLACKWHOLE-18 — Listing copy (INV-002, 68 chairs, Lockport IL)
 
 Pickup: **Lockport, IL 60441**. Suggested sell price: **$25/chair** (confirm — $1.79 is cost).
