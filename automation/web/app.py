@@ -69,6 +69,7 @@ from .. import favorites
 from .. import telegram_alerts
 from .. import deposits
 from .. import site_settings
+from .. import ebay_ads
 from .. import channels as channels_pkg
 from ..channels import store as channel_store
 from ..channels import sync as channel_sync
@@ -5151,6 +5152,31 @@ async def channels_sync_now():
         return await asyncio.to_thread(channel_sync.run_once)
     except Exception as e:  # noqa: BLE001 — surface, don't 500
         raise HTTPException(502, f"channel sync failed: {e!r}")
+
+
+@app.get("/api/channels/ebay")
+@readcache.cached()
+def channels_ebay(refresh: int = 0):
+    """Read-only eBay Promoted Listings view for the Channels tab: campaign state
+    (running / paused / not_eligible / …) with eBay's own reason, and one row per active
+    eBay listing with its lot, suggested rate, and current rate. eBay is called at most
+    once per EBAY_ADS_CACHE_SEC (ebay_ads.snapshot); `refresh=1` forces a re-read.
+    Writes nothing. Sync handler → FastAPI threadpool (blocking HTTP + DB)."""
+    snap = ebay_ads.snapshot(force=bool(refresh))
+    lots: dict[str, dict] = {}
+    try:
+        for row in inventory.list_all():
+            iid = ebay_ads.item_id_from_url(row.get("ebay_url"))
+            if iid:
+                lots[iid] = {"lot_id": row["lot_id"], "title": row.get("title"), "status": row.get("status")}
+    except Exception as e:  # noqa: BLE001 — the eBay view still renders without the lot join
+        print(f"[ebay] lot join failed: {e!r}")
+    listings = [{"item_id": r["id"], "title": r.get("title"), "price": r.get("price"),
+                 "qty": r.get("qty"), "suggested": r.get("suggested"), "current": r.get("now"),
+                 "want": r.get("want"), "lot": lots.get(r["id"])} for r in snap.get("rows", [])]
+    return {"state": snap["state"], "reason": snap.get("reason"), "cap": snap.get("cap"),
+            "campaign": snap.get("campaign"), "fetched_at": snap.get("fetched_at"),
+            "listings": listings}
 
 
 # ───────────────────────────── subscribers API ─────────────────────────────

@@ -926,6 +926,18 @@
     <span class="ch-hint">one row per lot, one cell per channel · hover a red cell for the error</span>
   </div>
   <div class="table-wrap ch-matrix" id="ch-matrix" data-state="loading">{{ skeleton_rows(6) }}</div>
+
+  {#- eBay Promoted Listings (plan 2026-10-13 Phase 4, Decision F: a section here, no new tab). READ-ONLY:
+      GET /api/channels/ebay (eBay read cached server-side, EBAY_ADS_CACHE_SEC) → campaign badge + eBay's reason +
+      one row per active eBay listing. Rates are only written by `scripts/ebay_ads.py apply --yes`. -#}
+  <div class="ch-head">
+    <h2>EBAY · PROMOTED LISTINGS</h2>
+    <span class="ch-ebay-badge" id="ch-ebay-badge" data-state="unknown">…</span>
+    <span class="ch-hint" id="ch-ebay-meta">read-only · suggested rate capped</span>
+    <button type="button" class="btn btn-small" id="ch-ebay-refresh" title="Re-read eBay now (otherwise cached 15 min)">↻ re-read eBay</button>
+  </div>
+  <p class="ch-ebay-reason" id="ch-ebay-reason" hidden></p>
+  <div class="table-wrap ch-ebay" id="ch-ebay" data-state="loading">{{ skeleton_rows(4) }}</div>
 </section>
 
 {#- ─────────────────────────── 12 Chairs (operator-only chairs feed) ─────────────────────────── -#}

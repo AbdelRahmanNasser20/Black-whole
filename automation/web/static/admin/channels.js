@@ -6,6 +6,9 @@
 //                  anything that is not a channel* / browser_channel* key)
 //   · queue      → POST  /api/channels/queue/{id}/approve | /reject
 //   · Sync now   → POST  /api/channels/sync (same pass the background loop runs; toasts its counts)
+// Plus a READ-ONLY eBay Promoted Listings section (GET /api/channels/ebay[?refresh=1]): campaign badge
+// RUNNING / PAUSED / NOT ELIGIBLE + eBay's own reason, one row per active eBay listing. It never writes a
+// rate — `scripts/ebay_ads.py apply --yes` does. The server caches the eBay read (EBAY_ADS_CACHE_SEC).
 //
 // What this UI deliberately does NOT do:
 //   · it never flips `channel_fb_marketplace_enabled` on its own — the red "OFF — waiting for
@@ -33,6 +36,7 @@ const STATE_CLASS = {
 
 const queueEl = () => $('#ch-queue');
 const matrixEl = () => $('#ch-matrix');
+const ebayEl = () => $('#ch-ebay');
 
 let last = null;          // the last GET /api/channels body (switches + queue + matrix + channels)
 
@@ -174,6 +178,83 @@ function renderMatrix(body) {
     </table>`;
 }
 
+// ───────── eBay Promoted Listings (read-only) ─────────
+
+const EBAY_BADGE = {
+  running: 'RUNNING', paused: 'PAUSED', not_eligible: 'NOT ELIGIBLE', no_campaign: 'NO CAMPAIGN',
+  not_configured: 'NOT CONNECTED', error: 'EBAY ERROR',
+};
+
+function pct(v) { return v === null || v === undefined ? '—' : `${Number(v).toFixed(1)}%`; }
+
+function paintEbayHead(b) {
+  const badge = $('#ch-ebay-badge');
+  if (badge) {
+    const state = EBAY_BADGE[b.state] ? b.state : 'error';
+    badge.dataset.state = state;
+    badge.textContent = EBAY_BADGE[state];
+    badge.title = b.campaign ? `campaign ${b.campaign.id} · eBay status ${b.campaign.status}` : '';
+  }
+  const reason = $('#ch-ebay-reason');
+  if (reason) {
+    const show = b.state !== 'running' && !!b.reason;
+    reason.hidden = !show;
+    reason.textContent = show ? `eBay says: ${b.reason}` : '';
+  }
+  const meta = $('#ch-ebay-meta');
+  if (meta) {
+    const c = b.campaign;
+    const parts = [`cap ${pct(b.cap)}`];
+    if (c) parts.push(`campaign ${c.id}${c.rate != null ? ' · default ' + pct(c.rate) : ''}`);
+    if (b.fetched_at) parts.push(`read ${since(new Date(b.fetched_at * 1000).toISOString())} ago`);
+    meta.textContent = 'read-only · ' + parts.join(' · ');
+  }
+}
+
+function ebayRow(r) {
+  const lot = r.lot
+    ? `<a href="/listings/${encodeURIComponent(r.lot.lot_id)}" target="_blank" rel="noopener">${escapeHtml(r.lot.lot_id)}</a>
+       <div class="ch-tiny">${escapeHtml(r.lot.status || '')}</div>`
+    : '<span class="ch-tiny">not linked</span>';
+  return `
+    <tr data-item="${escapeAttr(r.item_id)}">
+      <td class="ch-num"><a href="https://www.ebay.com/itm/${encodeURIComponent(r.item_id)}" target="_blank" rel="noopener">${escapeHtml(r.item_id)} ↗</a></td>
+      <td class="ch-lot">${escapeHtml(r.title || '')}</td>
+      <td>${lot}</td>
+      <td class="ch-num">${escapeHtml(pct(r.suggested))}</td>
+      <td class="ch-num" title="what apply would set (suggested, capped)">${escapeHtml(pct(r.want))}</td>
+      <td class="ch-num">${escapeHtml(pct(r.current))}</td>
+    </tr>`;
+}
+
+function renderEbay(b) {
+  return `
+    <table class="table ch-ebay-table">
+      <thead><tr><th>ITEM</th><th>TITLE</th><th>LOT</th><th>SUGGESTED</th><th>PLANNED</th><th>CURRENT</th></tr></thead>
+      <tbody>${(b.listings || []).map(ebayRow).join('')}</tbody>
+    </table>`;
+}
+
+async function loadEbay({keepOld = false, refresh = false} = {}) {
+  const el = ebayEl();
+  if (!el) return;
+  let body = null;
+  await uiLoad(el, async ({signal}) => {
+    body = await api('/api/channels/ebay' + (refresh ? '?refresh=1' : ''), {signal});
+    paintEbayHead(body);
+    return body;
+  }, {
+    skeleton: 'row', count: 4, keepOld,
+    isEmpty: (b) => !(b.listings || []).length,
+    render: renderEbay,
+    empty: {glyph: '◌', title: 'No active eBay listings', body: 'Nothing is live on eBay right now (or eBay is not connected).'},
+    errorMessage: (err) => "Couldn't load eBay. " + (err.status
+      ? `The server said ${err.status}${err.message ? ': ' + err.message : ''}.`
+      : "eBay didn't answer in time."),
+  });
+  return body;
+}
+
 // ───────── load ─────────
 // One GET feeds three regions. The queue and the matrix are separate UI.load targets so each gets its
 // own empty / error state; the switches are painted from the same body.
@@ -204,7 +285,7 @@ async function loadAll({keepOld = false} = {}) {
       ? `The server said ${err.status}${err.message ? ': ' + err.message : ''}.`
       : "The database didn't answer in 15 s."),
   });
-  await Promise.all([queueP, matrixP]);
+  await Promise.all([queueP, matrixP, loadEbay({keepOld})]);
   if (body) {
     last = body;
     paintSwitches(body.switches || {});
@@ -233,12 +314,13 @@ export function mount() {
   mounted = true;
   // The pane ships its skeleton twins inside data-state="loading". Until this tab is activated (shell.js →
   // load()), nothing is loading — drop the state so a smoke on another tab is not blocked on a hidden pane.
-  for (const el of [queueEl(), matrixEl()]) {
+  for (const el of [queueEl(), matrixEl(), ebayEl()]) {
     const pane = el?.closest('[data-pane]');
     if (el && pane?.hidden) { delete el.dataset.state; el.removeAttribute('aria-busy'); }
   }
   $$('#ch-switches input[data-key]').forEach(input => input.addEventListener('change', () => flipSwitch(input)));
   $('#ch-sync')?.addEventListener('click', (e) => pending(e.currentTarget, 'syncing…', syncNow));
+  $('#ch-ebay-refresh')?.addEventListener('click', (e) => pending(e.currentTarget, '↻ reading eBay…', () => loadEbay({keepOld: true, refresh: true})));
   $('#ch-refresh')?.addEventListener('click', (e) => pending(e.currentTarget, '↻ refreshing…', () => loadAll({keepOld: true})));
 }
 
