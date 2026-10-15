@@ -84,3 +84,9 @@ Edited through the admin Channels tab (`PATCH /api/channels/switches`, keys must
 ```
 
 Until `011` is applied, `GET /api/channels` 500s on the missing table and the writers log `listing_channels not updated (...)` and carry on — that is the intended behaviour, not a bug.
+
+## eBay Promoted Listings (read-only section, plan 2026-10-13 Phase 4)
+- Logic: `automation/ebay_ads.py` (client + `plan` + `apply` + cached `snapshot`). CLI: `scripts/ebay_ads.py check|plan|apply --yes`.
+- Admin: Channels tab → "EBAY · PROMOTED LISTINGS". `GET /api/channels/ebay` (plain `def`, `@readcache.cached()`); eBay is read at most once per `EBAY_ADS_CACHE_SEC` (900 s) — `?refresh=1` / "re-read eBay" forces it. It writes nothing.
+- eBay 409 / errorId 35078 = state `not_eligible` with eBay's message ("good standing with recent sales activity"). `apply` refuses unless the campaign is RUNNING/PAUSED. The only cure is recent eBay sales.
+- Rate rule: suggested rate, capped at `EBAY_AD_RATE_CAP` (15). Lot join = item id parsed from `inventory.ebay_url`.

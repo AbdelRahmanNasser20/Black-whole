@@ -70,3 +70,20 @@
   .ch-switches .ch-tools { margin-left: 0; flex-basis: 100%; }
   .ch-actions { white-space: normal; }
 }
+
+/* ── eBay Promoted Listings (read-only) ───────────────────────── */
+.ch-ebay-badge {
+  display: inline-flex; align-items: center; padding: 1px 8px;
+  font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .14em;
+  border: 1px solid currentColor; color: var(--dim);
+}
+.ch-ebay-badge[data-state="running"] { color: var(--success); }
+.ch-ebay-badge[data-state="paused"] { color: var(--accent); }
+.ch-ebay-badge[data-state="not_eligible"],
+.ch-ebay-badge[data-state="error"] { color: var(--bg); background: var(--danger); border-color: var(--danger); }
+.ch-ebay-reason {
+  margin: 0 0 var(--gap); padding: 8px 12px; border: 1px solid var(--danger);
+  font-family: var(--mono); font-size: var(--fs-xs); color: var(--text);
+}
+.ch-ebay-reason[hidden] { display: none; }
+.ch-ebay-table td.ch-num { font-family: var(--mono); text-align: right; white-space: nowrap; }
