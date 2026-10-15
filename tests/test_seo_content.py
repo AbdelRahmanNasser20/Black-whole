@@ -87,7 +87,7 @@ def test_kind_detection_and_unit_label():
 
 def test_freight_facts_only_what_the_spec_sheet_lacks():
     facts = dict(seo_copy.freight_facts(ROW, sold=False))
-    assert facts["Whole lot"] == "$3,000 (before freight)"
+    assert "Whole lot" not in facts  # no lot-level price (no-bulk-prices rule)
     assert facts["Frame"] == "Chrome steel"
     assert facts["Pallets"].startswith("≈ 4 at 35")
     assert facts["Weight per chair"] == "13 lb (estimate)"
@@ -190,7 +190,7 @@ def test_lot_page_gains_original_sections_and_faq_schema(client):
     html = client.get(f"/listings/{ROW['lot_id']}").text
     for heading in ("GOOD FOR", "PICKUP &amp; FREIGHT", "QUESTIONS BUYERS ASK"):
         assert heading in html, heading
-    assert "Whole lot" in html and "specs-table" in html
+    assert "Whole lot" not in html and "specs-table" in html
     kinds = [b["@type"] for b in _jsonld(html)]
     assert "FAQPage" in kinds and "Product" in kinds and "BreadcrumbList" in kinds
     assert seo_copy.word_count(_text(html)) >= 400

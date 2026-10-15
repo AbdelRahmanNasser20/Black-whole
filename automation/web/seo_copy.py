@@ -141,15 +141,13 @@ def _qty(row: dict, sold: bool) -> int | None:
 # ───────────────────────────── freight facts ─────────────────────────────
 
 def freight_facts(row: dict, *, sold: bool) -> list[tuple[str, str]]:
-    """Label/value pairs the spec sheet above does NOT already show: whole-lot
-    price, frame, pallets and weight. Only fields that exist render."""
+    """Label/value pairs the spec sheet above does NOT already show: frame,
+    pallets and weight. Only fields that exist render. No whole-lot price —
+    public copy carries one plain per-unit price (operator, 2026-10-15)."""
     out: list[tuple[str, str]] = []
     qty = _qty(row, sold)
-    price = _float(row.get("price_per_chair"))
     unit = lot_channels.unit_word(row)
     cal = freight_estimate.calibration_from_row(row)
-    if price and qty and not sold:
-        out.append(("Whole lot", f"{_money(price * qty)} (before freight)"))
     if row.get("chair_frame"):
         out.append(("Frame", str(row["chair_frame"]).strip()))
     if qty:

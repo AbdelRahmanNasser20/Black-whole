@@ -31,6 +31,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Awaitable, Callable, Union
 
+from .listing_copy import strip_bulk_pricing
 from .templates import listing_title, state_abbr
 from .web.short_links import short_url
 
@@ -198,7 +199,7 @@ _INTROS = [
 _CTAS = [
     "Message with the quantity you need and whether you want pickup or delivery.",
     "Reply with how many you need plus your ZIP for a delivery quote.",
-    "Text or email the quantity you're after — bulk discounts on larger orders.",
+    "Text or email the quantity you're after and your pickup day.",
     "Let us know your quantity and city and we'll send pricing right over.",
     "Serious buyers: send quantity + pickup/delivery and we'll get you a quote.",
 ]
@@ -217,7 +218,8 @@ def _body_lines(listing: CraigslistListing, label: str) -> list[str]:
     lines.append(f"Quantity available: {listing.quantity}")
     if listing.dimensions.strip():
         lines.append(f"Dimensions: {listing.dimensions.strip()}")
-    lines.append(f"Asking ${listing.price} per chair — bulk discounts on the full lot.")
+    # One plain per-chair price, never a bulk/tier price (operator, 2026-10-15).
+    lines.append(f"Asking ${listing.price} per chair.")
     lines.append(f"Local pickup in the {label} area (delivery quotes on request).")
     lines.append("Ideal for churches, banquet halls, schools, and event venues.")
     # Typed short link → tagged visit, so Craigslist traffic shows as its own source.
@@ -236,7 +238,7 @@ def deterministic_varier(
     )
     cta = _rotate(_CTAS, subdomain)
     body = "\n\n".join([intro, "\n".join(_body_lines(listing, label)), cta])
-    return title, body
+    return title, strip_bulk_pricing(body)
 
 
 async def llm_varier(
@@ -261,6 +263,8 @@ async def llm_varier(
         "dimensions, pickup logistics) but vary the wording so it is clearly "
         "distinct from the same listing posted in other cities — Craigslist "
         "removes near-duplicate posts. No emojis. No auction/bidding language. "
+        "One plain per-chair price only: never add bulk, volume, tiered or "
+        "whole-lot pricing or discounts. "
         "Return two lines exactly:\nTITLE: <one-line title>\nBODY: <body>\n\n"
         f"Reference title: {base_title}\nReference body:\n{base_body}"
     )
@@ -275,7 +279,7 @@ async def llm_varier(
         title, body = _parse_llm_copy(text)
         if not title or not body:
             return base_title, base_body
-        return title, body
+        return title, strip_bulk_pricing(body)
     except Exception as e:  # pragma: no cover - network/SDK path
         print(f"[craigslist] LLM copy variation failed for {subdomain} "
               f"({type(e).__name__}: {str(e)[:120]}); using deterministic copy")

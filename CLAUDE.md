@@ -10,6 +10,12 @@ Detail: `docs/claude-reference/` (index at bottom).
 
 ## HARD RULES (verbatim — don't reintroduce fixed bugs, don't regress)
 
+**Listing copy — NO BULK PRICES (operator, 2026-10-15):**
+- "Don't include any bulk prices at all, for any listing." Public copy carries ONE plain per-unit price — no tiers ("$22 for 500+"), no "bulk/volume discounts", no "take all N for $X", no whole-lot total, no "offers on the whole lot". Applies to the storefront, FB Marketplace, FB + Google catalog feeds, eBay, Craigslist, UsedPews and every LLM copy prompt.
+- The one guard is `automation/listing_copy.py::strip_bulk_pricing` — every channel writer runs its text through it (`templates`, `lot_channels.fb_description`, `catalog_feed._description`, `craigslist` varier, `web/app._decorate`). A new channel writer calls it too; never add a second filter. `tests/test_listing_copy.py` is the gate.
+- There is no single global listing template: per-channel bodies live in `automation/templates.py` (run.py FB/eBay), `automation/lot_channels.py::fb_description` (list-lot FB), `automation/craigslist.py`, `automation/web/seo_copy.py` (storefront). Fix copy in `inventory.description` (the shared source), not per channel.
+- Buyer chat / CRM negotiation is separate (see `facebook_scraper_Claude/bot_drafter.py`).
+
 **Browser / scrape:**
 - Headless mode hits Akamai 403 on GovDeals. Always non-headless. `persistent_context(headless=False)` is the default — don't flip it.
 - `ClaudeCodeExtractor` only works when Claude Code is the orchestrator with a real TTY. From the dashboard subprocess it'll hang. The `default_extractors()` picker handles this automatically.

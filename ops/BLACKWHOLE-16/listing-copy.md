@@ -1,3 +1,5 @@
+> **SUPERSEDED 2026-10-15 — no bulk prices.** The tier/bulk-discount lines below break the operator's no-bulk-prices rule; never paste them. One plain per-chair price only (see `CLAUDE.md`).
+
 # BLACKWHOLE-16 — Listing copy (Atlanta warehouse, two lots)
 
 Pickup: **Atlanta, GA 30318** (1387 Northside Dr NW). Sell price: **$25/chair** both lots.
