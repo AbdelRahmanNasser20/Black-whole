@@ -17,7 +17,7 @@ from automation import db
 COOKIE_NAME = "sb-access-token"
 
 _UPSERT_SQL = (
-    "INSERT INTO platform_users (user_id, email) VALUES (%s, %s) "
+    "INSERT INTO platform_users (user_id, email, last_seen_at) VALUES (%s, %s, now()) "
     "ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, last_seen_at = now() "
     "RETURNING *"
 )

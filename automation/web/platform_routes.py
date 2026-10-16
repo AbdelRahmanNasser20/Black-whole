@@ -68,7 +68,10 @@ def platform_signup(request: Request):
 
 @router.get("/platform/onboarding", response_class=HTMLResponse)
 def platform_onboarding(request: Request):
-    user = platform_auth.maybe_user(request)
+    try:
+        user = platform_auth.maybe_user(request)
+    except Exception:  # a DB hiccup must never 500 this page
+        user = None
     if user is None:
         # reauth=1 stops signup.html's auto-forward, or the stale session would
         # bounce signup -> onboarding -> signup forever.
@@ -131,7 +134,10 @@ def _max_alerts() -> int:
 
 @router.get("/platform/alerts", response_class=HTMLResponse)
 def platform_alerts_page(request: Request):
-    user = platform_auth.maybe_user(request)
+    try:
+        user = platform_auth.maybe_user(request)
+    except Exception:  # a DB hiccup must never 500 this page
+        user = None
     if user is None:
         return RedirectResponse("/platform/signup", status_code=302)
     if not user.get("onboarded_at"):
@@ -206,7 +212,10 @@ def _saved_lot_url(r: dict) -> str:
 
 @router.get("/platform/saved", response_class=HTMLResponse)
 def platform_saved_page(request: Request):
-    user = platform_auth.maybe_user(request)
+    try:
+        user = platform_auth.maybe_user(request)
+    except Exception:  # a DB hiccup must never 500 this page
+        user = None
     if user is None:
         return RedirectResponse("/platform/signup", status_code=302)
     if not user.get("onboarded_at"):

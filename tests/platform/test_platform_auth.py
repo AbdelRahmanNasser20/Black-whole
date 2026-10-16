@@ -111,3 +111,8 @@ def test_missing_sub_401():
 def test_non_uuid_sub_401(fake_db):
     assert _status(_req(bearer=_token(sub="not-a-uuid"))).status_code == 401
     assert fake_db == []
+
+
+def test_upsert_sets_last_seen_on_insert():
+    from automation.web import platform_auth as pa
+    assert "(user_id, email, last_seen_at) VALUES (%s, %s, now())" in pa._UPSERT_SQL

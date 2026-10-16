@@ -64,7 +64,7 @@ PUBLIC_COLS = (
     "asset_id, account_id, auction_id, title, canonical_category, "
     "native_category_name, city, state, bid_count, current_bid, currency_code, "
     "end_utc, outcome, final_bid, final_bid_count, outcome_complete, "
-    "first_seen_at, lat, lng"
+    "first_seen_at, lat, lng, site"
 )
 PUBLIC_SORTS = {"ends": "end_utc", "newest": "first_seen_at",
                 "bid": "current_bid", "bids": "bid_count"}
@@ -264,6 +264,12 @@ def clamp_page(page: int, per_page: int) -> tuple[int, int]:
     return max(1, min(int(page or 1), MAX_PAGE)), per_page
 
 
+def _with_source(row: dict) -> dict:
+    """deal_lots.site -> the public `source` field (snapshot rows already carry one)."""
+    row["source"] = row.pop("site", None) or GOVDEALS
+    return row
+
+
 def enrich_public(row: dict, fees) -> dict:
     return deals_query.enrich(row, fees)  # PUBLIC_COLS already excludes private fields
 
@@ -336,7 +342,7 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
             gd_total = conn.execute(
                 f"SELECT count(*) AS c FROM deal_lots WHERE {where}", tuple(args)
             ).fetchone()["c"]
-        gd_rows = [enrich_public(dict(r), fees) for r in rows]
+        gd_rows = [enrich_public(_with_source(dict(r)), fees) for r in rows]
     snap = [enrich_snapshot(r, fees) for r in _snapshot_rows(
         status=status, q=q, category=category, state=state, max_bids=max_bids,
         ending_within=ending_within, min_price=min_price, max_price=max_price,
@@ -360,14 +366,13 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
 def lot_ref(row: dict) -> tuple[str, str] | None:
     """(source, lot_key) as stored in platform_saved_lots / platform_alert_sends
     (deal_lots.native_id = 'asset/account/auction'). Only deal_lots-backed rows
-    get one: the other recorder sources live solely in listing_snapshots, which
+    get one (any site: govdeals, allsurplus, txauction...): the other recorder sources live solely in listing_snapshots, which
     /platform/saved does not read, so offering Save on them would save a lot the
     saved page could only render as "no longer listed"."""
-    if (row.get("source") or GOVDEALS) != GOVDEALS:
-        return None
     if None in (row.get("asset_id"), row.get("account_id"), row.get("auction_id")):
         return None
-    return GOVDEALS, f"{row['asset_id']}/{row['account_id']}/{row['auction_id']}"
+    # The row's real site: the saved page joins deal_lots.site = source.
+    return (row.get("source") or GOVDEALS), f"{row['asset_id']}/{row['account_id']}/{row['auction_id']}"
 
 
 def _max_bid_50(flip) -> float | None:

@@ -55,7 +55,7 @@ def _lot_fields(lot: dict) -> dict:
 def _build(alert: dict, lots: list[dict], unsub_url: str) -> tuple[str, str, str]:
     n = len(lots)
     keyword = " ".join(str(alert.get("keyword", "")).replace("\r", " ").replace("\n", " ").split())
-    subject = f"{n} new lots match “{keyword}”"
+    subject = f"{n} new lot matches “{keyword}”" if n == 1 else f"{n} new lots match “{keyword}”"
     text = [subject, ""]
     items = []
     for lot in lots[:MAX_LOTS]:

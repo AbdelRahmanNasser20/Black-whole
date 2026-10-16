@@ -91,3 +91,7 @@ def test_caps_at_20_lots_and_strips_newlines():
     assert "\n" not in subject and "\r" not in subject
     for part in (text, body):
         assert "Lot19x" in part and "Lot20x" not in part and "+5 more" in part
+
+
+def test_singular_subject():
+    assert platform_email._build(ALERT, LOTS[:1], "https://s/u")[0] == "1 new lot matches “chairs”"

@@ -163,3 +163,34 @@ def test_viewer_lookup_failure_serves_anonymous(env, monkeypatch):
 def test_snapshot_source_rows_get_no_save_button():
     row = {"source": "publicsurplus", "source_lot_id": "77", "asset_id": None, "account_id": None, "auction_id": None}
     assert public_deals.lot_ref(row) is None
+
+
+def test_allsurplus_deal_lot_ref_and_saved_roundtrip(monkeypatch):
+    row = dict(gd_row(), source="allsurplus")
+    assert public_deals.lot_ref(row) == ("allsurplus", "1/2/3")
+    assert public_deals.lot_ref(dict(gd_row())) == ("govdeals", "1/2/3")
+    assert public_deals._with_source({"site": "allsurplus"})["source"] == "allsurplus"
+    assert public_deals._with_source({"site": None})["source"] == "govdeals"
+    assert "site" in public_deals.PUBLIC_COLS
+    # saved page renders it live: the join key is the row's own site
+    def fetch_all(sql, params=None):
+        assert "deal_lots.site = s.source" in sql
+        return [{"source": "allsurplus", "lot_key": "1/2/3", "title": "AS chairs", "current_bid": 50.0,
+                 "end_utc": END, "bid_count": 1, "outcome_complete": False, "asset_id": 1, "account_id": 2}]
+    monkeypatch.setattr(db, "fetch_all", fetch_all)
+    app = FastAPI()
+    app.include_router(platform_routes.router)
+    monkeypatch.setattr(platform_auth, "maybe_user", lambda request: AUTHED)
+    r = TestClient(app).get("/platform/saved")
+    assert r.status_code == 200 and "AS chairs" in r.text and "no longer" not in r.text.lower()
+
+
+def test_pages_survive_auth_lookup_failure(monkeypatch):
+    def boom(request):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(platform_auth, "maybe_user", boom)
+    app = FastAPI()
+    app.include_router(platform_routes.router)
+    c = TestClient(app)
+    for path in ("/platform/alerts", "/platform/saved", "/platform/onboarding"):
+        assert c.get(path, follow_redirects=False).status_code == 302, path

@@ -45,3 +45,12 @@ CREATE INDEX IF NOT EXISTS platform_users_stripe_customer_idx
 ALTER TABLE public.platform_users ADD COLUMN IF NOT EXISTS billing_event_at TIMESTAMPTZ;
 ```
 Stripe event `created` of the last applied subscription event. Older events are ignored.
+
+## 2026-10-16 — alert sends cascade (migration 033, `scripts/sql/033_platform_sends_cascade.sql`)
+
+```sql
+ALTER TABLE public.platform_alert_sends DROP CONSTRAINT IF EXISTS platform_alert_sends_alert_id_fkey;
+ALTER TABLE public.platform_alert_sends ADD CONSTRAINT platform_alert_sends_alert_id_fkey
+  FOREIGN KEY (alert_id) REFERENCES public.platform_alerts(id) ON DELETE CASCADE;
+```
+Deleting an alert that already sent mail now removes its dedupe rows instead of failing with a FK error.
