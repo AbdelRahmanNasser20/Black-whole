@@ -38,7 +38,7 @@ MATCH_SQL = (
     "SELECT d.site AS source, d.native_id AS lot_key, d.title, d.current_bid, d.end_utc, "
     "d.state, d.asset_id, d.account_id FROM deal_lots d "
     "WHERE d.first_seen_at > greatest(%s::timestamptz, %s::timestamptz - interval '2 days') "
-    "AND d.end_utc > %s::timestamptz "
+    "AND d.end_utc > %s::timestamptz AND d.outcome_complete IS NOT TRUE "
     "AND d.title ILIKE %s ESCAPE '\\' "
     "AND (%s::text IS NULL OR d.state = %s::text) "
     "AND (%s::real IS NULL OR d.current_bid <= %s::real) "
@@ -73,7 +73,14 @@ def _cap() -> int:
         return 20
 
 
+_warned_base = False
+
+
 def _base_url() -> str:
+    global _warned_base
+    if not os.getenv("PLATFORM_BASE_URL") and not _warned_base:
+        _warned_base = True
+        logger.warning("platform-alerts: PLATFORM_BASE_URL unset; emails link to localhost")
     return (os.getenv("PLATFORM_BASE_URL") or "http://127.0.0.1:8765").rstrip("/")
 
 
@@ -89,41 +96,51 @@ def _lot_dict(r: dict) -> dict:
             "end_utc": r.get("end_utc"), "state": r.get("state"), "url": url}
 
 
+def _do_alert(a: dict, now: datetime, day_start: datetime, cap: int, rep: dict, users: set) -> None:
+    kw = (a["keyword"] or "").strip()
+    if not kw:
+        return
+    st, src, mp = a.get("state_filter"), a.get("source_filter"), a.get("max_price")
+    rows = db.fetch_all(MATCH_SQL, (
+        a["created_at"], now, now, f"%{escape_like(kw)}%",
+        st, st, mp, mp, src, src, a["id"]))
+    if not rows:
+        return
+    rep["matched"] += len(rows)
+    sent_today = (db.fetch_one(SENDS_TODAY_SQL, (a["user_id"], day_start)) or {}).get("n", 0)
+    if sent_today >= cap:
+        rep["skipped_dup"] += len(rows)
+        return
+    # Built BEFORE any insert: a failure here must not burn the lots.
+    unsub = f"{_base_url()}/platform/unsubscribe?token={platform_email.make_unsub_token(str(a['user_id']))}"
+    fresh = []
+    for r in rows:
+        if db.execute(INSERT_SEND_SQL, (a["id"], r["source"], r["lot_key"], a["email"], now)):
+            fresh.append(r)
+        else:
+            rep["skipped_dup"] += 1
+    if not fresh:
+        return
+    db.execute(FIRED_SQL, (now, a["id"]))
+    ok = platform_email.send_alert_email(
+        a["email"], {"keyword": kw}, [_lot_dict(r) for r in fresh], unsub)
+    if ok:
+        rep["emailed"] += 1
+        users.add(str(a["user_id"]))
+    else:
+        rep["failed"] += 1
+
+
 def run_pass(now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     day_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    rep = {"matched": 0, "emailed": 0, "skipped_dup": 0, "users": 0}
+    rep = {"matched": 0, "emailed": 0, "skipped_dup": 0, "users": 0, "failed": 0}
     users: set = set()
     cap = _cap()
     for a in db.fetch_all(ALERTS_SQL):
-        kw = (a["keyword"] or "").strip()
-        if not kw:
-            continue
-        st, src, mp = a.get("state_filter"), a.get("source_filter"), a.get("max_price")
-        rows = db.fetch_all(MATCH_SQL, (
-            a["created_at"], now, now, f"%{escape_like(kw)}%",
-            st, st, mp, mp, src, src, a["id"]))
-        if not rows:
-            continue
-        rep["matched"] += len(rows)
-        sent_today = (db.fetch_one(SENDS_TODAY_SQL, (a["user_id"], day_start)) or {}).get("n", 0)
-        if sent_today >= cap:
-            rep["skipped_dup"] += len(rows)
-            continue
-        fresh = []
-        for r in rows:
-            if db.execute(INSERT_SEND_SQL, (a["id"], r["source"], r["lot_key"], a["email"], now)):
-                fresh.append(r)
-            else:
-                rep["skipped_dup"] += 1
-        if not fresh:
-            continue
-        db.execute(FIRED_SQL, (now, a["id"]))
-        unsub = f"{_base_url()}/platform/unsubscribe?token={platform_email.make_unsub_token(str(a['user_id']))}"
-        ok = platform_email.send_alert_email(
-            a["email"], {"keyword": kw}, [_lot_dict(r) for r in fresh], unsub)
-        if ok:
-            rep["emailed"] += 1
-            users.add(str(a["user_id"]))
+        try:
+            _do_alert(a, now, day_start, cap, rep, users)
+        except Exception as e:
+            logger.error("platform-alerts: alert %s failed: %r", a.get("id"), e)
     rep["users"] = len(users)
     return rep

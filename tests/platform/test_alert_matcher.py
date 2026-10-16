@@ -92,7 +92,7 @@ def test_sql_text_key_clauses():
 def test_keyword_match_sends_once(env):
     env.add_alert(); env.add_lot(1); env.add_lot(2, title="Folding CHAIR set"); env.add_lot(3, title="Table")
     r = platform_alerts.run_pass(NOW)
-    assert r == {"matched": 2, "emailed": 1, "skipped_dup": 0, "users": 1}
+    assert r == {"matched": 2, "emailed": 1, "skipped_dup": 0, "users": 1, "failed": 0}
     to, alert, lots, unsub = env.mails[0]
     assert len(lots) == 2 and lots[0]["url"].startswith("https://www.govdeals.com/en/asset/")
     assert unsub.startswith("https://p.test/platform/unsubscribe?token=")
@@ -140,6 +140,21 @@ def test_closed_lots_ignored(env):
 def test_email_failure_still_records_send(env):
     env.add_alert(); env.add_lot(1); env.ok["v"] = False
     r = platform_alerts.run_pass(NOW)
-    assert r["emailed"] == 0 and len(env.sends) == 1
+    assert r["emailed"] == 0 and r["failed"] == 1 and len(env.sends) == 1
     env.ok["v"] = True
     assert platform_alerts.run_pass(NOW + timedelta(minutes=15))["matched"] == 0
+
+
+def test_one_alert_raising_does_not_starve_others(env, monkeypatch):
+    env.add_alert(id=1, user_id=UID); env.add_alert(id=2, user_id="22" + UID[2:]); env.add_lot(1)
+    real = platform_email.make_unsub_token
+
+    def tok(uid):
+        if uid == UID:
+            raise RuntimeError("no secret")
+        return real(uid)
+    monkeypatch.setattr(platform_email, "make_unsub_token", tok)
+    monkeypatch.setattr(platform_email, "_ser", lambda: __import__("itsdangerous").URLSafeTimedSerializer("k"))
+    r = platform_alerts.run_pass(NOW)
+    assert r["emailed"] == 1 and not [s for s in env.sends if s[0] == 1]
+    assert [s[0] for s in env.sends] == [2]

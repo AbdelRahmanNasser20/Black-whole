@@ -4476,7 +4476,7 @@ async def _platform_alerts_tick() -> None:
     try:
         from automation import platform_alerts
         rep = await asyncio.to_thread(platform_alerts.run_pass)
-        if rep.get("matched") or rep.get("emailed"):
+        if rep.get("matched") or rep.get("emailed") or rep.get("failed"):
             print(f"[platform-alerts] {rep}")
     except Exception as e:
         # One bad pass must not kill the loop.
