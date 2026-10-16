@@ -38,3 +38,10 @@ CREATE INDEX IF NOT EXISTS platform_users_stripe_customer_idx
   ON public.platform_users (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
 ```
 `customer.subscription.*` webhooks set `plan` to `pro` or `beta` by `stripe_customer_id`.
+
+## 2026-10-16 — subscription event ordering (migration 032, `scripts/sql/032_platform_billing_event_at.sql`)
+
+```sql
+ALTER TABLE public.platform_users ADD COLUMN IF NOT EXISTS billing_event_at TIMESTAMPTZ;
+```
+Stripe event `created` of the last applied subscription event. Older events are ignored.

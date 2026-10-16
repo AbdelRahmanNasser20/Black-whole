@@ -16,6 +16,9 @@ from pydantic import BaseModel, Field, field_validator
 from automation import db, platform_billing, stripe_gateway
 from automation.web import platform_auth
 
+import logging
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _PHONE_STRIP = re.compile(r"[+\-().\s]")
@@ -222,21 +225,41 @@ def platform_unsubscribe(token: str = ""):
                         "<p>You are unsubscribed. All your lot alerts are off.</p>")
 
 
-@router.post("/platform/api/subscribe")
-def platform_subscribe(user: dict = Depends(platform_auth.get_current_user)):
-    """Dark-ship: 404 unless PLATFORM_BILLING_ENABLED. Price comes from env only."""
-    price_id = os.getenv("PLATFORM_STRIPE_PRICE_ID", "").strip()
-    if not platform_billing.enabled() or not price_id:
+def _billing_gate() -> None:
+    """Dark-ship gate, resolved BEFORE auth so a dark route 404s for everyone."""
+    if not platform_billing.enabled() or not os.getenv("PLATFORM_STRIPE_PRICE_ID", "").strip():
         raise HTTPException(status_code=404, detail="not found")
-    row = db.fetch_one("SELECT stripe_customer_id FROM platform_users WHERE user_id = %s",
+
+
+@router.post("/platform/api/subscribe")
+def platform_subscribe(_gate: None = Depends(_billing_gate), user: dict = Depends(onboarded_user)):
+    """Price comes from env only, never the client."""
+    price_id = os.getenv("PLATFORM_STRIPE_PRICE_ID", "").strip()
+    base = (os.getenv("PLATFORM_BASE_URL") or "").strip()
+    if not base:
+        # Never send a paying user to a localhost redirect.
+        raise HTTPException(status_code=503, detail="billing not configured")
+    row = db.fetch_one("SELECT plan, stripe_customer_id FROM platform_users WHERE user_id = %s",
                        (user["user_id"],)) or {}
+    if row.get("plan") == "pro":
+        raise HTTPException(status_code=409, detail="already subscribed")
     customer_id = row.get("stripe_customer_id")
     if not customer_id:
-        customer_id = stripe_gateway.create_platform_customer(
+        created = stripe_gateway.create_platform_customer(
             email=user["email"], user_id=str(user["user_id"]))
-        db.execute("UPDATE platform_users SET stripe_customer_id = %s WHERE user_id = %s",
-                   (customer_id, user["user_id"]))
-    base = os.getenv("PLATFORM_BASE_URL") or "http://127.0.0.1:8765"
+        # Claim: only the first concurrent request stores its customer.
+        won = db.execute(
+            "UPDATE platform_users SET stripe_customer_id = %s "
+            "WHERE user_id = %s AND stripe_customer_id IS NULL",
+            (created, user["user_id"]))
+        if won:
+            customer_id = created
+        else:
+            stored = db.fetch_one("SELECT stripe_customer_id FROM platform_users "
+                                  "WHERE user_id = %s", (user["user_id"],)) or {}
+            customer_id = stored.get("stripe_customer_id") or created
+            logger.warning("platform billing: orphan stripe customer %s for user %s",
+                           created, user["user_id"])
     session = stripe_gateway.create_subscription_checkout(
         customer_id=customer_id, price_id=price_id, base_url=base)
     return {"ok": True, "url": session["url"]}
