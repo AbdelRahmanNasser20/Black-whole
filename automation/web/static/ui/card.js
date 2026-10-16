@@ -31,6 +31,12 @@ export function card(row, {compact = false} = {}) {
   const chips = [];
   if (!compact && row.landed_cost != null) chips.push(`<span class="chip chip-mono">landed ${esc(fmt.money(row.landed_cost))}</span>`);
   if (!compact && !closed && !bids) chips.push('<span class="chip chip-mono">no bids yet</span>');
+  // Signed-in extras (present only on /deals/api/lots for onboarded platform users).
+  if (!compact && row.flip_score != null) chips.push(`<span class="chip chip-mono">flip ${esc(String(Math.round(row.flip_score)))}</span>`);
+  if (!compact && row.max_bid != null) chips.push(`<span class="chip chip-mono">max bid ${esc(fmt.money(row.max_bid))}</span>`);
+  if (!compact && row.lot_key && row.saved != null) {
+    chips.push(`<button type="button" class="btn btn-ghost btn-small card-save" data-save-source="${esc(row.source)}" data-save-key="${esc(row.lot_key)}" data-saved="${row.saved ? '1' : '0'}">${row.saved ? 'Saved' : 'Save'}</button>`);
+  }
   // Source badge = the external link's word. Rows from deal_lots carry govdeals_url; rows from the other
   // recorder sites carry url + source_name (server-normalised, see deals_sources.py).
   const extUrl = row.url || row.govdeals_url;

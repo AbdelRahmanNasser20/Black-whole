@@ -351,6 +351,73 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
     }
 
 
+# ── signed-in extras (liquidator platform) ───────────────────────────────────
+# Applied AFTER fetch_page, to rows that already passed `exclusion_where()` /
+# the snapshot filters, so tenants see exactly the public lot set. Nothing here
+# is memoised: the result depends on the caller, so it must never enter _CACHE
+# or readcache.
+
+def lot_ref(row: dict) -> tuple[str, str] | None:
+    """(source, lot_key) as stored in platform_saved_lots / platform_alert_sends:
+    deal_lots.native_id is 'asset/account/auction' for GovDeals; other sites use
+    the recorder's source_lot_id."""
+    src = row.get("source") or GOVDEALS
+    if src == GOVDEALS:
+        if None in (row.get("asset_id"), row.get("account_id"), row.get("auction_id")):
+            return None
+        return GOVDEALS, f"{row['asset_id']}/{row['account_id']}/{row['auction_id']}"
+    key = row.get("source_lot_id")
+    return (src, str(key)) if key else None
+
+
+def _max_bid_50(flip) -> float | None:
+    """The stored deals/flip.py card's 50%-margin max bid (computed by
+    flip.max_bid_for_margin when the verdict was written; not recomputed here)."""
+    if isinstance(flip, str):
+        try:
+            flip = json.loads(flip)
+        except ValueError:
+            return None
+    mb = (flip or {}).get("max_bid") or {}
+    v = mb.get("50")
+    return float(v) if v is not None else None
+
+
+def add_platform_extras(rows: list[dict], user_id: str) -> list[dict]:
+    """Add source/lot_key/saved (+ flip_score/max_bid where a verdict exists)."""
+    from deals import verdict_store
+    keys = {}
+    for r in rows:
+        ref = lot_ref(r)
+        if ref:
+            r["source"], r["lot_key"] = ref
+            if ref[0] == GOVDEALS:
+                keys[(r["asset_id"], r["account_id"], r["auction_id"])] = r
+    saved = {(x["source"], x["lot_key"]) for x in db.fetch_all(
+        "SELECT source, lot_key FROM platform_saved_lots WHERE user_id = %s", (user_id,))}
+    for r in rows:
+        r["saved"] = (r.get("source"), r.get("lot_key")) in saved
+    if keys and verdict_store._has_flip_columns():
+        ks = list(keys)
+        verdicts = db.fetch_all(
+            "SELECT DISTINCT ON (asset_id, account_id, auction_id) "
+            "asset_id, account_id, auction_id, flip_score, flip FROM deal_verdicts "
+            "WHERE (asset_id, account_id, auction_id) IN ("
+            "SELECT * FROM unnest(%s::bigint[], %s::bigint[], %s::bigint[])) "
+            "ORDER BY asset_id, account_id, auction_id, analyzed_at DESC",
+            ([k[0] for k in ks], [k[1] for k in ks], [k[2] for k in ks]))
+        for v in verdicts:
+            r = keys.get((v["asset_id"], v["account_id"], v["auction_id"]))
+            if r is None:
+                continue
+            if v.get("flip_score") is not None:
+                r["flip_score"] = float(v["flip_score"])
+            mb = _max_bid_50(v.get("flip"))
+            if mb is not None:
+                r["max_bid"] = mb
+    return rows
+
+
 def fetch_pins(*, q=None, category=None, state=None, max_bids=None,
                ending_within=None, status="active", min_price=None,
                max_price=None, site=None) -> dict:

@@ -1,0 +1,56 @@
+{% extends "_public_base.html" %}
+{# Context: user_email, lots[{source, lot_key, live, title, current_bid, bid_count, end_utc, outcome_complete, url}]. #}
+{% block title %}Saved lots | Black Whole Liquidation{% endblock %}
+{% block body_class %}page-platform-saved{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">{{ user_email }}</div>
+    <h1 class="page-title">SAVED LOTS</h1>
+    <p class="page-lede"><a href="/deals">Browse deals</a> · <a href="/platform/alerts">Your alerts</a></p>
+  </div>
+</section>
+<section class="terms-body">
+  <p id="sv-msg" class="mono tiny" role="status"></p>
+  <ul id="sv-list">
+  {% for l in lots %}
+    <li data-source="{{ l.source }}" data-key="{{ l.lot_key }}">
+      {% if l.live %}
+        {% if l.url %}<a href="{{ l.url }}" target="_blank" rel="noopener">{{ l.title }}</a>{% else %}{{ l.title }}{% endif %}
+        {% if l.current_bid is not none %} · ${{ "{:,.0f}".format(l.current_bid) }}{% endif %}
+        · {{ l.bid_count or 0 }} bid{{ '' if l.bid_count == 1 else 's' }}
+        {% if l.outcome_complete %} · closed{% elif l.end_utc %} · ends {{ l.end_utc.strftime('%b %d %H:%M UTC') if l.end_utc.strftime else l.end_utc }}{% endif %}
+      {% else %}
+        {{ l.source }} / {{ l.lot_key }} · this lot is no longer listed
+      {% endif %}
+      <button type="button" class="btn sv-remove">Remove</button>
+    </li>
+  {% else %}
+    <li>Nothing saved yet. Hit Save on any lot in <a href="/deals">Deals</a>.</li>
+  {% endfor %}
+  </ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  document.getElementById("sv-list").addEventListener("click", function (ev) {
+    var btn = ev.target.closest(".sv-remove");
+    if (!btn) return;
+    var li = btn.closest("li");
+    var url = "/platform/api/saved/" + encodeURIComponent(li.dataset.source) + "/" +
+      li.dataset.key.split("/").map(encodeURIComponent).join("/");
+    btn.disabled = true;
+    fetch(url, { method: "DELETE", credentials: "include" }).then(function (r) {
+      if (!r.ok) throw new Error(String(r.status));
+      li.remove();
+    }).catch(function () {
+      btn.disabled = false;
+      document.getElementById("sv-msg").textContent = "Could not remove. Try again.";
+    });
+  });
+})();
+</script>
+{% endblock %}

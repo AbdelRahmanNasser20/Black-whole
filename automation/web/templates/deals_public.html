@@ -97,6 +97,12 @@
   </div>
 </details>
 
+{% if platform_authed %}
+<meta name="platform-authed" content="1">
+{% else %}
+<p class="feed-cta"><a class="btn btn-primary btn-small" href="/platform/signup">Sign up free for alerts + max bid</a></p>
+{% endif %}
+
 <div class="chips" id="feed-chips" data-state="loading" aria-label="Category">{% for _ in range(6) %}<span class="sk sk-pill" aria-hidden="true"></span>{% endfor %}</div>
 
 <div class="controls feed-controls" id="feed-controls">
@@ -133,4 +139,5 @@
 {% block scripts %}
 <script type="module" src="/static/deals/feed.js?v={{ asset_v }}"></script>
 <script type="module" src="/static/deals/map.js?v={{ asset_v }}"></script>
+{% if platform_authed %}<script type="module" src="/static/deals/platform.js?v={{ asset_v }}"></script>{% endif %}
 {% endblock %}

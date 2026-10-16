@@ -39,6 +39,7 @@ from fastapi.responses import (
     RedirectResponse,
     Response,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
@@ -133,6 +134,7 @@ from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
 app.include_router(_ebay_deletion_router)
+from automation.web import platform_auth  # noqa: E402
 from automation.web.platform_routes import router as _platform_router  # noqa: E402
 app.include_router(_platform_router)
 
@@ -1341,16 +1343,29 @@ def _public_site(site: str | None) -> str | None:
     return site
 
 
+def _platform_viewer(request: Request) -> dict | None:
+    """The onboarded platform user, else None (anonymous / not onboarded -> public view).
+    Plain function: maybe_user touches the DB, so callers run it via to_thread."""
+    user = platform_auth.maybe_user(request)
+    return user if user and user.get("onboarded_at") else None
+
+
+_PRIVATE = {"Cache-Control": "private, no-store"}
+
+
 @app.get("/deals", response_class=HTMLResponse)
 async def public_deals_page(request: Request):
+    viewer = await asyncio.to_thread(_platform_viewer, request)
     return templates.TemplateResponse(request, "deals_public.html", {
         "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
-        "per_page_choices": public_deals.PER_PAGE_CHOICES})
+        "per_page_choices": public_deals.PER_PAGE_CHOICES,
+        "platform_authed": viewer is not None},
+        headers=_PRIVATE if viewer else None)
 
 
 @app.get("/deals/api/lots")
 async def public_deals_lots(
-    q: str | None = None, category: str | None = None, state: str | None = None,
+    request: Request, q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None,
     max_price: float | None = None, bbox: str | None = None, site: str | None = None,
@@ -1359,12 +1374,19 @@ async def public_deals_lots(
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
     site = _public_site(site)
+    viewer = await asyncio.to_thread(_platform_viewer, request)
     try:
-        return await asyncio.to_thread(
+        out = await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
             site=site, sort=sort, dir=dir, page=page, per_page=per_page)
+        if viewer is None:
+            return out
+        # Per-user extras on top of the SAME policy-filtered page; never memoised,
+        # never shared: private/no-store keeps Cloudflare and the browser honest too.
+        await asyncio.to_thread(public_deals.add_platform_extras, out["rows"], viewer["user_id"])
+        return JSONResponse(jsonable_encoder(out), headers=_PRIVATE)
     except HTTPException:
         raise
     except Exception as e:

@@ -177,6 +177,38 @@ def unsave_lot(source: str, lot_key: str, user: dict = Depends(onboarded_user)):
     return {"ok": True}
 
 
+def _saved_lot_url(r: dict) -> str:
+    try:
+        from deals import sites
+        return sites.lot_url({"site": r["source"], "asset_id": r.get("asset_id"),
+                              "account_id": r.get("account_id"), "native_id": r["lot_key"]})
+    except Exception:
+        return ""
+
+
+@router.get("/platform/saved", response_class=HTMLResponse)
+def platform_saved_page(request: Request):
+    user = platform_auth.maybe_user(request)
+    if user is None:
+        return RedirectResponse("/platform/signup", status_code=302)
+    if not user.get("onboarded_at"):
+        return RedirectResponse("/platform/onboarding", status_code=302)
+    from automation.web import public_deals
+    # One query. The LEFT JOIN carries the public exclusion policy, so a saved key that
+    # points at an operator-hidden lot renders as "no longer listed", never its title.
+    ex_where, ex_args = public_deals.exclusion_where()
+    rows = db.fetch_all(
+        "SELECT s.source, s.lot_key, d.asset_id, d.account_id, d.title, d.current_bid, "
+        "d.bid_count, d.end_utc, d.outcome_complete "
+        "FROM platform_saved_lots s LEFT JOIN deal_lots "
+        "ON deal_lots.site = s.source AND deal_lots.native_id = s.lot_key AND " + ex_where + " "
+        "WHERE s.user_id = %s ORDER BY s.created_at DESC",
+        (*ex_args, user["user_id"]))
+    lots = [{**r, "live": r.get("title") is not None, "url": _saved_lot_url(r)} for r in rows]
+    return _render(request, "platform_saved.html", {
+        "user_email": user["email"], "lots": lots, "robots_noindex": True})
+
+
 # ---- unsubscribe (public, token-authenticated) -----------------------------
 
 @router.get("/platform/unsubscribe", response_class=HTMLResponse)
