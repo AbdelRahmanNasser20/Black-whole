@@ -72,6 +72,8 @@ ALL_CATEGORY_ID = "0"
 FURNITURE_CATEGORY_ID = "521"
 FURNITURE_CATEGORY_NAME = "Furniture"
 PAGING_COOKIE = "ibid_il_paging_pref=200"
+# An empty category's browse page (no table at all) says this instead.
+EMPTY_BROWSE_MARKER = "No items found"
 SITE_TZ = ZoneInfo("America/Chicago")
 DESCRIPTION_MAX_CHARS = 2000
 
@@ -210,7 +212,13 @@ def parse_browse(html: str) -> tuple[list[dict], datetime | None]:
 
 def _fetch_browse(category_id: str) -> str | None:
     """None on ANY fetch failure (network, non-200, no table); the HTML
-    otherwise. Callers decide whether that failure is fatal."""
+    otherwise. Callers decide whether that failure is fatal.
+
+    A category with nothing listed renders a real page saying "No items
+    found" (seen live on the Furniture category, 2026-10-16) — that is a
+    clean empty browse, not page-shape drift, so it is returned for
+    parse_browse to read as 0 rows (the breaker counts a clean 0-match
+    discover as a success)."""
     try:
         resp = polite_get(BROWSE_URL, params={"id": category_id},
                           headers={"Cookie": PAGING_COOKIE})
@@ -220,7 +228,8 @@ def _fetch_browse(category_id: str) -> str | None:
     if resp.status_code != 200:
         print(f"[{SOURCE}] RECORDER ERROR: browse id={category_id} HTTP {resp.status_code}")
         return None
-    if "item.php?id=" not in resp.text and "Bids #" not in resp.text:
+    if ("item.php?id=" not in resp.text and "Bids #" not in resp.text
+            and EMPTY_BROWSE_MARKER not in resp.text):
         print(f"[{SOURCE}] RECORDER ERROR: browse id={category_id} — unrecognised page shape")
         return None
     return resp.text
