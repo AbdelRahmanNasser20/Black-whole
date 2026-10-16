@@ -7,6 +7,7 @@ No route definitions here; routes import these dependencies.
 from __future__ import annotations
 
 import os
+import uuid
 
 import jwt
 from fastapi import HTTPException, Request
@@ -17,7 +18,7 @@ COOKIE_NAME = "sb-access-token"
 
 _UPSERT_SQL = (
     "INSERT INTO platform_users (user_id, email) VALUES (%s, %s) "
-    "ON CONFLICT (user_id) DO UPDATE SET last_seen_at = now() "
+    "ON CONFLICT (user_id) DO UPDATE SET email = EXCLUDED.email, last_seen_at = now() "
     "RETURNING *"
 )
 
@@ -38,11 +39,17 @@ def get_current_user(request: Request) -> dict:
     if not token:
         raise HTTPException(status_code=401, detail="missing token")
     try:
-        claims = jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
+        claims = jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated",
+            options={"require": ["exp", "sub"]},
+        )
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid token")
     uid, email = claims.get("sub"), claims.get("email")
     if not uid or not email:
+        raise HTTPException(status_code=401, detail="invalid token")
+    try:
+        uuid.UUID(str(uid))
+    except ValueError:
         raise HTTPException(status_code=401, detail="invalid token")
     return db.fetch_one(_UPSERT_SQL, (uid, email))
 

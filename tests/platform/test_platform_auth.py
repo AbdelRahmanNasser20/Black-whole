@@ -96,3 +96,18 @@ def test_require_onboarded():
     assert e.value.status_code == 403 and e.value.detail == {"error": "onboarding_required"}
     u = {"onboarded_at": "2026-10-16"}
     assert platform_auth.require_onboarded(u) is u
+
+
+def test_missing_exp_401():
+    tok = jwt.encode({"sub": UID, "email": "a@b.com", "aud": "authenticated"}, SECRET, algorithm="HS256")
+    assert _status(_req(bearer=tok)).status_code == 401
+
+
+def test_missing_sub_401():
+    tok = jwt.encode({"email": "a@b.com", "aud": "authenticated", "exp": int(time.time()) + 60}, SECRET, algorithm="HS256")
+    assert _status(_req(bearer=tok)).status_code == 401
+
+
+def test_non_uuid_sub_401(fake_db):
+    assert _status(_req(bearer=_token(sub="not-a-uuid"))).status_code == 401
+    assert fake_db == []
