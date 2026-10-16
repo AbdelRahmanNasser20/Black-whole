@@ -152,7 +152,7 @@ def test_sitemap_lists_slug_urls_and_city_pages(client):
     assert "<loc>https://black-whole.com/chairs</loc>" in xml
     assert "<loc>https://black-whole.com/chairs/pittsburgh-pa</loc>" in xml
     assert "<loc>https://black-whole.com/chairs/phoenix-az</loc>" in xml
-    assert "/chairs/baltimore-md" not in xml  # sold-only city is noindex
+    assert "<loc>https://black-whole.com/chairs/baltimore-md</loc>" in xml  # sold-only city is indexable too
 
 
 def test_feeds_link_to_the_slug():
@@ -191,14 +191,35 @@ def test_city_page_renders_lots_nearby_and_schema(client):
     assert "FAQPage" in kinds and "ItemList" in kinds and "BreadcrumbList" in kinds
     assert 'name="robots" content="noindex' not in html
     assert 'rel="canonical" href="https://black-whole.com/chairs/pittsburgh-pa"' in html
+    assert "SEE AVAILABLE CHAIRS NEAR YOU" not in html  # the sold-only hand-off block
 
 
-def test_sold_only_city_is_noindex_but_renders(client):
+def test_sold_only_city_is_indexable_with_honest_sold_content(client):
     r = client.get("/chairs/baltimore-md")
     assert r.status_code == 200
-    assert 'name="robots" content="noindex,follow"' in r.text
-    assert "ALREADY MOVED THROUGH BALTIMORE" in r.text
-    assert "Nothing is on the floor in Baltimore, MD" in r.text
+    html = r.text
+    # Indexable again (13 GSC "Excluded by noindex" pages, operator call 2026-10-16).
+    assert 'name="robots" content="noindex' not in html
+    assert 'rel="canonical" href="https://black-whole.com/chairs/baltimore-md"' in html
+    # …but never fake availability: the sold lots render stamped SOLD and the
+    # copy says plainly that nothing is on the floor.
+    assert "Sold Lots" in html.split("</title>")[0]
+    assert "ALREADY MOVED THROUGH BALTIMORE" in html
+    assert "Nothing is on the floor in Baltimore, MD" in html
+    assert "lot-stamp--sold" in html
+    assert 'href="/listings/3000-blue-chairs-baltimore-md"' in html  # the sold lot is linked
+    assert "InStock" not in html
+    # Prominent hand-off to live stock: /listings, the cities index, and the
+    # nearest in-stock city pages (Pittsburgh ≈ 210 mi before Phoenix ≈ 1,900 mi).
+    assert "SEE AVAILABLE CHAIRS NEAR YOU" in html
+    near = html.split("SEE AVAILABLE CHAIRS NEAR YOU")[1].split("</section>")[0]
+    assert 'href="/listings"' in near and 'href="/chairs"' in near
+    assert near.index("/chairs/pittsburgh-pa") < near.index("/chairs/phoenix-az")
+    # Structured data stays honest: the ItemList names page URLs only (no
+    # Offer), and the sold lot's page is one of them.
+    itemlist = [b for b in _jsonld(html) if b.get("@type") == "ItemList"][0]
+    urls = [e["url"] for e in itemlist["itemListElement"]]
+    assert "https://black-whole.com/listings/3000-blue-chairs-baltimore-md" in urls
 
 
 def test_unknown_city_is_404(client):
