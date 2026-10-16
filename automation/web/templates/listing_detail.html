@@ -133,6 +133,32 @@
       <div><dt>CONDITION</dt><dd>Used — inspected · see photos</dd></div>
     </dl>
 
+    {% if price_check %}
+    {#- Verified "what this costs new" anchors (automation/price_check.py):
+        live price_anchors rows or the hand-checked statics. Text + outbound
+        source link only — never another seller's photo, never an invented
+        number. #}
+    <div class="price-check">
+      <div class="section-rule"></div>
+      <div class="section-label mono tiny">PRICE CHECK — WHAT THESE COST NEW</div>
+      <ul class="pc-list">
+        {% for a in price_check.anchors %}
+        <li class="pc-row">
+          <span class="pc-price mono">~${{ "%.0f"|format(a.price) }}</span>
+          <span class="pc-label">{{ a.label }}</span>
+          <a class="pc-src mono tiny" href="{{ a.url }}" target="_blank"
+             rel="nofollow noopener">{{ a.source }} →</a>
+        </li>
+        {% endfor %}
+        <li class="pc-row pc-row--ours">
+          <span class="pc-price mono">${{ "%.0f"|format(price_check.ours) }}</span>
+          <span class="pc-label">this lot, per {{ item.unit | lower }} — used{% if price_check.where %}, already in {{ price_check.where }}{% endif %}</span>
+        </li>
+      </ul>
+      <div class="pc-note mono tiny">NEW RETAIL PRICES AS LISTED AT THE LINKED SELLERS · OUR CHAIRS ARE USED</div>
+    </div>
+    {% endif %}
+
     {% if nearby and nearby.origin %}
     <div class="nearby">
       <div class="section-rule"></div>
