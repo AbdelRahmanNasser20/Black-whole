@@ -133,6 +133,8 @@ from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
 app.include_router(_ebay_deletion_router)
+from automation.web.platform_routes import router as _platform_router  # noqa: E402
+app.include_router(_platform_router)
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public

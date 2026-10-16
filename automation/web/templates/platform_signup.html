@@ -1,0 +1,71 @@
+{% extends "_public_base.html" %}
+{# Context: supabase_url, supabase_key (public values from env; empty = not configured). #}
+{% block title %}Join the platform | Black Whole Liquidation{% endblock %}
+{% block meta_description %}Create a free account to get alerts on liquidation lots that fit what you flip.{% endblock %}
+{% block body_class %}page-platform-signup{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">EARLY ACCESS</div>
+    <h1 class="page-title">JOIN</h1>
+    <p class="page-lede">Free account. Tell us what you flip and we alert you when a matching lot shows up.</p>
+  </div>
+</section>
+<section class="terms-body">
+  {% if not supabase_url or not supabase_key %}
+  <p class="mono tiny" id="not-configured">Sign-in is not configured on this server yet.</p>
+  {% else %}
+  <p id="auth-msg" class="mono tiny" role="status"></p>
+  <p><button class="btn btn-primary" id="google-btn" type="button">Continue with Google</button></p>
+  <form id="otp-form" style="max-width:420px">
+    <label class="mono tiny" for="email">OR GET A CODE BY EMAIL</label><br>
+    <input id="email" type="email" required autocomplete="email" placeholder="you@company.com" style="width:100%;padding:10px;margin:6px 0">
+    <button class="btn btn-ghost" id="send-btn" type="submit">Send code</button>
+  </form>
+  <form id="verify-form" hidden style="max-width:420px">
+    <label class="mono tiny" for="code">CODE FROM YOUR EMAIL</label><br>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" required style="width:100%;padding:10px;margin:6px 0">
+    <button class="btn btn-primary" type="submit">Sign in</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if supabase_url and supabase_key %}
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(function () {
+  var sb = window.supabase.createClient({{ supabase_url | tojson }}, {{ supabase_key | tojson }});
+  var msg = document.getElementById("auth-msg");
+  var NEXT = "/platform/onboarding";
+  function say(t) { msg.textContent = t; }
+  function saveAndGo(session) {
+    document.cookie = "sb-access-token=" + session.access_token + "; path=/; max-age=3600; SameSite=Lax; Secure";
+    location.href = NEXT;
+  }
+  sb.auth.getSession().then(function (r) { if (r.data && r.data.session) saveAndGo(r.data.session); });
+  sb.auth.onAuthStateChange(function (_e, s) { if (s) saveAndGo(s); });
+  document.getElementById("google-btn").onclick = function () {
+    sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + "/platform/signup" } });
+  };
+  var email = "";
+  document.getElementById("otp-form").onsubmit = function (e) {
+    e.preventDefault();
+    email = document.getElementById("email").value.trim();
+    sb.auth.signInWithOtp({ email: email }).then(function (r) {
+      if (r.error) { say(r.error.message); return; }
+      say("Code sent. Check your email.");
+      document.getElementById("verify-form").hidden = false;
+    });
+  };
+  document.getElementById("verify-form").onsubmit = function (e) {
+    e.preventDefault();
+    sb.auth.verifyOtp({ email: email, token: document.getElementById("code").value.trim(), type: "email" })
+      .then(function (r) { if (r.error) say(r.error.message); else saveAndGo(r.data.session); });
+  };
+})();
+</script>
+{% endif %}
+{% endblock %}
