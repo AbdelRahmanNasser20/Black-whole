@@ -63,7 +63,13 @@ def test_billing_stays_dark_on_the_landing(monkeypatch):
     pricing = html.split('id="pricing"', 1)[1].split("</section>", 1)[0]
     assert "Not priced yet" in pricing
     assert not re.search(r"\$\s*\d", pricing)
-    assert "lock in Pro at a discount" in pricing
+    assert "preferred pricing" in pricing and "first access" in pricing
+    # the Pro tease names only real, free-tier-distinct advantages — never an
+    # unbuilt feature and never a free feature moved behind a paywall
+    assert "forecast" not in pricing.lower()
+    assert "unlimited" not in pricing.lower()
+    later = pricing.split('pf-plan--later', 1)[1]
+    assert "max bid" not in later.lower() and "flip score" not in later.lower()
 
 
 # ───────────────────────── real numbers only ─────────────────────────
@@ -135,3 +141,22 @@ def test_stats_cold_start_refreshes_in_background(monkeypatch):
         raise AssertionError("fresh memo must not re-read")
     monkeypatch.setattr(platform_api.db, "fetch_one", boom)
     assert platform_api.stats() == {"sold_outcomes": 7, "open_now": 3}
+
+
+def test_stats_failure_backs_off_between_page_views(monkeypatch):
+    monkeypatch.setattr(platform_api.threading, "Thread", InlineThread)
+    calls = []
+
+    def boom(sql, params=None):
+        calls.append(sql)
+        raise RuntimeError("db down")
+    monkeypatch.setattr(platform_api.db, "fetch_one", boom)
+    for _ in range(3):                       # three page views during an outage …
+        assert platform_api.stats() is None
+    assert len(calls) == 1, "… must try the database once, then back off"
+    # once the backoff lapses, the next view tries again and recovers
+    with platform_api._stats_lock:
+        platform_api._stats["fail_until"] = 0.0
+    monkeypatch.setattr(platform_api.db, "fetch_one",
+                        lambda sql, params=None: {"sold_outcomes": 9, "open_now": 4})
+    assert platform_api.stats() == {"sold_outcomes": 9, "open_now": 4}

@@ -262,7 +262,7 @@ def clear_cache() -> None:
     readcache.invalidate_all()
     _fail_until.clear()
     with _stats_lock:
-        _stats.update(at=0.0, data=None, refreshing=False)
+        _stats.update(at=0.0, data=None, refreshing=False, fail_until=0.0)
 
 
 def _lots(status: str) -> tuple[str, list[dict]]:
@@ -394,7 +394,7 @@ SELECT
 """
 
 _stats_lock = threading.Lock()
-_stats: dict[str, Any] = {"at": 0.0, "data": None, "refreshing": False}
+_stats: dict[str, Any] = {"at": 0.0, "data": None, "refreshing": False, "fail_until": 0.0}
 
 
 def _refresh_stats() -> None:
@@ -406,16 +406,20 @@ def _refresh_stats() -> None:
         data = None
     with _stats_lock:
         _stats["refreshing"] = False
-        if data is not None:      # a failure keeps the last good numbers
+        if data is not None:      # a failure keeps the last good numbers …
             _stats["data"], _stats["at"] = data, time.monotonic()
+        else:                      # … and backs off, so an outage is not re-queried per page view
+            _stats["fail_until"] = time.monotonic() + FAIL_BACKOFF
 
 
 def stats() -> dict | None:
     """The landing page's numbers, or None while none have been read yet.
-    Never blocks and never raises: stale-while-revalidate via a daemon thread."""
+    Never blocks and never raises: stale-while-revalidate via a daemon thread,
+    with FAIL_BACKOFF between refresh attempts while the database is down."""
     with _stats_lock:
-        stale = _stats["data"] is None or time.monotonic() - _stats["at"] >= STATS_TTL
-        if not stale or _stats["refreshing"]:
+        now = time.monotonic()
+        stale = _stats["data"] is None or now - _stats["at"] >= STATS_TTL
+        if not stale or _stats["refreshing"] or now < _stats["fail_until"]:
             return _stats["data"]
         _stats["refreshing"] = True
     threading.Thread(target=_refresh_stats, name="platform-stats", daemon=True).start()
