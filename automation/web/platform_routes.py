@@ -11,7 +11,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from automation import db
 from automation.web import platform_auth
@@ -81,10 +81,18 @@ _ALERT_COLS = "id, keyword, state_filter, source_filter, max_price, active, last
 
 
 class AlertBody(BaseModel):
-    keyword: str = Field(min_length=2, max_length=80)
+    keyword: str
     state_filter: str | None = Field(None, pattern=r"^[A-Za-z]{2}$")
     source_filter: str | None = Field(None, max_length=40)
     max_price: float | None = Field(None, gt=0, le=100_000_000)
+
+    @field_validator("keyword")
+    @classmethod
+    def _keyword_len(cls, v: str) -> str:
+        v = v.strip()  # strip first so whitespace can't satisfy the minimum
+        if not 2 <= len(v) <= 80:
+            raise ValueError("keyword must be 2-80 characters")
+        return v
 
 
 class SavedBody(BaseModel):
@@ -123,13 +131,14 @@ def list_alerts(user: dict = Depends(onboarded_user)):
 @router.post("/platform/api/alerts")
 def create_alert(body: AlertBody, user: dict = Depends(onboarded_user)):
     state = body.state_filter.upper() if body.state_filter else None
-    source = (body.source_filter or "").strip() or None
-    # One statement: the cap check and the insert can't race past the limit.
+    source = (body.source_filter or "").strip().lower() or None
+    # Cap is best-effort under concurrency (READ COMMITTED): worst case it overshoots
+    # by the number of concurrent requests.
     row = db.fetch_one(
         "INSERT INTO platform_alerts (user_id, keyword, state_filter, source_filter, max_price) "
         "SELECT %s, %s, %s, %s, %s WHERE (SELECT count(*) FROM platform_alerts WHERE user_id = %s) < %s "
         f"RETURNING {_ALERT_COLS}",
-        (user["user_id"], body.keyword.strip(), state, source, body.max_price, user["user_id"], _max_alerts()),
+        (user["user_id"], body.keyword, state, source, body.max_price, user["user_id"], _max_alerts()),
     )
     if row is None:
         raise HTTPException(status_code=409, detail={"error": "alert_limit", "max": _max_alerts()})
@@ -161,7 +170,7 @@ def save_lot(body: SavedBody, user: dict = Depends(onboarded_user)):
     return {"ok": True}
 
 
-@router.delete("/platform/api/saved/{source}/{lot_key}")
+@router.delete("/platform/api/saved/{source}/{lot_key:path}")
 def unsave_lot(source: str, lot_key: str, user: dict = Depends(onboarded_user)):
     db.execute("DELETE FROM platform_saved_lots WHERE user_id = %s AND source = %s AND lot_key = %s",
                (user["user_id"], source, lot_key))

@@ -87,7 +87,9 @@ def test_alert_cap_409(client, fake, monkeypatch):
     monkeypatch.setenv("PLATFORM_MAX_ALERTS_PER_USER", "2")
     for i in range(2):
         assert client.post("/platform/api/alerts", json={"keyword": f"kw{i}"}).status_code == 200
-    assert client.post("/platform/api/alerts", json={"keyword": "kw3"}).status_code == 409
+    r = client.post("/platform/api/alerts", json={"keyword": "kw3"})
+    assert r.status_code == 409
+    assert r.json() == {"detail": {"error": "alert_limit", "max": 2}}
     assert len(fake.alerts) == 2
 
 
@@ -110,7 +112,7 @@ def test_other_users_alert_404(client, fake):
 
 
 @pytest.mark.parametrize("body", [
-    {"keyword": "a"}, {"keyword": "x" * 81}, {"keyword": ""}, {},
+    {"keyword": "a"}, {"keyword": "x" * 81}, {"keyword": ""}, {"keyword": "   "}, {"keyword": " a "}, {},
     {"keyword": "chairs", "state_filter": "ARI"}, {"keyword": "chairs", "max_price": -5},
 ])
 def test_keyword_length_422(client, fake, body):
@@ -167,3 +169,14 @@ def test_alerts_page_not_onboarded_redirects(monkeypatch):
                         lambda req: {"user_id": ME, "email": "a@b.com", "onboarded_at": None})
     r = TestClient(app, follow_redirects=False).get("/platform/alerts")
     assert r.status_code == 302 and r.headers["location"] == "/platform/onboarding"
+
+
+def test_source_filter_lowercased(client, fake):
+    r = client.post("/platform/api/alerts", json={"keyword": "chairs", "source_filter": " GovDeals "})
+    assert r.json()["source_filter"] == "govdeals"
+
+
+def test_unsave_slashed_lot_key(client, fake):
+    fake.saved.add((ME, "govdeals", "a/b"))
+    assert client.delete("/platform/api/saved/govdeals/a%2Fb").status_code == 200
+    assert fake.saved == set()
