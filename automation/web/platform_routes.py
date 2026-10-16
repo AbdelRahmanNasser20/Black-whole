@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 
-from automation import db
+from automation import db, platform_billing, stripe_gateway
 from automation.web import platform_auth
 
 router = APIRouter()
@@ -220,3 +220,23 @@ def platform_unsubscribe(token: str = ""):
     db.execute("UPDATE platform_alerts SET active = false WHERE user_id = %s", (user_id,))
     return HTMLResponse("<!doctype html><meta charset=utf-8><title>Unsubscribed</title>"
                         "<p>You are unsubscribed. All your lot alerts are off.</p>")
+
+
+@router.post("/platform/api/subscribe")
+def platform_subscribe(user: dict = Depends(platform_auth.get_current_user)):
+    """Dark-ship: 404 unless PLATFORM_BILLING_ENABLED. Price comes from env only."""
+    price_id = os.getenv("PLATFORM_STRIPE_PRICE_ID", "").strip()
+    if not platform_billing.enabled() or not price_id:
+        raise HTTPException(status_code=404, detail="not found")
+    row = db.fetch_one("SELECT stripe_customer_id FROM platform_users WHERE user_id = %s",
+                       (user["user_id"],)) or {}
+    customer_id = row.get("stripe_customer_id")
+    if not customer_id:
+        customer_id = stripe_gateway.create_platform_customer(
+            email=user["email"], user_id=str(user["user_id"]))
+        db.execute("UPDATE platform_users SET stripe_customer_id = %s WHERE user_id = %s",
+                   (customer_id, user["user_id"]))
+    base = os.getenv("PLATFORM_BASE_URL") or "http://127.0.0.1:8765"
+    session = stripe_gateway.create_subscription_checkout(
+        customer_id=customer_id, price_id=price_id, base_url=base)
+    return {"ok": True, "url": session["url"]}

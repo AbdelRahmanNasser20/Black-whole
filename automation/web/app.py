@@ -75,6 +75,7 @@ from .. import channels as channels_pkg
 from ..channels import store as channel_store
 from ..channels import sync as channel_sync
 from .. import stripe_gateway
+from .. import platform_billing
 from .. import freight_estimate
 from .. import freight_log
 from .. import attribution
@@ -3271,6 +3272,8 @@ async def stripe_webhook(request: Request):
     except Exception:
         raise HTTPException(400, "invalid signature")
 
+    # Platform subscription events (customer.subscription.*); no-op for others.
+    await asyncio.to_thread(platform_billing.apply_stripe_event, event)
     row, changed = await asyncio.to_thread(deposits.apply_stripe_event, event)
     # `changed` is what keeps a Stripe retry from re-pinging the operator: the
     # state machine no-ops the second delivery and reports False.

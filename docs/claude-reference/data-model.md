@@ -29,3 +29,12 @@ CREATE TABLE public.platform_alert_sends (
   UNIQUE (alert_id, source, lot_key)
 );
 ```
+
+## 2026-10-16 — platform subscriptions (migration 031, `scripts/sql/031_platform_subscriptions.sql`)
+
+```sql
+ALTER TABLE public.platform_users ADD COLUMN IF NOT EXISTS stripe_customer_id TEXT;
+CREATE INDEX IF NOT EXISTS platform_users_stripe_customer_idx
+  ON public.platform_users (stripe_customer_id) WHERE stripe_customer_id IS NOT NULL;
+```
+`customer.subscription.*` webhooks set `plan` to `pro` or `beta` by `stripe_customer_id`.
