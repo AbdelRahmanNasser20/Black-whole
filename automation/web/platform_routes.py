@@ -175,3 +175,16 @@ def unsave_lot(source: str, lot_key: str, user: dict = Depends(onboarded_user)):
     db.execute("DELETE FROM platform_saved_lots WHERE user_id = %s AND source = %s AND lot_key = %s",
                (user["user_id"], source, lot_key))
     return {"ok": True}
+
+
+# ---- unsubscribe (public, token-authenticated) -----------------------------
+
+@router.get("/platform/unsubscribe", response_class=HTMLResponse)
+def platform_unsubscribe(token: str = ""):
+    from automation import platform_email  # lazy: keeps requests/itsdangerous off import path
+    user_id = platform_email.verify_unsub_token(token)
+    if not user_id:
+        raise HTTPException(status_code=400, detail="invalid or expired link")
+    db.execute("UPDATE platform_alerts SET active = false WHERE user_id = %s", (user_id,))
+    return HTMLResponse("<!doctype html><meta charset=utf-8><title>Unsubscribed</title>"
+                        "<p>You are unsubscribed. All your lot alerts are off.</p>")
