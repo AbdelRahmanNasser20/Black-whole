@@ -73,3 +73,96 @@ def platform_onboarding_submit(body: OnboardingBody, user: dict = Depends(platfo
          body.flips_what.strip(), body.biggest_pain.strip(), user["user_id"]),
     )
     return {"ok": True, "next": "/platform/alerts"}
+
+
+# ---- alerts + saved lots ---------------------------------------------------
+
+_ALERT_COLS = "id, keyword, state_filter, source_filter, max_price, active, last_fired_at, created_at"
+
+
+class AlertBody(BaseModel):
+    keyword: str = Field(min_length=2, max_length=80)
+    state_filter: str | None = Field(None, pattern=r"^[A-Za-z]{2}$")
+    source_filter: str | None = Field(None, max_length=40)
+    max_price: float | None = Field(None, gt=0, le=100_000_000)
+
+
+class SavedBody(BaseModel):
+    source: str = Field(min_length=1, max_length=40)
+    lot_key: str = Field(min_length=1, max_length=200)
+
+
+def onboarded_user(user: dict = Depends(platform_auth.get_current_user)) -> dict:
+    return platform_auth.require_onboarded(user)
+
+
+def _max_alerts() -> int:
+    try:
+        return int(os.getenv("PLATFORM_MAX_ALERTS_PER_USER", "10"))
+    except ValueError:
+        return 10
+
+
+@router.get("/platform/alerts", response_class=HTMLResponse)
+def platform_alerts_page(request: Request):
+    user = platform_auth.maybe_user(request)
+    if user is None:
+        return RedirectResponse("/platform/signup", status_code=302)
+    if not user.get("onboarded_at"):
+        return RedirectResponse("/platform/onboarding", status_code=302)
+    return _render(request, "platform_alerts.html", {"user_email": user["email"], "robots_noindex": True})
+
+
+@router.get("/platform/api/alerts")
+def list_alerts(user: dict = Depends(onboarded_user)):
+    rows = db.fetch_all(
+        f"SELECT {_ALERT_COLS} FROM platform_alerts WHERE user_id = %s ORDER BY id", (user["user_id"],))
+    return {"alerts": rows}
+
+
+@router.post("/platform/api/alerts")
+def create_alert(body: AlertBody, user: dict = Depends(onboarded_user)):
+    state = body.state_filter.upper() if body.state_filter else None
+    source = (body.source_filter or "").strip() or None
+    # One statement: the cap check and the insert can't race past the limit.
+    row = db.fetch_one(
+        "INSERT INTO platform_alerts (user_id, keyword, state_filter, source_filter, max_price) "
+        "SELECT %s, %s, %s, %s, %s WHERE (SELECT count(*) FROM platform_alerts WHERE user_id = %s) < %s "
+        f"RETURNING {_ALERT_COLS}",
+        (user["user_id"], body.keyword.strip(), state, source, body.max_price, user["user_id"], _max_alerts()),
+    )
+    if row is None:
+        raise HTTPException(status_code=409, detail={"error": "alert_limit", "max": _max_alerts()})
+    return row
+
+
+@router.delete("/platform/api/alerts/{alert_id}")
+def delete_alert(alert_id: int, user: dict = Depends(onboarded_user)):
+    n = db.execute("DELETE FROM platform_alerts WHERE id = %s AND user_id = %s", (alert_id, user["user_id"]))
+    if not n:  # missing and not-yours look identical
+        raise HTTPException(status_code=404, detail="not found")
+    return {"ok": True}
+
+
+@router.get("/platform/api/saved")
+def list_saved(user: dict = Depends(onboarded_user)):
+    rows = db.fetch_all(
+        "SELECT source, lot_key FROM platform_saved_lots WHERE user_id = %s ORDER BY created_at DESC",
+        (user["user_id"],))
+    return {"saved": rows}
+
+
+@router.post("/platform/api/saved")
+def save_lot(body: SavedBody, user: dict = Depends(onboarded_user)):
+    db.execute(
+        "INSERT INTO platform_saved_lots (user_id, source, lot_key) VALUES (%s, %s, %s) "
+        "ON CONFLICT (user_id, source, lot_key) DO NOTHING",
+        (user["user_id"], body.source, body.lot_key))
+    return {"ok": True}
+
+
+@router.delete("/platform/api/saved/{source}/{lot_key}")
+def unsave_lot(source: str, lot_key: str, user: dict = Depends(onboarded_user)):
+    db.execute("DELETE FROM platform_saved_lots WHERE user_id = %s AND source = %s AND lot_key = %s",
+               (user["user_id"], source, lot_key))
+    return {"ok": True}
