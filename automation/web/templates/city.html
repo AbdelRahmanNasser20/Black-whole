@@ -8,7 +8,7 @@
 {% block body_class %}page-city{% endblock %}
 {% block head_extra %}
 <script type="application/ld+json">{{ page.faq_jsonld | safe }}</script>
-{% if page.live %}
+{% if page.live or page.sold %}
 <script type="application/ld+json">{{ page.itemlist_jsonld | safe }}</script>
 {% endif %}
 {% endblock %}
@@ -18,7 +18,11 @@
 <section class="page-head">
   <div class="page-head-left">
     <div class="mono tiny">PICKUP CITY · {{ page.label | upper }}</div>
+    {%- if page.live %}
     <h1 class="page-title">BULK BANQUET CHAIRS FOR SALE IN {{ page.label | upper }}</h1>
+    {%- else %}
+    <h1 class="page-title">BULK BANQUET CHAIRS IN {{ page.label | upper }} — SOLD LOTS &amp; NEARBY STOCK</h1>
+    {%- endif %}
     <p class="page-lede">{{ page.intro }}</p>
   </div>
   <div class="page-head-right mono tiny">
@@ -67,6 +71,24 @@
     </a>
     {% endfor %}
   </div>
+</section>
+{% endif %}
+
+{% if not page.live %}
+{#- Sold-only city: honest hand-off to the live stock. Never fakes availability —
+    the sold lots render below, stamped SOLD. -#}
+<section class="floor floor--available-near">
+  <div class="how-head">
+    <div class="section-rule"></div>
+    <h2 class="section-title">SEE AVAILABLE CHAIRS NEAR YOU</h2>
+  </div>
+  <p class="page-lede">Every {{ page.city }} lot below is sold. These lots and cities have chairs on the floor right now:</p>
+  <p class="mono">
+    {%- for c in page.nearby_cities %}
+    <a href="{{ c.path }}">{{ c.label | upper }} · {{ "{:,}".format(c.chairs) }} CHAIRS →</a> ·
+    {%- endfor %}
+    <a href="/listings">ALL AVAILABLE LOTS →</a> · <a href="/chairs">ALL PICKUP CITIES →</a>
+  </p>
 </section>
 {% endif %}
 

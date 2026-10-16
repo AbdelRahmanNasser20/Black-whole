@@ -990,14 +990,21 @@ def public_cities(request: Request):
 @app.get("/chairs/{slug}", response_class=HTMLResponse)
 def public_city(request: Request, slug: str):
     """City landing page: live lots there, sold proof, lots within driving
-    distance, pickup/freight FAQ. Sold-only cities render with noindex."""
+    distance, pickup/freight FAQ. A sold-only city is indexable too: it
+    renders its lots stamped SOLD (honest archive, never fake availability)
+    and links hard to the live stock — /listings, the nearest in-stock city
+    pages and the nearby lots."""
     visits.track(request)
     page = city_pages.page(slug)
     if page is None:
         raise HTTPException(404, "no such city")
     page["live"] = [_decorate(dict(r)) for r in page["live"]]
     page["sold"] = [_decorate(dict(r)) for r in page["sold"]]
-    page["itemlist_jsonld"] = _itemlist_jsonld(page["live"], name=f"Chair lots in {page['label']}")
+    # Live and sold lots both belong in the ItemList — each URL is an
+    # indexable page of ours. ItemList carries no Offer/availability, so a
+    # sold lot here claims nothing; the lot page itself says SoldOut.
+    page["itemlist_jsonld"] = _itemlist_jsonld(
+        page["live"] + page["sold"], name=f"Chair lots in {page['label']}")
     return templates.TemplateResponse(
         request, "city.html",
         _public_ctx({"page": page, "robots_noindex": not page["indexable"]}),
@@ -2179,7 +2186,8 @@ def _sitemap_body() -> str:
     body += '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
     for path in ("/", "/listings", "/map", "/chairs", "/sell", "/about", "/terms", "/privacy"):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{path}")
-    # City pages with at least one live lot (sold-only cities are noindex).
+    # Every city page — sold-only cities included (2026-10-16): they render
+    # an honest SOLD archive plus links to live stock, and are indexable.
     for rec in city_pages.listing(indexable_only=True):
         body += _sitemap_entry(f"{PUBLIC_BASE_URL}{rec['path']}")
     # Sold lots are indexable too (BLACKWHOLE-29): "500 banquet chairs Atlanta"

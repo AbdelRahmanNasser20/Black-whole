@@ -13,9 +13,12 @@ from public_map.all_points() (allow-listed, city-level). A lot that sits in
 several cities (`locations`) appears on each of its city pages.
 `storage_note` is never read.
 
-Indexability: a city with at least one live lot is in the sitemap; a city
-with only sold lots still renders (anyone with the link gets the archive
-and the nearby lots) but carries noindex so it can't become a thin page.
+Indexability: every city page — live or sold-only — is indexable and in the
+sitemap (2026-10-16, reversing the launch noindex that put 13 pages in GSC's
+"Excluded by noindex"). A sold-only city is not thin: it shows that city's
+sold lots stamped SOLD (honest archive, never fake availability) and points
+hard at the live stock — /listings, the nearest in-stock city pages
+(`nearby_cities`) and the nearby lots.
 """
 
 from __future__ import annotations
@@ -88,7 +91,9 @@ def index() -> dict[str, dict]:
         prices = [float(r["price_per_chair"]) for r in rec["live"]
                   if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
         rec["min_price"] = min(prices) if prices else None
-        rec["indexable"] = bool(rec["live"])
+        # Sold-only cities are indexable too: the page is an honest SOLD
+        # archive plus links to live stock, not a thin orphan.
+        rec["indexable"] = bool(rec["live"] or rec["sold"])
         rec["kinds"] = sorted({seo_copy.kind(r) for r in rec["live"]} or {"banquet"})
     return cities
 
@@ -123,6 +128,28 @@ def nearby(city: str, state: str, *, exclude_slug: str, exclude_lots: set[str] |
             best[p["lot_id"]] = item
     items = sorted(best.values(), key=lambda p: p["distance_mi"])
     return items[:limit]
+
+
+def nearby_cities(slug: str, *, limit: int = 4) -> list[dict]:
+    """In-stock city pages nearest to this one — the "available chairs near
+    you" links on a sold-only city page. Distance-sorted when the city
+    geocodes; otherwise most live chairs first. Never invents stock: only
+    cities with live lots qualify."""
+    rec = index().get(slug)
+    if rec is None:
+        return []
+    live = [r for r in index().values() if r["live"] and r["slug"] != slug]
+    lat, lng, _ = geo.resolve_place(rec["city"], rec["state"], None)
+
+    def dist(r: dict) -> float:
+        if lat is None:
+            return 0.0
+        olat, olng, _ = geo.resolve_place(r["city"], r["state"], None)
+        if olat is None:
+            return float("inf")
+        return geo.haversine_miles(lat, lng, olat, olng)
+
+    return sorted(live, key=lambda r: (dist(r), -r["chairs"], r["label"]))[:limit]
 
 
 def _pick(seed: str, options: tuple[str, ...]) -> str:
@@ -186,14 +213,32 @@ def page(slug: str) -> dict | None:
         rec["nearby"] = nearby(rec["city"], rec["state"], exclude_slug=slug, exclude_lots=on_page)
     except Exception:  # noqa: BLE001 — the page must render without geo
         rec["nearby"] = []
+    rec["nearby_cities"] = []
+    if not rec["live"]:
+        try:
+            rec["nearby_cities"] = nearby_cities(slug)
+        except Exception:  # noqa: BLE001 — the page must render without geo
+            pass
     rec["intro"] = intro(rec)
     rec["faq"] = faq(rec)
     rec["faq_jsonld"] = seo_copy.faq_jsonld(rec["faq"])
-    rec["title"] = f"Bulk Banquet Chairs for Sale in {rec['label']} | Black Whole"
+    rec["title"] = (
+        f"Bulk Banquet Chairs for Sale in {rec['label']} | Black Whole"
+        if rec["live"] else
+        f"Bulk Banquet Chairs in {rec['label']} — Sold Lots & Nearby Stock | Black Whole"
+    )
     kinds = " and ".join(f"{seo_copy._KIND_WORD[k]} chairs" for k in rec["kinds"][:2])
-    rec["description"] = (
-        f"Used {kinds} in {rec['label']} sold by the lot — "
-        + (f"{rec['chairs']:,} chairs on the floor, " if rec["live"] else "")
-        + "free local pickup or nationwide freight. Matched commercial sets at liquidation prices."
-    )[:155]
+    if rec["live"]:
+        rec["description"] = (
+            f"Used {kinds} in {rec['label']} sold by the lot — "
+            f"{rec['chairs']:,} chairs on the floor, "
+            "free local pickup or nationwide freight. Matched commercial sets at liquidation prices."
+        )[:155]
+    else:
+        # Honest sold-only copy: never imply stock that isn't there.
+        rec["description"] = (
+            f"Used {kinds} lots in {rec['label']} — sold out right now. "
+            "See what moved through here and find available chairs nearby, "
+            "or join the list for the next lot."
+        )[:155]
     return rec
