@@ -4465,9 +4465,34 @@ async def _auction_sync_loop() -> None:
         await asyncio.sleep(_AUCTION_SYNC_INTERVAL_SEC)
 
 
+# ─────────── platform keyword-alert matcher (sibling loop, web process) ───────────
+_PLATFORM_ALERTS_INTERVAL_SEC = float(os.getenv("PLATFORM_ALERTS_INTERVAL_SEC", "900"))
+_PLATFORM_ALERTS_ENABLED = (os.getenv("PLATFORM_ALERTS_ENABLED", "1").strip().lower()
+                            not in ("0", "false", "no", "off"))
+_platform_alerts_task: asyncio.Task | None = None
+
+
+async def _platform_alerts_tick() -> None:
+    try:
+        from automation import platform_alerts
+        rep = await asyncio.to_thread(platform_alerts.run_pass)
+        if rep.get("matched") or rep.get("emailed"):
+            print(f"[platform-alerts] {rep}")
+    except Exception as e:
+        # One bad pass must not kill the loop.
+        print(f"[platform-alerts] tick error: {e!r}")
+
+
+async def _platform_alerts_loop() -> None:
+    while True:
+        await _platform_alerts_tick()
+        await asyncio.sleep(_PLATFORM_ALERTS_INTERVAL_SEC)
+
+
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
     global _alerts_task, _tracking_task, _geo_warm_task, _channel_sync_task, _auction_sync_task
+    global _platform_alerts_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -4508,13 +4533,17 @@ async def _start_alerts_loop() -> None:
               f"(every {_AUCTION_SYNC_INTERVAL_SEC / 60:.0f} min)")
     elif not _AUCTION_SYNC_ENABLED:
         print("[auction-sync] disabled (AUCTION_SYNC_ENABLED=0)")
+    if _PLATFORM_ALERTS_ENABLED and (_platform_alerts_task is None or _platform_alerts_task.done()):
+        _platform_alerts_task = asyncio.create_task(_platform_alerts_loop())
+        print(f"[platform-alerts] matcher started (every {_PLATFORM_ALERTS_INTERVAL_SEC:.0f}s)")
 
 
 @app.on_event("shutdown")
 async def _stop_alerts_loop() -> None:
     global _alerts_task
     await asyncio.to_thread(db.reset_pool)   # close pooled sockets off-loop
-    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task):
+    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task,
+                 _platform_alerts_task):
         if task and not task.done():
             task.cancel()
             try:
