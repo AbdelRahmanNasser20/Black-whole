@@ -1,7 +1,17 @@
-{#- templates/platform.html — GET /platform: one product window over a dark backdrop, then why + access.
+{#- templates/platform.html — GET /platform: the liquidator product landing.
     Reached by direct URL only: NOT in the buyer nav, NOT in the sitemap, noindex.
-    Order: backdrop (hero → app window) → why → access. Few words on purpose.
-    The window is the product: a sidebar of sections, a top bar with one search field, one pane on screen.
+    One dark page in the product's own palette (tokens.css [data-theme="dark"]) — the landing wears the
+    same skin as the product it sells. Order: hero (claim + real numbers) → live demo window → what you
+    get → founding members → closing CTA. The conversion is /platform/signup (free beta, no card).
+
+    Honesty rules, enforced by tests/web/test_platform_page.py + tests/platform/test_landing.py:
+    · Every number is real: `stats` is platform_api.stats() (live DB counts, memoised, background-refreshed,
+      None before the first read lands or while the DB is down → the number simply does not render) and the
+      source counts come from platform_api.SITES / PLANNED_SITES. Nothing is hardcoded in this file.
+    · A planned source is always named as planned; the page never says "all sites".
+    · No testimonials, no customer counts, no invented prices — Pro is framed as a founding-member
+      advantage, billing ships dark.
+    The demo window is unchanged from the PR #117 build:
     · Auctions   = REAL. static/site/platform/auctions.js reads GET /platform/api/auctions and, when that
                    route is missing, the public /deals/api/lots + /deals/api/pins. List and map stay in sync.
                    The tag says "Real data" until the feed reports open auctions, then "Live data".
@@ -12,41 +22,66 @@
                    No real lot, cost, buyer, message, phone or address; inventory.storage_note never renders.
     · Sites      = names render server-side (no DB read); platform.js adds each site's TRUE status —
                    Live, Paused or Planned — from /platform/api/sites (fallback /platform/api/sources).
-                   A planned site is never shown as scraped. The page never says "all sites".
-    · AI         = plain-English search does NOT exist yet; it is only ever labelled "Coming".
-    · Request access = POST /contact (existing endpoint, unchanged). The lead is tagged in `message` with
-                   "[PLATFORM PAGE]" because `inquiries` has no source column (no schema change).
-    The backdrop is a dark island: data-theme="dark" re-declares the operator palette from tokens.css. -#}
+                   A planned site is never shown as scraped. -#}
 {% extends "_public_base.html" %}
-{% block title %}Surplus auctions in one place | Black Whole{% endblock %}
-{% block meta_description %}Surplus auction sites in one feed, plus the operator desk for inventory, listings and buyers. Read-only demo, no signup.{% endblock %}
+{% block title %}Auction intelligence for liquidators | Black Whole{% endblock %}
+{% block meta_description %}One live feed over GovDeals, AllSurplus, GSA Auctions and more, with a Flip Score and a recommended max bid on every lot. Free early access for liquidators.{% endblock %}
 {% block body_class %}page-platform{% endblock %}
 {% block head_extra %}
   <meta name="robots" content="noindex,nofollow">
-  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/site/platform.css?v={{ now }}">
   <link rel="stylesheet" href="/static/site/platform/map.css?v={{ now }}">
 {% endblock %}
 
 {% block content %}
-<div class="pf-backdrop" data-theme="dark">
+<div class="pf-page" data-theme="dark">
   <section class="pf-hero" id="top">
     <nav class="pf-nav" aria-label="Page">
-      <a class="pf-nav-brand" href="/">◉ BLACK&nbsp;WHOLE</a>
+      <a class="pf-nav-brand" href="/">◉ Black Whole <span class="pf-nav-sub">platform</span></a>
       <span class="pf-nav-links">
-        <a href="#app">Demo</a>
-        <a href="#why">Why</a>
-        <a href="#access">Access</a>
+        <a href="#app">Live demo</a>
+        <a href="#product">What you get</a>
+        <a href="#pricing">Pricing</a>
+        <a href="/platform/signup" class="pf-nav-in">Sign in</a>
       </span>
     </nav>
-    <div class="pf-hero-body">
-      <h1 class="pf-headline">Surplus auctions, in one place.</h1>
-      <p class="pf-hero-sub">One feed of auctions. One desk for stock, listings and buyers.</p>
-      <a class="pf-cta" href="#app">Try it. No signup.</a>
+    <div class="pf-hero-grid">
+      <div class="pf-hero-say">
+        <h1 class="pf-headline">Know what it resells for before you bid.</h1>
+        <p class="pf-hero-sub">One feed over the government-surplus auction sites, with a Flip Score
+          and a recommended max bid read from recorded outcomes — not gut feel at 11:58&nbsp;pm.</p>
+        <p class="pf-hero-ctas">
+          <a class="pf-cta" href="/platform/signup">Get free early access</a>
+          <a class="pf-cta-quiet" href="#app">See the live feed</a>
+        </p>
+        <p class="pf-hero-note">Free while the beta runs. No card, no invite code.</p>
+      </div>
+      <dl class="pf-tape" aria-label="Live numbers from the database">
+        {% if stats %}
+        <div class="pf-fact">
+          <dt class="pf-fact-n"><span data-countup="{{ stats.sold_outcomes }}">{{ "{:,}".format(stats.sold_outcomes) }}</span></dt>
+          <dd class="pf-fact-l">closed auctions with the final price on record</dd>
+        </div>
+        <div class="pf-fact">
+          <dt class="pf-fact-n"><span data-countup="{{ stats.open_now }}">{{ "{:,}".format(stats.open_now) }}</span></dt>
+          <dd class="pf-fact-l">lots open on the feed right now</dd>
+        </div>
+        {% endif %}
+        <div class="pf-fact">
+          <dt class="pf-fact-n">{{ sources_tracked }}<span class="pf-fact-of"> of {{ sources_tracked + sources_planned }}</span></dt>
+          <dd class="pf-fact-l">auction sources tracked today — the rest named on the roadmap below</dd>
+        </div>
+      </dl>
     </div>
   </section>
 
   <section class="pf-app" id="app" aria-label="Product demo">
+    <header class="pf-app-head">
+      <h2 class="pf-h2">The live product</h2>
+      <p class="pf-app-lede">The window below is the real feed — read-only, no account. Auctions and
+        Sites are live; Inventory and Buyers run on invented sample data and say so.</p>
+    </header>
     <div class="pf-win" id="pf-win">
       <aside class="pf-side">
         <div class="pf-side-brand">◉ Black Whole</div>
@@ -245,69 +280,90 @@
       </div>
     </div>
   </section>
-</div>
 
-{# ══════════ WHY LIQUIDATORS — COPY BLOCK (start) ══════════
-   Three rows, pain → what this does about it, about 40 words in total. A research agent refines this
-   wording later: edit ONLY the text inside .pf-why-pain / .pf-why-fix, keep three rows, keep it short.
-   Source: direction/tasks/2026-10-02/liquidator-problems-research.md (section 5).
-   Claim only what is built. No customer counts, no prices, no "all sites". #}
-<section class="pf-why" id="why" aria-labelledby="pf-why-title">
-  <h2 class="pf-h2" id="pf-why-title">Why liquidators</h2>
-  <ul class="pf-why-rows">
-    <li class="pf-why-row">
-      <span class="pf-why-pain">The bid is not the cost.</span>
-      <span class="pf-why-fix">Landed cost per unit: bid, premium, freight.</span>
-    </li>
-    <li class="pf-why-row">
-      <span class="pf-why-pain">One lot, many listings to update.</span>
-      <span class="pf-why-fix">List once. It comes down when sold.</span>
-    </li>
-    <li class="pf-why-row">
-      <span class="pf-why-pain">Buyers scattered across chats.</span>
-      <span class="pf-why-fix">One CRM, and a map of past buyers near each lot.</span>
-    </li>
-  </ul>
-  <p class="pf-why-state">
-    <span class="pf-why-item"><span class="pf-state pf-state--on">Built</span> Finder.</span>
-    <span class="pf-why-item"><span class="pf-state pf-state--part">Partly built</span> Listings, buyer CRM.</span>
-    <span class="pf-why-item"><span class="pf-state pf-state--soon">Coming</span> Plain-English search.</span>
-  </p>
-</section>
-{# ══════════ WHY LIQUIDATORS — COPY BLOCK (end) ══════════ #}
+  {# ───────────── What you get — a ledger, not cards. Claim only what is built. ───────────── #}
+  <section class="pf-product" id="product" aria-labelledby="pf-product-title">
+    <h2 class="pf-h2" id="pf-product-title">What you get</h2>
+    <dl class="pf-feats">
+      <div class="pf-feat">
+        <dt class="pf-feat-name">One feed, not {{ sources_tracked + sources_planned }} tabs</dt>
+        <dd class="pf-feat-copy">
+          {{ platform_sources | join(", ") }} in one list today.
+          On the roadmap, named and labelled as such until they ship:
+          {{ planned_sources | join(", ") }}.
+        </dd>
+        <dd class="pf-feat-fact">{{ sources_tracked }} sources tracked · {{ sources_planned }} planned</dd>
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">A max bid, not a hunch</dt>
+        <dd class="pf-feat-copy">
+          Signed-in deal pages carry a Flip Score and a recommended max bid for each lot,
+          read from the recorded history of closed auctions — what things actually hammered for,
+          not what sellers ask.
+        </dd>
+        {% if stats %}<dd class="pf-feat-fact">{{ "{:,}".format(stats.sold_outcomes) }} recorded outcomes behind the score</dd>{% endif %}
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">Alerts that watch the feed for you</dt>
+        <dd class="pf-feat-copy">
+          Keyword, state, price cap. When a matching lot appears anywhere on the feed, you get one
+          email with the lots and their closing times. One click unsubscribes.
+        </dd>
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">One saved list across the feed</dt>
+        <dd class="pf-feat-copy">
+          Star a lot on any tracked site and watch it from a single page — current bid, bid count,
+          closing time — instead of five open tabs and a notes app.
+        </dd>
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">The map</dt>
+        <dd class="pf-feat-copy">
+          Open lots plotted city-level, so you can see what is within a truck's drive before you
+          fall in love with a price three states away.
+        </dd>
+      </div>
+    </dl>
+  </section>
 
-<section class="contact pf-access" id="access">
-  <div class="contact-grid">
-    <div>
-      <div class="section-rule"></div>
-      <h2 class="section-title">REQUEST ACCESS</h2>
-      <p class="contact-lede">Run a liquidation business? Tell me what you sell.</p>
-      <p class="pf-access-note">There is no price list yet. Hiring or curious? Same form.</p>
+  {# ───────────── Founding members — billing ships dark; no invented prices, no live checkout. ───────────── #}
+  <section class="pf-pricing" id="pricing" aria-labelledby="pf-pricing-title">
+    <h2 class="pf-h2" id="pf-pricing-title">Founding members</h2>
+    <div class="pf-plans">
+      <div class="pf-plan pf-plan--now">
+        <h3 class="pf-plan-name">While the beta runs</h3>
+        <p class="pf-plan-price">Free</p>
+        <ul class="pf-plan-list">
+          <li>The full feed, open and closed auctions</li>
+          <li>Flip Score and recommended max bid</li>
+          <li>Keyword, state and price-cap email alerts</li>
+          <li>Saved lots and the map</li>
+        </ul>
+        <p class="pf-plan-note">No card. Founding members get a direct line to the operator and
+          steer what gets built next.</p>
+        <a class="pf-cta" href="/platform/signup">Get free early access</a>
+      </div>
+      <div class="pf-plan pf-plan--later">
+        <h3 class="pf-plan-name">Pro, when billing launches</h3>
+        <p class="pf-plan-price">Not priced yet</p>
+        <ul class="pf-plan-list">
+          <li>Max bid on every lot</li>
+          <li>Close-price forecasts</li>
+          <li>Unlimited alerts</li>
+        </ul>
+        <p class="pf-plan-note">Founding members lock in Pro at a discount when billing launches —
+          that is the whole deal, and the only one.</p>
+      </div>
     </div>
-    <form class="manifest-form" id="pf-access-form" novalidate>
-      <div class="mf-row mf-row--two">
-        <label><span>NAME</span><input name="name" required autocomplete="name"></label>
-        <label><span>EMAIL</span><input name="email" type="email" required autocomplete="email"></label>
-      </div>
-      <div class="mf-row mf-row--two">
-        <label><span>COMPANY</span><input name="company" autocomplete="organization"></label>
-        <label>
-          <span>I AM A</span>
-          <select name="role">
-            <option value="liquidator">Liquidator or reseller</option>
-            <option value="recruiter">Recruiter or hiring manager</option>
-            <option value="other">Something else</option>
-          </select>
-        </label>
-      </div>
-      <label class="mf-row"><span>WHAT DO YOU SELL, AND WHERE DO YOU LIST IT?</span>
-        <textarea name="note" rows="4" placeholder="What you buy and resell, how many lots a month, which marketplaces you post on."></textarea>
-      </label>
-      <button type="submit" class="btn btn-primary">REQUEST ACCESS</button>
-      <div class="mf-result" hidden></div>
-    </form>
-  </div>
-</section>
+  </section>
+
+  <section class="pf-close" aria-label="Get access">
+    <p class="pf-close-say">Bring your next bid here.</p>
+    <a class="pf-cta pf-cta--big" href="/platform/signup">Get free early access</a>
+    <p class="pf-close-note">Built and run by the liquidator behind Black Whole — it prices his bids too.</p>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}

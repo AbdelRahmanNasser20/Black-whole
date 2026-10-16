@@ -2031,18 +2031,27 @@ async def public_sell(request: Request):
 
 @app.get("/platform", response_class=HTMLResponse)
 def public_platform(request: Request):
-    """The software behind the store, with a read-only demo (templates/platform.html).
+    """The liquidator product landing, with the read-only live demo window
+    (templates/platform.html). CTA: /platform/signup (free beta).
 
-    Deliberately unlinked: chair buyers should not land on a software pitch, so
-    this is not in the storefront nav or the sitemap and the page is `noindex`.
-    The handler reads nothing — the Deal finder tab calls the existing public
-    `/deals/api/*` endpoints from the browser (policy: public_deals.py), the
-    other two tabs load invented sample JSON from `static/site/platform/`, and
-    the request-access form posts to the existing `/contact`.
+    Deliberately unlinked from the storefront: chair buyers should not land on
+    a software pitch, so it is not in the buyer nav or the sitemap and the page
+    is `noindex`. The hero's numbers come from platform_api.stats(), which
+    never blocks and never raises — it answers from a memo refreshed in a
+    background thread, so with the database down (or before the first read
+    lands) the page still renders, with the source count only. The demo tabs
+    read the public `/deals/api/*` + `/platform/api/*` endpoints from the
+    browser; two tabs load invented sample JSON from `static/site/platform/`.
     """
     return templates.TemplateResponse(
         request, "platform.html",
-        _public_ctx({"platform_sources": list(_PLATFORM_SOURCE_NAMES.values())}),
+        _public_ctx({
+            "platform_sources": list(_PLATFORM_SOURCE_NAMES.values()),
+            "stats": platform_api.stats(),
+            "sources_tracked": len(platform_api.SITES),
+            "sources_planned": len(platform_api.PLANNED_SITES),
+            "planned_sources": [name for name, _kind in platform_api.PLANNED_SITES.values()],
+        }),
     )
 
 
