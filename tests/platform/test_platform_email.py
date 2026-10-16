@@ -83,3 +83,11 @@ def test_unsub_tampered_400(monkeypatch, client):
 def test_unsub_expired_none():
     tok = platform_email.make_unsub_token("uid-1")
     assert platform_email.verify_unsub_token(tok, max_age=-1) is None
+
+
+def test_caps_at_20_lots_and_strips_newlines():
+    lots = [{"title": f"Lot{i:02d}x"} for i in range(25)]
+    subject, text, body = platform_email._build({"keyword": "a\r\nBcc: x"}, lots, "u")
+    assert "\n" not in subject and "\r" not in subject
+    for part in (text, body):
+        assert "Lot19x" in part and "Lot20x" not in part and "+5 more" in part

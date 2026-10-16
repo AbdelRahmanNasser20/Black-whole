@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 RESEND_URL = "https://api.resend.com/emails"
 UNSUB_SALT = "platform-unsub"
+MAX_LOTS = 20
 UNSUB_MAX_AGE = 30 * 24 * 3600
 
 
@@ -53,11 +54,11 @@ def _lot_fields(lot: dict) -> dict:
 
 def _build(alert: dict, lots: list[dict], unsub_url: str) -> tuple[str, str, str]:
     n = len(lots)
-    keyword = alert.get("keyword", "")
+    keyword = " ".join(str(alert.get("keyword", "")).replace("\r", " ").replace("\n", " ").split())
     subject = f"{n} new lots match “{keyword}”"
     text = [subject, ""]
     items = []
-    for lot in lots:
+    for lot in lots[:MAX_LOTS]:
         f = _lot_fields(lot)
         text.append(f"- {f['title']} | current bid {f['bid']} | closes {f['end']} | {f['state']}")
         if f["url"]:
@@ -67,6 +68,10 @@ def _build(alert: dict, lots: list[dict], unsub_url: str) -> tuple[str, str, str
             title = f'<a href="{html.escape(f["url"], quote=True)}">{title}</a>'
         items.append(f"<li>{title}<br>Current bid {html.escape(f['bid'])} &middot; "
                      f"closes {html.escape(f['end'])} &middot; {html.escape(f['state'])}</li>")
+    if n > MAX_LOTS:
+        more = f"+{n - MAX_LOTS} more"
+        text += ["", more]
+        items.append(f"<li>{more}</li>")
     text += ["", f"Unsubscribe: {unsub_url}"]
     body = (f"<p>{html.escape(subject)}</p><ul>{''.join(items)}</ul>"
             f'<p><a href="{html.escape(unsub_url, quote=True)}">Unsubscribe</a></p>')
