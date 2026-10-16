@@ -1,0 +1,1 @@
+{"errors":[{"message":"Variable \u0027$status\u0027 is invalid. Unable to convert \u0027SOLD\u0027 to \u0027AuctionLotStatus\u0027","locations":[{"line":1,"column":83}],"extensions":{"code":"INVALID_VALUE","codes":["INVALID_VALUE","INVALID_OPERATION"],"number":"5.8"}}]}
