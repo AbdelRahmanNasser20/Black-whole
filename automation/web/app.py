@@ -77,6 +77,7 @@ from .. import stripe_gateway
 from .. import freight_estimate
 from .. import freight_log
 from .. import attribution
+from .. import price_check
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
 from . import deals_query
@@ -938,6 +939,10 @@ def public_listing_detail(request: Request, lot_id: str):
                 "default_qty": _freight_default_qty(row),
             },
             "nearby": near,
+            # "What this costs new" anchors next to our price. Verified
+            # numbers only (price_anchors rows / hand-checked statics) —
+            # text + outbound source link, never a competitor's photo.
+            "price_check": price_check.strip_for(row),
             "copy": seo_copy.build(row, sold=row["is_sold"]),
             "city_crumb": _city_crumb(row),
             "robots_noindex": not _indexable(row, hero, images),
