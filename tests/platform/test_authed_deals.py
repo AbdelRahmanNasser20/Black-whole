@@ -64,29 +64,25 @@ def env(monkeypatch):
     return sql_log
 
 
-def client(user):
-    monkeypatch_user = lambda request: user  # noqa: E731
-    platform_auth.maybe_user = monkeypatch_user
-    return TestClient(webapp.app)
-
-
-@pytest.fixture(autouse=True)
-def _restore_auth():
-    orig = platform_auth.maybe_user
-    yield
-    platform_auth.maybe_user = orig
+@pytest.fixture
+def client(monkeypatch):
+    """client(user) -> TestClient with platform_auth.maybe_user patched (and restored)."""
+    def make(user):
+        monkeypatch.setattr(platform_auth, "maybe_user", lambda request: user)
+        return TestClient(webapp.app)
+    return make
 
 
 AUTHED = {"user_id": ME, "email": "a@b.com", "onboarded_at": "2026-10-01"}
 
 
-def test_anon_json_has_no_max_bid(env):
+def test_anon_json_has_no_max_bid(env, client):
     body = client(None).get("/deals/api/lots").json()
     row = body["rows"][0]
     assert "max_bid" not in row and "flip_score" not in row and "saved" not in row
 
 
-def test_authed_json_has_max_bid(env):
+def test_authed_json_has_max_bid(env, client):
     r = client(AUTHED).get("/deals/api/lots")
     row = r.json()["rows"][0]
     assert row["max_bid"] == 88.0 and row["flip_score"] == 71.5
@@ -96,12 +92,12 @@ def test_authed_json_has_max_bid(env):
     assert "max_bid" not in client(None).get("/deals/api/lots").json()["rows"][0]
 
 
-def test_unonboarded_gets_public_view(env):
+def test_unonboarded_gets_public_view(env, client):
     u = dict(AUTHED, onboarded_at=None)
     assert "max_bid" not in client(u).get("/deals/api/lots").json()["rows"][0]
 
 
-def test_tenant_sees_no_excluded_lots(env):
+def test_tenant_sees_no_excluded_lots(env, client):
     client(None).get("/deals/api/lots")
     anon_sql = [s for s in env if "FROM deal_lots" in s]
     env.clear()
@@ -112,7 +108,7 @@ def test_tenant_sees_no_excluded_lots(env):
         assert all(frag in s for s in authed_sql)
 
 
-def test_deals_page_cta_anon_only(env):
+def test_deals_page_cta_anon_only(env, client):
     assert "/platform/signup" in client(None).get("/deals").text
     page = client(AUTHED).get("/deals")
     assert "Sign up free for alerts" not in page.text
@@ -148,7 +144,7 @@ def test_saved_page_lists_lots(monkeypatch):
     assert r.status_code == 302 and r.headers["location"] == "/platform/signup"
 
 
-def test_extras_failure_degrades_to_public_payload(env, monkeypatch):
+def test_extras_failure_degrades_to_public_payload(env, client, monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("db down")
     monkeypatch.setattr(public_deals, "add_platform_extras", boom)
@@ -156,10 +152,10 @@ def test_extras_failure_degrades_to_public_payload(env, monkeypatch):
     assert r.status_code == 200 and "max_bid" not in r.json()["rows"][0]
 
 
-def test_viewer_lookup_failure_serves_anonymous(env):
+def test_viewer_lookup_failure_serves_anonymous(env, monkeypatch):
     def boom(request):
         raise RuntimeError("db down")
-    platform_auth.maybe_user = boom
+    monkeypatch.setattr(platform_auth, "maybe_user", boom)
     assert TestClient(webapp.app).get("/deals/api/lots").status_code == 200
     assert TestClient(webapp.app).get("/deals").status_code == 200
 

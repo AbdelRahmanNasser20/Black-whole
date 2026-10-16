@@ -30,7 +30,8 @@ def client(calls):
 def test_phone_normalization():
     assert platform_routes.normalize_phone("+1 480-555-0100") == "14805550100"
     assert platform_routes.normalize_phone("(480) 555.0100") == "4805550100"
-    for bad in ("abc", "123", "", "1" * 16):
+    # ASCII digits only: unicode digits satisfy str.isdigit but no SMS gateway
+    for bad in ("abc", "123", "", "1" * 16, "٠١٢٣٤٥٦٧٨٩٤٨", "480555010٠٠"):
         with pytest.raises(ValueError):
             platform_routes.normalize_phone(bad)
 
@@ -84,7 +85,48 @@ def test_signup_page_injects_public_config(monkeypatch):
 
 
 def test_onboarding_page_redirects_when_unauthed(monkeypatch):
+    # reauth=1 tells signup.html to skip its auto-forward: a stale session must
+    # not bounce signup -> onboarding -> signup forever.
     monkeypatch.setenv("SUPABASE_JWT_SECRET", "s" * 40)
     from automation.web.app import app
     r = TestClient(app).get("/platform/onboarding", follow_redirects=False)
-    assert r.status_code == 302 and r.headers["location"] == "/platform/signup"
+    assert r.status_code == 302 and r.headers["location"] == "/platform/signup?reauth=1"
+
+
+def test_onboarding_page_forwards_onboarded_user(monkeypatch):
+    from automation.web.app import app
+    monkeypatch.setattr(platform_auth, "maybe_user",
+                        lambda request: dict(USER, onboarded_at="2026-10-01"))
+    r = TestClient(app).get("/platform/onboarding", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/platform/alerts"
+
+
+def test_signup_page_forwards_onboarded_user(monkeypatch):
+    from automation.web.app import app
+    monkeypatch.setattr(platform_auth, "maybe_user",
+                        lambda request: dict(USER, onboarded_at="2026-10-01"))
+    r = TestClient(app).get("/platform/signup", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/platform/alerts"
+    # not yet onboarded -> the signup page renders as usual
+    monkeypatch.setattr(platform_auth, "maybe_user", lambda request: dict(USER))
+    assert TestClient(app).get("/platform/signup").status_code == 200
+
+
+def test_signup_page_survives_viewer_lookup_failure(monkeypatch):
+    from automation.web.app import app
+    def boom(request):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(platform_auth, "maybe_user", boom)
+    assert TestClient(app).get("/platform/signup").status_code == 200
+
+
+def test_signup_js_handles_reauth(monkeypatch):
+    # The 401 bounce lands on ?reauth=1: the script must read it, gate the
+    # auto-forward, and clear the stale cookie before offering the buttons.
+    monkeypatch.setenv("SUPABASE_URL", "https://x.supabase.co")
+    monkeypatch.setenv("SUPABASE_PUBLISHABLE_KEY", "sb_publishable_abc")
+    from automation.web.app import app
+    text = TestClient(app).get("/platform/signup").text
+    assert 'get("reauth") === "1"' in text
+    assert "var ready = !reauth;" in text and "if (s && ready) saveAndGo(s);" in text
+    assert "sb-access-token=; path=/; max-age=0" in text

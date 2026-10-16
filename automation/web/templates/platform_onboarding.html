@@ -43,7 +43,7 @@ document.getElementById("ob-form").onsubmit = function (e) {
     body: JSON.stringify({ phone: v("phone"), sms_consent: document.getElementById("sms").checked,
       company: v("company"), state: v("state"), flips_what: v("flips"), biggest_pain: v("pain") })
   }).then(function (r) {
-    if (r.status === 401) { location.href = "/platform/signup"; return null; }
+    if (r.status === 401) { location.href = "/platform/signup?reauth=1"; return null; }
     if (r.status === 422) { msg.textContent = "Enter a valid phone number (10-15 digits)."; return null; }
     return r.json();
   }).then(function (j) { if (j && j.ok) location.href = j.next; });

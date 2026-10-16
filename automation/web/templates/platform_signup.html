@@ -40,13 +40,25 @@
   var sb = window.supabase.createClient({{ supabase_url | tojson }}, {{ supabase_key | tojson }});
   var msg = document.getElementById("auth-msg");
   var NEXT = "/platform/onboarding";
+  // reauth=1 = the server just rejected this browser's token (401). Skip the
+  // auto-forward and drop the stale session, or the page would bounce back to
+  // onboarding with the same bad token forever; `ready` gates every forward
+  // until the sign-out has landed. A fresh sign-in still forwards as usual.
+  var reauth = new URLSearchParams(location.search).get("reauth") === "1";
+  var ready = !reauth;
   function say(t) { msg.textContent = t; }
   function saveAndGo(session) {
     document.cookie = "sb-access-token=" + session.access_token + "; path=/; max-age=3600; SameSite=Lax; Secure";
     location.href = NEXT;
   }
-  sb.auth.getSession().then(function (r) { if (r.data && r.data.session) saveAndGo(r.data.session); });
-  sb.auth.onAuthStateChange(function (_e, s) { if (s) saveAndGo(s); });
+  if (reauth) {
+    document.cookie = "sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure";
+    say("Your session expired. Sign in again.");
+    sb.auth.signOut().finally(function () { ready = true; });
+  } else {
+    sb.auth.getSession().then(function (r) { if (ready && r.data && r.data.session) saveAndGo(r.data.session); });
+  }
+  sb.auth.onAuthStateChange(function (_e, s) { if (s && ready) saveAndGo(s); });
   document.getElementById("google-btn").onclick = function () {
     sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + "/platform/signup" } });
   };

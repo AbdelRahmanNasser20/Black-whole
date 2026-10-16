@@ -25,9 +25,13 @@ _PHONE_STRIP = re.compile(r"[+\-().\s]")
 
 
 def normalize_phone(raw: str) -> str:
-    """Digits only (E.164 without the plus); 10-15 digits or ValueError."""
+    """Digits only (E.164 without the plus); 10-15 ASCII digits or ValueError.
+
+    ASCII on purpose: ``str.isdigit`` accepts unicode digits ("٤٨٠…"), which
+    would store a phone no SMS gateway can dial.
+    """
     digits = _PHONE_STRIP.sub("", raw or "")
-    if not digits.isdigit() or not 10 <= len(digits) <= 15:
+    if not re.fullmatch(r"[0-9]{10,15}", digits):
         raise ValueError("phone must be 10-15 digits")
     return digits
 
@@ -48,6 +52,13 @@ def _render(request: Request, name: str, extra: dict) -> HTMLResponse:
 
 @router.get("/platform/signup", response_class=HTMLResponse)
 def platform_signup(request: Request):
+    try:
+        user = platform_auth.maybe_user(request)
+    except Exception:  # a DB hiccup must never 500 the signup page
+        user = None
+    if user is not None and user.get("onboarded_at"):
+        # Already signed in and onboarded: straight to the product, not the form.
+        return RedirectResponse("/platform/alerts", status_code=302)
     return _render(request, "platform_signup.html", {
         "supabase_url": os.getenv("SUPABASE_URL", ""),
         "supabase_key": os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
@@ -59,7 +70,11 @@ def platform_signup(request: Request):
 def platform_onboarding(request: Request):
     user = platform_auth.maybe_user(request)
     if user is None:
-        return RedirectResponse("/platform/signup", status_code=302)
+        # reauth=1 stops signup.html's auto-forward, or the stale session would
+        # bounce signup -> onboarding -> signup forever.
+        return RedirectResponse("/platform/signup?reauth=1", status_code=302)
+    if user.get("onboarded_at"):
+        return RedirectResponse("/platform/alerts", status_code=302)
     return _render(request, "platform_onboarding.html", {"user_email": user["email"], "robots_noindex": True})
 
 
