@@ -1355,7 +1355,11 @@ _PRIVATE = {"Cache-Control": "private, no-store"}
 
 @app.get("/deals", response_class=HTMLResponse)
 async def public_deals_page(request: Request):
-    viewer = await asyncio.to_thread(_platform_viewer, request)
+    try:
+        viewer = await asyncio.to_thread(_platform_viewer, request)
+    except Exception:
+        logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
+        viewer = None
     return templates.TemplateResponse(request, "deals_public.html", {
         "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
         "per_page_choices": public_deals.PER_PAGE_CHOICES,
@@ -1374,7 +1378,11 @@ async def public_deals_lots(
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
     site = _public_site(site)
-    viewer = await asyncio.to_thread(_platform_viewer, request)
+    try:
+        viewer = await asyncio.to_thread(_platform_viewer, request)
+    except Exception:  # a DB hiccup in the auth lookup must not break the public view
+        logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
+        viewer = None
     try:
         out = await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
@@ -1385,7 +1393,14 @@ async def public_deals_lots(
             return out
         # Per-user extras on top of the SAME policy-filtered page; never memoised,
         # never shared: private/no-store keeps Cloudflare and the browser honest too.
-        await asyncio.to_thread(public_deals.add_platform_extras, out["rows"], viewer["user_id"])
+        try:
+            await asyncio.to_thread(public_deals.add_platform_extras, out["rows"], viewer["user_id"])
+        except Exception:  # extras are a bonus: degrade to the public payload, never 503
+            logging.getLogger(__name__).warning("deals: platform extras failed; public payload", exc_info=True)
+            for r in out["rows"]:
+                for k in ("source", "lot_key", "saved", "flip_score", "max_bid"):
+                    if k != "source" or "lot_key" in r:
+                        r.pop(k, None)
         return JSONResponse(jsonable_encoder(out), headers=_PRIVATE)
     except HTTPException:
         raise

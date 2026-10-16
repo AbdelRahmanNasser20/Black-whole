@@ -358,16 +358,16 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
 # or readcache.
 
 def lot_ref(row: dict) -> tuple[str, str] | None:
-    """(source, lot_key) as stored in platform_saved_lots / platform_alert_sends:
-    deal_lots.native_id is 'asset/account/auction' for GovDeals; other sites use
-    the recorder's source_lot_id."""
-    src = row.get("source") or GOVDEALS
-    if src == GOVDEALS:
-        if None in (row.get("asset_id"), row.get("account_id"), row.get("auction_id")):
-            return None
-        return GOVDEALS, f"{row['asset_id']}/{row['account_id']}/{row['auction_id']}"
-    key = row.get("source_lot_id")
-    return (src, str(key)) if key else None
+    """(source, lot_key) as stored in platform_saved_lots / platform_alert_sends
+    (deal_lots.native_id = 'asset/account/auction'). Only deal_lots-backed rows
+    get one: the other recorder sources live solely in listing_snapshots, which
+    /platform/saved does not read, so offering Save on them would save a lot the
+    saved page could only render as "no longer listed"."""
+    if (row.get("source") or GOVDEALS) != GOVDEALS:
+        return None
+    if None in (row.get("asset_id"), row.get("account_id"), row.get("auction_id")):
+        return None
+    return GOVDEALS, f"{row['asset_id']}/{row['account_id']}/{row['auction_id']}"
 
 
 def _max_bid_50(flip) -> float | None:
@@ -396,7 +396,8 @@ def add_platform_extras(rows: list[dict], user_id: str) -> list[dict]:
     saved = {(x["source"], x["lot_key"]) for x in db.fetch_all(
         "SELECT source, lot_key FROM platform_saved_lots WHERE user_id = %s", (user_id,))}
     for r in rows:
-        r["saved"] = (r.get("source"), r.get("lot_key")) in saved
+        if "lot_key" in r:
+            r["saved"] = (r["source"], r["lot_key"]) in saved
     if keys and verdict_store._has_flip_columns():
         ks = list(keys)
         verdicts = db.fetch_all(

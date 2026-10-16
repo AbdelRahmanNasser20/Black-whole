@@ -125,6 +125,8 @@ def test_saved_page_lists_lots(monkeypatch):
     def fetch_all(sql, params=None):
         seen.append(sql)
         assert "FROM platform_saved_lots" in sql and "LEFT JOIN deal_lots" in sql
+        for frag in ("tracked_lots", "auction_favorites", "deal_list_items"):
+            assert frag in sql, frag
         return [
             {"source": "govdeals", "lot_key": "1/2/3", "title": "Banquet chairs", "current_bid": 100.0,
              "end_utc": END, "bid_count": 2, "outcome_complete": False, "asset_id": 1, "account_id": 2},
@@ -144,3 +146,24 @@ def test_saved_page_lists_lots(monkeypatch):
     monkeypatch.setattr(platform_auth, "maybe_user", lambda request: None)
     r = TestClient(app).get("/platform/saved", follow_redirects=False)
     assert r.status_code == 302 and r.headers["location"] == "/platform/signup"
+
+
+def test_extras_failure_degrades_to_public_payload(env, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(public_deals, "add_platform_extras", boom)
+    r = client(AUTHED).get("/deals/api/lots")
+    assert r.status_code == 200 and "max_bid" not in r.json()["rows"][0]
+
+
+def test_viewer_lookup_failure_serves_anonymous(env):
+    def boom(request):
+        raise RuntimeError("db down")
+    platform_auth.maybe_user = boom
+    assert TestClient(webapp.app).get("/deals/api/lots").status_code == 200
+    assert TestClient(webapp.app).get("/deals").status_code == 200
+
+
+def test_snapshot_source_rows_get_no_save_button():
+    row = {"source": "publicsurplus", "source_lot_id": "77", "asset_id": None, "account_id": None, "auction_id": None}
+    assert public_deals.lot_ref(row) is None
