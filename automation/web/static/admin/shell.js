@@ -138,8 +138,25 @@ document.addEventListener('keydown', (e) => {
 });
 
 // ───────── Sales badge ─────────
-// How much is waiting on the operator: requests nobody has touched + new inquiries. Read-only and memoised server-side
-// (15 s), so asking on boot and on every Sales activation is cheap. A failure just leaves the badge off.
+// Two different numbers, on purpose (operator report 2026-10-18: "the count never goes away after I read them"):
+//   • the view switch (#sales-count-quotes / -inquiries) = rows still carrying status `new` — the real to-do count,
+//     it drops only when a row is marked contacted/answered;
+//   • the RAIL badge (#sales-badge) = new rows the operator has not LOOKED at yet. Opening a Sales view marks every
+//     new row on it seen (per browser, localStorage — no schema), so the badge goes quiet once he has read them and
+//     lights again only for rows that arrived since.
+// Read-only and memoised server-side (15 s). Re-read on boot, on every Sales activation and after any successful
+// write (`admin:write`, dispatched by ui/state.js::api) — the server drops its memo on a write, so the badge must
+// not wait for the next tab switch to catch up. A failure just leaves the badge off.
+
+const SEEN_KEY = 'admin.sales.seen';           // {quotes: [ids], inquiries: [ids]} — the new rows already looked at
+
+function readSeen() {
+  try { return JSON.parse(localStorage.getItem(SEEN_KEY) || '{}') || {}; } catch (_) { return {}; }
+}
+
+function writeSeen(seen) {
+  try { localStorage.setItem(SEEN_KEY, JSON.stringify(seen)); } catch (_) {}
+}
 
 function setCount(el, n) {
   if (!el) return;
@@ -147,15 +164,37 @@ function setCount(el, n) {
   el.textContent = n > 0 ? String(n) : '';
 }
 
+const idList = (v) => Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : null;
+
 function refreshSalesCounts() {
   return apiFetch('/api/sales/counts').then((c) => {
-    const quotesNew = Number(c?.quotes_new) || 0;
-    const inquiriesNew = Number(c?.inquiries_new) || 0;
-    setCount($('#sales-badge'), quotesNew + inquiriesNew);
-    setCount($('#sales-count-quotes'), quotesNew);
-    setCount($('#sales-count-inquiries'), inquiriesNew);
+    const ids = {quotes: idList(c?.quotes_new_ids), inquiries: idList(c?.inquiries_new_ids)};
+    if (!ids.quotes || !ids.inquiries) {
+      // older server (no ids yet): fall back to the plain to-do count everywhere
+      const total = (Number(c?.quotes_new) || 0) + (Number(c?.inquiries_new) || 0);
+      setCount($('#sales-badge'), total);
+      setCount($('#sales-count-quotes'), Number(c?.quotes_new) || 0);
+      setCount($('#sales-count-inquiries'), Number(c?.inquiries_new) || 0);
+      return;
+    }
+    const seen = readSeen();
+    const viewing = tabFromUrl();
+    if (viewing in ids) {
+      // what is on screen right now has been looked at; replacing (not appending) also prunes rows no longer new
+      seen[viewing] = ids[viewing];
+      writeSeen(seen);
+    }
+    const unseen = (kind) => {
+      const looked = new Set(Array.isArray(seen[kind]) ? seen[kind] : []);
+      return ids[kind].filter(id => !looked.has(id)).length;
+    };
+    setCount($('#sales-badge'), unseen('quotes') + unseen('inquiries'));
+    setCount($('#sales-count-quotes'), ids.quotes.length);
+    setCount($('#sales-count-inquiries'), ids.inquiries.length);
   }).catch(() => {});
 }
+
+document.addEventListener('admin:write', () => refreshSalesCounts());
 
 // Resolve the tab to show: `?tab=` wins; otherwise migrate the legacy localStorage key into the URL once.
 function boot() {

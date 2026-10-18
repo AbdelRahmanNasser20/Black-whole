@@ -5002,10 +5002,21 @@ def freight_quote_carrier_check(quote_id: int):
 @app.get("/api/sales/counts")
 @readcache.cached()
 def sales_counts():
-    """What is waiting on the operator — the badge on the Sales rail tab."""
+    """What is waiting on the operator — the badge on the Sales rail tab.
+
+    The ids go along with the numbers: a row stays `new` until the operator
+    answers it, but the rail badge should go quiet once he has LOOKED, so
+    shell.js keeps a per-browser "seen" list and counts only the ids not in
+    it. The memo is dropped by the write middleware, so a status change is
+    reflected on the very next read.
+    """
+    quote_ids = freight_log.new_ids()
+    inquiry_ids = [int(r["id"]) for r in inventory.list_inquiries("new")]
     return {
-        "quotes_new": freight_log.count_new(),
-        "inquiries_new": len(inventory.list_inquiries("new")),
+        "quotes_new": len(quote_ids),
+        "quotes_new_ids": quote_ids,
+        "inquiries_new": len(inquiry_ids),
+        "inquiries_new_ids": inquiry_ids,
     }
 
 

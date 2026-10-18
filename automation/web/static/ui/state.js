@@ -31,6 +31,12 @@ export async function api(url, opts) {
     try { detail = (await res.json()).detail || detail; } catch {}
     const err = new Error(detail); err.status = res.status; throw err;
   }
+  // A successful write announces itself (the client twin of readcache's invalidate-on-write middleware), so
+  // whoever shows derived numbers — the Sales rail badge — can re-read right away instead of on the next tab switch.
+  const method = (opts?.method || 'GET').toUpperCase();
+  if (method !== 'GET' && method !== 'HEAD') {
+    document.dispatchEvent(new CustomEvent('admin:write', {detail: {url, method}}));
+  }
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : res.text();
 }
