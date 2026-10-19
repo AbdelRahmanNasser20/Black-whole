@@ -114,12 +114,17 @@ def test_mirrors_by_default_and_honours_the_no_mirror_list(monkeypatch):
     assert not d.mirror_allowed("folder_Tape_Measure_Lot")  # same folding as key_base
 
 
-def test_watermark_can_be_turned_off(monkeypatch):
+def test_no_watermark_by_default_and_opt_in_tiles_it(monkeypatch):
     src = _photo()
-    marked = d.disguise(src, key="31225")[0]
+    monkeypatch.delenv("IMAGE_DISGUISE_WATERMARK", raising=False)
+    assert d.watermark_text() is None
+    clean = d.disguise(src, key="31225")[0]
+    assert clean == d.disguise(src, key="31225", watermark=False)[0]
     monkeypatch.setenv("IMAGE_DISGUISE_WATERMARK", "off")
     assert d.watermark_text() is None
-    assert d.disguise(src, key="31225")[0] != marked
+    monkeypatch.setenv("IMAGE_DISGUISE_WATERMARK", "BLACKWHOLE")
+    assert d.watermark_text() == "BLACKWHOLE"
+    assert d.disguise(src, key="31225")[0] != clean
 
 
 def test_unreadable_bytes_return_none_never_the_original():
@@ -249,6 +254,7 @@ def test_catalog_url_maps_only_disguised_heroes():
 def test_r2_upload_puts_a_watermark_free_hero_twin(tmp_path, monkeypatch):
     for k, v in _R2.items():
         monkeypatch.setenv(k, v)
+    monkeypatch.setenv("IMAGE_DISGUISE_WATERMARK", "BLACKWHOLE")  # opt-in mark on the hero
     fake = FakeS3()
     monkeypatch.setattr(r2, "client", lambda cfg=None: fake)
     src = tmp_path / "a.jpg"

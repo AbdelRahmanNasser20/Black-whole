@@ -10,7 +10,9 @@ Covers `inventory.hero_image_url` / `image_urls` (site, CRM, FB catalog feed) an
 `auction_favorites.clean_*` (the public /map — lots we are still bidding on).
 
 - Dry-run by default; `--apply` uploads and writes.
-- Idempotent: a URL already under `p/` is the marker and is skipped.
+- Idempotent: a URL already under `p/` is the marker and is skipped — except a
+  `.o.jpg` copy (clean, un-mirrored, from the 10-06 photo-policy pass), which is
+  re-made as mirror + re-frame (no watermark by default, 2026-10-19).
 - Only our own R2 URLs are touched; anything else in a row is kept as-is.
 - Old objects are NOT deleted. Every row changed is logged old→new to
   ~/.listing_automation/logs/disguise-backfill-<ts>.jsonl; `--rollback <log>`
@@ -57,8 +59,11 @@ class Converter:
     def ours(self, url: str | None) -> bool:
         return bool(url) and url.startswith(self.cfg["public_base"] + "/")
 
+    def needs(self, url: str | None) -> bool:
+        return self.ours(url) and (not li.is_disguised_url(url) or _unmirrored(url))
+
     def convert(self, url: str | None, lot_key: str, *, hero: bool) -> str | None:
-        if not url or not self.ours(url) or li.is_disguised_url(url):
+        if not url or not self.needs(url):
             if url:
                 self.stats["kept"] += 1
             return url
@@ -109,6 +114,11 @@ class Converter:
                 [self.convert(u, lot_key, hero=False) for u in gallery])
 
 
+def _unmirrored(url: str) -> bool:
+    """A `p/…/*.o.jpg` copy: the clean original, never mirrored or re-framed."""
+    return url.partition("?")[0].endswith(".o.jpg")
+
+
 def _log_path() -> Path:
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return Path(config.LOG_DIR) / f"disguise-backfill-{ts}.jsonl"
@@ -134,7 +144,7 @@ def run(args) -> int:
                              fav.clean_hero_url, list(fav.clean_image_urls)))
 
     for table, ident, lot_key, hero, gallery in jobs:
-        todo = [u for u in [hero, *gallery] if conv.ours(u) and not li.is_disguised_url(u)]
+        todo = [u for u in [hero, *gallery] if conv.needs(u)]
         if not todo:
             continue
         print(f"  {table}:{ident}  {len(todo)} photo(s)")

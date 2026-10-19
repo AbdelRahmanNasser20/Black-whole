@@ -14,10 +14,13 @@ photos Lens exact-matched to GovDeals' Instagram, GovDeals and AllSurplus):
   on both lots (no-mirror + watermark still matched). The AllSurplus copy of
   one lot still sat ~25th in Lens's "visual matches" — same chair, same scene;
   no honest edit removes that. Photos we took ourselves are the only full fix.
-So all three layers stay on together. Drop any one and Lens finds the source.
+Operator rule 2026-10-19: **no watermark on public photos.** The default is
+mirror + the geometric/colour pass + grain only; the tiled watermark is opt-in
+(`IMAGE_DISGUISE_WATERMARK=BLACKWHOLE`). Lens may then exact-match some photos
+again; the operator chose that over a watermarked listing.
 
 The chairs, their colour, their condition and their count are untouched — it is
-the same product seen from a slightly different camera, with our mark on it.
+the same product seen from a slightly different camera.
 
 Rules this module encodes:
 - **Runs after dewatermark, before any upload.** It takes the cleaned bytes.
@@ -40,8 +43,8 @@ Env:
                                      (tape measures, signs). Those lots skip
                                      the flip — and Lens can then still match
                                      them, so use it sparingly.
-    IMAGE_DISGUISE_WATERMARK         tile text (default BLACKWHOLE; "off" drops
-                                     it — Lens then matches again)
+    IMAGE_DISGUISE_WATERMARK         tile text; unset/"off" = no watermark
+                                     (default). Set e.g. BLACKWHOLE to tile it.
 """
 from __future__ import annotations
 
@@ -62,7 +65,6 @@ from automation import image_hash
 
 VERSION = "v1"
 MAX_LONG_EDGE = 1560     # under listing_images.MAX_IMAGE_DIM (1600) on purpose
-DEFAULT_WATERMARK = "BLACKWHOLE"
 _GRAIN_TILE = 128
 _MAX_ATTEMPTS = 3
 _OFF = ("0", "off", "false", "no")
@@ -102,8 +104,8 @@ def mirror_allowed(lot_key: str) -> bool:
 
 
 def watermark_text() -> str | None:
-    text = (os.getenv("IMAGE_DISGUISE_WATERMARK") or DEFAULT_WATERMARK).strip()
-    return None if text.lower() in _OFF else text
+    text = (os.getenv("IMAGE_DISGUISE_WATERMARK") or "").strip()
+    return None if not text or text.lower() in _OFF else text
 
 
 @dataclass(frozen=True)
@@ -327,8 +329,8 @@ def _encode(img: Image.Image, quality: int) -> bytes:
 def disguise(data: bytes, *, key: str, watermark: bool = True) -> tuple[bytes, str, str] | None:
     """Disguised JPEG for one photo of lot `key`: ``(bytes, "jpg", "image/jpeg")``.
 
-    `watermark=False` is only for the FB catalog feed's hero, because Meta
-    rejects catalog images that carry a watermark. Lens can match that copy.
+    `watermark=False` forces no watermark even when `IMAGE_DISGUISE_WATERMARK`
+    is set (the FB catalog hero twin: Meta rejects watermarked images).
 
     None when the bytes aren't a readable image — the caller must then skip the
     file rather than upload the original.
