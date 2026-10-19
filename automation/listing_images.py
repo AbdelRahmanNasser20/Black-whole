@@ -153,8 +153,8 @@ def opaque_gallery_path(lot_id, source: bytes) -> str | None:
 def catalog_path(hero_path: str) -> str:
     """Watermark-free twin of a disguised hero (`…/h.jpg` → `…/h.c.jpg`).
 
-    Meta's catalog rejects watermarked images, so the FB feed gets this copy;
-    every other surface keeps the watermarked hero (the part that beats Lens).
+    Meta's catalog rejects watermarked images, so the FB feed gets this copy.
+    With the watermark off (the default) it matches the hero.
     """
     return hero_path[: -len(".jpg")] + ".c.jpg"
 
@@ -229,7 +229,8 @@ def optimize_for_web(data: bytes, ext: str) -> tuple[bytes, str, str]:
 def prepare_for_web(data: bytes, ext: str, *, key: str) -> tuple[bytes, str, str] | None:
     """The one gate every public lot photo passes before upload.
 
-    Disguise on (default): mirrored/re-framed/watermarked JPEG, or None when the
+    Disguise on (default): mirrored/re-framed JPEG (no watermark unless
+    `IMAGE_DISGUISE_WATERMARK` is set), or None when the
     bytes aren't an image — skip the file, never upload the original. Kill
     switch `IMAGE_DISGUISE=0`: the legacy `optimize_for_web` behaviour.
     """

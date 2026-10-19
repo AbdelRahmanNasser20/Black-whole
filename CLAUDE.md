@@ -28,7 +28,7 @@ Detail: `docs/claude-reference/` (index at bottom).
 - Local disk is a fallback, never an answer to "can the bot show a buyer this lot" — `has_usable_images()` ignores disk on purpose.
 - Run `scripts/check_offerable_images.py` (`--http`) after flipping any lot to `crm_offerable`.
 - **Scraped auction photos (`deals/archive.py`) are private**: private bucket + the auth-walled `/api/deal-photos/{key}` proxy. Never give them a public URL; our own lots go through `listing_images` (disguised) instead.
-- **Every public lot photo is disguised** before upload (`automation/image_disguise.py` via `listing_images.prepare_for_web`): mirror + re-frame + tiled BLACKWHOLE watermark, opaque `p/…` R2 keys. Google Lens exact-matched the undisguised copies to GovDeals/AllSurplus; drop any one layer and it matches again. FB/eBay file uploads take `listing_images.public_copies()`. Live photos: `scripts/disguise_live_images.py`.
+- **Every public lot photo is disguised** before upload (`automation/image_disguise.py` via `listing_images.prepare_for_web`): mirror + re-frame + colour/grain, opaque `p/…` R2 keys. **No watermark** (operator rule 2026-10-19): the tiled BLACKWHOLE mark is opt-in via `IMAGE_DISGUISE_WATERMARK=BLACKWHOLE` only. Google Lens may exact-match some no-watermark copies (09-19 test) — accepted. FB/eBay file uploads take `listing_images.public_copies()`. Live photos: `scripts/disguise_live_images.py`.
 
 **Inventory ledger (READ `inventory-ledger.md` BEFORE TOUCHING run.py OR app.py):**
 - **Preserved on re-upsert:** user edits never get stomped by a re-run (`quantity_remaining`, `status`, `price_per_chair`, `hero_image`, platform URLs).

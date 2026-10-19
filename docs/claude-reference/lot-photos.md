@@ -58,7 +58,8 @@ spelled the GovDeals ids (`gd-239-31465/00.jpg`).
 
 **What runs.** `listing_images.prepare_for_web()` → `image_disguise.disguise()`:
 mirror → keystone → 1–3° tilt + crop-in → uneven crop → small colour grade →
-resize → tiled `BLACKWHOLE` watermark → grain → metadata-free JPEG. Seeded by
+resize → grain → metadata-free JPEG (tiled watermark only when
+`IMAGE_DISGUISE_WATERMARK` is set — off by default since 2026-10-19). Seeded by
 HMAC(salt, lot, source bytes), so re-runs are byte-identical. Output must clear
 pHash/dHash distance 12 (`image_hash.py`) or it is redrawn stronger. Unreadable
 files are skipped, never uploaded raw. Stored under `p/<hmac>/h.jpg` (hero) and
@@ -75,6 +76,11 @@ files are skipped, never uploaded raw. Stored under `p/<hmac>/h.jpg` (hero) and
 | watermark only | match | – |
 | no mirror + watermark | match | – |
 | **mirror + re-frame + watermark (shipped)** | **none** | **none** |
+
+**2026-10-19 operator rule: no watermark.** The shipped default is now mirror +
+re-frame without the watermark (the "same + mirror" row: Lens can match some).
+The operator chose that over a watermarked listing. Re-make live photos with
+`scripts/disguise_live_images.py --apply` (it also re-makes clean `.o.jpg` copies).
 
 The AllSurplus copy of 125 still showed ~25th in "visual matches" (same chair,
 same scene). No honest edit removes that; photos we take ourselves do.
