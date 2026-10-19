@@ -79,7 +79,7 @@ def store(monkeypatch):
     monkeypatch.setattr(freight_log, "get_quote", get_quote)
     monkeypatch.setattr(freight_log, "set_quote_status", set_quote_status)
     monkeypatch.setattr(freight_log, "schema_ready", lambda: state["ready"])
-    monkeypatch.setattr(freight_log, "count_new", lambda: 3)
+    monkeypatch.setattr(freight_log, "new_ids", lambda: [4, 5, 6])
     return state
 
 
@@ -257,7 +257,10 @@ def test_manual_carrier_check_refusals(store, monkeypatch, setup, code):
 
 def test_sales_counts(store, monkeypatch):
     monkeypatch.setattr(inventory, "list_inquiries", lambda status=None: [{"id": 1}, {"id": 2}])
-    assert _client().get("/api/sales/counts").json() == {"quotes_new": 3, "inquiries_new": 2}
+    assert _client().get("/api/sales/counts").json() == {
+        "quotes_new": 3, "quotes_new_ids": [4, 5, 6],
+        "inquiries_new": 2, "inquiries_new_ids": [1, 2],
+    }
 
 
 # ───────────────────────────────────── auth ─────────────────────────────────

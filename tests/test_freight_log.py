@@ -219,6 +219,21 @@ def test_count_new_is_zero_before_the_migration(calls):
     assert calls["sql"] == []
 
 
+def test_new_ids_lists_the_untouched_storefront_rows(calls):
+    """The rail badge needs WHICH rows are new (shell.js remembers the ones the
+    operator has looked at), not only how many."""
+    calls["fetch_all"] = [{"id": 9}, {"id": 7}]
+    assert freight_log.new_ids() == [9, 7]
+    sql = calls["sql"][-1][0]
+    assert "status = 'new'" in sql and "source = 'storefront'" in sql
+
+
+def test_new_ids_is_empty_before_the_migration(calls):
+    calls["ready"] = False
+    assert freight_log.new_ids() == []
+    assert calls["sql"] == []
+
+
 def test_schema_check_keys_on_the_last_column_the_migration_adds(monkeypatch):
     """`apply_sql.py` runs the file statement by statement. A run that dies
     half-way must not flip the code onto inserts naming columns that are not

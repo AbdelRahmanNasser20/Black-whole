@@ -388,6 +388,23 @@ def count_new() -> int:
     return int((row or {}).get("n") or 0)
 
 
+def new_ids() -> list[int]:
+    """The ids behind `count_new()`, newest first.
+
+    The rail badge needs WHICH rows are new, not only how many: shell.js
+    remembers per browser the ones the operator has already looked at on the
+    Quotes view, so the badge clears on viewing while the row stays `new`
+    until it is actually answered.
+    """
+    if not schema_ready():
+        return []
+    rows = db.fetch_all(
+        "SELECT id FROM freight_quotes "
+        "WHERE status = 'new' AND source = 'storefront' ORDER BY id DESC"
+    )
+    return [int(r["id"]) for r in rows or []]
+
+
 # ────────────────────────────────── helpers ─────────────────────────────────
 
 def _mode(quote: dict) -> str:
