@@ -74,7 +74,8 @@ def test_freight_widget_renders_on_a_locatable_lot(lot):
     assert 'id="freight-widget"' in r.text
     assert 'data-lot-id="31225"' in r.text
     assert 'data-default-qty="400"' in r.text
-    assert "ESTIMATE — FINALIZED AT SHIP TIME" in r.text
+    assert "REAL CARRIER RATE WHERE AVAILABLE, OTHERWISE AN ESTIMATE" in r.text
+    assert "FINAL PRICE CONFIRMED ONCE THE PALLETS ARE WEIGHED" in r.text
     assert "LOCAL PICKUP ALWAYS FREE" in r.text
     # The plain fallback row must NOT also be there.
     assert "freight quoted on request" not in r.text

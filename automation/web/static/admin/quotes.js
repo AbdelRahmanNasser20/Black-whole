@@ -68,9 +68,16 @@ function shownLine(q) {
       <span>no price — quote by hand</span><span class="quote-why">${escapeHtml(q.unquotable_reason)}</span></div>`;
   }
   if (q.shown_low == null) return '';
+  if (q.provider === 'warp') {
+    // One padded number from a real carrier (since 2026-10-20): say how much padding sat on the cheapest rate.
+    const pad = (q.carrier_low > 0) ? ` · carrier +${Math.round((q.shown_low / q.carrier_low - 1) * 100)}%` : '';
+    return `<div class="quote-line"><span class="quote-k">SITE SHOWED</span>
+      <span class="quote-v">${money(q.shown_low)}</span>
+      <span class="quote-dim">carrier rate${pad}${q.valid_until ? ' · valid until ' + escapeHtml(q.valid_until) : ''}</span></div>`;
+  }
   return `<div class="quote-line"><span class="quote-k">SITE SHOWED</span>
     <span class="quote-v">${money(q.shown_low)}–${money(q.shown_high)}</span>
-    <span class="quote-dim">${escapeHtml(q.mode || 'ltl')} · ${escapeHtml(q.provider || 'estimator')}</span></div>`;
+    <span class="quote-dim">${escapeHtml(q.mode || 'ltl')} · ${escapeHtml(q.provider || 'estimator')} (estimate)</span></div>`;
 }
 
 function carrierLine(q) {

@@ -1,10 +1,18 @@
 """Real LTL carrier prices for one lane, from Warp's multi-carrier feed.
 
-**Operator-only.** The number a buyer sees on a lot page comes from
-`freight_estimate` and nothing else. This module answers a different question,
-after the buyer already has their estimate: "what would real carriers charge for
-that lane?" — so the Sales tab can show the cheapest carrier beside the range
-we showed, and flag the ones where the two disagree.
+**This is the buyer's price (operator decision 2026-10-20).** `POST
+/freight-estimate` sizes the lot's pallets, asks this feed for the lane and
+shows the buyer the cheapest usable carrier plus a padding percentage
+(`site_settings.freight_padding_pct`, Sales › Lane quote). When the feed cannot
+answer inside the buyer's timeout — or is off, over budget, empty, or the load
+is too big for LTL — the in-house `freight_estimate` range is shown instead,
+labelled as an estimate. The request is written to `freight_quotes` before any
+number goes out, whichever path answered. (Until 2026-10-20 the estimator was
+the only number a buyer saw and this feed was operator-only.)
+
+The same feed also backs the operator tools: the Sales › Quotes "carrier
+prices" check on a stored request, the Sales › Lane quote form and
+`scripts/lane_quote.py` — those show every carrier, unpadded.
 
 **One endpoint: `POST /ltl/market-options`.** It returns every carrier's rate
 for the lane (Averitt, XPO, ABF, Saia, FedEx, R+L …; 17-18 on the lanes probed
@@ -18,7 +26,8 @@ option is dropped here too, should the feed ever carry one.
 
 Published contract: https://www.wearewarp.com/.well-known/openapi.json
 Stdlib-only (urllib). Slow by design on Warp's side — typically ~20 s, up to
-45 s — so callers run it in a worker thread, never on the event loop.
+45 s — so callers run it in a worker thread, never on the event loop, and the
+buyer path caps its wait (`FREIGHT_CARRIER_TIMEOUT_SEC`).
 """
 from __future__ import annotations
 
@@ -27,7 +36,7 @@ import math
 import os
 import urllib.error
 import urllib.request
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 BASE_URL = "https://www.wearewarp.com/api/v1"
 TIMEOUT_SEC = 60
@@ -52,6 +61,18 @@ OPTIONS_KEPT = 5
 
 # Same default as the estimator: a storefront buyer has no dock.
 DELIVERY_ACCESSORIALS = ("liftgate-delivery", "residential-delivery")
+
+
+def delivery_accessorials(*, residential: bool = True, liftgate: bool = True) -> tuple[str, ...]:
+    """Warp's delivery accessorial codes for a drop. Residential + liftgate is
+    the storefront default; "without liftgate" means the driver does not
+    unload — the buyer hand-unloads off the truck; neither = a dock."""
+    codes = []
+    if liftgate:
+        codes.append("liftgate-delivery")
+    if residential:
+        codes.append("residential-delivery")
+    return tuple(codes)
 
 
 class WarpUnavailable(Exception):
@@ -95,8 +116,12 @@ def market_options(
     pickup: str | None = None,
     api_key: str | None = None,
     timeout: float = TIMEOUT_SEC,
+    delivery: tuple[str, ...] | list[str] = DELIVERY_ACCESSORIALS,
 ) -> list[dict]:
     """Every carrier's rate for the lane, as Warp returned them.
+
+    ``delivery`` is the drop's accessorial list (`delivery_accessorials`);
+    ``timeout`` is urllib's per-socket-operation timeout in seconds.
 
     Raises `WarpUnavailable` on a transport or HTTP error or a malformed body.
     An EMPTY list is a normal answer (Warp returns 200 with no options when its
@@ -111,7 +136,7 @@ def market_options(
         "length_in": PALLET_LENGTH_IN,
         "width_in": PALLET_WIDTH_IN,
         "height_in": min(int(height_in), MAX_PALLET_HEIGHT_IN),
-        "accessorials": {"pickup": [], "delivery": list(DELIVERY_ACCESSORIALS)},
+        "accessorials": {"pickup": [], "delivery": list(delivery)},
     }
     headers = {"Content-Type": "application/json", "User-Agent": USER_AGENT}
     key = api_key if api_key is not None else os.environ.get("WARP_API_KEY")
@@ -159,32 +184,44 @@ def _usable(option: dict) -> bool:
     return isinstance(price, (int, float)) and not isinstance(price, bool) and price > 0
 
 
-def summarize(options: list[dict], limit: int = OPTIONS_KEPT) -> dict:
+def summarize(options: list[dict], limit: int | None = OPTIONS_KEPT) -> dict:
     """Boil a market-options list down to what `freight_quotes` stores.
 
     The cheapest usable price, who quoted it, how many carriers answered, and
-    the ``limit`` cheapest options. Never the raw response.
+    the ``limit`` cheapest options (``None`` = every usable one, for the
+    operator's lane tool). Never the raw response.
     """
     usable = sorted((o for o in options if _usable(o)), key=lambda o: o["price_usd"])
     if not usable:
         return {
             "carrier_status": "none", "carrier_low": None, "carrier_name": None,
-            "carrier_count": 0, "carrier_options": [],
+            "carrier_count": 0, "carrier_options": [], "expires_at": None, "bookable": False,
         }
     kept = [
         {
             "carrier": str(o.get("carrier_name") or "unknown")[:80],
             "price_usd": round(float(o["price_usd"]), 2),
             "transit_days": o.get("transit_days") if isinstance(o.get("transit_days"), int) else None,
+            # Every option carries a quote expiry (1-3 days out on the lanes
+            # probed 2026-10-20) and whether Warp can book it — False for every
+            # third-party carrier; only Warp's own entries may be bookable.
+            "expires_at": _iso_or_none(o.get("expires_at")),
+            "bookable": bool(o.get("bookable")),
+            "service_level": (str(o["service_level"])[:40] if o.get("service_level") else None),
         }
-        for o in usable[:limit]
+        for o in (usable if limit is None else usable[:limit])
     ]
+    expiries = [k["expires_at"] for k in kept if k["expires_at"]]
     return {
         "carrier_status": "ok",
         "carrier_low": kept[0]["price_usd"],
         "carrier_name": kept[0]["carrier"],
         "carrier_count": len(usable),
         "carrier_options": kept,
+        # The earliest expiry among the kept options: past it the summary is
+        # stale as a whole (the memo in web/app.py drops it then).
+        "expires_at": min(expiries, key=expires_epoch) if expiries else None,
+        "bookable": any(k["bookable"] for k in kept),
     }
 
 
@@ -192,8 +229,55 @@ def unavailable(status: str) -> dict:
     """The summary for a check that produced no prices: 'too_big' | 'error'."""
     return {
         "carrier_status": status, "carrier_low": None, "carrier_name": None,
-        "carrier_count": None, "carrier_options": [],
+        "carrier_count": None, "carrier_options": [], "expires_at": None, "bookable": False,
     }
+
+
+def _iso_or_none(value) -> str | None:
+    """An ISO-8601 timestamp string, or None when Warp sent nothing usable."""
+    if not value or not isinstance(value, str) or expires_epoch(value) is None:
+        return None
+    return value[:40]
+
+
+def expires_epoch(value) -> float | None:
+    """Seconds since the epoch for an ISO timestamp (``Z`` or an offset; a
+    naive one is read as UTC). None when it does not parse — an option
+    without a readable expiry is treated as not expiring."""
+    if not value or not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text.endswith("Z") or text.endswith("z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.timestamp()
+
+
+def expires_date(value) -> str | None:
+    """The calendar day (ISO date) an option's quote is good until, or None."""
+    epoch = expires_epoch(value)
+    if epoch is None:
+        return None
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).date().isoformat()
+
+
+def padded_price(carrier_low, padding_pct) -> int | None:
+    """What the buyer pays: the cheapest carrier plus the operator's padding,
+    rounded UP to a whole dollar. None when there is no carrier price."""
+    try:
+        low, pct = float(carrier_low), float(padding_pct)
+    except (TypeError, ValueError):
+        return None
+    if low <= 0 or not math.isfinite(low) or not math.isfinite(pct) or pct < 0:
+        return None
+    # Round to cents first: 100 × 1.1 is 110.00000000000001 in binary, which
+    # a bare ceil would turn into $111.
+    return int(math.ceil(round(low * (1 + pct / 100.0), 2)))
 
 
 def price_check(shown_low, shown_high, carrier_low) -> str | None:

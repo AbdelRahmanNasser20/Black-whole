@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import functools
 import json
 import logging
 import os
@@ -76,6 +77,7 @@ from ..channels import sync as channel_sync
 from .. import stripe_gateway
 from .. import freight_estimate
 from .. import freight_log
+from .. import lane_quote
 from .. import attribution
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
@@ -2444,9 +2446,17 @@ def public_event(payload: dict, request: Request):
 # it and nothing depends on somebody reading a Telegram ping. (Before 2026-10
 # the email was an optional second step and 4 of 5 requests were anonymous.)
 #
-# The number the buyer sees is the in-house estimator's. Real carrier prices
-# (automation/warp_rates.py) are fetched afterwards, in the background, for the
-# operator only.
+# THE NUMBER THE BUYER SEES IS A REAL CARRIER'S (operator decision 2026-10-20).
+# The lot's pallets are sized from its calibration, Warp's multi-carrier feed
+# (automation/warp_rates.py) is asked for the lane with residential + liftgate,
+# and the buyer gets the cheapest usable carrier plus the operator's padding
+# (`site_settings.freight_padding_pct`), in whole dollars — plus, when it is
+# cheaper, the same drop without a liftgate (the buyer hand-unloads). The wait
+# is capped (`FREIGHT_CARRIER_TIMEOUT_SEC`); when Warp is off, over budget,
+# empty, too slow, or the load is too big for LTL, the in-house estimator's
+# range answers instead, labelled as an estimate, and the carrier check runs
+# in the background as before. Either way the row is written BEFORE a number
+# goes out, and it records which source answered (`provider`, `raw`).
 
 FREIGHT_UNQUOTABLE = {
     "ok": False,
@@ -2480,14 +2490,33 @@ FREIGHT_NOT_SAVED = {
     ),
 }
 
-# What the estimate is and isn't. Shipped with every quote so the widget can't
+# What the number is and isn't. Shipped with every quote so the widget can't
 # drift from the terms, and so a screenshot of the number carries its caveats.
+# `source` says who priced it: a real carrier (final price confirmed once the
+# pallets are weighed) or the in-house estimator (a range, re-confirmed at
+# ship time).
 FREIGHT_FRAMING = {
+    "source": "estimate",
     "estimate_only": True,
     "residential_liftgate_included": True,
     "chair_price_separate": True,
     "pickup_free": True,
+    "final_after_weigh": True,
 }
+FREIGHT_FRAMING_CARRIER = {
+    "source": "carrier",
+    "estimate_only": False,
+    "residential_liftgate_included": True,
+    "chair_price_separate": True,
+    "pickup_free": True,
+    "final_after_weigh": True,
+}
+
+# How long a buyer's request waits on Warp before the estimator answers
+# instead. Warp typically takes ~20 s, so at the 12 s default the FIRST ask on
+# a lane often falls back — the thread keeps running and memoises the answer,
+# so the next ask on that lane gets the carrier price at once.
+BUYER_CARRIER_TIMEOUT_SEC = app_config.FREIGHT_CARRIER_TIMEOUT_SEC
 
 # Sanity ceiling on a requested quantity. Bigger than any real lot (the largest
 # to date is ~4,900) and small enough that a fat-fingered 9-digit number can't
@@ -2527,6 +2556,10 @@ _carrier_lock = threading.Lock()
 _carrier_pending = 0
 _carrier_lane_cache: dict[tuple, tuple[float, dict]] = {}
 _carrier_budget = [0.0, 0]     # [window_end_epoch, calls_in_window]
+# Lanes being asked right now. A second caller for the same lane (the buyer's
+# request timed out, then the background check starts) waits on the first
+# answer instead of spending a second Warp call.
+_carrier_inflight: dict[tuple, concurrent.futures.Future] = {}
 
 
 class CarrierBudgetExceeded(Exception):
@@ -2543,11 +2576,20 @@ def _carrier_lane_get(key: tuple) -> dict | None:
 
 
 def _carrier_lane_put(key: tuple, summary: dict) -> None:
+    """Memoise a lane's summary — for `CARRIER_LANE_TTL_SEC`, or until the
+    earliest option in it expires (Warp quotes are good 1-3 days; a buyer must
+    never be shown a rate past its `expires_at`), whichever comes first."""
+    until = time.time() + CARRIER_LANE_TTL_SEC
+    expires = warp_rates.expires_epoch(summary.get("expires_at"))
+    if expires is not None:
+        until = min(until, expires)
+    if until <= time.time():
+        return                      # already stale: nothing worth remembering
     with _carrier_lock:
         if len(_carrier_lane_cache) >= CARRIER_LANE_CACHE_MAX:
             oldest = min(_carrier_lane_cache, key=lambda k: _carrier_lane_cache[k][0])
             _carrier_lane_cache.pop(oldest, None)
-        _carrier_lane_cache[key] = (time.time() + CARRIER_LANE_TTL_SEC, dict(summary))
+        _carrier_lane_cache[key] = (until, dict(summary))
 
 
 def _carrier_budget_take() -> bool:
@@ -2572,8 +2614,58 @@ def _carrier_reset() -> None:
     global _carrier_pending
     with _carrier_lock:
         _carrier_lane_cache.clear()
+        _carrier_inflight.clear()
         _carrier_pending = 0
         _carrier_budget[0], _carrier_budget[1] = 0.0, 0
+
+
+def _fetch_carrier_summary(lane: tuple, *, timeout: float = warp_rates.TIMEOUT_SEC) -> dict:
+    """Every carrier for one lane, as a `warp_rates.summarize(..., limit=None)`
+    dict — memoised per lane, one in-flight call per lane, one shared hourly
+    budget for buyer, background and operator asks.
+
+    ``lane`` is `lane_quote.lane_key(...)`: (origin, dest, pallets, lbs per
+    pallet, height, delivery accessorials). Blocking (a ~20-45 s HTTP call) —
+    callers run it on a worker thread. Raises `CarrierBudgetExceeded` before a
+    call is spent and `warp_rates.WarpUnavailable` when Warp did not answer
+    (a second caller that outwaits ``timeout`` on the first call gets that too).
+    """
+    hit = _carrier_lane_get(lane)
+    if hit is not None:
+        return hit
+    with _carrier_lock:
+        fut = _carrier_inflight.get(lane)
+        owner = fut is None
+        if owner:
+            fut = concurrent.futures.Future()
+            _carrier_inflight[lane] = fut
+    if not owner:
+        try:
+            return dict(fut.result(timeout=timeout))
+        except concurrent.futures.TimeoutError:
+            raise warp_rates.WarpUnavailable("warp: answer for this lane still pending") from None
+    try:
+        if not _carrier_budget_take():
+            raise CarrierBudgetExceeded(f"{CARRIER_CALLS_PER_HOUR} carrier checks used this hour")
+        origin, dest, pallets, weight, height, delivery = lane
+        summary = warp_rates.summarize(warp_rates.market_options(
+            origin, dest,
+            pallets=pallets,
+            weight_lbs_per_pallet=weight,
+            height_in=height,
+            timeout=timeout,
+            delivery=delivery,
+        ), limit=None)
+        if summary.get("carrier_status") == "ok":
+            _carrier_lane_put(lane, summary)   # same lane again ⇒ no second call
+        fut.set_result(summary)
+        return summary
+    except BaseException as e:
+        fut.set_exception(e)
+        raise
+    finally:
+        with _carrier_lock:
+            _carrier_inflight.pop(lane, None)
 
 
 def _freight_origin_zip(row: dict) -> str | None:
@@ -2650,6 +2742,8 @@ def _freight_range_str(quote: dict) -> str:
     )
     if not rng:
         return "—"
+    if rng["low"] == rng["high"]:
+        return f"${rng['low']:,.0f} ({mode})"
     return f"${rng['low']:,.0f}–${rng['high']:,.0f} ({mode})"
 
 
@@ -2812,34 +2906,21 @@ def _run_carrier_check(quote_id: int) -> dict | None:
     lot = inventory.get(quote["lot_id"]) if quote.get("lot_id") else None
     cal = freight_estimate.calibration_from_row(lot)
     quantity = int(quote.get("quantity") or 0)
-    pallets = warp_rates.pallets_for(quantity, cal.chairs_per_pallet)
-    if pallets <= 0:
+    ship = lane_quote.shipment(quantity, cal)
+    if ship["pallets"] <= 0:
         return None
-    if pallets > warp_rates.MAX_LTL_PALLETS:
+    if ship["too_big"]:
         summary = warp_rates.unavailable("too_big")
     else:
-        weight = warp_rates.weight_per_pallet(quantity, pallets, cal.lbs_per_chair)
-        lane = (quote["origin_zip"], quote["dest_zip"], pallets, weight, cal.pallet_height_in)
-        summary = _carrier_lane_get(lane)
-        if summary is None:
-            # One shared hourly budget for automatic AND manual checks.
-            if not _carrier_budget_take():
-                raise CarrierBudgetExceeded(
-                    f"{CARRIER_CALLS_PER_HOUR} carrier checks used this hour"
-                )
-            try:
-                summary = warp_rates.summarize(warp_rates.market_options(
-                    quote["origin_zip"],
-                    quote["dest_zip"],
-                    pallets=pallets,
-                    weight_lbs_per_pallet=weight,
-                    height_in=cal.pallet_height_in,
-                ))
-            except warp_rates.WarpUnavailable as e:
-                log.warning("carrier check failed for quote %s: %s", quote_id, e)
-                summary = warp_rates.unavailable("error")
-            if summary.get("carrier_status") == "ok":
-                _carrier_lane_put(lane, summary)   # same lane again ⇒ no second call
+        lane = lane_quote.lane_key(
+            quote["origin_zip"], quote["dest_zip"], ship, warp_rates.DELIVERY_ACCESSORIALS,
+        )
+        try:
+            # One shared hourly budget for buyer, automatic AND manual checks.
+            summary = _fetch_carrier_summary(lane)
+        except warp_rates.WarpUnavailable as e:
+            log.warning("carrier check failed for quote %s: %s", quote_id, e)
+            summary = warp_rates.unavailable("error")
     freight_log.set_carrier_result(quote_id, summary)
     readcache.invalidate_all()   # the Sales tab memo may hold the row without prices
     return summary
@@ -2870,9 +2951,99 @@ async def _carrier_check_task(quote_id: int) -> None:
             _carrier_pending -= 1
 
 
+def _summary_from(fut: asyncio.Future, done: set) -> tuple[dict | None, str | None]:
+    """(summary, why-not) for one finished-or-not executor future."""
+    if fut not in done:
+        return None, "timeout"
+    exc = fut.exception()
+    if exc is None:
+        return fut.result(), None
+    if isinstance(exc, CarrierBudgetExceeded):
+        return None, "budget"
+    if isinstance(exc, warp_rates.WarpUnavailable):
+        return None, "error"
+    log.warning("buyer carrier ask crashed", exc_info=exc)
+    return None, "error"
+
+
+async def _buyer_carrier_quote(
+    origin_zip: str, dest_zip: str, quantity: int, cal,
+) -> tuple[dict | None, dict | None, str | None]:
+    """Ask Warp for the buyer's lane, waiting at most `BUYER_CARRIER_TIMEOUT_SEC`.
+
+    Returns ``(with_liftgate, without_liftgate, fallback_reason)``: the
+    residential + liftgate summary (the buyer's price), the same drop without
+    a liftgate when `FREIGHT_NO_LIFTGATE_PRICE` is on (a second call against
+    the same budget — best-effort, never waited for on its own), and, when
+    the first is None, why the estimator answers instead: ``disabled``,
+    ``too_big``, ``queue_full``, ``timeout``, ``budget`` or ``error``.
+
+    Never raises, never blocks the loop, never touches the default executor
+    (the calls run on `_CARRIER_POOL`). A call that outlives the wait keeps
+    running on its thread and memoises its answer for the next request.
+    """
+    global _carrier_pending
+    if not warp_rates.enabled():
+        return None, None, "disabled"
+    ship = lane_quote.shipment(quantity, cal)
+    if ship["pallets"] <= 0:
+        return None, None, "no_pallets"
+    if ship["too_big"]:
+        return None, None, "too_big"
+    with _carrier_lock:
+        if _carrier_pending >= CARRIER_QUEUE_MAX:
+            return None, None, "queue_full"
+        _carrier_pending += 1
+    timeout = BUYER_CARRIER_TIMEOUT_SEC
+    lanes = [lane_quote.lane_key(origin_zip, dest_zip, ship, warp_rates.delivery_accessorials())]
+    if app_config.FREIGHT_NO_LIFTGATE_PRICE:
+        lanes.append(lane_quote.lane_key(
+            origin_zip, dest_zip, ship, warp_rates.delivery_accessorials(liftgate=False),
+        ))
+    loop = asyncio.get_running_loop()
+    futs = [
+        loop.run_in_executor(
+            _CARRIER_POOL, functools.partial(_fetch_carrier_summary, lane, timeout=timeout),
+        )
+        for lane in lanes
+    ]
+    try:
+        # The same bound as the thread's own HTTP timeout: a buyer never waits
+        # longer than `FREIGHT_CARRIER_TIMEOUT_SEC` for a number.
+        done, _pending = await asyncio.wait(futs, timeout=timeout)
+    finally:
+        with _carrier_lock:
+            _carrier_pending -= 1
+    primary, reason = _summary_from(futs[0], done)
+    if primary is not None and primary.get("carrier_status") != "ok":
+        reason = primary.get("carrier_status") or "none"
+    secondary = _summary_from(futs[1], done)[0] if len(futs) > 1 else None
+    if reason:
+        log.info("buyer carrier ask fell back to the estimator (%s): %s → %s × %s",
+                 reason, origin_zip, dest_zip, quantity)
+    return primary, secondary, reason
+
+
+def _freight_public_carrier(quote: dict) -> dict:
+    """What a browser may see of a carrier-priced quote: the padded price, the
+    carrier's transit days, how many carriers answered, and the cheaper
+    no-liftgate price when there is one. Never a carrier's name or its
+    unpadded rate — those stay in `raw` / the `carrier_*` columns."""
+    carrier = quote.get("carrier") or {}
+    return {
+        "price": quote.get("ltl_low"),
+        "transit_days": quote.get("transit_days"),
+        "carrier_count": carrier.get("carrier_count"),
+        "without_liftgate": quote.get("without_liftgate"),
+        "miles": quote.get("miles"),
+        "valid_until": quote.get("valid_until"),
+    }
+
+
 @app.post("/freight-estimate")
 async def public_freight_estimate(payload: dict, request: Request):
-    """`{lot_id, dest_zip, quantity?, email, phone}` → a freight range for the lane.
+    """`{lot_id, dest_zip, quantity?, email, phone}` → a carrier price (or,
+    when no carrier can answer in time, the estimator's range) for the lane.
 
     Email and phone are required: this is a quote request, and a request nobody
     can answer is not worth storing.
@@ -2931,7 +3102,8 @@ async def public_freight_estimate(payload: dict, request: Request):
 
     origin_zip = _freight_origin_zip(row)
 
-    quote: dict | None = None
+    quote: dict | None = None        # what is stored and shown
+    estimate: dict | None = None     # the estimator's own range (fallback / audit)
     reason: str | None = None
     if not origin_zip:
         # We don't know where the lot is. Better a hand quote than a lane
@@ -2946,12 +3118,28 @@ async def public_freight_estimate(payload: dict, request: Request):
         try:
             # Pure arithmetic over a committed lookup table — microseconds, no
             # I/O, so it runs inline rather than paying for a thread hop.
-            quote = freight_estimate.get_freight_estimate(
+            estimate = freight_estimate.get_freight_estimate(
                 origin_zip, dest_zip, quantity,
                 cal=freight_estimate.calibration_from_row(row),
             )
         except freight_estimate.FreightUnavailable as e:
             reason = str(e)[:200]
+
+    if estimate is not None:
+        # The lane is priceable: ask real carriers (bounded wait), and only
+        # then decide which number the buyer sees. The padding is the live
+        # setting; `site_settings.get_all` never raises.
+        cal = freight_estimate.calibration_from_row(row)
+        settings = await asyncio.to_thread(site_settings.get_all)
+        padding = float(settings.get("freight_padding_pct", app_config.FREIGHT_PADDING_PCT_DEFAULT))
+        with_liftgate, without_liftgate, fallback = await _buyer_carrier_quote(
+            origin_zip, dest_zip, quantity, cal,
+        )
+        if with_liftgate is not None:
+            quote = lane_quote.buyer_quote(estimate, with_liftgate, padding, no_liftgate=without_liftgate)
+        if quote is None:
+            quote = estimate
+            quote.setdefault("raw", {})["carrier_fallback"] = fallback or "none"
 
     # Asking for more than the lot holds is still a lead — quote what was asked,
     # record the stock at that moment, and tell both sides.
@@ -2995,10 +3183,23 @@ async def public_freight_estimate(payload: dict, request: Request):
         # have no record of having given.
         return dict(FREIGHT_NOT_SAVED)
 
-    _spawn(_carrier_check_task(quote_id))
+    if quote.get("provider") == "warp":
+        # The carrier summary is already on the row (same INSERT).
+        return {
+            "ok": True,
+            "quote_id": quote_id,
+            "source": "carrier",
+            "carrier": _freight_public_carrier(quote),
+            "estimate": None,
+            "framing": dict(FREIGHT_FRAMING_CARRIER),
+            "available": available,
+        }
+    _spawn(_carrier_check_task(quote_id))   # the operator still gets real prices on the row
     return {
         "ok": True,
         "quote_id": quote_id,
+        "source": "estimate",
+        "carrier": None,
         "estimate": _freight_public_estimate(quote),
         "framing": dict(FREIGHT_FRAMING),
         "available": available,
@@ -4997,6 +5198,81 @@ def freight_quote_carrier_check(quote_id: int):
     if summary is None:
         raise HTTPException(409, "this request has no priced lane to check")
     return _freight_quote_view(freight_log.get_quote(quote_id) or {})
+
+
+def _flag(value, default: bool) -> bool:
+    """A JSON/form boolean: true/false, 1/0, "yes"/"no"; missing = default."""
+    if value is None or value == "":
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).strip().lower() not in ("0", "false", "no", "off", "n")
+
+
+@app.post("/api/freight/lane-quote")
+def freight_lane_quote(payload: dict):
+    """Operator: every carrier for ANY lane, unpadded, with the estimator beside
+    it (Sales › Lane quote; the CLI is `scripts/lane_quote.py`).
+
+    `{origin_zip?, dest_zip, quantity?, lot_id?, lbs_per_chair?,
+    chairs_per_pallet?, pallet_height_in?, residential?, liftgate?}` — a
+    `lot_id` prefills the origin, the quantity and the lot's chair data;
+    explicit fields win over it. Same Warp budget and lane memo as the buyer
+    path (~20-45 s on a cold lane). Sync handler → threadpool.
+    """
+    payload = payload or {}
+    if not warp_rates.enabled():
+        raise HTTPException(409, "carrier checks are switched off (WARP_RATES_ENABLED=0)")
+    lot_id = str(payload.get("lot_id") or "").strip()
+    lot = inventory.get(lot_id) if lot_id else None
+    if lot_id and lot is None:
+        raise HTTPException(404, "lot not found")
+    try:
+        origin = lane_quote.clean_zip(
+            payload.get("origin_zip") or _freight_origin_zip(lot or {}), "origin_zip",
+        )
+        dest = lane_quote.clean_zip(payload.get("dest_zip"), "dest_zip")
+        if freight_estimate._is_international(dest):
+            raise lane_quote.LaneInput(f"destination {dest} is offshore — quote it by hand")
+        qty_in = payload.get("quantity")
+        if qty_in in (None, "") and lot is not None:
+            qty_in = _freight_default_qty(lot)
+        quantity = min(lane_quote.clean_quantity(qty_in), FREIGHT_MAX_QTY)
+        cal = lane_quote.calibration(
+            lot,
+            lbs_per_chair=payload.get("lbs_per_chair"),
+            chairs_per_pallet=payload.get("chairs_per_pallet"),
+            pallet_height_in=payload.get("pallet_height_in"),
+        )
+    except lane_quote.LaneInput as e:
+        raise HTTPException(400, str(e))
+    residential = _flag(payload.get("residential"), True)
+    liftgate = _flag(payload.get("liftgate"), True)
+    padding = float(site_settings.get_all().get(
+        "freight_padding_pct", app_config.FREIGHT_PADDING_PCT_DEFAULT))
+
+    ship = lane_quote.shipment(quantity, cal)
+    summary, error = None, None
+    if ship["too_big"]:
+        error = (f"{ship['pallets']} pallets is more than LTL takes "
+                 f"({warp_rates.MAX_LTL_PALLETS}) — quote a partial/full truck by hand")
+    else:
+        lane = lane_quote.lane_key(
+            origin, dest, ship,
+            warp_rates.delivery_accessorials(residential=residential, liftgate=liftgate),
+        )
+        try:
+            summary = _fetch_carrier_summary(lane)
+        except CarrierBudgetExceeded as e:
+            raise HTTPException(429, f"{e} — try again next hour")
+        except warp_rates.WarpUnavailable as e:
+            error = str(e)
+    out = lane_quote.result(
+        origin, dest, quantity, cal, residential=residential, liftgate=liftgate,
+        summary=summary, padding_pct=padding, error=error,
+    )
+    out["lot_id"] = lot_id or None
+    return out
 
 
 @app.get("/api/sales/counts")

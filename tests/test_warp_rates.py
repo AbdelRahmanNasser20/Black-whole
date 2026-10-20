@@ -158,6 +158,7 @@ def test_summary_picks_the_cheapest_and_counts_all(wire):
     assert s["carrier_count"] == 3
     assert s["carrier_options"][0] == {
         "carrier": "Averitt Express", "price_usd": 589.51, "transit_days": 1,
+        "expires_at": None, "bookable": False, "service_level": "STND",
     }
 
 
@@ -186,7 +187,7 @@ def test_summary_drops_substituted_and_unpriced_options(bad):
 def test_summary_of_nothing_is_status_none():
     assert warp_rates.summarize([]) == {
         "carrier_status": "none", "carrier_low": None, "carrier_name": None,
-        "carrier_count": 0, "carrier_options": [],
+        "carrier_count": 0, "carrier_options": [], "expires_at": None, "bookable": False,
     }
 
 

@@ -372,6 +372,7 @@
     <a class="seg-btn" data-sales-view="inquiries" href="?tab=inquiries">Inquiries<span class="sales-count" id="sales-count-inquiries" hidden></span><kbd>i</kbd></a>
     <a class="seg-btn" data-sales-view="deposits" href="?tab=deposits">Deposits<kbd>d</kbd></a>
     <a class="seg-btn" data-sales-view="subscribers" href="?tab=subscribers">Subscribers<kbd>s</kbd></a>
+    <a class="seg-btn" data-sales-view="lane" href="?tab=lane">Lane quote<kbd>l</kbd></a>
   </div>
 </nav>
 
@@ -388,7 +389,8 @@
       From the freight box on a lot page. Each one left an email and a phone. Move it
       <span class="lex running">new</span> → <span class="lex done">answered</span> →
       <span class="lex done">won</span> or <span class="lex pending">lost</span> once you've replied.
-      The carrier price is for you only — the buyer saw the site's range.
+      SITE SHOWED is the buyer's number: a real carrier's rate plus the padding (Lane quote view),
+      or the estimator's range when no carrier answered in time — the unpadded carrier price sits beside it.
     </p>
   </div>
 
@@ -411,6 +413,60 @@
 
   {#- skeleton twin ships in the HTML; static/admin/quotes.js (UI.load) swaps it for cards / empty / error -#}
   <div class="quote-list" id="quo-list" data-state="loading">{{ skeleton_cards(5) }}</div>
+</section>
+
+
+<!-- ───────────── Sales › Lane quote ───────────── -->
+<section class="panel" data-pane="lane" hidden>
+  {#- Sales › Lane quote (operator decision 2026-10-20): every carrier for any lane, unpadded, beside the
+      estimator — and the live padding the lot page adds to the cheapest carrier. CSS in static/admin/lane.css;
+      the form posts to /api/freight/lane-quote (static/admin/lane.js). -#}
+  <link rel="stylesheet" href="/static/admin/lane.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">SALES / LANE QUOTE</div>
+    <h1 class="hero-title">What real carriers charge for any lane.</h1>
+    <p class="hero-sub">
+      Every carrier Warp returns for moving chairs between two ZIPs, cheapest first and
+      <span class="lex running">unpadded</span>. Pick a lot to prefill its origin, quantity and chair data,
+      or type a lane. A buyer on a lot page sees the cheapest carrier plus the padding below; third-party
+      carriers are <span class="lex pending">quote only</span> — book them with the carrier, not through Warp.
+      Same terminal: <code>scripts/lane_quote.py --origin 04270 --dest 28206 --qty 100</code>.
+    </p>
+  </div>
+
+  {#- The live buyer padding: site_settings.freight_padding_pct, seeded from FREIGHT_PADDING_PCT_DEFAULT. -#}
+  <div class="controls lane-settings" id="lane-settings">
+    <div class="lane-group">
+      <span class="lane-label" title="Added to the cheapest carrier before a buyer sees the price; rounded up to the dollar">BUYER PADDING %</span>
+      <input type="number" id="lane-padding" min="0" max="100" step="0.5" value="15" aria-label="Freight padding percentage">
+    </div>
+    <div class="lane-actions">
+      <span class="lane-settings-status" id="lane-settings-msg" aria-live="polite"></span>
+      <button type="button" class="btn btn-small btn-primary" id="lane-padding-save">save padding</button>
+    </div>
+  </div>
+
+  <form class="lane-form" id="lane-form" novalidate>
+    <label class="lane-field lane-field--lot"><span>LOT (prefills origin + chair data)</span>
+      <select id="lane-lot"><option value="">— type a lane —</option></select></label>
+    <label class="lane-field"><span>ORIGIN ZIP</span>
+      <input class="lane-zip" id="lane-origin" inputmode="numeric" maxlength="5" placeholder="04270"></label>
+    <label class="lane-field"><span>DEST ZIP</span>
+      <input class="lane-zip" id="lane-dest" inputmode="numeric" maxlength="5" placeholder="28206" required></label>
+    <label class="lane-field"><span>CHAIRS</span>
+      <input class="lane-num" id="lane-qty" type="number" min="1" max="10000" placeholder="100"></label>
+    <label class="lane-field"><span>LB / CHAIR</span>
+      <input class="lane-num" id="lane-lb" type="number" min="1" step="0.5" placeholder="13"></label>
+    <label class="lane-field"><span>CHAIRS / PALLET</span>
+      <input class="lane-num" id="lane-per-pallet" type="number" min="1" placeholder="35"></label>
+    <label class="lane-field"><span>PALLET HEIGHT IN</span>
+      <input class="lane-num" id="lane-height" type="number" min="1" max="85" placeholder="80"></label>
+    <label class="lane-check"><input type="checkbox" id="lane-residential" checked> residential</label>
+    <label class="lane-check"><input type="checkbox" id="lane-liftgate" checked> liftgate</label>
+    <button type="submit" class="btn btn-small btn-primary">quote lane →</button>
+  </form>
+
+  <div class="lane-result" id="lane-result" data-state="idle">Pick a lot or type a lane, then quote it. A cold lane takes 20–45 s; the same lane again is instant.</div>
 </section>
 
 
@@ -1031,7 +1087,7 @@
   var panes = document.querySelectorAll('[data-pane]'), hit = false;
   panes.forEach(function (p) { if (p.dataset.pane === t) hit = true; }); if (!hit) return;
   panes.forEach(function (p) { p.hidden = p.dataset.pane !== t; });
-  var sales = ['quotes', 'inquiries', 'deposits', 'subscribers'].indexOf(t) !== -1, r = sales ? 'sales' : t;
+  var sales = ['quotes', 'inquiries', 'deposits', 'subscribers', 'lane'].indexOf(t) !== -1, r = sales ? 'sales' : t;
   document.querySelectorAll('.rail-tab').forEach(function (a) {
     var on = a.dataset.tab === r; a.classList.toggle('is-active', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');

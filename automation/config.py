@@ -134,6 +134,17 @@ STRIPE_WEBHOOK_SECRET = os.getenv("STRIPE_WEBHOOK_SECRET", "")
 DEPOSIT_PCT_DEFAULT = _env_float("DEPOSIT_PCT_DEFAULT", 0.15)
 DEPOSIT_MIN_USD_DEFAULT = _env_int("DEPOSIT_MIN_USD_DEFAULT", 200)
 
+# Freight (operator decision 2026-10-20: buyers see a real carrier rate).
+# `FREIGHT_PADDING_PCT_DEFAULT` is the SEED for `site_settings.freight_padding_pct`
+# (edited in admin Sales › Lane quote): the buyer pays the cheapest carrier
+# plus this percentage, in whole dollars. The other two are deployment knobs:
+# how long a buyer's request waits on Warp before the estimator answers
+# instead, and whether a second "without liftgate" price is fetched (one more
+# Warp call per request against the same hourly budget).
+FREIGHT_PADDING_PCT_DEFAULT = _env_float("FREIGHT_PADDING_PCT_DEFAULT", 15.0)
+FREIGHT_CARRIER_TIMEOUT_SEC = _env_float("FREIGHT_CARRIER_TIMEOUT_SEC", 12.0)
+FREIGHT_NO_LIFTGATE_PRICE = os.getenv("FREIGHT_NO_LIFTGATE_PRICE", "1").strip() != "0"
+
 DEFAULT_PRICE_PER_CHAIR = 20
 FB_PACKAGE_WEIGHT_LB = 12
 FB_PACKAGE_WEIGHT_OZ = 0

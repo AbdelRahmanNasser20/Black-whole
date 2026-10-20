@@ -28,11 +28,12 @@ import asyncio
 import logging
 import threading
 import sys
+import time
 
 import pytest
 from fastapi.testclient import TestClient
 
-from automation import freight_estimate, freight_log, inventory, telegram_alerts, warp_rates
+from automation import freight_estimate, freight_log, inventory, site_settings, telegram_alerts, warp_rates
 from automation.web import auth as auth_svc
 from automation.web import rate_limit
 from automation.web.app import app
@@ -157,6 +158,54 @@ def carrier(monkeypatch):
     return started
 
 
+# Warp's answer for the buyer's lane, as `market_options` returns it.
+WARP_OPTIONS = [
+    {"carrier_name": "Averitt Express", "price_usd": 589.51, "transit_days": 3, "is_warp": False},
+    {"carrier_name": "Saia LTL Freight", "price_usd": 625.51, "transit_days": 2, "is_warp": False},
+    {"carrier_name": "XPO", "price_usd": 701.00, "transit_days": 4, "is_warp": False},
+]
+
+
+@pytest.fixture(autouse=True)
+def warp(monkeypatch):
+    """No network, ever. `warp_rates.market_options` answers from `warp["options"]`
+    (keyed by the delivery accessorials — the no-liftgate ask gets
+    `warp["options_no_liftgate"]`), raises `warp["raise"]` when set, or sleeps
+    `warp["delay"]` seconds. The buyer's wait is shortened so a timeout test
+    takes a tenth of a second, not twelve. Default: Warp is DOWN, so the older
+    tests below exercise the estimator path exactly as before 2026-10-20."""
+    state = {
+        "calls": [], "options": list(WARP_OPTIONS), "options_no_liftgate": None,
+        "raise": warp_rates.WarpUnavailable("warp unreachable: test default"),
+        "delay": 0.0, "settings": {"freight_padding_pct": 15.0},
+    }
+
+    def fake_market(origin, dest, **kw):
+        state["calls"].append((origin, dest, kw))
+        if state["delay"]:
+            time.sleep(state["delay"])
+        if state["raise"]:
+            raise state["raise"]
+        if "liftgate-delivery" not in tuple(kw.get("delivery") or ()):
+            return list(state["options_no_liftgate"] if state["options_no_liftgate"] is not None
+                        else state["options"])
+        return list(state["options"])
+
+    monkeypatch.setattr(warp_rates, "market_options", fake_market)
+    monkeypatch.setattr(app_module, "BUYER_CARRIER_TIMEOUT_SEC", 0.1)
+    monkeypatch.setattr(app_module.app_config, "FREIGHT_NO_LIFTGATE_PRICE", False)
+    monkeypatch.setattr(site_settings, "get_all",
+                        lambda: {**site_settings.defaults(), **state["settings"]})
+    return state
+
+
+def warp_up(warp, **over):
+    """Flip the Warp double to 'answers'."""
+    warp["raise"] = None
+    warp.update(over)
+    return warp
+
+
 def _client():
     # https so any Secure cookie round-trips; no `with` so lifespan never fires.
     return TestClient(app, base_url="https://testserver")
@@ -188,17 +237,20 @@ def test_happy_path_response_shape(lot, logged):
 
     assert body["ok"] is True
     assert body["quote_id"] == 4242
-    assert set(body) == {"ok", "quote_id", "estimate", "framing", "available"}
+    assert set(body) == {"ok", "quote_id", "source", "carrier", "estimate", "framing", "available"}
+    assert body["source"] == "estimate" and body["carrier"] is None   # Warp is down in this file
     assert body["available"] is None
     assert set(body["estimate"]) == {
         "mode", "recommended_mode", "ltl", "partial", "miles", "transit_days",
         "valid_until",
     }
     assert body["framing"] == {
+        "source": "estimate",
         "estimate_only": True,
         "residential_liftgate_included": True,
         "chair_price_separate": True,
         "pickup_free": True,
+        "final_after_weigh": True,
     }
 
 
@@ -594,7 +646,8 @@ def test_carrier_check_sizes_the_shipment_from_the_standard_chair(check):
     ((origin, dest, kw),) = check["calls"]
     assert (origin, dest) == ("30318", "30033")
     # 160 chairs at 35 per pallet = 5 pallets; 160 × 13 lb / 5 + 40 lb pallet.
-    assert kw == {"pallets": 5, "weight_lbs_per_pallet": 456, "height_in": 80}
+    assert (kw["pallets"], kw["weight_lbs_per_pallet"], kw["height_in"]) == (5, 456, 80)
+    assert tuple(kw["delivery"]) == ("liftgate-delivery", "residential-delivery")
     assert summary["carrier_status"] == "ok"
     assert summary["carrier_low"] == 589.51 and summary["carrier_name"] == "Averitt Express"
     assert check["saved"] == [(9, summary)]
@@ -604,7 +657,7 @@ def test_carrier_check_uses_the_lots_own_chair_data(check, lot):
     lot.update(chair_weight_lb=17, chairs_per_pallet=40, pallet_height_in=72)
     app_module._run_carrier_check(9)
     kw = check["calls"][0][2]
-    assert kw == {"pallets": 4, "weight_lbs_per_pallet": 720, "height_in": 72}
+    assert (kw["pallets"], kw["weight_lbs_per_pallet"], kw["height_in"]) == (4, 720, 72)
 
 
 def test_carrier_check_skips_the_network_for_a_load_too_big_for_ltl(check):
@@ -981,3 +1034,248 @@ def test_listing_detail_context_gates_the_widget():
     assert app_module._freight_default_qty(
         make_lot(quantity_remaining=None, quantity_original=None)
     ) == 1
+
+
+# ─────────────────────── the carrier price (2026-10-20) ─────────────────────
+# Operator decision: the buyer sees a real carrier's rate plus padding. Every
+# test here flips the Warp double to "answers" and pins one rule each.
+
+def test_buyer_sees_the_cheapest_carrier_plus_padding(lot, logged, warp, carrier):
+    warp_up(warp)
+    body = _estimate(_client()).json()
+    assert body["ok"] is True and body["source"] == "carrier"
+    assert body["estimate"] is None
+    # ceil(589.51 × 1.15) = 678, whole dollars, from the CHEAPEST option.
+    assert body["carrier"]["price"] == 678
+    assert body["carrier"]["transit_days"] == 3          # Averitt's, not the estimator's 7
+    assert body["carrier"]["carrier_count"] == 3
+    assert body["carrier"]["without_liftgate"] is None   # second ask is off in this file
+    assert body["framing"]["source"] == "carrier" and body["framing"]["estimate_only"] is False
+    assert body["framing"]["final_after_weigh"] is True
+    assert carrier == []            # the summary is on the row already — no background check
+    # Warp was asked with the buyer's drop: residential + liftgate, the lot's lane.
+    ((origin, dest, kw),) = warp["calls"]
+    assert (origin, dest) == ("83702", DEST_WORCESTER)
+    assert tuple(kw["delivery"]) == ("liftgate-delivery", "residential-delivery")
+    assert kw["timeout"] == 0.1
+
+
+def test_padding_is_the_live_setting(lot, logged, warp):
+    warp_up(warp, settings={"freight_padding_pct": 0})
+    assert _estimate(_client()).json()["carrier"]["price"] == 590       # ceil(589.51)
+    app_module._carrier_reset()
+    warp["settings"] = {"freight_padding_pct": 40}
+    assert _estimate(_client()).json()["carrier"]["price"] == 826       # ceil(589.51 × 1.4)
+
+
+def test_carrier_quote_is_stored_as_one_row_with_the_carrier_columns(lot, logged, warp):
+    warp_up(warp)
+    _estimate(_client())
+    (call,) = logged["inserts"]
+    q = call["quote"]
+    assert q["provider"] == "warp"
+    assert q["ltl_low"] == q["ltl_high"] == 678 and q["partial_low"] is None
+    assert q["mode"] == "ltl" and q["transit_days"] == 3
+    assert q["carrier"]["carrier_status"] == "ok"
+    assert q["carrier"]["carrier_low"] == 589.51 and q["carrier"]["carrier_name"] == "Averitt Express"
+    assert len(q["carrier"]["carrier_options"]) == 3
+    # the audit trail keeps the unpadded rate, the padding and the estimator's range
+    assert q["raw"]["padding_pct"] == 15.0 and q["raw"]["carrier_low"] == 589.51
+    assert 1000 <= q["raw"]["estimator"]["ltl_low"] <= 1300
+    assert q["raw"]["nmfc_class"] == 175
+
+
+def test_carrier_name_and_unpadded_rate_never_reach_the_browser(lot, logged, warp):
+    warp_up(warp)
+    flat = repr(_estimate(_client()).json())
+    assert "Averitt" not in flat and "589" not in flat and "raw" not in flat
+
+
+def test_no_row_means_no_carrier_price_either(monkeypatch, lot, warp, notified):
+    """Row-before-price holds on the carrier path too."""
+    warp_up(warp)
+    monkeypatch.setattr(freight_log, "insert_storefront_quote", lambda **kw: None)
+    body = _estimate(_client()).json()
+    assert body["ok"] is False and body["reason"] == "not_saved"
+    assert "carrier" not in body and "estimate" not in body
+    (ping,) = notified["estimates"]
+    assert ping["quote"]["provider"] == "warp" and ping["quote_id"] is None
+
+
+def test_without_liftgate_price_is_offered_only_when_cheaper(monkeypatch, lot, logged, warp):
+    monkeypatch.setattr(app_module.app_config, "FREIGHT_NO_LIFTGATE_PRICE", True)
+    cheaper = [{"carrier_name": "Averitt Express", "price_usd": 480.0, "transit_days": 3}]
+    warp_up(warp, options_no_liftgate=cheaper)
+    body = _estimate(_client()).json()
+    assert body["carrier"]["price"] == 678
+    assert body["carrier"]["without_liftgate"] == 552                 # ceil(480 × 1.15)
+    assert logged["inserts"][-1]["quote"]["without_liftgate"] == 552
+    deliveries = sorted(tuple(kw["delivery"]) for _o, _d, kw in warp["calls"])
+    assert deliveries == [("liftgate-delivery", "residential-delivery"), ("residential-delivery",)]
+
+    app_module._carrier_reset()
+    warp["options_no_liftgate"] = [{"carrier_name": "X", "price_usd": 650.0, "transit_days": 3}]
+    assert _estimate(_client()).json()["carrier"]["without_liftgate"] is None   # not cheaper ⇒ not shown
+
+
+def test_a_failed_no_liftgate_ask_does_not_cost_the_buyer_the_price(monkeypatch, lot, logged, warp):
+    monkeypatch.setattr(app_module.app_config, "FREIGHT_NO_LIFTGATE_PRICE", True)
+    warp_up(warp)
+    real = warp_rates.market_options
+
+    def flaky(origin, dest, **kw):
+        if "liftgate-delivery" not in tuple(kw.get("delivery") or ()):
+            raise warp_rates.WarpUnavailable("warp HTTP 503")
+        return real(origin, dest, **kw)
+
+    monkeypatch.setattr(warp_rates, "market_options", flaky)
+    body = _estimate(_client()).json()
+    assert body["source"] == "carrier" and body["carrier"]["price"] == 678
+    assert body["carrier"]["without_liftgate"] is None
+
+
+@pytest.mark.parametrize("setup, reason", [
+    ("down", "error"),
+    ("empty", "none"),
+    ("slow", "timeout"),
+    ("budget", "budget"),
+    ("disabled", "disabled"),
+    ("too_big", "too_big"),
+    ("queue_full", "queue_full"),
+])
+def test_every_carrier_failure_falls_back_to_the_estimate(monkeypatch, lot, logged, warp, carrier, setup, reason):
+    """Down, empty, slow, over budget, switched off, too big for LTL, queue
+    full: the buyer still gets a number — the estimator's range, labelled as
+    an estimate — the row says why, and the background check still runs."""
+    warp_up(warp)
+    quantity = 150
+    if setup == "down":
+        warp["raise"] = warp_rates.WarpUnavailable("warp HTTP 503")
+    elif setup == "empty":
+        warp["options"] = []
+    elif setup == "slow":
+        warp["delay"] = 0.5                      # the buyer waits 0.1 s
+    elif setup == "budget":
+        monkeypatch.setattr(app_module, "CARRIER_CALLS_PER_HOUR", 0)
+    elif setup == "disabled":
+        monkeypatch.setenv("WARP_RATES_ENABLED", "0")
+    elif setup == "too_big":
+        quantity = 500                           # 15 pallets > 12
+    elif setup == "queue_full":
+        monkeypatch.setattr(app_module, "CARRIER_QUEUE_MAX", 0)
+    body = _estimate(_client(), quantity=quantity).json()
+    assert body["ok"] is True and body["source"] == "estimate"
+    assert body["carrier"] is None
+    shown = body["estimate"]["ltl"] or body["estimate"]["partial"]     # 500 chairs is a partial load
+    assert shown["low"] > 0
+    assert body["framing"]["source"] == "estimate" and body["framing"]["estimate_only"] is True
+    (call,) = logged["inserts"]
+    assert call["quote"]["provider"] == "estimator"
+    assert call["quote"]["raw"]["carrier_fallback"] == reason
+    assert carrier == [4242]                     # the operator still gets real prices later
+    if setup in ("disabled", "too_big", "budget", "queue_full"):
+        assert warp["calls"] == []               # nothing spent on a call we would not use
+
+
+def test_a_slow_answer_is_memoised_for_the_next_buyer(lot, logged, warp):
+    """The first ask on a lane times out; the thread finishes and memoises, so
+    the next request on that lane gets the carrier price without a call."""
+    warp_up(warp, delay=0.3)
+    client = _client()
+    assert _estimate(client).json()["source"] == "estimate"
+    time.sleep(0.5)                               # let the worker finish
+    warp["delay"] = 0.0
+    assert _estimate(client).json()["source"] == "carrier"
+    assert len(warp["calls"]) == 1
+
+
+def test_buyer_asks_share_the_hourly_budget_with_the_operator(monkeypatch, lot, logged, warp):
+    warp_up(warp)
+    monkeypatch.setattr(app_module, "CARRIER_CALLS_PER_HOUR", 1)
+    client = _client()
+    assert _estimate(client).json()["source"] == "carrier"
+    assert _estimate(client, dest_zip="30033").json()["source"] == "estimate"   # a new lane: budget spent
+    assert len(warp["calls"]) == 1
+
+
+def test_buyer_asks_run_on_the_carrier_pool(lot, logged, warp):
+    names = []
+    real = warp_rates.market_options
+
+    def record(origin, dest, **kw):
+        names.append(threading.current_thread().name)
+        return real(origin, dest, **kw)
+
+    warp_up(warp)
+    warp_rates.market_options = record
+    try:
+        _estimate(_client())
+    finally:
+        warp_rates.market_options = real
+    assert names and names[0].startswith("carrier-check")
+
+
+def test_the_same_lane_in_flight_is_asked_once():
+    """Two threads asking the same lane at once make ONE Warp call; the second
+    waits for the first answer (no second call, no second budget unit)."""
+    app_module._carrier_reset()
+    calls = []
+    real = warp_rates.market_options
+
+    def slow(origin, dest, **kw):
+        calls.append(1)
+        time.sleep(0.2)
+        return list(WARP_OPTIONS)
+
+    warp_rates.market_options = slow
+    try:
+        lane = ("83702", "01608", 5, 456, 80, ("liftgate-delivery", "residential-delivery"))
+        out = []
+        threads = [threading.Thread(target=lambda: out.append(app_module._fetch_carrier_summary(lane, timeout=2)))
+                   for _ in range(2)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+    finally:
+        warp_rates.market_options = real
+    assert len(calls) == 1 and len(out) == 2
+    assert out[0]["carrier_low"] == out[1]["carrier_low"] == 589.51
+    assert app_module._carrier_inflight == {}
+
+
+def test_buyer_valid_until_is_the_carrier_quotes_expiry_day(lot, logged, warp):
+    """Warp quotes expire in 1-3 days: the buyer's 'valid until' is the cheapest
+    option's expiry day, and the row stores the expiry + bookable flag."""
+    warp_up(warp, options=[
+        {"carrier_name": "Averitt Express", "price_usd": 589.51, "transit_days": 3,
+         "expires_at": "2026-10-23T18:00:00Z", "bookable": False, "service_level": "STND"},
+        {"carrier_name": "Warp", "price_usd": 640.0, "transit_days": 2, "is_warp": True, "bookable": True,
+         "expires_at": "2026-10-21T18:00:00Z"},
+    ])
+    body = _estimate(_client()).json()
+    assert body["carrier"]["valid_until"] == "2026-10-23"
+    q = logged["inserts"][-1]["quote"]
+    assert q["valid_until"] == "2026-10-23"
+    assert q["raw"]["carrier_expires_at"] == "2026-10-23T18:00:00Z" and q["raw"]["carrier_bookable"] is False
+    assert q["carrier"]["expires_at"] == "2026-10-21T18:00:00Z" and q["carrier"]["bookable"] is True
+    assert q["carrier"]["carrier_options"][0]["expires_at"] == "2026-10-23T18:00:00Z"
+
+
+def test_memo_never_serves_a_buyer_an_expired_rate(lot, logged, warp):
+    warp_up(warp, options=[{"carrier_name": "Averitt Express", "price_usd": 589.51, "transit_days": 3,
+                            "expires_at": "2020-01-01T00:00:00Z"}])
+    client = _client()
+    assert _estimate(client).json()["source"] == "carrier"
+    assert _estimate(client).json()["source"] == "carrier"
+    assert len(warp["calls"]) == 2                 # the stale answer was not memoised
+
+
+def test_alert_shows_one_number_for_a_carrier_quote(telegram):
+    quote = dict(QUOTE_FOR_ALERT, ltl_low=678, ltl_high=678, provider="warp")
+    asyncio.run(REAL_NOTIFY(
+        make_lot(), quote, dest_zip="30033", quantity=160, quote_id=9,
+        email=EMAIL, phone=PHONE_DIGITS,
+    ))
+    text = telegram["texts"][0][0]
+    assert "$678 (ltl)" in text and "via warp" in text and "–" not in text.split("\n")[1]

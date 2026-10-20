@@ -117,12 +117,14 @@
               <input class="fw-phone-input" name="phone" type="tel" maxlength="32"
                      placeholder="(555) 555-0100" autocomplete="tel" required>
             </label>
-            <button type="submit" class="btn btn-primary btn-small">GET ESTIMATE →</button>
+            <button type="submit" class="btn btn-primary btn-small">GET FREIGHT QUOTE →</button>
           </form>
           <div class="fw-result mf-result" hidden></div>
+          {#- Since 2026-10-20 the number is a real carrier's rate (cheapest LTL carrier + padding) when one
+              answers in time, else the in-house estimate — site.js labels each. #}
           <div class="fw-framing mono tiny">
-            ESTIMATE — FINALIZED AT SHIP TIME · INCLUDES RESIDENTIAL DELIVERY + LIFTGATE
-            · CHAIR PRICE SEPARATE &amp; FIRM · LOCAL PICKUP ALWAYS FREE
+            REAL CARRIER RATE WHERE AVAILABLE, OTHERWISE AN ESTIMATE · FINAL PRICE CONFIRMED ONCE THE PALLETS ARE WEIGHED
+            · INCLUDES RESIDENTIAL DELIVERY + LIFTGATE · CHAIR PRICE SEPARATE &amp; FIRM · LOCAL PICKUP ALWAYS FREE
             · THE SHIPPING SHOWN ON GOOGLE IS A PLACEHOLDER — THIS IS THE REAL NUMBER
           </div>
         </dd>

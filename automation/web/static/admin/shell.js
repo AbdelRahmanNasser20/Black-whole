@@ -18,18 +18,19 @@ import * as deposits from './deposits.js';
 import * as channels from './channels.js';
 import * as archive from './archive.js';
 import * as chairs from './chairs.js';
+import * as lane from './lane.js';
 import {applyState, connectStream} from './launcher.js';
 import {setScrapeStrip, connectScrapeStream} from './auctions.js';
 
-// Every `?tab=` value and its module. There are more TABS than rail entries: the four Sales views are separate
+// Every `?tab=` value and its module. There are more TABS than rail entries: the five Sales views are separate
 // panes/modules (each keeps its own URL keys and its old `?tab=` link) that share ONE rail tab.
-const TABS = {launcher, drafts, auctions, inventory, quotes, inquiries, subscribers, 'listings-db': listingsDb, 'test-scrape': testScrape, deals, tracking, deposits, channels, archive, chairs};
+const TABS = {launcher, drafts, auctions, inventory, quotes, inquiries, subscribers, 'listings-db': listingsDb, 'test-scrape': testScrape, deals, tracking, deposits, channels, archive, chairs, lane};
 const DEFAULT_TAB = 'launcher';
 const LEGACY_TAB_KEY = 'admin.lastTab';   // pre-E1 localStorage key — read once, moved into the URL, deleted
 
 // ───────── the Sales group ─────────
-// Order = the order of the view switch in index.html (#sales-nav) and of the q/i/d/s keys (SALES_CODES below).
-const SALES_VIEWS = ['quotes', 'inquiries', 'deposits', 'subscribers'];
+// Order = the order of the view switch in index.html (#sales-nav) and of the q/i/d/s/l keys (SALES_CODES below).
+const SALES_VIEWS = ['quotes', 'inquiries', 'deposits', 'subscribers', 'lane'];
 let lastSalesView = SALES_VIEWS[0];      // where the rail's Sales tab (and `5`) lands — the view last looked at
 const railNameFor = (name) => SALES_VIEWS.includes(name) ? 'sales' : name;
 const tabForRail = (railName) => railName === 'sales' ? lastSalesView : railName;
@@ -102,13 +103,13 @@ window.addEventListener('popstate', () => activateTab(tabFromUrl() || DEFAULT_TA
 // ───────── keyboard ─────────
 // [ ]      previous / next rail tab (wraps)
 // 1–9, 0   jump to rail tab 1–10
-// q i d s  inside Sales: Quotes / Inquiries / Deposits / Subscribers
+// q i d s l  inside Sales: Quotes / Inquiries / Deposits / Subscribers / Lane quote
 // Matched on the PHYSICAL key (`e.code`), not the character: with an Arabic layout active the same keys type
 // ج د ض ه ي س and Arabic-Indic digits, and a character match would simply never fire.
 // Never while typing (input, textarea, select, contenteditable), never with Cmd/Ctrl/Alt held (browser and OS
 // shortcuts stay theirs), and never while the deal drawer or a dialog is open (digits belong to what is on top).
 const DIGIT_CODE = /^(?:Digit|Numpad)([0-9])$/;
-const SALES_CODES = {KeyQ: 'quotes', KeyI: 'inquiries', KeyD: 'deposits', KeyS: 'subscribers'};
+const SALES_CODES = {KeyQ: 'quotes', KeyI: 'inquiries', KeyD: 'deposits', KeyS: 'subscribers', KeyL: 'lane'};
 const overlayOpen = () => !!document.querySelector('#deal-drawer.is-open, dialog[open]');
 
 function isTyping(el) {
