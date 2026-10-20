@@ -218,6 +218,12 @@ function bindCaptureForm(form) {
 
   const money = (n) => '$' + Math.round(Number(n)).toLocaleString('en-US');
   const num = (n) => Number(n).toLocaleString('en-US');
+  // "2026-10-23" → "OCT 23" (an ISO date is parsed as UTC midnight; read the parts, not the Date).
+  const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
+  function validDate(iso) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || ''));
+    return m ? MONTHS[Number(m[2]) - 1] + ' ' + Number(m[3]) : String(iso);
+  }
 
   function show(html, tone) {
     result.innerHTML = html;
@@ -246,7 +252,34 @@ function bindCaptureForm(form) {
     return est[mode] || null;
   }
 
+  // A real carrier priced the lane (the usual answer since 2026-10-20): one number, the
+  // carrier's transit days, and — when the driver not unloading is cheaper — that price too.
+  function renderCarrier(data) {
+    const c = data.carrier;
+    const bits = ['◉ ' + money(c.price) + ' · CURRENT MARKET RATE'];
+    if (c.transit_days) bits.push('~' + num(c.transit_days) + ' DAYS');
+    if (c.miles) bits.push('~' + num(c.miles) + ' MI');
+    let html = bits.join(' · ');
+    // Carrier quotes expire in 1–3 days; `valid_until` is the cheapest option's expiry day.
+    const until = c.valid_until ? ' · VALID UNTIL ' + validDate(c.valid_until) : '';
+    html += '<span class="fw-alt">REAL CARRIER RATE, RESIDENTIAL DELIVERY WITH LIFTGATE' + until +
+      ' · CONFIRMED WHEN WE BOOK · FINAL PRICE CONFIRMED ONCE THE PALLETS ARE WEIGHED</span>';
+    if (c.without_liftgate) {
+      html += '<span class="fw-alt">' + money(c.without_liftgate) +
+        ' WITHOUT LIFTGATE — DRIVER DOESN’T UNLOAD, YOU HAND-UNLOAD OFF THE TRUCK</span>';
+    }
+    if (data.available) {
+      html += '<span class="fw-alt">NOTE: ' + num(data.available) + ' AVAILABLE ON THIS LOT</span>';
+    }
+    html += '<span class="fw-alt">REQUEST SAVED — WE’LL FOLLOW UP.</span>';
+    show(html, 'mf-result--ok');
+  }
+
   function renderEstimate(data) {
+    if (data.source === 'carrier' && data.carrier && data.carrier.price > 0) {
+      renderCarrier(data);
+      return;
+    }
     const est = data.estimate || {};
     const mode = est.recommended_mode || est.mode || 'ltl';
     const primary = rangeFor(est, mode) || rangeFor(est, 'ltl') || rangeFor(est, 'partial');
@@ -254,7 +287,8 @@ function bindCaptureForm(form) {
       show('WE’LL QUOTE THIS LANE BY HAND AND GET BACK TO YOU.', 'mf-result--ok');
       return;
     }
-    const bits = ['◉ EST. ' + money(primary.low) + '–' + money(primary.high)];
+    // No carrier answered in time: the in-house range, labelled as the estimate it is.
+    const bits = ['◉ ESTIMATE ' + money(primary.low) + '–' + money(primary.high)];
     if (est.miles) bits.push('~' + num(est.miles) + ' MI');
     if (est.transit_days) bits.push('~' + num(est.transit_days) + ' DAYS');
     let html = bits.join(' · ');

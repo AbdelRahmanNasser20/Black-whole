@@ -19,13 +19,18 @@ truth.
    numpy and downloads ~10 MB on first use. Here `zip_to_latlon` reads the
    committed 3-digit-prefix table in `automation.zip_centroids` — stdlib only,
    zero network, ±30 mi (≈ ±$10, inside the range spread).
-2. *No carrier adapter at all.* The Estes adapter needed a carrier account that
-   was rejected. The Warp adapter that came across with it posted an old body
-   shape to an old host and never ran with a key; with one set it would have
-   failed on every estimate and added a 20 s wait before the fallback. Both are
-   gone (2026-10-02). **The estimator is the only provider**, and a
-   `WARP_API_KEY` in the environment changes nothing here. Real carrier prices
-   are fetched separately, for the operator only, by `automation.warp_rates`.
+2. *No carrier adapter in this module.* The Estes adapter needed a carrier
+   account that was rejected. The Warp adapter that came across with it posted
+   an old body shape to an old host and never ran with a key; with one set it
+   would have failed on every estimate and added a 20 s wait before the
+   fallback. Both are gone (2026-10-02). **The estimator is this module's only
+   provider**, and a `WARP_API_KEY` in the environment changes nothing here.
+   Real carrier prices come from `automation.warp_rates` (Warp
+   `/ltl/market-options`), and since the operator's decision of 2026-10-20
+   they ARE the buyer's number: `web/app.py` asks Warp first and shows the
+   cheapest carrier plus padding (`automation.lane_quote.buyer_quote`); this
+   estimator is the fallback when Warp cannot answer in time, and the
+   comparison column on the operator's lane tool.
 3. *Lane failures raise.* An unresolvable ZIP, an international destination, an
    offshore/Alaska destination, or a non-positive quantity all produce
    `FreightUnavailable` and the caller shows "we'll quote this one by hand".
@@ -551,8 +556,10 @@ class EstimatorProvider:
 # Provider selection + public entry point
 # ===========================================================================
 def select_provider() -> FreightProvider:
-    """The estimator, always. Kept as a seam (and for the CRM's call sites);
-    no environment variable selects anything else — see the module docstring."""
+    """The estimator, always — this module never calls a carrier. Kept as a
+    seam (and for the CRM's call sites); no environment variable selects
+    anything else. The carrier-backed buyer price lives one layer up
+    (`web/app.py` + `automation.lane_quote`), with this as its fallback."""
     return EstimatorProvider()
 
 

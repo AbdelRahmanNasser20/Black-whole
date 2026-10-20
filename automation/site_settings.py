@@ -40,6 +40,15 @@ SPEC: dict[str, dict[str, Any]] = {
         "max": 100_000,
         "default": config.DEPOSIT_MIN_USD_DEFAULT,
     },
+    # Freight padding, in PERCENT (15 = 15 %), on top of the cheapest real
+    # carrier price a buyer is shown (operator decision 2026-10-20). Edited on
+    # the admin Sales › Lane quote view; 0 = pass the carrier price through.
+    "freight_padding_pct": {
+        "type": float,
+        "min": 0.0,
+        "max": 100.0,
+        "default": config.FREIGHT_PADDING_PCT_DEFAULT,
+    },
 }
 
 # ── Channel switches (multichannel Phase 1.2) ────────────────────────────────

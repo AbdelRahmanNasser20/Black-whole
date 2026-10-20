@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -113,12 +113,17 @@ def insert_storefront_quote(
     `automation/attribution.py`); stored on the 021 schema once migration 022
     has added the ``attr_*`` columns, silently dropped before that.
 
-    ``quote`` is a `freight_estimate.get_freight_estimate` dict, or None for a
-    lane we could not price (then ``unquotable_reason`` says why). Its ``raw``
-    key (calibration internals: weight, linear feet, NMFC class) is stored —
-    that's the audit trail for "why did we quote that?" — but it is never
-    returned to a browser. ``client_ip`` rides inside ``raw_response``: it's for
-    abuse forensics, not analytics.
+    ``quote`` is a `freight_estimate.get_freight_estimate` dict — or, since
+    2026-10-20, a `lane_quote.buyer_quote` dict when a real carrier priced the
+    lane (``provider='warp'``, one padded number in ``ltl_low``/``ltl_high``,
+    and a ``carrier`` summary that lands in the `carrier_*` columns of the
+    SAME row, so one request is always one INSERT) — or None for a lane we
+    could not price (then ``unquotable_reason`` says why). Its ``raw`` key
+    (calibration internals: weight, linear feet, NMFC class, the padding and
+    the unpadded carrier price) is stored — that's the audit trail for "why
+    did we quote that?" — but it is never returned to a browser.
+    ``client_ip`` rides inside ``raw_response``: it's for abuse forensics, not
+    analytics.
     """
     try:
         quote = quote or {}
@@ -128,6 +133,7 @@ def insert_storefront_quote(
         email = (buyer_email or "").strip() or None
         phone = (buyer_phone or "").strip() or None
         priced = bool(quote)
+        carrier = _carrier_columns(quote.get("carrier") if priced else None)
 
         if schema_ready():
             # Column names come from attribution.COLUMNS (a fixed tuple),
@@ -142,12 +148,16 @@ def insert_storefront_quote(
                     quantity, mode, ltl_low, ltl_high, partial_low, partial_high,
                     miles, transit_days, provider, accessorials, raw_response,
                     buyer_email, buyer_phone, valid_until,
+                    carrier_status, carrier_low, carrier_name, carrier_count,
+                    carrier_options, carrier_checked_at,
                     unquotable_reason, lot_quantity_remaining{attr_sql}
                 ) VALUES (
                     'storefront', NULL, NULL, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s::jsonb, %s::jsonb,
                     %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s::jsonb, %s,
                     %s, %s{attr_ph}
                 )
                 RETURNING id
@@ -170,6 +180,7 @@ def insert_storefront_quote(
                     email,
                     phone,
                     quote.get("valid_until"),
+                    *carrier,
                     None if priced else (unquotable_reason or "unquotable"),
                     lot_quantity_remaining,
                     *attr_vals,
@@ -394,6 +405,24 @@ def _mode(quote: dict) -> str:
     # `mode` carries a CHECK of ('ltl','partial','both'); fall back rather than
     # let a provider quirk kill the insert.
     return quote.get("mode") or quote.get("recommended_mode") or "ltl"
+
+
+def _carrier_columns(summary: dict | None) -> tuple:
+    """`(carrier_status, carrier_low, carrier_name, carrier_count,
+    carrier_options JSON, carrier_checked_at)` for the INSERT — all NULL when
+    no carrier was asked at request time (the estimator answered). Options are
+    capped like `set_carrier_result`."""
+    if not summary:
+        return (None, None, None, None, None, None)
+    options = list(summary.get("carrier_options") or [])[:CARRIER_OPTIONS_MAX]
+    return (
+        summary.get("carrier_status"),
+        summary.get("carrier_low"),
+        summary.get("carrier_name"),
+        summary.get("carrier_count"),
+        _json_or_none(options or None),
+        datetime.now(timezone.utc),
+    )
 
 
 def _provider(quote: dict) -> str:

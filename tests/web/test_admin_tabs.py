@@ -36,7 +36,7 @@ def test_admin_has_no_compare_tab():
         assert f'data-pane="{view}"' in html, view
 
 
-SALES_VIEWS = ["quotes", "inquiries", "deposits", "subscribers"]
+SALES_VIEWS = ["quotes", "inquiries", "deposits", "subscribers", "lane"]
 
 
 def _admin() -> str:
@@ -59,7 +59,7 @@ def test_sales_view_switch_lists_the_four_views_in_key_order():
     assert nav, "Sales view switch missing (or not hidden by default)"
     views = re.findall(r'data-sales-view="([a-z]+)" href="\?tab=([a-z]+)"', nav.group(1))
     assert views == [(v, v) for v in SALES_VIEWS]
-    assert re.findall(r"<kbd>([a-z])</kbd>", nav.group(1)) == ["q", "i", "d", "s"]
+    assert re.findall(r"<kbd>([a-z])</kbd>", nav.group(1)) == ["q", "i", "d", "s", "l"]
 
 
 def test_quotes_pane_ships_skeleton_filter_and_banner():
@@ -87,8 +87,8 @@ def test_quotes_css_is_served_and_tokens_only():
 def test_shell_groups_the_sales_views_and_binds_the_keys():
     from pathlib import Path
     src = Path("automation/web/static/admin/shell.js").read_text()
-    assert "const SALES_VIEWS = ['quotes', 'inquiries', 'deposits', 'subscribers'];" in src
-    assert "const SALES_CODES = {KeyQ: 'quotes', KeyI: 'inquiries', KeyD: 'deposits', KeyS: 'subscribers'};" in src
+    assert "const SALES_VIEWS = ['quotes', 'inquiries', 'deposits', 'subscribers', 'lane'];" in src
+    assert "const SALES_CODES = {KeyQ: 'quotes', KeyI: 'inquiries', KeyD: 'deposits', KeyS: 'subscribers', KeyL: 'lane'};" in src
     # the shortcuts never fire while typing, with a modifier held, or under the deal drawer / a dialog
     for needle in ("isTyping(e.target)", "e.metaKey || e.ctrlKey || e.altKey",
                    "#deal-drawer.is-open, dialog[open]",
@@ -103,7 +103,7 @@ def test_deep_link_script_lights_the_sales_tab_for_a_sales_view():
     """The pre-shell inline script must not flash Launcher on ?tab=deposits."""
     html = _admin()
     inline = html.split("show the ?tab= pane before shell.js runs")[1].split("</script>")[0]
-    assert "['quotes', 'inquiries', 'deposits', 'subscribers']" in inline
+    assert "['quotes', 'inquiries', 'deposits', 'subscribers', 'lane']" in inline
     assert "getElementById('sales-nav')" in inline
 
 
