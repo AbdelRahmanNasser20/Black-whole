@@ -2269,6 +2269,12 @@ _DEPOSIT_ALERT_HEADS = {
     "charge.refunded": "↩ REFUNDED",
 }
 
+_DEPOSIT_KIND_LABELS = {
+    "deposit": "deposit",
+    "full": "paid in full",
+    "financed": "financed via Affirm — collect the rest at pickup",
+}
+
 
 def _dollars(cents: Any) -> str:
     return f"${(int(cents or 0) / 100):,.2f}"
@@ -2285,7 +2291,9 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
         head = _DEPOSIT_ALERT_HEADS.get(event_type, "◉ DEPOSIT UPDATE")
         # A completed session that only reached 'processing' is an ACH debit in
         # flight, not money in the bank — say so rather than crying "PAID".
-        if status == "processing":
+        if status == "paid" and row.get("kind") == deposits.FINANCED_KIND:
+            head = "💰 AFFIRM PAID"
+        elif status == "processing":
             head = "🏦 ACH INITIATED"
         elif status == "failed":
             head = "✗ ACH FAILED"
@@ -2298,7 +2306,7 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
         bits = [f"{head} · #{row.get('id')}"]
         bits.append(
             f"{_dollars(row.get('amount_cents'))} "
-            f"({'deposit' if kind == 'deposit' else 'paid in full'})"
+            f"({_DEPOSIT_KIND_LABELS.get(kind, 'paid in full')})"
             + (f" · via {row['payment_method']}" if row.get("payment_method") else "")
         )
         lot_id = row.get("lot_id")
@@ -3071,7 +3079,11 @@ async def reserve_success(request: Request, session_id: str = Query("")):
         _public_ctx({
             "deposit": row,
             "is_paid": row.get("status") == "paid",
-            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+            "policy": (
+                stripe_gateway.FINANCED_POLICY_SHORT
+                if row.get("kind") == deposits.FINANCED_KIND
+                else stripe_gateway.REFUND_POLICY_SHORT
+            ),
         }),
     )
 
@@ -5059,6 +5071,64 @@ async def dep_delete(deposit_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+_FINANCED_MIGRATION = (
+    ".venv/bin/python scripts/apply_sql.py scripts/sql/034_deposits_financed.sql"
+)
+
+
+@app.post("/api/deposits/financing-link")
+async def dep_financing_link(payload: dict):
+    """Operator makes an Affirm-only Checkout link for a negotiated amount.
+
+    The money number is the operator's (this is under /api/, so the session
+    middleware gates it) — e.g. $4,500 financed of a $9,000 deal, the rest in
+    cash at pickup. Same row-first-then-session order as `reserve_checkout`.
+    The link is a normal Checkout session: it expires in 24 h unpaid.
+    """
+    if not _reserve_enabled():
+        raise HTTPException(409, "Stripe is not configured (STRIPE_SECRET_KEY unset)")
+    payload = payload or {}
+    lot_id = str(payload.get("lot_id") or "").strip()
+    lot = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    if not lot:
+        raise HTTPException(404, "lot not found")
+    try:
+        deposit = await asyncio.to_thread(
+            deposits.create_financed,
+            lot_id=lot.get("lot_id") or lot_id,
+            quantity=payload.get("quantity"),
+            amount_usd=payload.get("amount_usd"),
+            order_total_usd=payload.get("order_total_usd"),
+            price_per_chair=lot.get("price_per_chair"),
+            buyer_name=payload.get("name"),
+            buyer_email=(payload.get("email") or "").strip() or None,
+            buyer_phone=(payload.get("phone") or "").strip() or None,
+        )
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        # 23514 = check_violation: the kind CHECK predates 'financed'.
+        if getattr(e, "sqlstate", None) == "23514":
+            raise HTTPException(409, f"apply migration 034 first: {_FINANCED_MIGRATION}")
+        raise
+
+    try:
+        session = await asyncio.to_thread(
+            stripe_gateway.create_checkout_session, deposit=deposit, lot=lot
+        )
+    except Exception as e:
+        await asyncio.to_thread(
+            deposits.transition, deposit["id"], "canceled",
+            failure_reason="session_create_failed",
+        )
+        # Operator-only route, so Stripe's reason (e.g. Affirm not enabled on
+        # the account) is worth showing.
+        raise HTTPException(502, f"Stripe refused the session: {e}")
+
+    await asyncio.to_thread(deposits.attach_session, deposit["id"], session.id)
+    return {"ok": True, "url": session.url, "deposit_id": deposit["id"]}
 
 
 # ───────────────────────────── site settings API ─────────────────────────────

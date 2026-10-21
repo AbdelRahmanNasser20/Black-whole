@@ -851,6 +851,37 @@
     </div>
   </div>
 
+  {#- Affirm financing link: the operator types the deal (e.g. $4,500 of $9,000, rest cash at pickup) and gets
+      a Stripe Checkout URL to send the buyer. POST /api/deposits/financing-link; needs migration 034. -#}
+  <form class="controls dep-settings dep-finance" id="dep-finance" autocomplete="off">
+    <div class="dep-group">
+      <span class="dep-label">AFFIRM LINK · LOT</span>
+      <input type="text" id="dep-fin-lot" required placeholder="lot id" aria-label="Lot id" size="8">
+    </div>
+    <div class="dep-group">
+      <span class="dep-label">QTY</span>
+      <input type="number" id="dep-fin-qty" required min="1" step="1" aria-label="Chair quantity">
+    </div>
+    <div class="dep-group">
+      <span class="dep-label" title="Charged through Affirm now — $50 to $30,000">FINANCE $</span>
+      <input type="number" id="dep-fin-amount" required min="50" max="30000" step="0.01" aria-label="Amount to finance in dollars">
+    </div>
+    <div class="dep-group">
+      <span class="dep-label" title="Whole deal. Blank = qty × the lot's price per chair">ORDER $</span>
+      <input type="number" id="dep-fin-total" min="50" step="0.01" aria-label="Order total in dollars">
+    </div>
+    <div class="dep-group">
+      <span class="dep-label">BUYER</span>
+      <input type="text" id="dep-fin-name" placeholder="name" aria-label="Buyer name">
+      <input type="email" id="dep-fin-email" placeholder="email" aria-label="Buyer email">
+      <input type="tel" id="dep-fin-phone" placeholder="phone" aria-label="Buyer phone">
+    </div>
+    <div class="dep-actions">
+      <span class="dep-settings-status" id="dep-fin-msg" aria-live="polite"></span>
+      <button type="submit" class="btn btn-small btn-primary" id="dep-fin-create">make link</button>
+    </div>
+  </form>
+
   {#- status filter mirrors ?dstatus= (static/admin/deposits.js owns the key — `status` is already taken by
       Inquiries and Subscribers); shared .seg / .seg-btn.is-active -#}
   <div class="controls deposit-controls">

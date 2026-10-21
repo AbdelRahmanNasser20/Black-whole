@@ -33,6 +33,21 @@ REFUND_POLICY_SHORT = (
     "delivery — balance payable by Zelle or cash."
 )
 
+# The financed rail's submit message. Affirm runs its own loan terms on its own
+# page; this line only says what happens to the rest of the order.
+FINANCED_POLICY_SHORT = (
+    "Financed through Affirm — Affirm pays us now and you repay Affirm on the "
+    "plan you choose. Any remaining balance is paid at pickup."
+)
+
+# Rails per kind. 'financed' is Affirm only: the operator made this link for a
+# financing deal, and a card fallback on $4,500 is a 2.9% surprise.
+_RAILS = {
+    "deposit": ["card", "us_bank_account"],
+    "full": ["us_bank_account"],
+    "financed": ["affirm"],
+}
+
 
 def enabled() -> bool:
     """The dark-ship gate. No secret key => no Reserve anything, anywhere."""
@@ -48,7 +63,9 @@ def _stripe():
 
 
 def _product_name(*, kind: str, title: str, quantity: int) -> str:
-    label = "Deposit" if kind == "deposit" else "Payment in full"
+    label = {"deposit": "Deposit", "financed": "Financed payment"}.get(
+        kind, "Payment in full"
+    )
     name = f"{label} — {title} × {quantity} chairs"
     return name[:250]  # Stripe rejects product names over 250 chars
 
@@ -62,7 +79,9 @@ def create_checkout_session(*, deposit: dict, lot: dict) -> Any:
     Rails: a deposit may go on card **or** bank — it's small, and card removes
     the 3-day ACH wait for a buyer who wants the lot held tonight. Pay-in-full
     is bank-only: 2.9% + 30¢ on a $6,000 order is $174 of margin, ACH is capped
-    at $5.
+    at $5. A financed row (operator-made, see `deposits.create_financed`) is
+    Affirm-only; Affirm settles at once, so `checkout.session.completed`
+    already carries `paid`.
 
     Metadata is written twice — on the session AND on the PaymentIntent. The
     session copy is what `checkout.session.*` events carry; the PI copy is the
@@ -86,9 +105,7 @@ def create_checkout_session(*, deposit: dict, lot: dict) -> Any:
 
     params: dict[str, Any] = {
         "mode": "payment",
-        "payment_method_types": (
-            ["card", "us_bank_account"] if kind == "deposit" else ["us_bank_account"]
-        ),
+        "payment_method_types": list(_RAILS.get(kind, _RAILS["full"])),
         "line_items": [
             {
                 "quantity": 1,
@@ -105,13 +122,21 @@ def create_checkout_session(*, deposit: dict, lot: dict) -> Any:
         ],
         "metadata": metadata,
         "payment_intent_data": {"metadata": dict(metadata)},
-        "custom_text": {"submit": {"message": REFUND_POLICY_SHORT}},
+        "custom_text": {"submit": {"message": (
+            FINANCED_POLICY_SHORT if kind == "financed" else REFUND_POLICY_SHORT
+        )}},
         "success_url": (
             f"{config.PUBLIC_BASE_URL}/reserve/success"
             "?session_id={CHECKOUT_SESSION_ID}"
         ),
         "cancel_url": f"{config.PUBLIC_BASE_URL}/reserve/{lot_id}?canceled=1",
     }
+
+    if kind == "financed":
+        # Stripe: an address on the order raises Affirm's approval rate.
+        params["billing_address_collection"] = "required"
+        # Not /reserve: that page sells a deposit, not this deal.
+        params["cancel_url"] = f"{config.PUBLIC_BASE_URL}/listings/{lot_id}"
 
     email = (deposit.get("buyer_email") or "").strip()
     if email:
