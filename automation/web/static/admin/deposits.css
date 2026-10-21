@@ -16,6 +16,13 @@
   font-family: var(--mono); font-size: var(--fs-sm);
 }
 .dep-settings input[type=number]:focus { outline: none; border-color: var(--accent); }
+/* Affirm financing link form — same row look, text inputs for lot + buyer */
+.dep-finance input[type=text], .dep-finance input[type=email], .dep-finance input[type=tel] {
+  width: 130px; padding: 4px 6px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  font-family: var(--mono); font-size: var(--fs-sm);
+}
+.dep-finance input:focus { outline: none; border-color: var(--accent); }
 .dep-settings .dep-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
 .dep-settings-status { font-family: var(--mono); font-size: var(--fs-xs); color: var(--muted); }
 .dep-msg-ok  { color: var(--success); }
@@ -47,6 +54,7 @@
 }
 .dep-kind--deposit { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .dep-kind--full    { background: var(--success); color: var(--bg); border-color: var(--success); }
+.dep-kind--financed { background: var(--text); color: var(--bg); border-color: var(--text); }
 
 .dep-amount { font-family: var(--mono); font-size: var(--fs-lg); color: var(--text); }
 .dep-qty, .dep-order, .dep-ids, .dep-hint {

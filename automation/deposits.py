@@ -33,7 +33,16 @@ from typing import Any
 from . import db, site_settings
 from . import attribution as attribution_mod
 
+# What a BUYER may ask for on the public /reserve checkout. 'financed' is not in
+# here on purpose: only the operator creates one (`create_financed`).
 DEPOSIT_KINDS = ("deposit", "full")
+FINANCED_KIND = "financed"
+ALL_KINDS = DEPOSIT_KINDS + (FINANCED_KIND,)
+
+# Affirm's transaction limits on Stripe (docs.stripe.com/payments/affirm:
+# $50–$30,000). Checked here so a typo answers 400 instead of a Stripe error.
+FINANCED_MIN_CENTS = 50_00
+FINANCED_MAX_CENTS = 30_000_00
 DEPOSIT_STATUSES = (
     "pending", "processing", "paid", "failed", "refunded", "canceled",
 )
@@ -199,6 +208,77 @@ def create_pending(
             (buyer_email or "").strip() or None,
             (buyer_phone or "").strip() or None,
             *attr_vals,
+        ),
+    )
+
+
+def _usd_to_cents(value: Any, field: str) -> int:
+    try:
+        cents = Decimal(str(value)) * 100
+    except Exception:
+        raise ValueError(f"{field} must be a dollar amount")
+    return int(cents.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def create_financed(
+    *,
+    lot_id: str,
+    quantity: int,
+    amount_usd: Any,
+    order_total_usd: Any = None,
+    price_per_chair: Any = None,
+    buyer_name: str | None = None,
+    buyer_email: str | None = None,
+    buyer_phone: str | None = None,
+) -> dict:
+    """Operator-made Affirm row: finance `amount_usd` of an `order_total_usd` deal.
+
+    The amount is the operator's number (the route is auth-walled), not a
+    buyer's — that's the difference from `create_pending`, where the browser
+    may only send a quantity. `order_total_usd` defaults to qty × price/chair;
+    a negotiated deal passes it explicitly. Needs migration 034 — without it
+    the kind CHECK rejects the insert and the route answers 409.
+    """
+    if not lot_id or not str(lot_id).strip():
+        raise ValueError("lot_id required")
+    quantity = int(quantity or 0)
+    if quantity <= 0:
+        raise ValueError("quantity must be positive")
+    if not buyer_email and not buyer_phone:
+        raise ValueError("email or phone required")
+    amount_cents = _usd_to_cents(amount_usd, "amount")
+    if not FINANCED_MIN_CENTS <= amount_cents <= FINANCED_MAX_CENTS:
+        raise ValueError("Affirm finances $50 to $30,000")
+    if order_total_usd not in (None, ""):
+        subtotal_cents = _usd_to_cents(order_total_usd, "order total")
+    elif price_per_chair not in (None, ""):
+        subtotal_cents = _to_cents(quantity, price_per_chair)
+    else:
+        subtotal_cents = amount_cents
+    if amount_cents > subtotal_cents:
+        raise ValueError("financed amount is more than the order total")
+    unit_price = (
+        Decimal(subtotal_cents) / 100 / quantity
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return db.fetch_one(
+        """
+        INSERT INTO deposits (
+            lot_id, kind, quantity, price_per_chair,
+            subtotal_cents, amount_cents, currency,
+            buyer_name, buyer_email, buyer_phone, status
+        ) VALUES (%s, %s, %s, %s, %s, %s, 'usd', %s, %s, %s, 'pending')
+        RETURNING *
+        """,
+        (
+            str(lot_id).strip(),
+            FINANCED_KIND,
+            quantity,
+            unit_price,
+            subtotal_cents,
+            amount_cents,
+            (buyer_name or "").strip() or None,
+            (buyer_email or "").strip() or None,
+            (buyer_phone or "").strip() or None,
         ),
     )
 

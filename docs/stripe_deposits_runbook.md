@@ -87,3 +87,28 @@ Test matrix (all in test mode):
   deposit covers freight on cancel; otherwise it applies to the balance at delivery.
 - ACH lag is normal: `processing` for 1–4 business days is not an error. Never book
   freight against a `processing` row — wait for `paid`.
+
+## 5. Affirm financing link (operator-made, `kind='financed'`)
+
+For a buyer who pays part in cash and finances the rest — e.g. $9,000 deal = $4,500 cash at
+pickup + $4,500 through Affirm. Affirm pays us the full $4,500 up front; the buyer repays
+Affirm. Ours to lose only if we release chairs before the row says `paid`.
+
+**One-time:**
+1. Apply `scripts/sql/034_deposits_financed.sql` (adds `'financed'` to the kind CHECK).
+   Until then the route answers 409 with the apply command.
+2. Stripe → Settings → Payment methods → **Affirm → On** (test mode first, then live).
+   Optional: **Affirm → financing package → Enhanced** = 0% APR plans (3/6 mo) offered to
+   the buyer, at a higher fee to us. Check the fee on that screen before switching.
+3. Same keys + webhook as §3 — nothing new. Affirm settles at once, so
+   `checkout.session.completed` already carries `paid`.
+
+**Per deal:** admin → Sales › Deposits → **AFFIRM LINK** row: lot id, qty, FINANCE $
+(4500), ORDER $ (9000; blank = qty × lot price), buyer name + email/phone → **make link**
+→ copy → send to the buyer. The link expires in 24 h unpaid; make a new one if it does.
+Telegram pings `💰 AFFIRM PAID` when approved. Release the chairs only when the row is
+`paid` AND the cash is in hand. Inventory is still adjusted by hand.
+
+Test (test mode): make a link, open it, pick Affirm, use SSN last-4 `0000` on the Affirm
+sandbox → row `paid`, `payment_method=affirm`, one ping. Close the Affirm modal instead →
+the row stays `pending` and the session expires to `canceled`.
