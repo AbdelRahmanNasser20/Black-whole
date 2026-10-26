@@ -95,7 +95,7 @@ pickup + $4,500 through Affirm. Affirm pays us the full $4,500 up front; the buy
 Affirm. Ours to lose only if we release chairs before the row says `paid`.
 
 **One-time:**
-1. Apply `scripts/sql/034_deposits_financed.sql` (adds `'financed'` to the kind CHECK).
+1. `scripts/sql/034_deposits_financed.sql` — APPLIED to prod 2026-10-26.
    Until then the route answers 409 with the apply command.
 2. Stripe → Settings → Payment methods → **Affirm → On** (test mode first, then live).
    Optional: **Affirm → financing package → Enhanced** = 0% APR plans (3/6 mo) offered to
