@@ -2,7 +2,7 @@
 --
 -- A 'financed' row is a Checkout session the OPERATOR creates from the admin
 -- Deposits view for a negotiated amount (e.g. $4,500 of a $9,000 order, the
--- rest paid in cash at pickup). The session offers Affirm only; Affirm pays us
+-- rest paid in cash at pickup). The session offers Affirm only. Affirm pays us
 -- the full amount up front and the buyer repays Affirm.
 --
 -- Shape reuse: `subtotal_cents` = the whole order, `amount_cents` = the part
@@ -17,7 +17,8 @@
 -- change, nothing to add.
 --
 -- Apply: .venv/bin/python scripts/apply_sql.py scripts/sql/034_deposits_financed.sql
--- Applied to Supabase project nihgzltpjriekyqqucbd on: PENDING
+-- Applied to Supabase project nihgzltpjriekyqqucbd on: 2026-10-26
+-- (apply_sql.py splits on semicolons even inside comments, keep comments free of them)
 
 ALTER TABLE deposits DROP CONSTRAINT IF EXISTS deposits_kind_check;
 ALTER TABLE deposits ADD CONSTRAINT deposits_kind_check
