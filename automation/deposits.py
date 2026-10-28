@@ -431,6 +431,8 @@ def _payment_method_of(session: dict) -> str | None:
     status = session.get("payment_status")
     if status == "paid" and "card" in types:
         return "card"
+    if status == "paid" and "affirm" in types:
+        return "affirm"
     if status and status != "paid" and "us_bank_account" in types:
         return "us_bank_account"
     return None
@@ -478,10 +480,16 @@ def apply_stripe_event(event: dict) -> tuple[dict | None, bool]:
         )
 
     if event_type == "checkout.session.async_payment_succeeded":
+        # Only the bank rail settles late, so this event names it even when the
+        # session also offered an instant rail (card, Affirm) that reads "paid".
+        types = obj.get("payment_method_types") or []
         return transition(
             row["id"], "paid",
             payment_intent=_id_of(obj.get("payment_intent")),
-            payment_method=_payment_method_of(obj),
+            payment_method=(
+                "us_bank_account" if "us_bank_account" in types
+                else _payment_method_of(obj)
+            ),
         )
 
     if event_type == "checkout.session.async_payment_failed":

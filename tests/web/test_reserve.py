@@ -532,9 +532,24 @@ def test_gateway_bills_the_row_not_the_lot(fake_stripe):
 def test_gateway_rails_depend_on_the_kind(fake_stripe):
     stripe_gateway.create_checkout_session(deposit=make_deposit(), lot=make_lot())
     assert fake_stripe["payment_method_types"] == ["card", "us_bank_account"]
-    # Pay-in-full is bank-only: 2.9% on a $3k order is not a rounding error.
+    assert "billing_address_collection" not in fake_stripe
+    # Pay-in-full is bank or Affirm, never card: 2.9% on a $3k order is not a
+    # rounding error.
     stripe_gateway.create_checkout_session(
         deposit=make_deposit(kind="full", amount_cents=300000), lot=make_lot()
+    )
+    assert fake_stripe["payment_method_types"] == ["us_bank_account", "affirm"]
+    assert fake_stripe["billing_address_collection"] == "required"
+
+
+def test_gateway_drops_affirm_outside_its_order_band(fake_stripe):
+    """Affirm caps an order at $30k; offering it above that fails the session."""
+    stripe_gateway.create_checkout_session(
+        deposit=make_deposit(kind="full", amount_cents=3_000_001), lot=make_lot()
+    )
+    assert fake_stripe["payment_method_types"] == ["us_bank_account"]
+    stripe_gateway.create_checkout_session(
+        deposit=make_deposit(kind="full", amount_cents=4_999), lot=make_lot()
     )
     assert fake_stripe["payment_method_types"] == ["us_bank_account"]
 
