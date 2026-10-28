@@ -3172,6 +3172,9 @@ async def reserve_checkout(lot_id: str, payload: dict):
             stripe_gateway.create_checkout_session, deposit=deposit, lot=row
         )
     except Exception:
+        # The buyer only sees "checkout_unavailable"; Stripe's reason goes to
+        # the log so the operator can tell a one-off from a broken account.
+        log.exception("stripe checkout session failed for deposit %s", deposit["id"])
         # Close the row out rather than leaving a pending record no webhook can
         # ever resolve (there is no session to expire).
         await asyncio.to_thread(
