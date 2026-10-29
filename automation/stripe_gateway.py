@@ -48,6 +48,20 @@ _RAILS = {
     "financed": ["affirm"],
 }
 
+# Affirm's own order band (Stripe docs, US). Pay-in-full inside it offers
+# Affirm next to the bank rail; outside it Stripe would refuse the session.
+AFFIRM_MIN_CENTS = 5_000
+AFFIRM_MAX_CENTS = 3_000_000
+
+
+def _rails(kind: str, amount_cents: int) -> list[str]:
+    rails = list(_RAILS.get(kind, _RAILS["full"]))
+    if kind == "full" and AFFIRM_MIN_CENTS <= amount_cents <= AFFIRM_MAX_CENTS:
+        # A buyer who can't wire $5k today can still take the lot on monthly
+        # payments; Affirm pays us the full amount up front.
+        rails.append("affirm")
+    return rails
+
 
 def enabled() -> bool:
     """The dark-ship gate. No secret key => no Reserve anything, anywhere."""
@@ -78,8 +92,9 @@ def create_checkout_session(*, deposit: dict, lot: dict) -> Any:
 
     Rails: a deposit may go on card **or** bank — it's small, and card removes
     the 3-day ACH wait for a buyer who wants the lot held tonight. Pay-in-full
-    is bank-only: 2.9% + 30¢ on a $6,000 order is $174 of margin, ACH is capped
-    at $5. A financed row (operator-made, see `deposits.create_financed`) is
+    is bank or Affirm: 2.9% + 30¢ on a $6,000 order is $174 of margin, ACH is
+    capped at $5, and Affirm is there for the buyer who needs monthly payments
+    (inside Affirm's $50–$30k band only). A financed row (operator-made, see `deposits.create_financed`) is
     Affirm-only; Affirm settles at once, so `checkout.session.completed`
     already carries `paid`.
 
@@ -105,7 +120,7 @@ def create_checkout_session(*, deposit: dict, lot: dict) -> Any:
 
     params: dict[str, Any] = {
         "mode": "payment",
-        "payment_method_types": list(_RAILS.get(kind, _RAILS["full"])),
+        "payment_method_types": _rails(kind, amount_cents),
         "line_items": [
             {
                 "quantity": 1,
@@ -132,9 +147,10 @@ def create_checkout_session(*, deposit: dict, lot: dict) -> Any:
         "cancel_url": f"{config.PUBLIC_BASE_URL}/reserve/{lot_id}?canceled=1",
     }
 
-    if kind == "financed":
+    if "affirm" in params["payment_method_types"]:
         # Stripe: an address on the order raises Affirm's approval rate.
         params["billing_address_collection"] = "required"
+    if kind == "financed":
         # Not /reserve: that page sells a deposit, not this deal.
         params["cancel_url"] = f"{config.PUBLIC_BASE_URL}/listings/{lot_id}"
 

@@ -262,6 +262,31 @@ def test_async_payment_succeeded_settles_a_processing_row(fake_db):
     assert row["status"] == "paid"
 
 
+def test_affirm_on_pay_in_full_is_recorded_as_affirm(fake_db):
+    """Pay-in-full offers bank + Affirm; Affirm is the one that is paid at once."""
+    fake_db.row = make_row(status="pending")
+    row, _ = deposits.apply_stripe_event(_session_event(
+        "checkout.session.completed",
+        payment_status="paid",
+        payment_intent="pi_affirm",
+        payment_method_types=["us_bank_account", "affirm"],
+    ))
+    assert row["status"] == "paid"
+    assert row["payment_method"] == "affirm"
+
+
+def test_late_bank_settlement_is_never_read_as_affirm(fake_db):
+    fake_db.row = make_row(status="processing")
+    row, _ = deposits.apply_stripe_event(_session_event(
+        "checkout.session.async_payment_succeeded",
+        payment_status="paid",
+        payment_intent="pi_ach",
+        payment_method_types=["us_bank_account", "affirm"],
+    ))
+    assert row["status"] == "paid"
+    assert row["payment_method"] == "us_bank_account"
+
+
 def test_async_payment_failed_records_the_bank_reason(fake_db):
     fake_db.row = make_row(status="processing")
     row, changed = deposits.apply_stripe_event(_session_event(
