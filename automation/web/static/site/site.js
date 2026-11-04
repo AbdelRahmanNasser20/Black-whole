@@ -107,6 +107,20 @@ function bindCaptureForm(form) {
       result.hidden = false;
       return;
     }
+    // Chair inquiries are un-routable without a location: a 5-digit ZIP is
+    // the minimum (where the chairs are for a sell, where they go for a buy).
+    const zipEl = form.querySelector('[name="zip_code"]');
+    if (zipEl) {
+      const zip = String(payload.zip_code || '').replace(/\D/g, '').slice(0, 5);
+      if (zip.length !== 5) {
+        result.textContent = '✗ Enter the 5-digit ZIP code (where the chairs are, or where they are going).';
+        result.classList.add('mf-result--err');
+        result.hidden = false;
+        zipEl.focus();
+        return;
+      }
+      payload.zip_code = zip;
+    }
 
     const btn = form.querySelector('button[type="submit"]');
     try {

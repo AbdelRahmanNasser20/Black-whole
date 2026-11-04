@@ -2247,6 +2247,7 @@ async def _notify_new_inquiry(row: dict) -> None:
         bits.append(f"{who}{(' — ' + contact) if contact else ''}")
         meta = " · ".join(
             str(x) for x in (
+                f"ZIP {row['zip_code']}" if row.get("zip_code") else None,
                 f"qty {row['quantity_interested']}" if row.get("quantity_interested") else None,
                 f"lot {row['lot_id']}" if row.get("lot_id") else None,
             ) if x
@@ -2351,6 +2352,7 @@ async def public_contact(payload: dict):
                 if payload.get("quantity_interested")
                 else None
             ),
+            zip_code=(str(payload.get("zip_code") or "")).strip() or None,
         ))
     except ValueError as e:
         raise HTTPException(400, str(e))
