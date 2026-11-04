@@ -58,6 +58,7 @@ function inquiryCard(q) {
     <div class="card-meta inquiry-contact">
       ${q.email ? `<a href="mailto:${escapeAttr(q.email)}">${escapeHtml(q.email)}</a>` : ''}
       ${q.phone ? `<a href="tel:${escapeAttr(q.phone)}">${escapeHtml(q.phone)}</a>` : ''}
+      ${q.zip_code ? `<span>· ZIP ${escapeHtml(q.zip_code)}</span>` : ''}
       ${q.quantity_interested ? `<span>· qty ${escapeHtml(q.quantity_interested)}</span>` : ''}
     </div>
     ${q.message ? `<blockquote class="inquiry-msg">${escapeHtml(q.message)}</blockquote>` : ''}
