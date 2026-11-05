@@ -130,7 +130,9 @@ export async function mountSiteMap(el, opts = {}) {
   };
 }
 
-function wireFilters(form, ctl) {
+// syncUrl=false: the admin Inventory tab mounts this same map, and its own ?status= filter
+// owns the URL there — the map's filters must not write into it.
+export function wireFilters(form, ctl, { syncUrl = true } = {}) {
   const seg = form.querySelector('#map-status');
   const hidden = seg && seg.querySelector('input[name="status"]');
   if (!seg || !hidden) return;
@@ -141,6 +143,7 @@ function wireFilters(form, ctl) {
     const b = e.target.closest('.seg-btn'); if (!b) return;
     if (active.has(b.dataset.bucket)) active.delete(b.dataset.bucket); else active.add(b.dataset.bucket);
     paint(); hidden.value = [...active].join(',') || 'none'; ctl.setStatus(active);
+    if (!syncUrl) return;
     const u = new URL(location.href); u.searchParams.set('status', hidden.value); history.replaceState(null, '', u);
   });
   form.addEventListener('submit', (e) => {
@@ -148,6 +151,7 @@ function wireFilters(form, ctl) {
     const near = form.querySelector('#map-near').value.trim();
     const radius = form.querySelector('#map-radius').value;
     ctl.setNear(near, radius);
+    if (!syncUrl) return;
     const u = new URL(location.href);
     near ? u.searchParams.set('near', near) : u.searchParams.delete('near');
     radius ? u.searchParams.set('radius', radius) : u.searchParams.delete('radius');
@@ -156,6 +160,8 @@ function wireFilters(form, ctl) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
+  // [data-points-url] auto-mounts on page load; the admin's map has no such attribute
+  // (it sits in a hidden pane) and mounts itself on first open via mountSiteMap().
   for (const el of document.querySelectorAll('[data-points-url]')) {
     try {
       const ctl = await mountSiteMap(el);
