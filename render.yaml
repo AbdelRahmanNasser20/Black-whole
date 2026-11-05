@@ -261,6 +261,24 @@ services:
     envVars:
       - fromGroup: blackwhole-secrets
 
+  # ── SEO Pulse (weekly) — audit every sitemap page, read Search Console, rank
+  # what to fix, Telegram the 5-line summary. BrightEdge-shaped, operator-sized:
+  # design docs/superpowers/specs/2026-11-05-seo-pulse-design.md. Read-only on
+  # the site and the DB; nothing auto-edits a page. Without
+  # GSC_SERVICE_ACCOUNT_JSON (+ GSC_SITE_URL) in blackwhole-secrets the run still
+  # audits + suggests keywords and says Search Console is missing.
+  - type: cron
+    name: seo-pulse
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    schedule: "0 9 * * 1"        # Monday 09:00 UTC
+    autoDeploy: true
+    dockerCommand: python scripts/seo_pulse.py run --gsc api --telegram --quiet
+    envVars:
+      - fromGroup: blackwhole-secrets
+      - key: SEO_PULSE_DIR
+        value: /tmp/seo_pulse     # ephemeral on Render: no week-over-week trend until a durable dir exists
+
   # Cold-storage the closed lots' `raw` blob. This is the cron that STOPS the
   # regrowth that pushed the database past the free tier's 500 MB read-only
   # ceiling: `raw` is ~2.7 KB on a row that is 473 bytes without it, kept

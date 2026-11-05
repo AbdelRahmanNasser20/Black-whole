@@ -74,3 +74,39 @@ Not installed on purpose: Google Analytics (cookie banner + consent work for no 
 - Per-city landing pages ("chairs in Boise") — revisit when there are
   enough lots per city that the pages aren't thin.
 - `ItemList` JSON-LD on `/listings`, `FAQPage` on `/sell`.
+
+## SEO Pulse — the weekly loop (BrightEdge, operator-sized)
+
+BrightEdge sells five things: a keyword database, rank tracking, a site audit,
+Search-Console-aligned page recommendations, and auto-fixes. `scripts/seo_pulse.py`
+does the first four from free data and leaves the fixes to the operator
+(design: `docs/superpowers/specs/2026-11-05-seo-pulse-design.md`).
+
+```
+.venv/bin/python scripts/seo_pulse.py run --gsc ~/Downloads/black-whole.com-Performance-on-Search-*.zip --draft
+.venv/bin/python scripts/seo_pulse.py run --gsc api --telegram      # cron form (service account)
+.venv/bin/python scripts/seo_pulse.py audit                          # crawl only
+.venv/bin/python scripts/seo_pulse.py keywords --seed "church chairs" --city atlanta
+```
+
+What one run does, in order:
+1. **Audit** every `/sitemap.xml` URL (polite, 0.2 s gap): status, redirect, title/meta
+   length, H1 count, canonical, noindex, JSON-LD validity, word count, alt text,
+   inbound links → orphans, duplicate titles/descriptions, slow sitemap.
+2. **Search Console**: `--gsc <zip or folder>` reads the UI export
+   (Performance → Export → Download CSV); `--gsc api` uses a service account
+   (`GSC_SERVICE_ACCOUNT_JSON` path or inline JSON, `GSC_SITE_URL=https://black-whole.com/`,
+   the account added as a user on the GSC property). The API path also gives
+   query × page rows; the export does not.
+3. **Keyword ideas**: seed terms × the cities we have `/chairs/{city}` pages for →
+   Google autocomplete; flags terms Search Console does not show us for yet.
+4. **Recommendations**, ranked: striking-distance queries (position 4–20, ≥3
+   impressions), content gaps (impressions, no page covers the query), CTR gaps
+   (≥20 impressions, position ≤20, CTR <2 %), page fixes weighted by impressions, orphans.
+5. `--draft`: Groq `openai/gpt-oss-20b` drafts title ≤60 / meta ≤155 / H1 / 3 FAQs for
+   the top `SEO_PULSE_MAX_DRAFTS` (5) recommendations. Paste by hand — nothing writes to a page.
+6. Snapshot + report in `SEO_PULSE_DIR`; the next run prints movers vs the previous snapshot.
+
+Weekly cron `seo-pulse` in `render.yaml` (Monday 09:00 UTC) sends the 5-line summary to
+Telegram (`ops`). On Render `SEO_PULSE_DIR=/tmp/seo_pulse` is ephemeral, so the
+trend table only works on the laptop until a durable directory (R2) is wired.
