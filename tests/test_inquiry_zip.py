@@ -133,8 +133,10 @@ def test_contact_passes_zip(client, monkeypatch):
 
 
 def test_contact_missing_zip_is_a_400(client, monkeypatch):
+    real = inventory.create_inquiry
+
     def real_rules(**kw):
-        return inventory.create_inquiry(**kw)   # hits the ValueError before any DB call
+        return real(**kw)   # hits the ValueError before any DB call
     monkeypatch.setattr(inventory, "create_inquiry", real_rules)
     r = client.post("/contact", json={"kind": "sell", "name": "Brenda", "email": "b@x.com",
                                       "message": "150 gold banquet chairs"})
