@@ -62,6 +62,7 @@ from .. import config as app_config
 from .. import db
 from .. import catalog_feed, google_feed, lot_channels
 from .. import inventory
+from .. import inquiry_photos
 from .. import lot_images
 from .. import lot_urls
 from .. import favorite_images
@@ -2247,6 +2248,7 @@ async def _notify_new_inquiry(row: dict) -> None:
         bits.append(f"{who}{(' — ' + contact) if contact else ''}")
         meta = " · ".join(
             str(x) for x in (
+                f"ZIP {row['zip_code']}" if row.get("zip_code") else None,
                 f"qty {row['quantity_interested']}" if row.get("quantity_interested") else None,
                 f"lot {row['lot_id']}" if row.get("lot_id") else None,
             ) if x
@@ -2351,11 +2353,51 @@ async def public_contact(payload: dict):
                 if payload.get("quantity_interested")
                 else None
             ),
+            zip_code=(str(payload.get("zip_code") or "")).strip() or None,
         ))
     except ValueError as e:
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_inquiry(row))
-    return {"ok": True, "id": row["id"]}
+    out = {"ok": True, "id": row["id"]}
+    if row.get("kind") == "sell":
+        # Lets the browser attach the optional photos to THIS inquiry only.
+        out["photo_token"] = inquiry_photos.upload_token(row["id"], row.get("created_at"))
+    return out
+
+
+def _photo_count(row: dict | None) -> int:
+    return len(inventory.inquiry_photo_keys(row)) if row else 0
+
+
+@app.post("/contact/{inquiry_id}/photos")
+async def public_contact_photos(inquiry_id: int, request: Request,
+                                token: str = Query(""),
+                                photos: list[UploadFile] = File(...)):
+    """Optional seller photos for a sell inquiry. Private R2 bucket only."""
+    ip = rate_limit.client_ip(request)
+    if not rate_limit.allow(f"inq-photos:{ip}", limit=20):
+        raise HTTPException(429, "rate_limited")
+    blobs = []
+    for f in photos[: inquiry_photos.MAX_PHOTOS + 1]:
+        data = await f.read(inquiry_photos.MAX_BYTES + 1)
+        blobs.append(data)
+    row = await asyncio.to_thread(inventory.get_inquiry, inquiry_id)
+    if row is not None and row.get("kind") != "sell":
+        row = None
+    try:
+        exts = inquiry_photos.validate(row, token, _photo_count(row), blobs)
+    except inquiry_photos.PhotoRejected as e:
+        raise HTTPException(400, str(e))
+    try:
+        keys = await asyncio.to_thread(inquiry_photos.store, inquiry_id, blobs, exts)
+        await asyncio.to_thread(inventory.add_inquiry_photos, inquiry_id, keys)
+    except Exception as e:  # noqa: BLE001 - R2 down / unconfigured
+        log.warning("inquiry photos failed for #%s: %s", inquiry_id, e)
+        raise HTTPException(503, "photo upload failed — email the photos instead")
+    asyncio.create_task(telegram_alerts.send_message(
+        f"📷 {len(keys)} photo(s) added to sell lead #{inquiry_id} ({row.get('name') or '—'})"
+        "\n→ blackwhole.com/admin (Inquiries)", topic="leads"))
+    return {"ok": True, "count": len(keys)}
 
 
 async def _notify_new_subscriber(row: dict) -> None:
@@ -4892,7 +4934,25 @@ def inv_backfill():
 @readcache.cached()
 def inq_list(status: str | None = None):
     # sync handler → FastAPI threadpool; memoised (readcache.py)
-    return {"items": inventory.list_inquiries(status)}
+    items = inventory.list_inquiries(status)
+    for q in items:
+        q["photos"] = inventory.inquiry_photo_keys(q)
+    return {"items": items}
+
+
+@app.get("/api/inquiry-photos/{key:path}")
+def inquiry_photo(key: str):
+    """Operator-only proxy for seller photos in the PRIVATE bucket (/api/ is session-walled)."""
+    try:
+        got = inquiry_photos.fetch(key)
+    except Exception as e:  # noqa: BLE001 - unconfigured / R2 down
+        raise HTTPException(503, f"photo store unavailable: {type(e).__name__}")
+    if got is None:
+        raise HTTPException(404, "no such photo")
+    data, ctype = got
+    return Response(data, media_type=ctype,
+                    headers={"Cache-Control": "private, max-age=604800",
+                             "X-Robots-Tag": "noindex"})
 
 
 @app.patch("/api/inquiries/{inquiry_id}")

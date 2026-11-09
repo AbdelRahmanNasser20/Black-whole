@@ -904,6 +904,38 @@ def insert_manual(
 
 # ───────────────────────────── inquiries ─────────────────────────────
 
+# Site-tagged leads (platform / liquidator request-access forms) are not chair
+# inquiries: no ZIP is asked for there, so none is required.
+_NO_ZIP_LEAD_TAGS = ("[PLATFORM PAGE]", "[LIQUIDATORS PAGE]")
+_inquiries_zip_ready: bool = False
+
+
+def clean_zip(raw: str | None) -> str | None:
+    """'85054', '85054-1234', ' 85054 ' -> '85054'; anything else -> None."""
+    digits = re.sub(r"\D", "", raw or "")
+    return digits[:5] if len(digits) >= 5 else None
+
+
+def inquiries_have_zip_column() -> bool:
+    """True once migration 035 (`inquiries.zip_code`) is applied. Only a
+    positive answer is cached (same reasoning as has_slug_column): a pooler
+    blip must not pin "no column" for the process lifetime."""
+    global _inquiries_zip_ready
+    if _inquiries_zip_ready:
+        return True
+    try:
+        row = db.fetch_one(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'inquiries' AND column_name = 'zip_code' LIMIT 1"
+        )
+    except Exception:
+        return False
+    if row is not None:
+        _inquiries_zip_ready = True
+        return True
+    return False
+
+
 def create_inquiry(
     *,
     kind: str,
@@ -913,6 +945,7 @@ def create_inquiry(
     message: str | None = None,
     lot_id: str | None = None,
     quantity_interested: int | None = None,
+    zip_code: str | None = None,
     attribution: dict | None = None,
 ) -> dict:
     if kind not in ("buy", "sell"):
@@ -921,16 +954,31 @@ def create_inquiry(
         raise ValueError("name required")
     if not email and not phone:
         raise ValueError("email or phone required")
+    message = (message or "").strip() or None
+    zip5 = clean_zip(zip_code)
+    tagged = bool(message) and message.startswith(_NO_ZIP_LEAD_TAGS)
+    if zip5 is None and not tagged:
+        # A chair lead without a location cannot be routed (no lane, no
+        # nearest lot). The site forms require it; the API enforces it.
+        raise ValueError("5-digit ZIP code required")
     now = _now()
     cols = [
         "kind", "lot_id", "name", "email", "phone", "quantity_interested",
         "message", "status", "created_at",
     ]
+    if zip5 and not inquiries_have_zip_column():
+        # Migration 035 not applied yet: keep the ZIP in the message rather
+        # than drop it on the floor.
+        message = f"ZIP {zip5}" + (f"\n\n{message}" if message else "")
+        zip5 = None
     vals: list[Any] = [
         kind, str(lot_id) if lot_id else None, name.strip(),
         (email or "").strip() or None, (phone or "").strip() or None,
-        quantity_interested, (message or "").strip() or None, "new", now,
+        quantity_interested, message, "new", now,
     ]
+    if zip5:
+        cols.append("zip_code")
+        vals.append(zip5)
     # First-touch attribution (migration 022). Empty until applied — the
     # helper omits the columns when they are not there yet.
     extra_cols, extra_vals = attribution_mod.insert_columns("inquiries", attribution)
@@ -944,6 +992,58 @@ def create_inquiry(
             tuple(vals),
         )
         inquiry_id = cur.fetchone()["id"]
+        conn.commit()
+    return get_inquiry(inquiry_id)
+
+
+_inquiries_photos_ready: bool = False
+_PHOTOS_LINE = "PHOTOS: "
+
+
+def inquiries_have_photos_column() -> bool:
+    """True once migration 035's `inquiries.photo_keys` exists. Positive answer cached only."""
+    global _inquiries_photos_ready
+    if _inquiries_photos_ready:
+        return True
+    try:
+        row = db.fetch_one(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'inquiries' AND column_name = 'photo_keys' LIMIT 1"
+        )
+    except Exception:
+        return False
+    if row is not None:
+        _inquiries_photos_ready = True
+        return True
+    return False
+
+
+def inquiry_photo_keys(row: dict) -> list[str]:
+    """Photo keys on an inquiry: the column when set, else the PHOTOS: lines
+    the pre-migration fallback appended to `message`."""
+    keys = list(row.get("photo_keys") or [])
+    for line in (row.get("message") or "").splitlines():
+        if line.startswith(_PHOTOS_LINE):
+            keys += [k for k in line[len(_PHOTOS_LINE):].split() if k not in keys]
+    return keys
+
+
+def add_inquiry_photos(inquiry_id: int, keys: list[str]) -> dict | None:
+    """Record uploaded photo keys on the inquiry (column, or folded into message)."""
+    if not keys:
+        return get_inquiry(inquiry_id)
+    with connect() as conn:
+        if inquiries_have_photos_column():
+            conn.execute(
+                "UPDATE inquiries SET photo_keys = COALESCE(photo_keys, '{}') || %s::text[] "
+                "WHERE id = %s",
+                (list(keys), int(inquiry_id)),
+            )
+        else:
+            conn.execute(
+                "UPDATE inquiries SET message = COALESCE(message, '') || %s WHERE id = %s",
+                ("\n" + _PHOTOS_LINE + " ".join(keys), int(inquiry_id)),
+            )
         conn.commit()
     return get_inquiry(inquiry_id)
 
