@@ -319,6 +319,7 @@
     </label>
     <span class="result-count" id="inv-count" aria-live="polite"></span>
     <div class="inv-actions-bar">
+      <button type="button" class="btn btn-small" id="inv-map-toggle" aria-expanded="false" aria-controls="inv-map-section">◎ map</button>
       <button type="button" class="btn btn-small" id="inv-add">+ add listing</button>
       <button type="button" class="btn btn-small" id="inv-refresh">↻ refresh</button>
       <button type="button" class="btn btn-small" id="inv-backfill"
@@ -328,6 +329,42 @@
       <a class="btn btn-small btn-ghost" href="/listings" target="_blank" rel="noopener">open public /listings ↗</a>
       <a class="btn btn-small btn-ghost" href="/catalog/facebook.csv" download="fb_catalog_products.csv"
          title="Same rows Meta pulls on schedule — upload this file in Commerce Manager → catalog Chairs → Data sources">⬇ FB catalog CSV</a>
+    </div>
+  </div>
+
+  {#- The storefront's /map, verbatim: same mounter (static/site/map.js), same feed (/map/api/points), same
+      filters and side list. No data-points-url here — that attribute auto-mounts on page load, and Leaflet
+      cannot size itself inside a hidden pane; inventory.js mounts it on first open instead. -#}
+  <link rel="stylesheet" href="/static/site/map.css?v={{ asset_v }}">
+  <div class="inv-map" id="inv-map-section" hidden>
+    <form class="filter-bar map-filters" id="map-filters" action="/map" method="get">
+      <div class="filter-group filter-group--grow">
+        <label for="map-near" class="mono tiny">NEAR</label>
+        <input id="map-near" name="near" type="search" placeholder="City or ZIP" autocomplete="off">
+      </div>
+      <div class="filter-group">
+        <label for="map-radius" class="mono tiny">WITHIN</label>
+        <select id="map-radius" name="radius">
+          <option value="" selected>Any distance</option>
+          {% for r in (100, 200, 500, 1000) %}<option value="{{ r }}">{{ r }} mi</option>{% endfor %}
+        </select>
+      </div>
+      <div class="filter-group seg" id="map-status" data-value="available,incoming,sold">
+        <label class="mono tiny">SHOW</label>
+        <button type="button" class="seg-btn b-available" data-bucket="available">Available</button>
+        <button type="button" class="seg-btn b-incoming" data-bucket="incoming">Incoming</button>
+        <button type="button" class="seg-btn b-sold" data-bucket="sold">Sold</button>
+        <input type="hidden" name="status" value="available,incoming,sold">
+      </div>
+      <div class="filter-group">
+        <button type="submit" class="btn btn-primary">GO</button>
+        <span id="map-count" class="mono tiny" aria-live="polite"></span>
+      </div>
+    </form>
+    <div class="map-split">
+      <div id="inv-map" class="site-map site-map--full map-loading" aria-label="Map of our chair lots"
+           data-status="available,incoming,sold" data-tiles="light"></div>
+      <aside id="inv-map-list" class="map-list" data-state="loading"></aside>
     </div>
   </div>
 

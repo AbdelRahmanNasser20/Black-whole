@@ -170,3 +170,13 @@
 .inv-wrap .table tr.is-pending td:first-child::after {
   content: " ◌"; display: inline-block; color: var(--accent); animation: sk-spin 1s linear infinite;
 }
+
+/* ── map (the storefront's /map, mounted in place — styles come from static/site/map.css) ── */
+.inv-map { display: grid; gap: var(--gap); padding: 12px 0; border-bottom: 1px solid var(--border); }
+.inv-map .filter-bar { display: flex; flex-wrap: wrap; gap: var(--gap); align-items: flex-end; }
+.inv-map .filter-group { display: flex; flex-direction: column; gap: 4px; }
+.inv-map .filter-group input[type="search"], .inv-map .filter-group select {
+  height: 30px; padding: 0 10px; font: inherit; font-size: var(--fs-sm);
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius);
+}
+.inv-map .map-item { color: var(--text); }
