@@ -189,6 +189,16 @@ def test_newest_observed_at_returns_none_when_no_row(monkeypatch):
     assert store.newest_observed_at("govdeals") is None
 
 
+def test_newest_observed_at_skips_bidbox_rows(monkeypatch):
+    """bidbox_final/recheck rows are written every run by poll/recheck; they
+    must not make a source look freshly discovered (fallback path only)."""
+    captured = {}
+    monkeypatch.setattr(store.db, "fetch_one",
+                        lambda sql, params=None: captured.update(sql=sql) or None)
+    store.newest_observed_at("govdeals")
+    assert "raw->'recorder_capture' IS NULL" in captured["sql"]
+
+
 # --- coverage --------------------------------------------------------------
 
 def test_coverage_computes_pct_and_all_rollup(monkeypatch):

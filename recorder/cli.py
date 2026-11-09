@@ -695,16 +695,16 @@ def cmd_run(registry: dict, discover_stale_hours: float = 6.0, now: datetime | N
             poll_rc = cmd_recheck_finals(registry) or poll_rc
             poll_rc = cmd_archive_pending(registry) or poll_rc
 
-            # Stale = no new row AND no clean DISCOVER for H hours. A discover
-            # that saw every lot unchanged inserts nothing (change-gating), so
-            # newest_observed_at alone re-fired discover for a quiet source on
-            # every 5-minute run. Poll successes do NOT count: clean polls
-            # that insert nothing must not hold discover off forever.
+            # Stale = no clean DISCOVER for H hours (last_discover_at). Rows
+            # do NOT count: poll and bidbox_recheck rows land every run, and
+            # max(newest row, last_discover_at) starved discover from 10-29.
+            # newest_observed_at (non-bidbox rows) is only the fallback when
+            # last_discover_at is unknown (migration 020 missing / no row).
             stale: list[str] = []
             for name in registry:
-                newest = store.newest_observed_at(name)
-                last_disc = health_reg.get(name).last_discover_at
-                ref = max((t for t in (newest, last_disc) if t is not None), default=None)
+                ref = health_reg.get(name).last_discover_at
+                if ref is None:
+                    ref = store.newest_observed_at(name)
                 if ref is None or (now - ref) >= timedelta(hours=discover_stale_hours):
                     stale.append(name)
 

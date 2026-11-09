@@ -271,9 +271,12 @@ whose error text can carry the api_key.
 - `run` loads the breaker once, skips open sources (`poll source=X skipped:
   circuit open until …`, `discover source=X skipped: …`), records every
   outcome and saves once. Ends with `run: elapsed=…s`.
-- Discover staleness = newest row **or** last clean *discover*
-  (`last_discover_at`, migration 020), whichever is newer — a quiet source no
-  longer re-discovers every run, and clean polls never hold discover off.
+- Discover staleness = last clean *discover* (`last_discover_at`, migration
+  020) only — a quiet source does not re-discover every run, and poll /
+  `bidbox_recheck` rows never hold discover off (they did from 10-29 when the
+  newer of the two counted). Only when `last_discover_at` is unknown (020
+  missing, no health row) does the newest non-bidbox row
+  (`raw->'recorder_capture' IS NULL`) stand in.
 - `RECORDER_RUN_BUDGET_S` (default 0 = off): once a run has spent this long,
   remaining stale discovers wait for the next run (polls/closes come first).
 - Public Surplus discover stops after the first term whose connection fails
