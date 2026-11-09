@@ -9,6 +9,7 @@ unit-tested (tests/deals/test_store_rows.py) without touching the DB. The
 rest are thin wrappers over `automation.db`, exercised later via a live
 smoke task.
 """
+import os
 import sys
 import json
 from datetime import datetime
@@ -157,7 +158,7 @@ def update_live_state(key, s: Snapshot, next_poll_at, lane: str) -> None:
 
 def row_to_lot(r: dict) -> Lot:
     """A deal_lots row → Lot from the stored columns (foreign sites: their
-    `raw` is not maestro-shaped, so mapping.asset_to_lot can't rebuild them)."""
+    `raw` is not maestro-shaped; due_for_poll uses it for every site)."""
     def f(v, default=0.0):
         return float(v) if v is not None else default
     return Lot(
@@ -181,27 +182,40 @@ def row_to_lot(r: dict) -> Lot:
         site=r.get("site") or "govdeals", native_id=r.get("native_id") or "",
     )
 
+# What a watch pass reads per due lot. Never `raw`/`description`: the govdeals
+# backlog is 100k+ due rows at ~15 KB of raw each, which OOM-killed the
+# 512 MiB deals-watch cron. poll_once needs only the key, end time, bids and
+# status; foreign adapters' remember() needs site + native_id.
+POLL_COLUMNS = ["asset_id", "account_id", "auction_id", "end_utc", "bid_count",
+                "current_bid", "status", "site", "native_id"]
+
+def _watch_max_per_run() -> int:
+    try:
+        return max(1, int(os.environ.get("DEALS_WATCH_MAX_PER_RUN", "5000")))
+    except ValueError:
+        return 5000
+
 def due_for_poll(now: datetime, extra_where: tuple[str, list] | None = None,
                  site: str = "govdeals") -> list[Lot]:
-    """Lots of ONE site due for a poll. The site filter is what keeps the
-    GovDeals watch cron from handing a foreign row to mapping.asset_to_lot and
-    then to maestro (synthesized ids mean nothing there)."""
-    from deals.mapping import asset_to_lot
-    # `raw IS NOT NULL` guards against a cold-archived row leaking in: raw is
-    # nulled once a lot closes and its blob is exported to R2, and
-    # asset_to_lot(None) would raise AttributeError, killing the whole pass.
+    """Lots of ONE site due for a poll, soonest-ending first, at most
+    DEALS_WATCH_MAX_PER_RUN (default 5000). The site filter is what keeps the
+    GovDeals watch cron from handing a foreign row to maestro (synthesized
+    ids mean nothing there). Lots are built from POLL_COLUMNS for every site."""
+    # `raw IS NOT NULL` keeps a cold-archived (closed, raw exported to R2) row
+    # out of the pass, as before. `end_utc IS NOT NULL`: poll_once compares it.
     # `extra_where` = a research-profile fragment (deals/profiles.deal_lots_where).
     where = ("site = %s AND outcome_complete IS NOT TRUE AND raw IS NOT NULL "
-             "AND (next_poll_at IS NULL OR next_poll_at<=%s)")
+             "AND end_utc IS NOT NULL AND (next_poll_at IS NULL OR next_poll_at<=%s)")
     params: list = [site, now]
     if extra_where and extra_where[0] != "TRUE":
         where += f" AND ({extra_where[0]})"; params += list(extra_where[1])
-    cols = "raw" if site == "govdeals" else ",".join(LOT_COLUMNS)
-    rows = db.fetch_all(f"SELECT {cols} FROM deal_lots WHERE {where}", tuple(params))
+    params.append(_watch_max_per_run())
+    rows = db.fetch_all(f"SELECT {','.join(POLL_COLUMNS)} FROM deal_lots WHERE {where} "
+                        "ORDER BY end_utc LIMIT %s", tuple(params))
     lots = []
     for r in rows:
         try:
-            lots.append(asset_to_lot(r["raw"]) if site == "govdeals" else row_to_lot(r))
+            lots.append(row_to_lot(r))
         except (ValueError, AttributeError, TypeError, KeyError) as e:
             print(f"deals.store.due_for_poll: skipping malformed stored row: {e}", file=sys.stderr)
     return lots
