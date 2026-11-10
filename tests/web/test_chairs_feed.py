@@ -243,3 +243,17 @@ def test_cli_parser_dispatches_chairs_before_the_adapter(monkeypatch):
     monkeypatch.setattr("sys.argv", ["deals.cli", "chairs", "--min-qty", "80", "--site", "gsa", "--json"])
     cli.main()
     assert seen["min_qty"] == 80 and seen["site"] == "gsa" and seen["json"] is True
+
+
+def test_best_quantity_is_memoised(monkeypatch):
+    """~1,600 live seating lots are re-parsed on every Chairs load (regexes per
+    lot, ~1 s on Render's 0.5 CPU, 2026-11-10). Same text -> same answer: cache it."""
+    from automation.web import chairs_feed
+    calls = []
+    real = chairs_feed.lot_quantity
+    monkeypatch.setattr(chairs_feed, "lot_quantity", lambda t, d=None: calls.append(t) or real(t, d))
+    chairs_feed.best_quantity.cache_clear()
+    a = chairs_feed.best_quantity("150 Banquet Chairs", "stacking")
+    b = chairs_feed.best_quantity("150 Banquet Chairs", "stacking")
+    assert a == b and calls == ["150 Banquet Chairs"]
+    chairs_feed.best_quantity.cache_clear()
