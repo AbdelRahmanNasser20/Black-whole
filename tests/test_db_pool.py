@@ -204,3 +204,34 @@ def test_pool_connections_get_a_longer_handshake_budget(monkeypatch):
     assert db._conn_kwargs()["connect_timeout"] == 10
     assert db._conn_kwargs(for_pool=True)["connect_timeout"] == 30
     assert db._conn_kwargs(for_pool=True)["keepalives"] == 1
+
+
+class ModeConn(FakeConn):
+    """Records the autocommit mode each statement ran under."""
+
+    def __init__(self, n: int):
+        super().__init__(n)
+        self.autocommit = False
+        self.modes: list[bool] = []
+
+    def execute(self, sql, params=None):
+        self.modes.append(self.autocommit)
+        return super().execute(sql, params)
+
+
+def test_single_statement_helpers_run_in_autocommit(monkeypatch):
+    """A transaction costs BEGIN + query + COMMIT = 3 round-trips to the pooler.
+    Render (Oregon) -> Supabase (us-east-1) is ~60 ms each, so every admin read
+    paid ~180 ms instead of ~60 ms (measured 2026-11-10). One statement needs no
+    transaction: run it in autocommit, and hand the connection back to the pool
+    in its normal (transactional) mode so `with db.connect()` blocks stay atomic."""
+    conn = ModeConn(5)
+    monkeypatch.setattr(db, "_make_pool", lambda: FakePool([conn]))
+    db.fetch_one("select 5")
+    db.fetch_all("select 5")
+    db.execute("update x set y = 1")
+    assert conn.modes == [True, True, True]
+    assert conn.autocommit is False
+    with db.connect() as c:
+        c.execute("insert into x values (1)")
+    assert conn.modes[-1] is False

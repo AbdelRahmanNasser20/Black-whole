@@ -306,8 +306,12 @@ def _list_on(conn, status: str | None) -> list[dict]:
 
 
 def list_all(status: str | None = None) -> list[dict]:
-    with connect() as conn:
-        return _list_on(conn, status)
+    # db.fetch_all = one autocommit round-trip, not BEGIN + query + COMMIT.
+    if status:
+        return db.fetch_all(
+            "SELECT * FROM inventory WHERE status = %s ORDER BY updated_at DESC", (status,)
+        )
+    return db.fetch_all("SELECT * FROM inventory ORDER BY updated_at DESC")
 
 
 def list_public() -> list[dict]:
@@ -957,17 +961,11 @@ def get_inquiry(inquiry_id: int) -> dict | None:
 
 
 def list_inquiries(status: str | None = None) -> list[dict]:
-    with connect() as conn:
-        if status:
-            rows = conn.execute(
-                "SELECT * FROM inquiries WHERE status = %s ORDER BY created_at DESC",
-                (status,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM inquiries ORDER BY created_at DESC"
-            ).fetchall()
-    return [dict(r) for r in rows]
+    if status:
+        return db.fetch_all(
+            "SELECT * FROM inquiries WHERE status = %s ORDER BY created_at DESC", (status,)
+        )
+    return db.fetch_all("SELECT * FROM inquiries ORDER BY created_at DESC")
 
 
 def set_inquiry_status(inquiry_id: int, status: str) -> dict | None:
@@ -1135,17 +1133,11 @@ def get_subscriber(subscriber_id: int) -> dict | None:
 
 
 def list_subscribers(status: str | None = None) -> list[dict]:
-    with connect() as conn:
-        if status:
-            rows = conn.execute(
-                "SELECT * FROM subscribers WHERE status = %s ORDER BY created_at DESC",
-                (status,),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT * FROM subscribers ORDER BY created_at DESC"
-            ).fetchall()
-    return [dict(r) for r in rows]
+    if status:
+        return db.fetch_all(
+            "SELECT * FROM subscribers WHERE status = %s ORDER BY created_at DESC", (status,)
+        )
+    return db.fetch_all("SELECT * FROM subscribers ORDER BY created_at DESC")
 
 
 def set_subscriber_status(subscriber_id: int, status: str) -> dict | None:
