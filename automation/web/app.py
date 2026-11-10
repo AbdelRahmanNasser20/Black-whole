@@ -1138,9 +1138,12 @@ def _deals_facets_and_stats() -> tuple[list, list, dict]:
         f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
         "GROUP BY 1 ORDER BY count DESC"
     )
+    # `candidates` is bounded to live lots: the deal_candidates view has no
+    # `end_utc > now()`, so a bare count(*) scanned every closed lot (~5 s cold,
+    # and showed 59k "candidates" when ~2k were live — measured 2026-11-10).
     stats = db.fetch_one(
         "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
-        "(SELECT count(*) FROM deal_candidates) AS candidates, "
+        "(SELECT count(*) FROM deal_candidates WHERE end_utc > now()) AS candidates, "
         f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
         "AND end_utc <= now() + interval '24 hours') AS ending_24h"
     )

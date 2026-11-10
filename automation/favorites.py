@@ -159,15 +159,14 @@ def _sent_intervals(conn, asset_id: str) -> list[str]:
 
 
 def list_all() -> list[Favorite]:
-    """All favorites, newest-starred first."""
-    with inventory.connect() as conn:
-        rows = conn.execute(
-            "SELECT * FROM auction_favorites ORDER BY starred_at DESC"
-        ).fetchall()
-        out: list[Favorite] = []
-        for r in rows:
-            out.append(_row_to_favorite(r, _sent_intervals(conn, r["asset_id"])))
-    return out
+    """All favorites, newest-starred first. One query: the sent intervals ride
+    along as an array (was one extra query per favorite, ~60 ms each on Render)."""
+    rows = inventory.db.fetch_all(
+        "SELECT f.*, ARRAY(SELECT s.interval_label FROM auction_alerts_sent s "
+        "WHERE s.asset_id = f.asset_id) AS sent_intervals "
+        "FROM auction_favorites f ORDER BY f.starred_at DESC"
+    )
+    return [_row_to_favorite(r, list(r["sent_intervals"] or [])) for r in rows]
 
 
 def get(asset_id: str) -> Favorite | None:
