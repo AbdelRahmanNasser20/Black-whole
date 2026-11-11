@@ -41,7 +41,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import config  # noqa: F401  (loads .env)
-from . import db, inventory, listing_images, lot_images, lot_urls, progress
+from . import db, indexnow, inventory, listing_images, lot_images, lot_urls, progress
 from .catalog_feed import FEED_COLUMNS, build_feed_rows, state_code
 from .channels import store as channel_store
 
@@ -86,6 +86,17 @@ def _record_channel(fn: Callable, *args, log: Log = _print, **kwargs) -> None:
         fn(*args, **kwargs)
     except Exception as e:  # noqa: BLE001 — never let bookkeeping break the flow
         log(f"  · listing_channels not updated ({getattr(fn, '__name__', 'store')}): {e}")
+
+
+def _ping_indexnow(row: dict | None, log: Log = _print) -> None:
+    """Tell IndexNow (Bing) the lot's pages changed. Same rule as
+    `_record_channel`: a failure is logged and swallowed, never breaks the flow.
+    The POST itself runs in a background thread (`indexnow.submit_async`)."""
+    try:
+        if row and indexnow.ping_lot(row):
+            log("  · IndexNow: pinged " + lot_urls.public_path(row))
+    except Exception as e:  # noqa: BLE001 — never let a ping break the flow
+        log(f"  · IndexNow ping skipped: {e}")
 
 
 # ───────────────────────────── pure helpers ─────────────────────────────
@@ -607,6 +618,8 @@ def add_lot(url: str, *, price: float | None = None, split: str | None = None,
         else:
             upsert_plan_entry(entry)
         res.channels = [c for c in ("site", "business") if c in channels]
+        if "site" in channels:
+            _ping_indexnow(row, log)
 
         if "fb" in channels:
             existing_fb = (plan_entry_for(lot_id) or {}).get("fb_listing_url") or row.get("facebook_url")
@@ -708,6 +721,8 @@ def remove_lot(lot_id: str, *, channels: tuple[str, ...] = CHANNELS, log: Log = 
         inventory.set_fields(lot_id, status=status, fake_sold_out=True)
         db.execute("UPDATE inventory SET crm_offerable = false WHERE lot_id = %s", (lot_id,))
         log(f"  ✓ {lot_id}: status {status}, fake_sold_out=true → site shows SOLD, feed drops it, CRM won't offer it")
+        if "site" in channels:
+            _ping_indexnow(row, log)
     res = RemoveResult(lot_id=lot_id, status=status)
     if "fb" in channels:
         entry = plan_entry_for(lot_id) or {}
@@ -762,6 +777,7 @@ def restore_lot(lot_id: str, status: str = "active_bid", log: Log = _print) -> d
         raise ValueError(f"no inventory row {lot_id!r}")
     db.execute("UPDATE inventory SET crm_offerable = true WHERE lot_id = %s", (lot_id,))
     log(f"  ✓ {lot_id}: status {status}, fake_sold_out=false")
+    _ping_indexnow(row, log)
     _record_channel(channel_store.set_state, lot_id, "fb_marketplace", "pending_approval", log=log)
     log("  · Marketplace relist queued for your approval (admin → Channels)")
     return row
