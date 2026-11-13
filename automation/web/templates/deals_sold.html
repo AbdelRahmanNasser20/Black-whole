@@ -1,0 +1,132 @@
+{#- templates/deals_sold.html — public "Sold prices" page. Server-rendered from public_sold.fetch_sold.
+    Confirmed closes only (lot_archive outcome='sold'), USD only. public_sold.py owns every exclusion.
+    Never renders auction photos, sellers, verdicts, or inventory.storage_note. -#}
+{% set nav_active = 'sold' %}
+{% extends "_base.html" %}
+{% block title %}Sold prices — confirmed government surplus sales{% endblock %}
+{% block head %}
+<meta name="description" content="What government surplus lots sold for: confirmed closing prices only. A top bid under the reserve is not counted as a sale.">
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="/static/deals/sold.css?v={{ asset_v }}">
+{% endblock %}
+{% block topbar_nav %}
+<a href="/deals">Deals</a>
+<a href="/deals/sold" aria-current="page">Sold prices</a>
+<a href="/sources">Sources</a>
+{% endblock %}
+
+{% macro usd(v) %}{% if v is none %}—{% else %}${{ "{:,.0f}".format(v) }}{% endif %}{% endmacro %}
+{% macro pct(v) %}{% if v is none %}—{% else %}{{ "{:.0f}".format(v) }}%{% endif %}{% endmacro %}
+{% macro label(c) %}{{ (c or 'other')|replace('_', ' ')|capitalize }}{% endmacro %}
+{% macro qs(page) %}?{% for k, v in filters.items() if v %}{{ k }}={{ v|urlencode }}&amp;{% endfor %}page={{ page }}{% endmacro %}
+
+{% block content %}
+<main class="sold">
+  <header class="sold-head">
+    <h1>Sold prices</h1>
+    <p class="sold-lede">Confirmed closing prices from the auction site's own close record. A lot that ended with a top bid under its reserve did not sell, so its top bid is not a price here.</p>
+  </header>
+
+  <form class="sold-filters" method="get" action="/deals/sold">
+    <input type="search" name="q" value="{{ filters.q or '' }}" placeholder="Search sold lots — forklift, laptops, mower…" aria-label="Search sold lots">
+    <select name="category" aria-label="Category">
+      <option value="">All categories</option>
+      {% for c in category_options %}<option value="{{ c }}"{% if filters.category == c %} selected{% endif %}>{{ label(c) }}</option>{% endfor %}
+    </select>
+    <input type="text" name="state" value="{{ filters.state or '' }}" maxlength="2" size="4" placeholder="State" aria-label="State, two letters">
+    <select name="days" aria-label="Period">
+      <option value="">All recorded</option>
+      {% for d in day_choices %}<option value="{{ d }}"{% if filters.days == d %} selected{% endif %}>Last {{ d }} days</option>{% endfor %}
+    </select>
+    <button class="btn btn-primary btn-small" type="submit">Show</button>
+    {% if filters.values()|select|list %}<a class="btn btn-ghost btn-small" href="/deals/sold">Clear</a>{% endif %}
+  </form>
+
+  {% if error %}
+  <p class="sold-empty" role="alert">Sold prices are not available right now. Try again in a minute.</p>
+  {% else %}
+  {% set s = data.summary %}
+  <section class="sold-stats" aria-label="Summary">
+    <div class="sold-stat sold-stat--main">
+      <span class="sold-stat-num">{{ usd(s.median) }}</span>
+      <span class="sold-stat-label">Median sold price</span>
+      <span class="sold-stat-sub">Middle half: {{ usd(s.p25) }} – {{ usd(s.p75) }}</span>
+    </div>
+    <div class="sold-stat">
+      <span class="sold-stat-num">{{ "{:,}".format(s.sold) }}</span>
+      <span class="sold-stat-label">Confirmed sales</span>
+      <span class="sold-stat-sub">{% if s.since %}{{ s.since }} to {{ s.until }}{% else %}No records{% endif %}</span>
+    </div>
+    <div class="sold-stat">
+      <span class="sold-stat-num">{{ pct(s.sold_share) }}</span>
+      <span class="sold-stat-label">Of closes with a bid, sold</span>
+      <span class="sold-stat-sub">{{ "{:,}".format(s.reserve_not_met) }} ended under the reserve</span>
+    </div>
+  </section>
+
+  {% if data.categories %}
+  <section aria-labelledby="sold-cats-h">
+    <h2 id="sold-cats-h">By category</h2>
+    <div class="table-wrap">
+      <table class="table sold-table">
+        <thead><tr><th>Category</th><th class="num">Sales</th><th class="num">Median</th><th class="num">Middle half</th><th class="num">Sold share</th></tr></thead>
+        <tbody>
+        {% for c in data.categories %}
+          <tr>
+            <td><a href="/deals/sold?category={{ c.value|urlencode }}">{{ label(c.value) }}</a></td>
+            <td class="num">{{ "{:,}".format(c.sold) }}</td>
+            <td class="num">{{ usd(c.median) }}</td>
+            <td class="num">{{ usd(c.p25) }} – {{ usd(c.p75) }}</td>
+            <td class="num">{{ pct(c.sold_share) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+  {% endif %}
+
+  <section aria-labelledby="sold-rows-h">
+    <h2 id="sold-rows-h">Sold lots <span class="sold-count">{{ "{:,}".format(data.total) }}</span></h2>
+    {% if data.rows %}
+    <div class="table-wrap">
+      <table class="table sold-table">
+        <thead><tr><th>Lot</th><th>Place</th><th>Closed</th><th class="num">Bids</th><th class="num">Sold for</th><th>Source of price</th></tr></thead>
+        <tbody>
+        {% for r in data.rows %}
+          <tr>
+            <td>{% if r.viewer_url %}<a href="{{ r.viewer_url }}">{{ r.title }}</a>{% else %}{{ r.title }}{% endif %}
+              <span class="sold-cat">{{ label(r.canonical_category) }}</span></td>
+            <td>{{ r.city or '' }}{% if r.city and r.state %}, {% endif %}{{ r.state or '' }}</td>
+            <td>{{ (r.closed_at or '')[:10] }}</td>
+            <td class="num">{{ r.bid_count if r.bid_count is not none else '—' }}</td>
+            <td class="num sold-price">{{ usd(r.final_price) }}</td>
+            <td><span class="badge badge-closed">Confirmed close</span></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <nav class="sold-pages" aria-label="Pages">
+      {% if data.page > 1 %}<a class="btn btn-ghost btn-small" href="/deals/sold{{ qs(data.page - 1) }}">← Newer</a>{% endif %}
+      <span>Page {{ data.page }} of {{ data.pages }}</span>
+      {% if data.page < data.pages %}<a class="btn btn-ghost btn-small" href="/deals/sold{{ qs(data.page + 1) }}">Older →</a>{% endif %}
+    </nav>
+    {% else %}
+    <p class="sold-empty">No confirmed sale matches these filters.</p>
+    {% endif %}
+  </section>
+
+  <section class="sold-method" aria-labelledby="sold-method-h">
+    <h2 id="sold-method-h">How these numbers are made</h2>
+    <ul>
+      <li><strong>Sold price</strong> = the winning bid on a lot the auction site marked as sold. Buyer premium and tax are not included.</li>
+      <li><strong>Not a sale:</strong> a lot that ended under its reserve, was cancelled, or got no bid. These lots are counted, not priced.</li>
+      <li><strong>Sold share</strong> = sales ÷ (sales + lots that ended under the reserve).</li>
+      <li>US dollars only. Median and middle half (25th–75th percentile) are used because some lots sell very high.</li>
+      <li>Records start on {{ data.summary.since or '—' }}. Sites that do not publish a close record are not in this table.</li>
+    </ul>
+  </section>
+  {% endif %}
+</main>
+{% endblock %}
