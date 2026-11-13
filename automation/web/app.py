@@ -86,6 +86,7 @@ from . import deals_query
 from . import deals_sources
 from . import platform_api
 from . import public_deals
+from . import public_sold
 from . import chairs_feed
 from . import rate_limit
 from . import public_map
@@ -1434,6 +1435,42 @@ async def public_deals_pins(
             min_price=min_price, max_price=max_price, site=site)
     except Exception as e:
         raise HTTPException(503, f"pins query failed: {e!r}")
+
+
+def _sold_filters(q, category, state, days) -> dict:
+    return {"q": (q or "").strip() or None, "category": (category or "").strip() or None,
+            "state": (state or "").strip().upper() or None, "days": days}
+
+
+@app.get("/deals/sold", response_class=HTMLResponse)
+def public_sold_page(request: Request, q: str | None = Query(None, max_length=80),
+                     category: str | None = Query(None, max_length=40),
+                     state: str | None = Query(None, max_length=2),
+                     days: int | None = None, page: int = Query(1, ge=1)):
+    """Public "Sold prices": confirmed closes only. Plain `def` — it reads the DB."""
+    filters = _sold_filters(q, category, state, days)
+    ctx = {"base_url": PUBLIC_BASE_URL, "filters": filters, "data": None, "error": False,
+           "day_choices": public_sold.DAY_CHOICES, "category_options": []}
+    try:
+        ctx["data"] = public_sold.fetch_sold(**filters, page=page)
+    except Exception as e:  # noqa: BLE001 - the page says so in plain words
+        print(f"[sold] query failed: {e!r}", file=sys.stderr)
+        ctx["error"] = True
+        return templates.TemplateResponse(request, "deals_sold.html", ctx, status_code=503)
+    ctx["category_options"] = sorted({c["value"] for c in ctx["data"]["categories"]}
+                                     | ({filters["category"]} if filters["category"] else set()))
+    return templates.TemplateResponse(request, "deals_sold.html", ctx)
+
+
+@app.get("/deals/api/sold")
+def public_sold_api(q: str | None = Query(None, max_length=80),
+                    category: str | None = Query(None, max_length=40),
+                    state: str | None = Query(None, max_length=2),
+                    days: int | None = None, page: int = Query(1, ge=1)):
+    try:
+        return public_sold.fetch_sold(**_sold_filters(q, category, state, days), page=page)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"sold query failed: {e!r}")
 
 
 @app.get("/deals/api/facets")
