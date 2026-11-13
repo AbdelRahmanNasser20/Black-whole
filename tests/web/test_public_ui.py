@@ -14,6 +14,8 @@ from fastapi.testclient import TestClient
 
 from automation import config as config_mod
 from automation import deposits, inventory, site_settings, stripe_gateway
+import importlib
+web_app = importlib.import_module("automation.web.app")
 from automation.web.app import app
 
 app_module = sys.modules["automation.web.app"]
@@ -271,3 +273,24 @@ def test_returns_short_link_redirects_to_terms_anchor():
     r = _client().get("/returns", follow_redirects=False)
     assert r.status_code == 301
     assert r.headers["location"] == "/terms#returns"
+
+
+# ───────────────────────────── phone contact ────────────────────────────────
+
+def test_phone_defaults_to_the_google_voice_number(monkeypatch):
+    import os, subprocess
+    env = {k: v for k, v in os.environ.items() if k != "PUBLIC_CONTACT_PHONE"}
+    out = subprocess.run(
+        [sys.executable, "-c", "from automation import config; print(config.PUBLIC_CONTACT_PHONE)"],
+        env=env, capture_output=True, text=True, check=True,
+    ).stdout.strip().splitlines()[-1]
+    assert out == "(619) 407-8945"
+
+
+def test_landing_contact_offers_call_and_text(monkeypatch):
+    assert web_app.PUBLIC_CONTACT["tel"] == "+16194078945"
+    monkeypatch.setattr(inventory, "list_public", lambda: [])
+    monkeypatch.setattr(inventory, "list_sold_showcase", lambda: [])
+    html = _client().get("/").text
+    assert 'href="tel:+16194078945"' in html
+    assert 'href="sms:+16194078945"' in html

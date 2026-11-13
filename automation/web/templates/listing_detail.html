@@ -240,6 +240,13 @@
         large orders, and we'll work with your budget.
         {%- endif %}
       </p>
+      {% if contact.phone %}
+      <p class="section-crosslink mono tiny">
+        RATHER TALK? CALL OR TEXT
+        <a href="tel:{{ contact.tel }}">{{ contact.phone }}</a> ·
+        <a href="sms:{{ contact.tel }}?body={{ ('Hi, about lot ' ~ item.lot_id ~ ': ') | urlencode }}">TEXT US →</a>
+      </p>
+      {% endif %}
     </div>
     <form class="manifest-form" id="contact-form" data-mode="detail">
       <input type="hidden" name="lot_id" value="{{ item.lot_id }}">

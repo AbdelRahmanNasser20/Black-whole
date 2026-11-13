@@ -534,6 +534,10 @@ PUBLIC_CONTACT: dict = {
         "postal": PUBLIC_ADDRESS_POSTAL.strip() or None,
     }.items() if v
 }
+# E.164 form for tel:/sms: links, e.g. "+16194078945".
+if PUBLIC_CONTACT.get("phone"):
+    _digits = "".join(c for c in PUBLIC_CONTACT["phone"] if c.isdigit())
+    PUBLIC_CONTACT["tel"] = "+" + (_digits if len(_digits) > 10 else "1" + _digits)
 
 
 # <title> budget. Google shows ~60 characters on desktop and truncates the
