@@ -64,6 +64,7 @@ Edited through the admin Channels tab (`PATCH /api/channels/switches`, keys must
 - `lot_channels.restore_lot` → `set_state(fb_marketplace, pending_approval)` — the relist waits in the queue, never auto-posts.
 - `inventory.set_platform_url("facebook"|"ebay", url)` → `upsert(live)`; url cleared → `off`. `fb_business`/`ad` are not channels.
 - Every store call is wrapped: a store failure is logged and swallowed. Bookkeeping never breaks a post, a remove, or a ledger write.
+- Site add / remove / restore (`lot_channels.add_lot` / `remove_lot` / `restore_lot`) also fire `_ping_indexnow` (IndexNow → Bing, background thread) — same rule: a failure is logged and swallowed.
 
 ## How to turn FB Marketplace on (operator only)
 

@@ -169,7 +169,8 @@ GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")
 # the address is the registered business address already on the CAN-SPAM
 # footer and WHOIS, never the storage facility (`inventory.storage_note`).
 PUBLIC_CONTACT_EMAIL = os.getenv("PUBLIC_CONTACT_EMAIL", "abdel.nasser@black-whole.com")
-PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "")
+# Google Voice line — buyers can call or text it.
+PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "(619) 407-8945")
 PUBLIC_ADDRESS_STREET = os.getenv("PUBLIC_ADDRESS_STREET", "18220 N 68th St")
 PUBLIC_ADDRESS_CITY = os.getenv("PUBLIC_ADDRESS_CITY", "Phoenix")
 PUBLIC_ADDRESS_REGION = os.getenv("PUBLIC_ADDRESS_REGION", "AZ")

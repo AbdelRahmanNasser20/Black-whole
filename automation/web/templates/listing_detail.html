@@ -240,6 +240,13 @@
         large orders, and we'll work with your budget.
         {%- endif %}
       </p>
+      {% if contact.phone %}
+      <p class="section-crosslink mono tiny">
+        RATHER TALK? CALL OR TEXT
+        <a href="tel:{{ contact.tel }}">{{ contact.phone }}</a> ·
+        <a href="sms:{{ contact.tel }}?body={{ ('Hi, about lot ' ~ item.lot_id ~ ': ') | urlencode }}">TEXT US →</a>
+      </p>
+      {% endif %}
     </div>
     <form class="manifest-form" id="contact-form" data-mode="detail">
       <input type="hidden" name="lot_id" value="{{ item.lot_id }}">
@@ -250,6 +257,9 @@
       </div>
       <div class="mf-row mf-row--two">
         <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+        <label><span>DELIVERY / PICKUP ZIP</span><input name="zip_code" required inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="postal-code" placeholder="5-digit ZIP"></label>
+      </div>
+      <div class="mf-row mf-row--two">
         <label><span>QTY INTERESTED</span><input name="quantity_interested" type="number" min="1" value="{{ item.quantity_remaining or '' }}"></label>
       </div>
       <label class="mf-row"><span>MESSAGE</span>

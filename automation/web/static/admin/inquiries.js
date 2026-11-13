@@ -58,9 +58,14 @@ function inquiryCard(q) {
     <div class="card-meta inquiry-contact">
       ${q.email ? `<a href="mailto:${escapeAttr(q.email)}">${escapeHtml(q.email)}</a>` : ''}
       ${q.phone ? `<a href="tel:${escapeAttr(q.phone)}">${escapeHtml(q.phone)}</a>` : ''}
+      ${q.zip_code ? `<span>· ZIP ${escapeHtml(q.zip_code)}</span>` : ''}
       ${q.quantity_interested ? `<span>· qty ${escapeHtml(q.quantity_interested)}</span>` : ''}
     </div>
     ${q.message ? `<blockquote class="inquiry-msg">${escapeHtml(q.message)}</blockquote>` : ''}
+    ${(q.photos || []).length ? `<div class="inquiry-photos">${q.photos.map(k => {
+        const u = '/api/inquiry-photos/' + k.split('/').map(encodeURIComponent).join('/');
+        return `<a href="${escapeAttr(u)}" target="_blank" rel="noopener"><img src="${escapeAttr(u)}" alt="seller photo" loading="lazy"></a>`;
+      }).join('')}</div>` : ''}
     <div class="card-chips inquiry-actions">
       ${STATUSES.filter(s => s !== q.status)
         .map(s => `<button type="button" class="btn btn-small" data-set-status="${s}">→ ${s}</button>`).join('')}

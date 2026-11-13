@@ -43,11 +43,17 @@
     </div>
     <div class="mf-row mf-row--two">
       <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+      <label><span>ZIP WHERE THE CHAIRS ARE</span><input name="zip_code" required inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="postal-code" placeholder="5-digit ZIP"></label>
+    </div>
+    <div class="mf-row mf-row--two">
       <label><span>QUANTITY</span><input name="quantity_interested" type="number" min="1" placeholder="e.g. 240"></label>
     </div>
     <label class="mf-row"><span>WHAT DO YOU HAVE?</span>
       <textarea name="message" rows="5" required
-                placeholder="Chair type, condition, city, dimensions if known, photos welcome (we'll email you for attachments)."></textarea>
+                placeholder="Chair type, condition, dimensions if known. How much are you looking to get for them (per chair or for the lot)?"></textarea>
+    </label>
+    <label class="mf-row"><span>PHOTOS (OPTIONAL, UP TO 6)</span>
+      <input name="photos" type="file" accept="image/*" multiple data-max="6">
     </label>
     <button type="submit" class="btn btn-primary">REQUEST A QUOTE</button>
     <div class="mf-result" hidden></div>

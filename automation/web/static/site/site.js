@@ -91,9 +91,12 @@ function bindCaptureForm(form) {
     const fd = new FormData(form);
     const payload = {};
     for (const [k, v] of fd.entries()) {
-      if (typeof v === 'string' && v.trim() === '') continue;
+      if (typeof v !== 'string') continue;   // files go up separately (seller photos)
+      if (v.trim() === '') continue;
       payload[k] = v;
     }
+    const photoEl = form.querySelector('input[type="file"][name="photos"]');
+    const photos = photoEl ? Array.from(photoEl.files || []) : [];
     for (const qty of ['quantity_interested', 'quantity_wanted']) {
       if (payload[qty]) payload[qty] = parseInt(payload[qty], 10);
     }
@@ -107,6 +110,26 @@ function bindCaptureForm(form) {
       result.hidden = false;
       return;
     }
+    // Chair inquiries are un-routable without a location: a 5-digit ZIP is
+    // the minimum (where the chairs are for a sell, where they go for a buy).
+    const zipEl = form.querySelector('[name="zip_code"]');
+    if (zipEl) {
+      const zip = String(payload.zip_code || '').replace(/\D/g, '').slice(0, 5);
+      if (zip.length !== 5) {
+        result.textContent = '✗ Enter the 5-digit ZIP code (where the chairs are, or where they are going).';
+        result.classList.add('mf-result--err');
+        result.hidden = false;
+        zipEl.focus();
+        return;
+      }
+      payload.zip_code = zip;
+    }
+    if (photos.length > 6) {
+      result.textContent = '✗ Up to 6 photos, please.';
+      result.classList.add('mf-result--err');
+      result.hidden = false;
+      return;
+    }
 
     const btn = form.querySelector('button[type="submit"]');
     try {
@@ -116,8 +139,23 @@ function bindCaptureForm(form) {
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
       })) || {};
-      result.textContent = form.dataset.success ||
-        ('◉ INQUIRY #' + data.id + ' FILED. WE\u2019LL BE IN TOUCH WITHIN 1 BUSINESS DAY.');
+      let photoNote = '';
+      if (photos.length && data.photo_token) {
+        // Optional seller photos: the inquiry is already saved, so a failed
+        // upload only changes the message, never the result.
+        const up = new FormData();
+        photos.forEach(f => up.append('photos', f));
+        try {
+          await pending(btn, 'UPLOADING PHOTOS…', () => api(
+            '/contact/' + data.id + '/photos?token=' + encodeURIComponent(data.photo_token),
+            {method: 'POST', body: up}));
+          photoNote = ' ' + photos.length + ' PHOTO' + (photos.length > 1 ? 'S' : '') + ' RECEIVED.';
+        } catch (err) {
+          photoNote = ' (PHOTOS DID NOT UPLOAD: ' + (err.message || 'error') + ' — TEXT OR EMAIL THEM TO US.)';
+        }
+      }
+      result.textContent = (form.dataset.success ||
+        ('◉ INQUIRY #' + data.id + ' FILED. WE\u2019LL BE IN TOUCH WITHIN 1 BUSINESS DAY.')) + photoNote;
       result.classList.add('mf-result--ok');
       result.hidden = false;
       form.reset();

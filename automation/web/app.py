@@ -61,8 +61,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
-from .. import catalog_feed, google_feed, lot_channels
+from .. import catalog_feed, google_feed, indexnow, lot_channels
 from .. import inventory
+from .. import inquiry_photos
 from .. import lot_images
 from .. import lot_urls
 from .. import favorite_images
@@ -538,6 +539,10 @@ PUBLIC_CONTACT: dict = {
         "postal": PUBLIC_ADDRESS_POSTAL.strip() or None,
     }.items() if v
 }
+# E.164 form for tel:/sms: links, e.g. "+16194078945".
+if PUBLIC_CONTACT.get("phone"):
+    _digits = "".join(c for c in PUBLIC_CONTACT["phone"] if c.isdigit())
+    PUBLIC_CONTACT["tel"] = "+" + (_digits if len(_digits) > 10 else "1" + _digits)
 
 
 # <title> budget. Google shows ~60 characters on desktop and truncates the
@@ -1142,9 +1147,12 @@ def _deals_facets_and_stats() -> tuple[list, list, dict]:
         f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
         "GROUP BY 1 ORDER BY count DESC"
     )
+    # `candidates` is bounded to live lots: the deal_candidates view has no
+    # `end_utc > now()`, so a bare count(*) scanned every closed lot (~5 s cold,
+    # and showed 59k "candidates" when ~2k were live — measured 2026-11-10).
     stats = db.fetch_one(
         "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
-        "(SELECT count(*) FROM deal_candidates) AS candidates, "
+        "(SELECT count(*) FROM deal_candidates WHERE end_utc > now()) AS candidates, "
         f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
         "AND end_utc <= now() + interval '24 hours') AS ending_24h"
     )
@@ -2215,6 +2223,17 @@ async def robots_txt():
     )
 
 
+# IndexNow key file (Bing ownership check). MUST stay registered AFTER
+# /robots.txt — `/{name}.txt` matches every root .txt path, so any future root
+# *.txt route has to be registered BEFORE this one or it gets shadowed.
+@app.get("/{name}.txt", response_class=PlainTextResponse, include_in_schema=False)
+async def indexnow_key_file(name: str):
+    key = indexnow.key()
+    if not key or name != key:
+        raise HTTPException(404, headers={"Cache-Control": "no-store"})
+    return key
+
+
 def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
     tag = f"  <url>\n    <loc>{loc}</loc>\n"
     if lastmod:
@@ -2296,6 +2315,7 @@ async def _notify_new_inquiry(row: dict) -> None:
         bits.append(f"{who}{(' — ' + contact) if contact else ''}")
         meta = " · ".join(
             str(x) for x in (
+                f"ZIP {row['zip_code']}" if row.get("zip_code") else None,
                 f"qty {row['quantity_interested']}" if row.get("quantity_interested") else None,
                 f"lot {row['lot_id']}" if row.get("lot_id") else None,
             ) if x
@@ -2318,6 +2338,12 @@ _DEPOSIT_ALERT_HEADS = {
     "charge.refunded": "↩ REFUNDED",
 }
 
+_DEPOSIT_KIND_LABELS = {
+    "deposit": "deposit",
+    "full": "paid in full",
+    "financed": "financed via Affirm — collect the rest at pickup",
+}
+
 
 def _dollars(cents: Any) -> str:
     return f"${(int(cents or 0) / 100):,.2f}"
@@ -2334,7 +2360,9 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
         head = _DEPOSIT_ALERT_HEADS.get(event_type, "◉ DEPOSIT UPDATE")
         # A completed session that only reached 'processing' is an ACH debit in
         # flight, not money in the bank — say so rather than crying "PAID".
-        if status == "processing":
+        if status == "paid" and row.get("kind") == deposits.FINANCED_KIND:
+            head = "💰 AFFIRM PAID"
+        elif status == "processing":
             head = "🏦 ACH INITIATED"
         elif status == "failed":
             head = "✗ ACH FAILED"
@@ -2347,7 +2375,7 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
         bits = [f"{head} · #{row.get('id')}"]
         bits.append(
             f"{_dollars(row.get('amount_cents'))} "
-            f"({'deposit' if kind == 'deposit' else 'paid in full'})"
+            f"({_DEPOSIT_KIND_LABELS.get(kind, 'paid in full')})"
             + (f" · via {row['payment_method']}" if row.get("payment_method") else "")
         )
         lot_id = row.get("lot_id")
@@ -2392,11 +2420,51 @@ async def public_contact(payload: dict):
                 if payload.get("quantity_interested")
                 else None
             ),
+            zip_code=(str(payload.get("zip_code") or "")).strip() or None,
         ))
     except ValueError as e:
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_inquiry(row))
-    return {"ok": True, "id": row["id"]}
+    out = {"ok": True, "id": row["id"]}
+    if row.get("kind") == "sell":
+        # Lets the browser attach the optional photos to THIS inquiry only.
+        out["photo_token"] = inquiry_photos.upload_token(row["id"], row.get("created_at"))
+    return out
+
+
+def _photo_count(row: dict | None) -> int:
+    return len(inventory.inquiry_photo_keys(row)) if row else 0
+
+
+@app.post("/contact/{inquiry_id}/photos")
+async def public_contact_photos(inquiry_id: int, request: Request,
+                                token: str = Query(""),
+                                photos: list[UploadFile] = File(...)):
+    """Optional seller photos for a sell inquiry. Private R2 bucket only."""
+    ip = rate_limit.client_ip(request)
+    if not rate_limit.allow(f"inq-photos:{ip}", limit=20):
+        raise HTTPException(429, "rate_limited")
+    blobs = []
+    for f in photos[: inquiry_photos.MAX_PHOTOS + 1]:
+        data = await f.read(inquiry_photos.MAX_BYTES + 1)
+        blobs.append(data)
+    row = await asyncio.to_thread(inventory.get_inquiry, inquiry_id)
+    if row is not None and row.get("kind") != "sell":
+        row = None
+    try:
+        exts = inquiry_photos.validate(row, token, _photo_count(row), blobs)
+    except inquiry_photos.PhotoRejected as e:
+        raise HTTPException(400, str(e))
+    try:
+        keys = await asyncio.to_thread(inquiry_photos.store, inquiry_id, blobs, exts)
+        await asyncio.to_thread(inventory.add_inquiry_photos, inquiry_id, keys)
+    except Exception as e:  # noqa: BLE001 - R2 down / unconfigured
+        log.warning("inquiry photos failed for #%s: %s", inquiry_id, e)
+        raise HTTPException(503, "photo upload failed — email the photos instead")
+    asyncio.create_task(telegram_alerts.send_message(
+        f"📷 {len(keys)} photo(s) added to sell lead #{inquiry_id} ({row.get('name') or '—'})"
+        "\n→ blackwhole.com/admin (Inquiries)", topic="leads"))
+    return {"ok": True, "count": len(keys)}
 
 
 async def _notify_new_subscriber(row: dict) -> None:
@@ -3120,7 +3188,11 @@ async def reserve_success(request: Request, session_id: str = Query("")):
         _public_ctx({
             "deposit": row,
             "is_paid": row.get("status") == "paid",
-            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+            "policy": (
+                stripe_gateway.FINANCED_POLICY_SHORT
+                if row.get("kind") == deposits.FINANCED_KIND
+                else stripe_gateway.REFUND_POLICY_SHORT
+            ),
         }),
     )
 
@@ -3209,6 +3281,9 @@ async def reserve_checkout(lot_id: str, payload: dict):
             stripe_gateway.create_checkout_session, deposit=deposit, lot=row
         )
     except Exception:
+        # The buyer only sees "checkout_unavailable"; Stripe's reason goes to
+        # the log so the operator can tell a one-off from a broken account.
+        log.exception("stripe checkout session failed for deposit %s", deposit["id"])
         # Close the row out rather than leaving a pending record no webhook can
         # ever resolve (there is no session to expire).
         await asyncio.to_thread(
@@ -4957,7 +5032,25 @@ def inv_backfill():
 @readcache.cached()
 def inq_list(status: str | None = None):
     # sync handler → FastAPI threadpool; memoised (readcache.py)
-    return {"items": inventory.list_inquiries(status)}
+    items = inventory.list_inquiries(status)
+    for q in items:
+        q["photos"] = inventory.inquiry_photo_keys(q)
+    return {"items": items}
+
+
+@app.get("/api/inquiry-photos/{key:path}")
+def inquiry_photo(key: str):
+    """Operator-only proxy for seller photos in the PRIVATE bucket (/api/ is session-walled)."""
+    try:
+        got = inquiry_photos.fetch(key)
+    except Exception as e:  # noqa: BLE001 - unconfigured / R2 down
+        raise HTTPException(503, f"photo store unavailable: {type(e).__name__}")
+    if got is None:
+        raise HTTPException(404, "no such photo")
+    data, ctype = got
+    return Response(data, media_type=ctype,
+                    headers={"Cache-Control": "private, max-age=604800",
+                             "X-Robots-Tag": "noindex"})
 
 
 @app.patch("/api/inquiries/{inquiry_id}")
@@ -5139,6 +5232,64 @@ async def dep_delete(deposit_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+_FINANCED_MIGRATION = (
+    ".venv/bin/python scripts/apply_sql.py scripts/sql/034_deposits_financed.sql"
+)
+
+
+@app.post("/api/deposits/financing-link")
+async def dep_financing_link(payload: dict):
+    """Operator makes an Affirm-only Checkout link for a negotiated amount.
+
+    The money number is the operator's (this is under /api/, so the session
+    middleware gates it) — e.g. $4,500 financed of a $9,000 deal, the rest in
+    cash at pickup. Same row-first-then-session order as `reserve_checkout`.
+    The link is a normal Checkout session: it expires in 24 h unpaid.
+    """
+    if not _reserve_enabled():
+        raise HTTPException(409, "Stripe is not configured (STRIPE_SECRET_KEY unset)")
+    payload = payload or {}
+    lot_id = str(payload.get("lot_id") or "").strip()
+    lot = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    if not lot:
+        raise HTTPException(404, "lot not found")
+    try:
+        deposit = await asyncio.to_thread(
+            deposits.create_financed,
+            lot_id=lot.get("lot_id") or lot_id,
+            quantity=payload.get("quantity"),
+            amount_usd=payload.get("amount_usd"),
+            order_total_usd=payload.get("order_total_usd"),
+            price_per_chair=lot.get("price_per_chair"),
+            buyer_name=payload.get("name"),
+            buyer_email=(payload.get("email") or "").strip() or None,
+            buyer_phone=(payload.get("phone") or "").strip() or None,
+        )
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        # 23514 = check_violation: the kind CHECK predates 'financed'.
+        if getattr(e, "sqlstate", None) == "23514":
+            raise HTTPException(409, f"apply migration 034 first: {_FINANCED_MIGRATION}")
+        raise
+
+    try:
+        session = await asyncio.to_thread(
+            stripe_gateway.create_checkout_session, deposit=deposit, lot=lot
+        )
+    except Exception as e:
+        await asyncio.to_thread(
+            deposits.transition, deposit["id"], "canceled",
+            failure_reason="session_create_failed",
+        )
+        # Operator-only route, so Stripe's reason (e.g. Affirm not enabled on
+        # the account) is worth showing.
+        raise HTTPException(502, f"Stripe refused the session: {e}")
+
+    await asyncio.to_thread(deposits.attach_session, deposit["id"], session.id)
+    return {"ok": True, "url": session.url, "deposit_id": deposit["id"]}
 
 
 # ───────────────────────────── site settings API ─────────────────────────────

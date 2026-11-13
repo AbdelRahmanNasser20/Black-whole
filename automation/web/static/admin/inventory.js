@@ -3,6 +3,8 @@
 // inline cell edits mark their <tr> is-pending. Filter state (`status`, `q`) lives in the URL via shell.js.
 // `q` is a client-side filter over the rows already fetched — /api/inventory has no search parameter.
 // The private storage note on a lot (facility address + gate code) is never read from a row here and never rendered.
+// The ◎ map view is the storefront's /map itself (static/site/map.js + the public /map/api/points feed), so the
+// operator sees exactly what buyers see — city-level pins, no private fields.
 import {$, $$, toast, escapeHtml, escapeAttr, getParams, setParams} from './shared.js';
 import {load as uiLoad, pending, api, renderEmpty} from '../ui/state.js';
 
@@ -439,6 +441,35 @@ async function onPlatformClear(btn) {
   });
 }
 
+// ───────── map (the storefront's /map, same mounter + feed) ─────────
+
+let mapCtl = null;          // mountSiteMap() handle once mounted
+let mapMounting = null;     // in-flight mount — a double click must not mount twice
+
+async function toggleMap(btn) {
+  const section = $('#inv-map-section');
+  if (!section) return;
+  section.hidden = !section.hidden;
+  btn.setAttribute('aria-expanded', String(!section.hidden));
+  btn.classList.toggle('is-active', !section.hidden);
+  if (section.hidden) return;
+  if (mapCtl) { mapCtl.map.invalidateSize(); return; }   // Leaflet re-measures after being hidden
+  if (mapMounting) return;
+  const el = $('#inv-map');
+  mapMounting = (async () => {
+    try {
+      const {mountSiteMap, wireFilters} = await import('../site/map.js');
+      mapCtl = await mountSiteMap(el, {listEl: $('#inv-map-list'), countEl: $('#map-count')});
+      wireFilters($('#map-filters'), mapCtl, {syncUrl: false});   // ?status= belongs to the table filter
+    } catch (err) {
+      el.classList.remove('map-loading');
+      el.innerHTML = `<div class="map-empty"><p>${escapeHtml(err.message || 'Map unavailable')}</p></div>`;
+    } finally {
+      mapMounting = null;
+    }
+  })();
+}
+
 // ───────── mount / load ─────────
 
 let mounted = false;
@@ -455,6 +486,8 @@ export function mount() {
   // one delegated listener each — rows are re-rendered on every load
   wrap()?.addEventListener('change', onFieldChange);
   wrap()?.addEventListener('click', onRowClick);
+
+  $('#inv-map-toggle')?.addEventListener('click', (e) => toggleMap(e.currentTarget));
 
   $('#inv-refresh')?.addEventListener('click', (e) => {
     pending(e.currentTarget, '↻ loading…', () => loadInventory({keepOld: true}));

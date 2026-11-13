@@ -208,6 +208,13 @@
         NOTHING FITS <em>YET</em>?
         <a href="#alerts">JOIN THE ALERT LIST →</a>
       </p>
+      {% if contact.phone %}
+      <p class="section-crosslink mono tiny">
+        RATHER TALK? CALL OR TEXT
+        <a href="tel:{{ contact.tel }}">{{ contact.phone }}</a> ·
+        <a href="sms:{{ contact.tel }}">TEXT US →</a>
+      </p>
+      {% endif %}
     </div>
     <form class="manifest-form" id="contact-form" data-mode="landing">
       <div class="mf-row">
@@ -225,6 +232,9 @@
       </div>
       <div class="mf-row mf-row--two">
         <label><span>PHONE</span><input name="phone" autocomplete="tel"></label>
+        <label><span>ZIP (WHERE THE CHAIRS ARE OR ARE GOING)</span><input name="zip_code" required inputmode="numeric" pattern="[0-9]{5}" maxlength="5" autocomplete="postal-code" placeholder="5-digit ZIP"></label>
+      </div>
+      <div class="mf-row mf-row--two">
         <label><span>QUANTITY</span><input name="quantity_interested" type="number" min="1"></label>
       </div>
       <label class="mf-row"><span>MESSAGE</span>
