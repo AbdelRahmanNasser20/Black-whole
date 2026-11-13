@@ -89,6 +89,7 @@ from . import public_deals
 from . import public_sold
 from . import chairs_feed
 from . import rate_limit
+from . import scrape_guard
 from . import public_map
 from . import public_distress
 from . import seo_copy
@@ -131,6 +132,7 @@ PHASES = ["scrape", "llm", "download", "dewatermark", "facebook", "ebay"]
 app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
@@ -164,6 +166,37 @@ async def _response_headers_middleware(request: Request, call_next):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:
             response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@app.middleware("http")
+async def _scrape_guard_middleware(request: Request, call_next):
+    """Rate limit, trap ban and anonymous depth cap for the public auction feed.
+    Policy and numbers: automation/web/scrape_guard.py. The operator's admin
+    session passes straight through."""
+    path = request.url.path
+    if not scrape_guard.is_guarded(path) or not scrape_guard.enabled() \
+            or auth_svc.request_has_session(request):
+        return await call_next(request)
+    ip = rate_limit.client_ip(request)
+    if path == scrape_guard.TRAP_PATH:
+        scrape_guard.ban(ip)
+        print(f"[scrape_guard] trap hit, feed closed for {ip}", file=sys.stderr)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    wait = scrape_guard.ban_left(ip) or scrape_guard.over_limit(ip)
+    if wait:
+        return JSONResponse({"detail": "rate_limited"}, status_code=429,
+                            headers={"Retry-After": str(wait)})
+    if scrape_guard.depth(path, request.query_params) > scrape_guard.ANON_MAX_ROWS:
+        try:
+            viewer = await asyncio.to_thread(_platform_viewer, request)
+        except Exception:  # noqa: BLE001 - an auth lookup failure reads as anonymous
+            viewer = None
+        if not viewer:
+            return JSONResponse({"detail": "sign_in_required"}, status_code=401)
+    response = await call_next(request)
+    if scrape_guard.is_json(path):
+        response.headers["X-Robots-Tag"] = scrape_guard.ROBOTS_TAG
     return response
 
 
@@ -2254,6 +2287,9 @@ async def robots_txt():
         "Disallow: /admin\n"
         "Disallow: /api/\n"
         "Disallow: /deals\n"
+        "Disallow: /platform/api/\n"
+        "Disallow: /map/api/\n"
+        "Disallow: /distress/api/\n"
         "Disallow: /reserve/\n"
         "Allow: /\n"
         "\n"

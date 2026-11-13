@@ -158,7 +158,8 @@ def test_page_is_noindex_and_out_of_the_sitemap(no_db, monkeypatch):
     monkeypatch.setattr(inventory, "list_sold_showcase", lambda: [])
     assert "/platform" not in _client().get("/sitemap.xml").text
     # robots.txt must NOT disallow it: a crawler has to fetch the page to see the noindex.
-    assert "/platform" not in _client().get("/robots.txt").text
+    # (only its JSON prefix is disallowed — scrape_guard)
+    assert "/platform" not in _client().get("/robots.txt").text.replace("Disallow: /platform/api/", "")
 
 
 def test_no_storefront_nav_or_self_link(no_db):
