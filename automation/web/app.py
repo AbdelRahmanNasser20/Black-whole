@@ -2093,6 +2093,7 @@ def public_platform(request: Request):
         _public_ctx({
             "platform_sources": list(_PLATFORM_SOURCE_NAMES.values()),
             "stats": platform_api.stats(),
+            "sold_head": public_sold.headline(),
             "sources_tracked": len(platform_api.SITES),
             "sources_planned": len(platform_api.PLANNED_SITES),
             "planned_sources": [name for name, _kind in platform_api.PLANNED_SITES.values()],

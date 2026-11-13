@@ -137,3 +137,24 @@ def test_page_shows_a_plain_message_when_the_read_fails(monkeypatch):
 
 def test_deals_feed_links_to_sold_prices():
     assert 'href="/deals/sold"' in TestClient(app).get("/deals").text
+
+
+def test_headline_is_memo_only_and_keeps_the_last_good_read(monkeypatch):
+    ps._head.update(at=0.0, data=None, busy=False)
+    calls = []
+
+    class Now:  # run the refresh inline instead of on a thread
+        def __init__(self, target, **kw): self.t = target
+        def start(self): self.t()
+    monkeypatch.setattr(ps.threading, "Thread", Now)
+    monkeypatch.setattr(ps.db, "fetch_one", lambda sql, params=(): calls.append(sql) or {
+        "sold": 6, "not_sold": 4, "p25": 1, "median": 2, "p75": 3})
+    ps.headline()                      # first call starts the read
+    assert ps.headline()["sold_share"] == 60.0 and len(calls) == 1   # served from the memo
+    assert "currency = %s" in calls[0] and "tracked_lots" in calls[0]
+    def boom(sql, params=()):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(ps.db, "fetch_one", boom)
+    ps._head["at"] = 0.0               # stale
+    assert ps.headline()["sold"] == 6  # a failed refresh keeps the last numbers
+    ps._head.update(at=0.0, data=None, busy=False)

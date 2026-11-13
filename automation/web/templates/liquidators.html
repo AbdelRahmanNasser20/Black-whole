@@ -11,7 +11,7 @@
 {% block body_class %}page-pt page-lq{% endblock %}
 {% block head_extra %}
   <meta name="robots" content="noindex,nofollow">
-  <link rel="stylesheet" href="/static/site/platform-tools.css?v={{ now }}">
+  <link rel="stylesheet" href="/static/site/platform-tools.css?v={{ asset_v }}">
 {% endblock %}
 
 {% block content %}
@@ -222,5 +222,5 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/liquidators.js?v={{ now }}"></script>
+<script type="module" src="/static/site/liquidators.js?v={{ asset_v }}"></script>
 {% endblock %}

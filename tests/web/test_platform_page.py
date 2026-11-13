@@ -51,6 +51,8 @@ def _no_auth(monkeypatch):
     yield
     auth_svc.reset_caches()
 
+from automation.web import public_sold  # noqa: E402
+
 
 @pytest.fixture
 def no_db(monkeypatch):
@@ -65,6 +67,7 @@ def no_db(monkeypatch):
     monkeypatch.setattr(app_module.db, "fetch_all", boom)
     monkeypatch.setattr(app_module.db, "fetch_one", boom)
     monkeypatch.setattr(platform_api, "stats", lambda: None)
+    monkeypatch.setattr(public_sold, "headline", lambda: None)
 
 
 def _client():
@@ -445,3 +448,24 @@ def test_script_never_claims_live_without_the_endpoint_saying_so():
     assert "if (f.status === 'open' && res.total > 0) view.sawOpen = true;" in AUCTIONS_JS
     # the slow closed-archive query runs on a click, never on page load
     assert "status: 'open'" in AUCTIONS_JS.split("const f = ", 1)[1].split(";", 1)[0]
+
+
+def test_sold_proof_section_renders_from_the_memo_only(no_db, monkeypatch):
+    # with a headline: the share of bid-on closes that did NOT sell, and the count behind it
+    monkeypatch.setattr(public_sold, "headline", lambda: {
+        "sold": 4110, "not_sold": 4774, "sold_share": 46.3, "median": 260.0, "p25": 42.0, "p75": 2225.0})
+    html = _page()
+    assert 'id="proof"' in html and 'href="/deals/sold"' in html
+    assert "54%" in html and "4,110" in html and "4,774" in html
+    # without one: the section and its link stay, no invented number
+    monkeypatch.setattr(public_sold, "headline", lambda: None)
+    html = _page()
+    assert 'id="proof"' in html and 'href="/deals/sold"' in html
+    assert "54%" not in html
+
+
+def test_asset_links_carry_a_real_cache_key(no_db):
+    # `?v={{ now }}` rendered as `?v=` (no `now` in the context): a browser kept the old CSS after a deploy.
+    html = _page()
+    assert "?v=\"" not in html
+    assert "platform.css?v=" in html

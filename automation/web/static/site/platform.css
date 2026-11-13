@@ -28,8 +28,8 @@
   font-family: var(--sans); font-size: 16px; line-height: 1.5;
 }
 .pf-page :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-.pf-hero, .pf-product, .pf-pricing, .pf-close { padding-left: 48px; padding-right: 48px; }
-.pf-hero > *, .pf-product > *, .pf-pricing > *, .pf-close > *, .pf-app-head { max-width: 1200px; margin-left: auto; margin-right: auto; }
+.pf-hero, .pf-product, .pf-proof, .pf-pricing, .pf-close { padding-left: 48px; padding-right: 48px; }
+.pf-hero > *, .pf-product > *, .pf-proof > *, .pf-pricing > *, .pf-close > *, .pf-app-head { max-width: 1200px; margin-left: auto; margin-right: auto; }
 
 /* ───────────────────────── nav ───────────────────────── */
 .pf-nav {
@@ -95,7 +95,7 @@
 .pf-h2 {
   font-family: var(--display); font-weight: 400; text-transform: none;
   font-size: clamp(32px, 3.6vw, 54px); line-height: 1.05; letter-spacing: -0.01em;
-  margin: 0 0 20px 0;
+  margin: 0 auto 20px auto;
 }
 .pf-app-head { padding: 0 16px; margin-bottom: 22px; }
 .pf-app-head .pf-h2 { margin-bottom: 8px; }
@@ -418,7 +418,7 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
 
 /* ───────────────────────── what you get: the ledger ───────────────────────── */
 .pf-product { padding-top: 96px; padding-bottom: 24px; }
-.pf-feats { margin: 0; border-top: 1px solid var(--border-strong); }
+.pf-feats { margin: 0 auto; border-top: 1px solid var(--border-strong); }
 .pf-feat {
   display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
   grid-template-areas: "name copy" "name fact";
@@ -439,6 +439,19 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
   border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
   border-radius: 999px; padding: 3px 12px;
 }
+
+/* ───────────────────────── sold means sold ───────────────────────── */
+.pf-proof { padding-top: 96px; }
+.pf-proof-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 32px 64px; align-items: center; }
+.pf-proof-copy { margin: 0 0 22px 0; max-width: 34em; color: var(--muted); font-size: 17px; line-height: 1.6; }
+.pf-proof-nums { margin: 0; display: grid; gap: 1px; background: var(--border-strong); border: 1px solid var(--border-strong); border-radius: 12px; overflow: hidden; }
+.pf-proof-num { display: grid; grid-template-columns: 5.2em 1fr; gap: 18px; align-items: baseline; padding: 20px 24px; background: var(--surface); }
+.pf-proof-num dt { font-family: var(--mono); font-size: 24px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.pf-proof-num dd { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.45; }
+.pf-proof-num--main { grid-template-columns: 1fr; gap: 6px; padding: 26px 24px; }
+.pf-proof-num--main dt { font-family: var(--display); font-size: clamp(56px, 6vw, 88px); line-height: 0.95; color: var(--accent); }
+.pf-proof-num--main dd { font-size: 17px; color: var(--text); }
+@media (max-width: 900px) { .pf-proof-grid { grid-template-columns: 1fr; } .pf-proof { padding-top: 72px; } }
 
 /* ───────────────────────── founding members ───────────────────────── */
 .pf-pricing { padding-top: 96px; }
@@ -481,7 +494,7 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
   .pf-feat { grid-template-columns: 1fr; grid-template-areas: "name" "copy" "fact"; gap: 10px; padding: 24px 0 26px 0; }
 }
 @media (max-width: 900px) {
-  .pf-hero, .pf-product, .pf-pricing, .pf-close { padding-left: 24px; padding-right: 24px; }
+  .pf-hero, .pf-product, .pf-proof, .pf-pricing, .pf-close { padding-left: 24px; padding-right: 24px; }
   .pf-app { padding-left: 16px; padding-right: 16px; }
   .pf-product, .pf-pricing { padding-top: 72px; }
   .pf-close { padding-top: 80px; padding-bottom: 72px; }
@@ -556,7 +569,7 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
   .pf-detail-why { grid-column: 1 / -1; }
 }
 @media (max-width: 600px) {
-  .pf-hero, .pf-product, .pf-pricing, .pf-close { padding-left: 16px; padding-right: 16px; }
+  .pf-hero, .pf-product, .pf-proof, .pf-pricing, .pf-close { padding-left: 16px; padding-right: 16px; }
   .pf-nav { padding: 16px 0; font-size: 13px; flex-wrap: wrap; }
   .pf-nav-links { gap: 14px; flex-wrap: wrap; }
   .pf-hero-grid { padding-top: 36px; padding-bottom: 48px; }

@@ -15,6 +15,8 @@ came from the site's own close record (bidbox → detail → search precedence,
 from __future__ import annotations
 
 import re
+import threading
+import time
 from datetime import date, datetime
 from typing import Any
 
@@ -149,3 +151,37 @@ def fetch_sold(*, q: str | None = None, category: str | None = None,
             "categories": [dict(_stats(c), value=c["value"]) for c in cats],
             "rows": out_rows, "total": total, "page": page, "per_page": PER_PAGE,
             "pages": max(1, min(MAX_PAGE, -(-total // PER_PAGE)))}
+
+
+# ── headline numbers for the /platform landing page ──────────────────────────
+# Memo only on the request path: never blocks, never raises. A stale memo starts
+# one background read; a failed read keeps the last good numbers.
+HEAD_TTL = 6 * 3600
+HEAD_RETRY = 300
+_head: dict[str, Any] = {"at": 0.0, "data": None, "busy": False}
+_head_lock = threading.Lock()
+
+
+def _refresh_headline() -> None:
+    try:
+        where, args = base_where()
+        data = _stats(db.fetch_one(f"SELECT {_AGG} FROM lot_archive WHERE {where}", tuple(args)))
+    except Exception:  # noqa: BLE001 - the landing page renders without the numbers
+        data = None
+    with _head_lock:
+        _head["busy"] = False
+        if data is not None:
+            _head["data"], _head["at"] = data, time.monotonic()
+        else:
+            _head["at"] = time.monotonic() - HEAD_TTL + HEAD_RETRY
+
+
+def headline() -> dict | None:
+    """All-time `_stats` (sold, not_sold, sold_share, median, p25, p75), or None before the first read."""
+    with _head_lock:
+        fresh = _head["at"] and time.monotonic() - _head["at"] < HEAD_TTL
+        if fresh or _head["busy"]:
+            return _head["data"]
+        _head["busy"] = True
+    threading.Thread(target=_refresh_headline, name="sold-headline", daemon=True).start()
+    return _head["data"]

@@ -30,8 +30,8 @@
 {% block head_extra %}
   <meta name="robots" content="noindex,nofollow">
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/site/platform.css?v={{ now }}">
-  <link rel="stylesheet" href="/static/site/platform/map.css?v={{ now }}">
+  <link rel="stylesheet" href="/static/site/platform.css?v={{ asset_v }}">
+  <link rel="stylesheet" href="/static/site/platform/map.css?v={{ asset_v }}">
 {% endblock %}
 
 {% block content %}
@@ -42,6 +42,7 @@
       <span class="pf-nav-links">
         <a href="#app">Live demo</a>
         <a href="#product">What you get</a>
+        <a href="/deals/sold">Sold prices</a>
         <a href="#pricing">Pricing</a>
         <a href="/platform/signup" class="pf-nav-in">Sign in</a>
       </span>
@@ -327,6 +328,35 @@
     </dl>
   </section>
 
+  {# ───────────── Sold means sold — the accuracy claim, with the numbers from lot_archive (public_sold.headline). ───────────── #}
+  <section class="pf-proof" id="proof" aria-labelledby="pf-proof-title">
+    <div class="pf-proof-grid">
+      <div class="pf-proof-say">
+        <h2 class="pf-h2" id="pf-proof-title">Sold means sold.</h2>
+        <p class="pf-proof-copy">An auction can end with a top bid and still not sell, because the
+          bid was under the reserve. A tracker that records the last bid it saw counts that as a
+          sale. We read the auction site's own close record, so a price here is a price a buyer paid.</p>
+        <a class="pf-cta-quiet" href="/deals/sold">See the sold prices</a>
+      </div>
+      {% if sold_head and sold_head.sold_share is not none %}
+      <dl class="pf-proof-nums" aria-label="From our close records">
+        <div class="pf-proof-num pf-proof-num--main">
+          <dt>{{ "{:.0f}".format(100 - sold_head.sold_share) }}%</dt>
+          <dd>of auctions that closed with a bid did not sell</dd>
+        </div>
+        <div class="pf-proof-num">
+          <dt>{{ "{:,}".format(sold_head.sold) }}</dt>
+          <dd>confirmed sales, each with the price paid</dd>
+        </div>
+        <div class="pf-proof-num">
+          <dt>{{ "{:,}".format(sold_head.not_sold) }}</dt>
+          <dd>closes under the reserve, counted and never priced</dd>
+        </div>
+      </dl>
+      {% endif %}
+    </div>
+  </section>
+
   {# ───────────── Founding members — billing ships dark; no invented prices, no live checkout. ───────────── #}
   <section class="pf-pricing" id="pricing" aria-labelledby="pf-pricing-title">
     <h2 class="pf-h2" id="pf-pricing-title">Founding members</h2>
@@ -367,6 +397,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script type="module" src="/static/site/platform.js?v={{ now }}"></script>
-<script type="module" src="/static/site/platform/map.js?v={{ now }}"></script>
+<script type="module" src="/static/site/platform.js?v={{ asset_v }}"></script>
+<script type="module" src="/static/site/platform/map.js?v={{ asset_v }}"></script>
 {% endblock %}
