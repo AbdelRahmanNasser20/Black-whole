@@ -208,6 +208,13 @@
         NOTHING FITS <em>YET</em>?
         <a href="#alerts">JOIN THE ALERT LIST →</a>
       </p>
+      {% if contact.phone %}
+      <p class="section-crosslink mono tiny">
+        RATHER TALK? CALL OR TEXT
+        <a href="tel:{{ contact.tel }}">{{ contact.phone }}</a> ·
+        <a href="sms:{{ contact.tel }}">TEXT US →</a>
+      </p>
+      {% endif %}
     </div>
     <form class="manifest-form" id="contact-form" data-mode="landing">
       <div class="mf-row">
