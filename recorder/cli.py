@@ -56,6 +56,7 @@ from recorder.sources import govdeals as govdeals_source
 from recorder.sources.allsurplus import AllSurplusSource
 from recorder.sources.govdeals import GovDealsSource
 from recorder.sources.gsa import GSASource
+from recorder.sources.hibid import HiBidSource
 from recorder.sources.ibid_il import IBidIllinoisSource
 from recorder.sources.mibid import MiBidSource
 from recorder.sources.mnbid import MNBidSource
@@ -70,7 +71,7 @@ from recorder.sources.base import SourceFetchFailed
 # `--source` choices (needed before any adapter is instantiated, so --help
 # never touches the network) and `build_registry()`'s dict.
 SOURCE_NAMES = ("govdeals", "allsurplus", "public_surplus", "purple_wave", "municibid", "mibid", "gsa",
-                "ibid_il", "wisconsin_surplus", "usgovbid", "mnbid")
+                "ibid_il", "wisconsin_surplus", "usgovbid", "mnbid", "hibid")
 # Sources on the maestro API (bidbox finals, the 7-day re-check, the lot archive).
 MAESTRO_SOURCES = govdeals_source.MAESTRO_SOURCES
 
@@ -90,6 +91,7 @@ def build_registry() -> dict:
         "wisconsin_surplus": WisconsinSurplusSource(),
         "usgovbid": USGovBidSource(),
         "mnbid": MNBidSource(),
+        "hibid": HiBidSource(),
     }
 
 
