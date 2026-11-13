@@ -146,6 +146,50 @@ def test_discover_raises_on_transport_error(monkeypatch):
         ibid_il.IBidIllinoisSource().discover()
 
 
+# --- empty category ("No items found", captured live 2026-10-16) ---------
+
+def test_parse_browse_empty_category_has_no_rows():
+    rows, _ = ibid_il.parse_browse(_html("browse_empty.html"))
+    assert rows == []
+
+
+def test_fetch_browse_accepts_empty_category(monkeypatch, capsys):
+    monkeypatch.setattr(ibid_il, "polite_get",
+                        lambda *a, **k: _Resp(_html("browse_empty.html")))
+    assert ibid_il._fetch_browse(ibid_il.FURNITURE_CATEGORY_ID) is not None
+    assert "unrecognised page shape" not in capsys.readouterr().out
+
+
+def test_discover_empty_furniture_category_is_not_drift(monkeypatch, capsys):
+    """A legitimately empty Furniture category must not print the drift error
+    or the 'Furniture category page failed' warning — title matches still run."""
+    def fake(url, *, params=None, headers=None, **kw):
+        pid = str((params or {}).get("id"))
+        if url == ibid_il.BROWSE_URL:
+            if pid == ibid_il.ALL_CATEGORY_ID:
+                return _Resp(_html("browse_all.html"))
+            return _Resp(_html("browse_empty.html"))
+        if pid in ITEMS:
+            return _Resp(_html(ITEMS[pid]), 200, url)
+        return _Resp("", 502, url)
+
+    monkeypatch.setattr(ibid_il, "polite_get", fake)
+    obs = ibid_il.IBidIllinoisSource().discover()   # must not raise
+    out = capsys.readouterr().out
+    assert "unrecognised page shape" not in out
+    assert "Furniture category page failed" not in out
+    assert all(o.status == "active" for o in obs)
+
+
+def test_discover_whole_site_empty_is_clean_zero_matches(monkeypatch, capsys):
+    """Both browse pages empty = a quiet site, a clean [] (breaker success),
+    never SourceFetchFailed."""
+    monkeypatch.setattr(ibid_il, "polite_get",
+                        lambda *a, **k: _Resp(_html("browse_empty.html")))
+    assert ibid_il.IBidIllinoisSource().discover() == []
+    assert "unrecognised page shape" not in capsys.readouterr().out
+
+
 # --- poll() ------------------------------------------------------------
 
 def test_poll_reads_closed_final(monkeypatch):
