@@ -348,3 +348,41 @@ def test_restore_lot_queues_fb_marketplace_for_approval(_ledger, monkeypatch):
     row = lc.restore_lot("gd-1-2", log=lambda _m: None)
     assert row["fake_sold_out"] is False and row["status"] == "active_bid"
     assert seen == [("fb_marketplace", "pending_approval")], "relist is an approval, never an automatic post"
+
+
+# ─── IndexNow pings (site add/remove/restore) ───
+
+def test_remove_lot_pings_indexnow(_ledger, monkeypatch):
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda *a, **k: {})
+    pinged = []
+    monkeypatch.setattr(lc.indexnow, "ping_lot", lambda row: pinged.append(row["lot_id"]) or True)
+    logs = []
+    lc.remove_lot("gd-1-2", log=logs.append)
+    assert pinged == ["gd-1-2"]
+    assert any("IndexNow: pinged /listings/gd-1-2" in m for m in logs)
+
+
+def test_remove_lot_fb_only_does_not_ping(_ledger, monkeypatch):
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda *a, **k: {})
+    monkeypatch.setattr(lc.indexnow, "ping_lot", lambda row: pytest.fail("fb-only remove must not ping"))
+    lc.remove_lot("gd-1-2", channels=("fb",), log=lambda _m: None)
+
+
+def test_remove_lot_survives_a_ping_failure(_ledger, monkeypatch):
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda *a, **k: {})
+
+    def boom(row):
+        raise RuntimeError("thread start failed")
+    monkeypatch.setattr(lc.indexnow, "ping_lot", boom)
+    logs = []
+    res = lc.remove_lot("gd-1-2", log=logs.append)
+    assert res.lot_id == "gd-1-2"
+    assert any("IndexNow ping skipped" in m for m in logs)
+
+
+def test_restore_lot_pings_indexnow(_ledger, monkeypatch):
+    monkeypatch.setattr(lc.channel_store, "set_state", lambda *a, **k: {})
+    pinged = []
+    monkeypatch.setattr(lc.indexnow, "ping_lot", lambda row: pinged.append(row["lot_id"]) or True)
+    lc.restore_lot("gd-1-2", log=lambda _m: None)
+    assert pinged == ["gd-1-2"]

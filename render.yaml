@@ -75,6 +75,9 @@ envVarGroups:
         sync: false
       - key: STRIPE_WEBHOOK_SECRET  # whsec_… from the live webhook endpoint; unset = webhook closed
         sync: false
+      # IndexNow (Bing/ChatGPT search). UNSET = dark: /<key>.txt 404s, no pings.
+      - key: INDEXNOW_KEY           # 32 hex chars; public by design (served at /<key>.txt)
+        sync: false
 
 services:
   # ── 1. Always-on website ────────────────────────────────────────────────

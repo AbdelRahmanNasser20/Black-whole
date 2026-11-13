@@ -60,7 +60,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
-from .. import catalog_feed, google_feed, lot_channels
+from .. import catalog_feed, google_feed, indexnow, lot_channels
 from .. import inventory
 from .. import inquiry_photos
 from .. import lot_images
@@ -2172,6 +2172,17 @@ async def robots_txt():
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
     )
+
+
+# IndexNow key file (Bing ownership check). MUST stay registered AFTER
+# /robots.txt — `/{name}.txt` matches every root .txt path, so any future root
+# *.txt route has to be registered BEFORE this one or it gets shadowed.
+@app.get("/{name}.txt", response_class=PlainTextResponse, include_in_schema=False)
+async def indexnow_key_file(name: str):
+    key = indexnow.key()
+    if not key or name != key:
+        raise HTTPException(404, headers={"Cache-Control": "no-store"})
+    return key
 
 
 def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
