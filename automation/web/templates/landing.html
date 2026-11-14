@@ -9,7 +9,30 @@
 {% endblock %}
 
 {% block content %}
-<section class="hero">
+{# Top of the page = moving photos. `hero_shots` = photo URLs picked in app.py
+   (HERO_PICKS + HERO_STOCK); with none, the hero stays plain. Each photo gets
+   6 s; the keyframes are sized here because they depend on the photo count. #}
+<section class="hero{% if hero_shots %} hero--media{% endif %}">
+  {% if hero_shots %}
+  {% set slot = 100 / (hero_shots | length) %}
+  <style>
+    .hero-shot { animation-duration: {{ (hero_shots | length) * 6 }}s; }
+    @keyframes heroShot {
+      0% { opacity: 0; transform: scale(1.04); }
+      {{ "%.2f" | format(slot * 0.2) }}% { opacity: 1; }
+      {{ "%.2f" | format(slot) }}% { opacity: 1; }
+      {{ "%.2f" | format([slot * 1.28, 100] | min) }}% { opacity: 0; transform: scale(1.14); }
+      100% { opacity: 0; transform: scale(1.14); }
+    }
+  </style>
+  <div class="hero-media" aria-hidden="true">
+    {% for src in hero_shots %}
+    <img class="hero-shot" src="{{ src }}" alt=""
+         {% if not loop.first %}loading="lazy"{% else %}fetchpriority="high"{% endif %}
+         decoding="async" style="animation-delay: {{ loop.index0 * 6 }}s">
+    {% endfor %}
+  </div>
+  {% endif %}
   <div class="hero-grid">
     <div class="hero-tag mono">SALES FLOOR · 2026 · NEW LOTS WEEKLY</div>
     <h1 class="hero-title">
@@ -24,20 +47,8 @@
       without the catalog markup.
     </p>
     <div class="hero-cta">
-      <a href="/listings" class="btn btn-primary">SHOP AVAILABLE CHAIRS</a>
+      <a href="/map" class="btn btn-primary">SHOP AVAILABLE CHAIRS</a>
       <a href="/sell" class="btn btn-ghost">HAVE CHAIRS TO LIQUIDATE? →</a>
-    </div>
-  </div>
-  <div class="hero-sidebar" aria-hidden="true">
-    <div class="ticker">
-      <span>MANIFEST&nbsp;·&nbsp;</span>
-      <span>BANQUET&nbsp;·&nbsp;</span>
-      <span>STACKING&nbsp;·&nbsp;</span>
-      <span>FOLDING&nbsp;·&nbsp;</span>
-      <span>EXEC&nbsp;·&nbsp;</span>
-      <span>PADDED&nbsp;·&nbsp;</span>
-      <span>METAL&nbsp;·&nbsp;</span>
-      <span>MANIFEST&nbsp;·&nbsp;</span>
     </div>
   </div>
 </section>
@@ -241,6 +252,7 @@
         <textarea name="message" rows="4" placeholder="Tell us which lot or describe what you have."></textarea>
       </label>
       <button type="submit" class="btn btn-primary">FILE INQUIRY</button>
+      <div class="mf-hint mono tiny">BUYERS ALSO GET OUR NEW-LOT ALERTS. UNSUBSCRIBE ANY TIME.</div>
       <div class="mf-result" hidden></div>
     </form>
   </div>
