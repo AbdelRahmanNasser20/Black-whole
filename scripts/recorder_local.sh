@@ -25,6 +25,6 @@ default_env() {   # default_env NAME VALUE
     export "${name}=${value}"
 }
 default_env RECORDER_PROXY_URL   "socks5h://127.0.0.1:1081"
-default_env RECORDER_PROXY_HOSTS "publicsurplus.com,mibid.michigan.gov"
+default_env RECORDER_PROXY_HOSTS "publicsurplus.com,mibid.michigan.gov,propertyroom.com"
 
 exec /Users/abdelnasser/Projects/blackwhole/listing_automation/.venv/bin/python -m recorder.cli run

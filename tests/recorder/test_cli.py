@@ -125,7 +125,7 @@ def test_registry_has_all_sources():
     assert set(registry.keys()) == set(cli.SOURCE_NAMES)
     assert set(cli.SOURCE_NAMES) == {
         "govdeals", "allsurplus", "public_surplus", "purple_wave", "municibid", "mibid", "gsa",
-        "ibid_il", "wisconsin_surplus", "usgovbid", "mnbid",
+        "ibid_il", "wisconsin_surplus", "usgovbid", "mnbid", "propertyroom",
     }
 
 
