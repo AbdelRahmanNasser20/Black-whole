@@ -119,7 +119,7 @@ PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "(619) 407-8945")
 # Read at request time by web/platform_routes.py and web/platform_auth.py:
 #   SUPABASE_URL              project URL (public)
 #   SUPABASE_PUBLISHABLE_KEY  publishable/anon key for supabase-js (public)
-#   SUPABASE_JWT_SECRET       HS256 secret that verifies access tokens (SECRET)
+#   SUPABASE_JWT_SECRET       legacy HS256 secret (SECRET); not needed when the project signs ES256 (JWKS from SUPABASE_URL)
 
 # ── Reserve with deposit (Stripe Checkout) ──────────────────────────────────
 # SHIPS DARK. No STRIPE_SECRET_KEY => no Reserve button on the storefront,

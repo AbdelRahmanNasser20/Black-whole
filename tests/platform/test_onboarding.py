@@ -72,7 +72,9 @@ def test_signup_page_renders_without_supabase_config(monkeypatch):
     from automation.web.app import app
     r = TestClient(app).get("/platform/signup")
     assert r.status_code == 200
-    assert "not configured" in r.text.lower()
+    # No sign-in yet: the page still takes the lead (the old /platform access form), never a dead end.
+    assert 'id="pf-access-form"' in r.text and "[PLATFORM PAGE]" in r.text
+    assert "supabase-js" not in r.text and 'id="otp-form"' not in r.text
 
 
 def test_signup_page_injects_public_config(monkeypatch):

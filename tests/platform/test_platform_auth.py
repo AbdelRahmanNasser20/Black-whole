@@ -116,3 +116,63 @@ def test_non_uuid_sub_401(fake_db):
 def test_upsert_sets_last_seen_on_insert():
     from automation.web import platform_auth as pa
     assert "(user_id, email, last_seen_at) VALUES (%s, %s, now())" in pa._UPSERT_SQL
+
+
+# --- asymmetric signing keys (the live project signs ES256; public keys come from JWKS) ---
+
+URL = "https://proj.supabase.co"
+
+
+@pytest.fixture
+def es256(monkeypatch):
+    from cryptography.hazmat.primitives.asymmetric import ec
+
+    key = ec.generate_private_key(ec.SECP256R1())
+    monkeypatch.delenv("SUPABASE_JWT_SECRET")
+    monkeypatch.setenv("SUPABASE_URL", URL)
+    asked = []
+
+    class _Client:
+        def get_signing_key_from_jwt(self, token):
+            return type("K", (), {"key": key.public_key()})()
+
+    monkeypatch.setattr(platform_auth, "_jwks", lambda url: asked.append(url) or _Client())
+
+    def make(signer=key, iss=URL + "/auth/v1", aud="authenticated"):
+        return jwt.encode({"sub": UID, "email": "a@b.com", "aud": aud, "iss": iss,
+                           "exp": int(time.time()) + 3600}, signer, algorithm="ES256")
+
+    make.asked = asked
+    return make
+
+
+def test_es256_token_verifies_against_the_project_jwks_without_a_secret(es256):
+    assert platform_auth.get_current_user(_req(bearer=es256()))["user_id"] == UID
+    assert es256.asked == [URL]
+
+
+def test_es256_token_signed_by_another_key_401(es256):
+    from cryptography.hazmat.primitives.asymmetric import ec
+    assert _status(_req(bearer=es256(signer=ec.generate_private_key(ec.SECP256R1())))).status_code == 401
+
+
+def test_es256_token_from_another_project_401(es256):
+    assert _status(_req(bearer=es256(iss="https://evil.supabase.co/auth/v1"))).status_code == 401
+
+
+def test_hs256_token_is_refused_when_only_jwks_is_configured(es256):
+    e = _status(_req(bearer=_token()))
+    assert e.status_code == 401 and e.detail == "platform auth not configured"
+
+
+def test_unsigned_token_401(es256):
+    tok = jwt.encode({"sub": UID, "email": "a@b.com", "aud": "authenticated",
+                      "exp": int(time.time()) + 60}, None, algorithm="none")
+    assert _status(_req(bearer=tok)).status_code == 401
+
+
+def test_jwks_fetch_failure_reads_as_invalid_token(es256, monkeypatch):
+    def boom(url):
+        raise jwt.PyJWKClientError("network down")
+    monkeypatch.setattr(platform_auth, "_jwks", boom)
+    assert _status(_req(bearer=es256())).status_code == 401

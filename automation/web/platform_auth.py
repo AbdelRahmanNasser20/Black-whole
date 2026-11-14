@@ -1,7 +1,10 @@
 """Supabase auth for the liquidator platform: JWT verification + current user.
 
 Token lookup: ``Authorization: Bearer <jwt>``, else the ``sb-access-token``
-cookie. Verified HS256 against ``SUPABASE_JWT_SECRET`` (aud ``authenticated``).
+cookie (aud ``authenticated``). The token's own header picks the check:
+ES256/RS256 = the project's public signing keys from ``SUPABASE_URL`` (JWKS,
+no secret needed; issuer must be that project), HS256 = ``SUPABASE_JWT_SECRET``.
+Each algorithm is bound to its own key type, so one can never stand in for the other.
 No route definitions here; routes import these dependencies.
 """
 from __future__ import annotations
@@ -30,18 +33,47 @@ def _token_from(request: Request) -> str | None:
     return request.cookies.get(COOKIE_NAME) or None
 
 
+_JWKS_CLIENTS: dict[str, jwt.PyJWKClient] = {}
+_NOT_CONFIGURED = HTTPException(status_code=401, detail="platform auth not configured")
+
+
+def _jwks(url: str) -> jwt.PyJWKClient:
+    """One cached key-set client per project (keys are re-read hourly)."""
+    if url not in _JWKS_CLIENTS:
+        _JWKS_CLIENTS[url] = jwt.PyJWKClient(
+            f"{url}/auth/v1/.well-known/jwks.json", lifespan=3600, timeout=5)
+    return _JWKS_CLIENTS[url]
+
+
+def _claims(token: str) -> dict:
+    secret = os.environ.get("SUPABASE_JWT_SECRET")
+    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    alg = jwt.get_unverified_header(token).get("alg")
+    extra = {}
+    if alg == "HS256":
+        if not secret:
+            raise _NOT_CONFIGURED
+        key = secret
+    elif alg in ("ES256", "RS256"):
+        if not url:
+            raise _NOT_CONFIGURED
+        key = _jwks(url).get_signing_key_from_jwt(token).key
+        extra["issuer"] = f"{url}/auth/v1"
+    else:
+        raise jwt.InvalidAlgorithmError(alg)
+    return jwt.decode(token, key, algorithms=[alg], audience="authenticated",
+                      options={"require": ["exp", "sub"]}, **extra)
+
+
 def get_current_user(request: Request) -> dict:
     """The ``platform_users`` row for the caller; 401 if unauthenticated."""
-    secret = os.environ.get("SUPABASE_JWT_SECRET")
-    if not secret:
-        raise HTTPException(status_code=401, detail="platform auth not configured")
+    if not os.environ.get("SUPABASE_JWT_SECRET") and not os.environ.get("SUPABASE_URL"):
+        raise _NOT_CONFIGURED
     token = _token_from(request)
     if not token:
         raise HTTPException(status_code=401, detail="missing token")
     try:
-        claims = jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated",
-            options={"require": ["exp", "sub"]},
-        )
+        claims = _claims(token)
     except jwt.PyJWTError:
         raise HTTPException(status_code=401, detail="invalid token")
     uid, email = claims.get("sub"), claims.get("email")
