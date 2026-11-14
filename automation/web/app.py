@@ -2280,6 +2280,16 @@ def public_platform_deals(request: Request):
     )
 
 
+# Bing Webmaster Tools ownership file (public by design). Code from
+# bing.com/webmasters → Add site → XML File.
+@app.get("/BingSiteAuth.xml", include_in_schema=False)
+async def bing_site_auth():
+    return Response(
+        '<?xml version="1.0"?>\n<users>\n\t<user>F1622AF247E88937142BFA0511079194</user>\n</users>\n',
+        media_type="application/xml",
+    )
+
+
 @app.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     return (
