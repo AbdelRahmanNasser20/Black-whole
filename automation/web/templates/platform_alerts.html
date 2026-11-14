@@ -1,0 +1,103 @@
+{% extends "_public_base.html" %}
+{# Context: user_email. Talks to /platform/api/alerts and /platform/api/saved. #}
+{% block title %}Your alerts | Black Whole Liquidation{% endblock %}
+{% block body_class %}page-platform-alerts{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">{{ user_email }}</div>
+    <h1 class="page-title">YOUR ALERTS</h1>
+    <p class="page-lede">We email you when a new lot matches.</p>
+  </div>
+</section>
+<section class="terms-body">
+  <form id="al-form" style="max-width:520px">
+    <p id="al-msg" class="mono tiny" role="status"></p>
+    <label class="mono tiny" for="al-kw">KEYWORD</label>
+    <input id="al-kw" required minlength="2" maxlength="80" style="width:100%;padding:10px;margin:6px 0">
+    <label class="mono tiny" for="al-state">STATE (OPTIONAL, 2 LETTERS)</label>
+    <input id="al-state" maxlength="2" pattern="[A-Za-z]{2}" style="width:100%;padding:10px;margin:6px 0">
+    <label class="mono tiny" for="al-price">MAX PRICE (OPTIONAL)</label>
+    <input id="al-price" type="number" min="1" step="any" style="width:100%;padding:10px;margin:6px 0">
+    <label class="mono tiny" for="al-source">SOURCE (OPTIONAL)</label>
+    <input id="al-source" maxlength="40" placeholder="govdeals" style="width:100%;padding:10px;margin:6px 0">
+    <button class="btn btn-primary" type="submit">Add alert</button>
+  </form>
+  <h2 class="mono tiny" style="margin-top:32px">ACTIVE ALERTS</h2>
+  <ul id="al-list"></ul>
+  <h2 class="mono tiny" style="margin-top:32px">SAVED LOTS</h2>
+  <ul id="sv-list"></ul>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  var msg = document.getElementById("al-msg");
+  function api(method, url, body) {
+    return fetch(url, { method: method, credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined }).then(function (r) {
+      if (r.status === 401) { location.href = "/platform/signup"; return null; }
+      if (r.status === 403) { location.href = "/platform/onboarding"; return null; }
+      return r.json().then(function (j) { return { status: r.status, body: j }; });
+    });
+  }
+  function li(text, onDelete) {
+    var el = document.createElement("li");
+    el.appendChild(document.createTextNode(text + " "));
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = "Delete"; b.onclick = onDelete;
+    el.appendChild(b);
+    return el;
+  }
+  function loadAlerts() {
+    api("GET", "/platform/api/alerts").then(function (r) {
+      if (!r) return;
+      var ul = document.getElementById("al-list"); ul.textContent = "";
+      if (!r.body.alerts.length) ul.appendChild(document.createTextNode("No alerts yet."));
+      r.body.alerts.forEach(function (a) {
+        var bits = [a.keyword];
+        if (a.state_filter) bits.push(a.state_filter);
+        if (a.source_filter) bits.push(a.source_filter);
+        if (a.max_price) bits.push("under $" + a.max_price);
+        ul.appendChild(li(bits.join(" · "), function () {
+          api("DELETE", "/platform/api/alerts/" + a.id).then(loadAlerts);
+        }));
+      });
+    });
+  }
+  function loadSaved() {
+    api("GET", "/platform/api/saved").then(function (r) {
+      if (!r) return;
+      var ul = document.getElementById("sv-list"); ul.textContent = "";
+      if (!r.body.saved.length) ul.appendChild(document.createTextNode("Nothing saved yet."));
+      r.body.saved.forEach(function (s) {
+        ul.appendChild(li(s.source + " / " + s.lot_key, function () {
+          api("DELETE", "/platform/api/saved/" + encodeURIComponent(s.source) + "/" + encodeURIComponent(s.lot_key))
+            .then(loadSaved);
+        }));
+      });
+    });
+  }
+  document.getElementById("al-form").onsubmit = function (e) {
+    e.preventDefault();
+    var v = function (id) { return document.getElementById(id).value.trim(); };
+    var body = { keyword: v("al-kw") };
+    if (v("al-state")) body.state_filter = v("al-state");
+    if (v("al-source")) body.source_filter = v("al-source");
+    if (v("al-price")) body.max_price = parseFloat(v("al-price"));
+    api("POST", "/platform/api/alerts", body).then(function (r) {
+      if (!r) return;
+      if (r.status === 409) { msg.textContent = "Alert limit reached. Delete one first."; return; }
+      if (r.status === 422) { msg.textContent = "Check the fields: keyword 2-80 characters, state 2 letters."; return; }
+      msg.textContent = "";
+      document.getElementById("al-form").reset();
+      loadAlerts();
+    });
+  };
+  loadAlerts(); loadSaved();
+})();
+</script>
+{% endblock %}

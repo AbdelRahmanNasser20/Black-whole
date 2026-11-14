@@ -1,0 +1,52 @@
+{% extends "_public_base.html" %}
+{# Context: user_email. Posts JSON to /platform/api/onboarding. #}
+{% block title %}Set up your account | Black Whole Liquidation{% endblock %}
+{% block body_class %}page-platform-onboarding{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">STEP 2 OF 2 · {{ user_email }}</div>
+    <h1 class="page-title">ABOUT YOU</h1>
+    <p class="page-lede">Two minutes. This tunes your alerts.</p>
+  </div>
+</section>
+<section class="terms-body">
+  <form id="ob-form" style="max-width:520px">
+    <p id="ob-msg" class="mono tiny" role="status"></p>
+    <label class="mono tiny" for="phone">PHONE</label>
+    <input id="phone" type="tel" required autocomplete="tel" style="width:100%;padding:10px;margin:6px 0">
+    <p class="tiny">We ask for your phone for early-access support and first dibs on hot lots.</p>
+    <label class="tiny"><input id="sms" type="checkbox"> Text me occasionally about hot lots and account help. Msg &amp; data rates may apply. Reply STOP to opt out.</label>
+    <p></p>
+    <label class="mono tiny" for="company">COMPANY</label>
+    <input id="company" maxlength="200" style="width:100%;padding:10px;margin:6px 0">
+    <label class="mono tiny" for="state">STATE</label>
+    <input id="state" maxlength="40" style="width:100%;padding:10px;margin:6px 0">
+    <label class="mono tiny" for="flips">WHAT DO YOU FLIP?</label>
+    <input id="flips" maxlength="500" style="width:100%;padding:10px;margin:6px 0">
+    <label class="mono tiny" for="pain">BIGGEST PAIN IN YOUR SOURCING TODAY</label>
+    <textarea id="pain" maxlength="1000" rows="3" style="width:100%;padding:10px;margin:6px 0"></textarea>
+    <button class="btn btn-primary" type="submit">Finish</button>
+  </form>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById("ob-form").onsubmit = function (e) {
+  e.preventDefault();
+  var v = function (id) { return document.getElementById(id).value; };
+  var msg = document.getElementById("ob-msg");
+  fetch("/platform/api/onboarding", {
+    method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phone: v("phone"), sms_consent: document.getElementById("sms").checked,
+      company: v("company"), state: v("state"), flips_what: v("flips"), biggest_pain: v("pain") })
+  }).then(function (r) {
+    if (r.status === 401) { location.href = "/platform/signup?reauth=1"; return null; }
+    if (r.status === 422) { msg.textContent = "Enter a valid phone number (10-15 digits)."; return null; }
+    return r.json();
+  }).then(function (j) { if (j && j.ok) location.href = j.next; });
+};
+</script>
+{% endblock %}

@@ -39,6 +39,7 @@ from fastapi.responses import (
     RedirectResponse,
     Response,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
@@ -75,6 +76,7 @@ from .. import channels as channels_pkg
 from ..channels import store as channel_store
 from ..channels import sync as channel_sync
 from .. import stripe_gateway
+from .. import platform_billing
 from .. import freight_estimate
 from .. import freight_log
 from .. import attribution
@@ -84,8 +86,10 @@ from . import deals_query
 from . import deals_sources
 from . import platform_api
 from . import public_deals
+from . import public_sold
 from . import chairs_feed
 from . import rate_limit
+from . import scrape_guard
 from . import public_map
 from . import public_distress
 from . import seo_copy
@@ -128,12 +132,16 @@ PHASES = ["scrape", "llm", "download", "dewatermark", "facebook", "ebay"]
 app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
 app.include_router(_ebay_deletion_router)
+from automation.web import platform_auth  # noqa: E402
+from automation.web.platform_routes import router as _platform_router  # noqa: E402
+app.include_router(_platform_router)
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
@@ -158,6 +166,37 @@ async def _response_headers_middleware(request: Request, call_next):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:
             response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@app.middleware("http")
+async def _scrape_guard_middleware(request: Request, call_next):
+    """Rate limit, trap ban and anonymous depth cap for the public auction feed.
+    Policy and numbers: automation/web/scrape_guard.py. The operator's admin
+    session passes straight through."""
+    path = request.url.path
+    if not scrape_guard.is_guarded(path) or not scrape_guard.enabled() \
+            or auth_svc.request_has_session(request):
+        return await call_next(request)
+    ip = rate_limit.client_ip(request)
+    if path == scrape_guard.TRAP_PATH:
+        scrape_guard.ban(ip)
+        print(f"[scrape_guard] trap hit, feed closed for {ip}", file=sys.stderr)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    wait = scrape_guard.ban_left(ip) or scrape_guard.over_limit(ip)
+    if wait:
+        return JSONResponse({"detail": "rate_limited"}, status_code=429,
+                            headers={"Retry-After": str(wait)})
+    if scrape_guard.depth(path, request.query_params) > scrape_guard.ANON_MAX_ROWS:
+        try:
+            viewer = await asyncio.to_thread(_platform_viewer, request)
+        except Exception:  # noqa: BLE001 - an auth lookup failure reads as anonymous
+            viewer = None
+        if not viewer:
+            return JSONResponse({"detail": "sign_in_required"}, status_code=401)
+    response = await call_next(request)
+    if scrape_guard.is_json(path):
+        response.headers["X-Robots-Tag"] = scrape_guard.ROBOTS_TAG
     return response
 
 
@@ -1380,16 +1419,33 @@ def _public_site(site: str | None) -> str | None:
     return site
 
 
+def _platform_viewer(request: Request) -> dict | None:
+    """The onboarded platform user, else None (anonymous / not onboarded -> public view).
+    Plain function: maybe_user touches the DB, so callers run it via to_thread."""
+    user = platform_auth.maybe_user(request)
+    return user if user and user.get("onboarded_at") else None
+
+
+_PRIVATE = {"Cache-Control": "private, no-store"}
+
+
 @app.get("/deals", response_class=HTMLResponse)
 async def public_deals_page(request: Request):
+    try:
+        viewer = await asyncio.to_thread(_platform_viewer, request)
+    except Exception:
+        logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
+        viewer = None
     return templates.TemplateResponse(request, "deals_public.html", {
         "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
-        "per_page_choices": public_deals.PER_PAGE_CHOICES})
+        "per_page_choices": public_deals.PER_PAGE_CHOICES,
+        "platform_authed": viewer is not None},
+        headers=_PRIVATE if viewer else None)
 
 
 @app.get("/deals/api/lots")
 async def public_deals_lots(
-    q: str | None = None, category: str | None = None, state: str | None = None,
+    request: Request, q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None,
     max_price: float | None = None, bbox: str | None = None, site: str | None = None,
@@ -1399,11 +1455,29 @@ async def public_deals_lots(
         raise HTTPException(400, "status must be active|closed|all")
     site = _public_site(site)
     try:
-        return await asyncio.to_thread(
+        viewer = await asyncio.to_thread(_platform_viewer, request)
+    except Exception:  # a DB hiccup in the auth lookup must not break the public view
+        logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
+        viewer = None
+    try:
+        out = await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
             site=site, sort=sort, dir=dir, page=page, per_page=per_page)
+        if viewer is None:
+            return out
+        # Per-user extras on top of the SAME policy-filtered page; never memoised,
+        # never shared: private/no-store keeps Cloudflare and the browser honest too.
+        try:
+            await asyncio.to_thread(public_deals.add_platform_extras, out["rows"], viewer["user_id"])
+        except Exception:  # extras are a bonus: degrade to the public payload, never 503
+            logging.getLogger(__name__).warning("deals: platform extras failed; public payload", exc_info=True)
+            for r in out["rows"]:
+                for k in ("source", "lot_key", "saved", "flip_score", "max_bid"):
+                    if k != "source" or "lot_key" in r:
+                        r.pop(k, None)
+        return JSONResponse(jsonable_encoder(out), headers=_PRIVATE)
     except HTTPException:
         raise
     except Exception as e:
@@ -1427,6 +1501,42 @@ async def public_deals_pins(
             min_price=min_price, max_price=max_price, site=site)
     except Exception as e:
         raise HTTPException(503, f"pins query failed: {e!r}")
+
+
+def _sold_filters(q, category, state, days) -> dict:
+    return {"q": (q or "").strip() or None, "category": (category or "").strip() or None,
+            "state": (state or "").strip().upper() or None, "days": days}
+
+
+@app.get("/deals/sold", response_class=HTMLResponse)
+def public_sold_page(request: Request, q: str | None = Query(None, max_length=80),
+                     category: str | None = Query(None, max_length=40),
+                     state: str | None = Query(None, max_length=2),
+                     days: int | None = None, page: int = Query(1, ge=1)):
+    """Public "Sold prices": confirmed closes only. Plain `def` — it reads the DB."""
+    filters = _sold_filters(q, category, state, days)
+    ctx = {"base_url": PUBLIC_BASE_URL, "filters": filters, "data": None, "error": False,
+           "day_choices": public_sold.DAY_CHOICES, "category_options": []}
+    try:
+        ctx["data"] = public_sold.fetch_sold(**filters, page=page)
+    except Exception as e:  # noqa: BLE001 - the page says so in plain words
+        print(f"[sold] query failed: {e!r}", file=sys.stderr)
+        ctx["error"] = True
+        return templates.TemplateResponse(request, "deals_sold.html", ctx, status_code=503)
+    ctx["category_options"] = sorted({c["value"] for c in ctx["data"]["categories"]}
+                                     | ({filters["category"]} if filters["category"] else set()))
+    return templates.TemplateResponse(request, "deals_sold.html", ctx)
+
+
+@app.get("/deals/api/sold")
+def public_sold_api(q: str | None = Query(None, max_length=80),
+                    category: str | None = Query(None, max_length=40),
+                    state: str | None = Query(None, max_length=2),
+                    days: int | None = None, page: int = Query(1, ge=1)):
+    try:
+        return public_sold.fetch_sold(**_sold_filters(q, category, state, days), page=page)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"sold query failed: {e!r}")
 
 
 @app.get("/deals/api/facets")
@@ -2032,18 +2142,28 @@ async def public_sell(request: Request):
 
 @app.get("/platform", response_class=HTMLResponse)
 def public_platform(request: Request):
-    """The software behind the store, with a read-only demo (templates/platform.html).
+    """The liquidator product landing, with the read-only live demo window
+    (templates/platform.html). CTA: /platform/signup (free beta).
 
-    Deliberately unlinked: chair buyers should not land on a software pitch, so
-    this is not in the storefront nav or the sitemap and the page is `noindex`.
-    The handler reads nothing — the Deal finder tab calls the existing public
-    `/deals/api/*` endpoints from the browser (policy: public_deals.py), the
-    other two tabs load invented sample JSON from `static/site/platform/`, and
-    the request-access form posts to the existing `/contact`.
+    Deliberately unlinked from the storefront: chair buyers should not land on
+    a software pitch, so it is not in the buyer nav or the sitemap and the page
+    is `noindex`. The hero's numbers come from platform_api.stats(), which
+    never blocks and never raises — it answers from a memo refreshed in a
+    background thread, so with the database down (or before the first read
+    lands) the page still renders, with the source count only. The demo tabs
+    read the public `/deals/api/*` + `/platform/api/*` endpoints from the
+    browser; two tabs load invented sample JSON from `static/site/platform/`.
     """
     return templates.TemplateResponse(
         request, "platform.html",
-        _public_ctx({"platform_sources": list(_PLATFORM_SOURCE_NAMES.values())}),
+        _public_ctx({
+            "platform_sources": list(_PLATFORM_SOURCE_NAMES.values()),
+            "stats": platform_api.stats(),
+            "sold_head": public_sold.headline(),
+            "sources_tracked": len(platform_api.SITES),
+            "sources_planned": len(platform_api.PLANNED_SITES),
+            "planned_sources": [name for name, _kind in platform_api.PLANNED_SITES.values()],
+        }),
     )
 
 
@@ -2210,6 +2330,9 @@ async def robots_txt():
         "Disallow: /admin\n"
         "Disallow: /api/\n"
         "Disallow: /deals\n"
+        "Disallow: /platform/api/\n"
+        "Disallow: /map/api/\n"
+        "Disallow: /distress/api/\n"
         "Disallow: /reserve/\n"
         "Allow: /\n"
         "\n"
@@ -3353,6 +3476,8 @@ async def stripe_webhook(request: Request):
     except Exception:
         raise HTTPException(400, "invalid signature")
 
+    # Platform subscription events (customer.subscription.*); no-op for others.
+    await asyncio.to_thread(platform_billing.apply_stripe_event, event)
     row, changed = await asyncio.to_thread(deposits.apply_stripe_event, event)
     # `changed` is what keeps a Stripe retry from re-pinging the operator: the
     # state machine no-ops the second delivery and reports False.
@@ -4584,9 +4709,34 @@ async def _auction_sync_loop() -> None:
         await asyncio.sleep(_AUCTION_SYNC_INTERVAL_SEC)
 
 
+# ─────────── platform keyword-alert matcher (sibling loop, web process) ───────────
+_PLATFORM_ALERTS_INTERVAL_SEC = float(os.getenv("PLATFORM_ALERTS_INTERVAL_SEC", "900"))
+_PLATFORM_ALERTS_ENABLED = (os.getenv("PLATFORM_ALERTS_ENABLED", "1").strip().lower()
+                            not in ("0", "false", "no", "off"))
+_platform_alerts_task: asyncio.Task | None = None
+
+
+async def _platform_alerts_tick() -> None:
+    try:
+        from automation import platform_alerts
+        rep = await asyncio.to_thread(platform_alerts.run_pass)
+        if rep.get("matched") or rep.get("emailed") or rep.get("failed"):
+            print(f"[platform-alerts] {rep}")
+    except Exception as e:
+        # One bad pass must not kill the loop.
+        print(f"[platform-alerts] tick error: {e!r}")
+
+
+async def _platform_alerts_loop() -> None:
+    while True:
+        await _platform_alerts_tick()
+        await asyncio.sleep(_PLATFORM_ALERTS_INTERVAL_SEC)
+
+
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
     global _alerts_task, _tracking_task, _geo_warm_task, _channel_sync_task, _auction_sync_task
+    global _platform_alerts_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -4627,13 +4777,17 @@ async def _start_alerts_loop() -> None:
               f"(every {_AUCTION_SYNC_INTERVAL_SEC / 60:.0f} min)")
     elif not _AUCTION_SYNC_ENABLED:
         print("[auction-sync] disabled (AUCTION_SYNC_ENABLED=0)")
+    if _PLATFORM_ALERTS_ENABLED and (_platform_alerts_task is None or _platform_alerts_task.done()):
+        _platform_alerts_task = asyncio.create_task(_platform_alerts_loop())
+        print(f"[platform-alerts] matcher started (every {_PLATFORM_ALERTS_INTERVAL_SEC:.0f}s)")
 
 
 @app.on_event("shutdown")
 async def _stop_alerts_loop() -> None:
     global _alerts_task
     await asyncio.to_thread(db.reset_pool)   # close pooled sockets off-loop
-    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task):
+    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task,
+                 _platform_alerts_task):
         if task and not task.done():
             task.cancel()
             try:

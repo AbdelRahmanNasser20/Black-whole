@@ -1,0 +1,120 @@
+{% extends "_public_base.html" %}
+{# Context: supabase_url, supabase_key (public values from env; empty = not configured). #}
+{% block title %}Join the platform | Black Whole Liquidation{% endblock %}
+{% block meta_description %}Create a free account to get alerts on liquidation lots that fit what you flip.{% endblock %}
+{% block body_class %}page-platform-signup{% endblock %}
+
+{% block content %}
+<section class="page-head">
+  <div class="page-head-left">
+    <div class="mono tiny">EARLY ACCESS</div>
+    <h1 class="page-title">JOIN</h1>
+    <p class="page-lede">Free account. Tell us what you flip and we alert you when a matching lot shows up.</p>
+  </div>
+</section>
+<section class="terms-body">
+  {% if not supabase_url or not supabase_key %}
+  {# Accounts are not switched on (no SUPABASE_PUBLISHABLE_KEY): take the lead instead of a dead end. #}
+  <p>Accounts open soon. Leave your email and you get the first invite.</p>
+  <form class="manifest-form" id="pf-access-form" novalidate style="max-width:520px">
+    <div class="mf-row mf-row--two">
+      <label><span>NAME</span><input name="name" required autocomplete="name"></label>
+      <label><span>EMAIL</span><input name="email" type="email" required autocomplete="email"></label>
+    </div>
+    <label class="mf-row"><span>WHAT DO YOU FLIP, AND WHERE DO YOU LIST IT?</span>
+      <textarea name="note" rows="3"></textarea>
+    </label>
+    <button type="submit" class="btn btn-primary">REQUEST ACCESS</button>
+    <div class="mf-result" role="status" hidden></div>
+  </form>
+  {% else %}
+  <p id="auth-msg" class="mono tiny" role="status"></p>
+  <p id="google-row" hidden><button class="btn btn-primary" id="google-btn" type="button">Continue with Google</button></p>
+  <form id="otp-form" style="max-width:420px">
+    <label class="mono tiny" for="email">SIGN IN BY EMAIL</label><br>
+    <input id="email" type="email" required autocomplete="email" placeholder="you@company.com" style="width:100%;padding:10px;margin:6px 0">
+    <button class="btn btn-ghost" id="send-btn" type="submit">Send email</button>
+  </form>
+  <form id="verify-form" hidden style="max-width:420px">
+    <label class="mono tiny" for="code">CODE FROM YOUR EMAIL</label><br>
+    <input id="code" inputmode="numeric" autocomplete="one-time-code" required style="width:100%;padding:10px;margin:6px 0">
+    <button class="btn btn-primary" type="submit">Sign in</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if not supabase_url or not supabase_key %}
+<script>
+(function () {
+  var form = document.getElementById("pf-access-form"), out = form.querySelector(".mf-result");
+  function show(t) { out.textContent = t; out.hidden = false; }
+  form.onsubmit = function (e) {
+    e.preventDefault();
+    var name = form.elements.name.value.trim(), email = form.elements.email.value.trim();
+    if (!name || !/^\S+@\S+\.\S+$/.test(email)) { show("Add your name and an email address."); return; }
+    // The tag leads the message so the inbox and the Telegram preview show where the lead came from.
+    var message = "[PLATFORM PAGE] early access" + (form.elements.note.value.trim() ? " | " + form.elements.note.value.trim() : "");
+    fetch("/contact", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "buy", name: name, email: email, message: message }) })
+      .then(function (r) { if (!r.ok) throw new Error(); return r.json(); })
+      .then(function () { show("Request received. The invite will come by email."); form.reset(); })
+      .catch(function () { show("The request did not send. Try again in a moment."); });
+  };
+})();
+</script>
+{% endif %}
+{% if supabase_url and supabase_key %}
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+(function () {
+  var sb = window.supabase.createClient({{ supabase_url | tojson }}, {{ supabase_key | tojson }});
+  var msg = document.getElementById("auth-msg");
+  var NEXT = "/platform/onboarding";
+  // reauth=1 = the server just rejected this browser's token (401). Skip the
+  // auto-forward and drop the stale session, or the page would bounce back to
+  // onboarding with the same bad token forever; `ready` gates every forward
+  // until the sign-out has landed. A fresh sign-in still forwards as usual.
+  var reauth = new URLSearchParams(location.search).get("reauth") === "1";
+  var ready = !reauth;
+  function say(t) { msg.textContent = t; }
+  function saveAndGo(session) {
+    document.cookie = "sb-access-token=" + session.access_token + "; path=/; max-age=3600; SameSite=Lax; Secure";
+    location.href = NEXT;
+  }
+  if (reauth) {
+    document.cookie = "sb-access-token=; path=/; max-age=0; SameSite=Lax; Secure";
+    say("Your session expired. Sign in again.");
+    sb.auth.signOut().finally(function () { ready = true; });
+  } else {
+    sb.auth.getSession().then(function (r) { if (ready && r.data && r.data.session) saveAndGo(r.data.session); });
+  }
+  sb.auth.onAuthStateChange(function (_e, s) { if (s && ready) saveAndGo(s); });
+  // Show Google only when the project has that provider switched on (public auth settings).
+  fetch({{ supabase_url | tojson }} + "/auth/v1/settings", { headers: { apikey: {{ supabase_key | tojson }} } })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { if (d.external && d.external.google) document.getElementById("google-row").hidden = false; })
+    .catch(function () {});
+  document.getElementById("google-btn").onclick = function () {
+    sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: location.origin + "/platform/signup" } });
+  };
+  var email = "";
+  document.getElementById("otp-form").onsubmit = function (e) {
+    e.preventDefault();
+    email = document.getElementById("email").value.trim();
+    sb.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + "/platform/signup" } }).then(function (r) {
+      if (r.error) { say(r.error.message); return; }
+      say("Email sent. Click the link in it, or enter the code here.");
+      document.getElementById("verify-form").hidden = false;
+    });
+  };
+  document.getElementById("verify-form").onsubmit = function (e) {
+    e.preventDefault();
+    sb.auth.verifyOtp({ email: email, token: document.getElementById("code").value.trim(), type: "email" })
+      .then(function (r) { if (r.error) say(r.error.message); else saveAndGo(r.data.session); });
+  };
+})();
+</script>
+{% endif %}
+{% endblock %}
