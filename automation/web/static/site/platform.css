@@ -45,6 +45,25 @@
 .pf-nav-in:hover { border-color: var(--text); text-decoration: none !important; }
 
 /* ───────────────────────── hero: the claim + the number tape ───────────────────────── */
+/* The live feed drifts slowly behind the claim, dimmed so the words stay first. */
+.pf-hero { position: relative; overflow: hidden; }
+.pf-hero > :not(.pf-hero-media) { position: relative; z-index: 1; }
+.pf-hero > .pf-hero-media { position: absolute; inset: 0; max-width: none; margin: 0; z-index: 0; }
+.pf-hero-media::after {
+  content: ""; position: absolute; inset: 0;
+  background:
+    linear-gradient(90deg, var(--bg) 0%, color-mix(in srgb, var(--bg) 78%, transparent) 42%, color-mix(in srgb, var(--bg) 30%, transparent) 100%),
+    linear-gradient(0deg, var(--bg) 0%, transparent 34%);
+}
+.pf-hero-shot {
+  position: absolute; top: 0; right: -6%; width: 78%; height: auto; min-height: 100%;
+  object-fit: cover; object-position: left top; opacity: 0.85;
+  animation: pfHeroDrift 38s ease-in-out infinite alternate;
+}
+@keyframes pfHeroDrift {
+  from { transform: scale(1.02) translate(0, 0); }
+  to   { transform: scale(1.16) translate(-4%, -5%); }
+}
 .pf-hero-grid {
   display: grid; grid-template-columns: minmax(0, 7fr) minmax(300px, 4fr);
   gap: 48px 72px; align-items: center; padding: 64px 0 88px 0;
@@ -573,6 +592,7 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
   .pf-nav { padding: 16px 0; font-size: 13px; flex-wrap: wrap; }
   .pf-nav-links { gap: 14px; flex-wrap: wrap; }
   .pf-hero-grid { padding-top: 36px; padding-bottom: 48px; }
+  .pf-hero-shot { width: 190%; right: -70%; opacity: 0.22; }
   .pf-hero-ctas .pf-cta { width: 100%; text-align: center; }
   .pf-app { padding-left: 8px; padding-right: 8px; }
   .pf-app-head { padding: 0 8px; }
@@ -584,5 +604,6 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
   .pf-plan .pf-cta { align-self: stretch; text-align: center; }
 }
 @media (prefers-reduced-motion: reduce) {
+  .pf-hero-shot { animation: none; }
   html { scroll-behavior: auto; }
 }

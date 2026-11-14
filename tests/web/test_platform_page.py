@@ -470,3 +470,16 @@ def test_asset_links_carry_a_real_cache_key(no_db):
     html = _page()
     assert "?v=\"" not in html
     assert "platform.css?v=" in html
+
+
+def test_hero_plays_the_real_feed_behind_the_claim(no_db):
+    # The moving background is a capture of the live Auctions view (real data),
+    # never the Inventory/Buyers sample views. Decoration only: hidden from readers.
+    html = _page()
+    hero = html.split('class="pf-hero"', 1)[1].split("</section>", 1)[0]
+    assert '<div class="pf-hero-media" aria-hidden="true">' in hero
+    assert 'src="/static/site/platform/hero/feed.webp?v=' in hero
+    assert _client().get("/static/site/platform/hero/feed.webp").status_code == 200
+    css = _client().get("/static/site/platform.css").text
+    assert "pfHeroDrift" in css
+    assert ".pf-hero-shot { animation: none" in css.split("prefers-reduced-motion: reduce", 1)[1]
