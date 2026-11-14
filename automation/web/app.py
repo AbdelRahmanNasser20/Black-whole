@@ -39,6 +39,7 @@ from fastapi.responses import (
     RedirectResponse,
     Response,
 )
+from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
@@ -60,8 +61,9 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
-from .. import catalog_feed, google_feed, lot_channels
+from .. import catalog_feed, google_feed, indexnow, lot_channels
 from .. import inventory
+from .. import inquiry_photos
 from .. import lot_images
 from .. import lot_urls
 from .. import favorite_images
@@ -74,6 +76,7 @@ from .. import channels as channels_pkg
 from ..channels import store as channel_store
 from ..channels import sync as channel_sync
 from .. import stripe_gateway
+from .. import platform_billing
 from .. import freight_estimate
 from .. import freight_log
 from .. import attribution
@@ -83,8 +86,10 @@ from . import deals_query
 from . import deals_sources
 from . import platform_api
 from . import public_deals
+from . import public_sold
 from . import chairs_feed
 from . import rate_limit
+from . import scrape_guard
 from . import public_map
 from . import public_distress
 from . import seo_copy
@@ -127,12 +132,16 @@ PHASES = ["scrape", "llm", "download", "dewatermark", "facebook", "ebay"]
 app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
 app.include_router(_ebay_deletion_router)
+from automation.web import platform_auth  # noqa: E402
+from automation.web.platform_routes import router as _platform_router  # noqa: E402
+app.include_router(_platform_router)
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
@@ -157,6 +166,39 @@ async def _response_headers_middleware(request: Request, call_next):
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         else:
             response.headers["Cache-Control"] = "public, max-age=300"
+    return response
+
+
+@app.middleware("http")
+async def _scrape_guard_middleware(request: Request, call_next):
+    """Rate limit, trap ban and anonymous depth cap for the public auction feed.
+    Policy and numbers: automation/web/scrape_guard.py. The operator's admin
+    session passes straight through."""
+    path = request.url.path
+    if not scrape_guard.is_guarded(path) or not scrape_guard.enabled() \
+            or auth_svc.request_has_session(request):
+        return await call_next(request)
+    ip = rate_limit.client_ip(request)
+    if path == scrape_guard.TRAP_PATH:
+        scrape_guard.ban(ip)
+        print(f"[scrape_guard] trap hit, feed closed for {ip}", file=sys.stderr)
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
+    wait = scrape_guard.ban_left(ip) or scrape_guard.over_limit(ip)
+    if wait:
+        return JSONResponse({"detail": "rate_limited"}, status_code=429,
+                            headers={"Retry-After": str(wait)})
+    if scrape_guard.depth(path, request.query_params) > scrape_guard.ANON_MAX_ROWS:
+        try:
+            viewer = await asyncio.to_thread(_platform_viewer, request)
+        except Exception:  # noqa: BLE001 - an auth lookup failure reads as anonymous
+            viewer = None
+        if not viewer:
+            if not scrape_guard.is_json(path):   # an HTML page: send the person to sign in
+                return RedirectResponse("/platform/signup", status_code=302)
+            return JSONResponse({"detail": "sign_in_required"}, status_code=401)
+    response = await call_next(request)
+    if scrape_guard.is_json(path):
+        response.headers["X-Robots-Tag"] = scrape_guard.ROBOTS_TAG
     return response
 
 
@@ -533,6 +575,10 @@ PUBLIC_CONTACT: dict = {
         "postal": PUBLIC_ADDRESS_POSTAL.strip() or None,
     }.items() if v
 }
+# E.164 form for tel:/sms: links, e.g. "+16194078945".
+if PUBLIC_CONTACT.get("phone"):
+    _digits = "".join(c for c in PUBLIC_CONTACT["phone"] if c.isdigit())
+    PUBLIC_CONTACT["tel"] = "+" + (_digits if len(_digits) > 10 else "1" + _digits)
 
 
 # <title> budget. Google shows ~60 characters on desktop and truncates the
@@ -761,6 +807,36 @@ def _gallery_srcs(row: dict) -> list[str]:
     return lot_images.gallery_srcs(row)
 
 
+# Home-page hero photos, in the operator's order (2026-11-14): the Boise hall
+# full of chairs, the chairs around banquet tables, the 3,000 blue chairs, the
+# Boise classroom. (lot_id, position in that lot's public gallery).
+HERO_PICKS = (("31225-atl", 0), ("31225-atl", 2),
+              ("blue-silver-frame-3000", 0), ("31225-atl", 1))
+
+
+# Stock room photos the operator picked (Pexels, free licence; 2026-11-14).
+# They play after our own photos. They are rooms, not our stock.
+HERO_STOCK = ("/static/site/hero/banquet-room.jpg",    # pexels.com/photo/14636170
+              "/static/site/hero/white-tables.jpg")    # pexels.com/photo/2649771
+
+
+def _hero_shots(featured: list[dict]) -> list[str]:
+    """The picked photos that still exist; else the featured lots' own heroes."""
+    shots: list[str] = []
+    rows: dict[str, dict | None] = {}
+    for lot_id, i in HERO_PICKS:
+        try:
+            if lot_id not in rows:
+                rows[lot_id] = inventory.get(lot_id)
+            urls = lot_images.resolve(rows[lot_id]).urls if rows[lot_id] else []
+        except Exception:  # noqa: BLE001 — a missing pick must not break the page
+            urls = []
+        if i < len(urls):
+            shots.append(urls[i])
+    shots = shots or [r["hero_src"] for r in featured if r.get("hero_src")][:4]
+    return shots + list(HERO_STOCK)
+
+
 @readcache.cached(ttl=60)
 def _landing_data() -> dict:
     """Counts + featured carousel for `/`. Memoised: this is the most-hit
@@ -782,6 +858,7 @@ def _landing_data() -> dict:
     prices = [float(r["price_per_chair"]) for r in rows
               if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
     return {"counts": counts, "featured": featured,
+            "hero_shots": _hero_shots(featured),
             "min_price": min(prices) if prices else None}
 
 
@@ -792,14 +869,16 @@ def public_landing(request: Request):
         data = _landing_data()
         counts, featured = data["counts"], data["featured"]
         min_price = data.get("min_price")
+        hero_shots = data.get("hero_shots") or []
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
         min_price = None
+        hero_shots = []
     return templates.TemplateResponse(
         request, "landing.html",
         _public_ctx({
-            "stats": counts, "featured": featured,
+            "stats": counts, "featured": featured, "hero_shots": hero_shots,
             "intent": _intent_line(counts, min_price),
             "site_faq": seo_copy.SITE_FAQ,
             "site_faq_jsonld": seo_copy.faq_jsonld(seo_copy.SITE_FAQ),
@@ -1137,9 +1216,12 @@ def _deals_facets_and_stats() -> tuple[list, list, dict]:
         f"WHERE {_DEALS_ACTIVE} AND state IS NOT NULL "
         "GROUP BY 1 ORDER BY count DESC"
     )
+    # `candidates` is bounded to live lots: the deal_candidates view has no
+    # `end_utc > now()`, so a bare count(*) scanned every closed lot (~5 s cold,
+    # and showed 59k "candidates" when ~2k were live — measured 2026-11-10).
     stats = db.fetch_one(
         "SELECT (SELECT count(*) FROM deal_lots) AS total_lots, "
-        "(SELECT count(*) FROM deal_candidates) AS candidates, "
+        "(SELECT count(*) FROM deal_candidates WHERE end_utc > now()) AS candidates, "
         f"(SELECT count(*) FROM deal_lots WHERE {_DEALS_ACTIVE} "
         "AND end_utc <= now() + interval '24 hours') AS ending_24h"
     )
@@ -1339,16 +1421,33 @@ def _public_site(site: str | None) -> str | None:
     return site
 
 
+def _platform_viewer(request: Request) -> dict | None:
+    """The onboarded platform user, else None (anonymous / not onboarded -> public view).
+    Plain function: maybe_user touches the DB, so callers run it via to_thread."""
+    user = platform_auth.maybe_user(request)
+    return user if user and user.get("onboarded_at") else None
+
+
+_PRIVATE = {"Cache-Control": "private, no-store"}
+
+
 @app.get("/deals", response_class=HTMLResponse)
 async def public_deals_page(request: Request):
+    try:
+        viewer = await asyncio.to_thread(_platform_viewer, request)
+    except Exception:
+        logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
+        viewer = None
     return templates.TemplateResponse(request, "deals_public.html", {
         "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
-        "per_page_choices": public_deals.PER_PAGE_CHOICES})
+        "per_page_choices": public_deals.PER_PAGE_CHOICES,
+        "platform_authed": viewer is not None},
+        headers=_PRIVATE if viewer else None)
 
 
 @app.get("/deals/api/lots")
 async def public_deals_lots(
-    q: str | None = None, category: str | None = None, state: str | None = None,
+    request: Request, q: str | None = None, category: str | None = None, state: str | None = None,
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None,
     max_price: float | None = None, bbox: str | None = None, site: str | None = None,
@@ -1358,11 +1457,29 @@ async def public_deals_lots(
         raise HTTPException(400, "status must be active|closed|all")
     site = _public_site(site)
     try:
-        return await asyncio.to_thread(
+        viewer = await asyncio.to_thread(_platform_viewer, request)
+    except Exception:  # a DB hiccup in the auth lookup must not break the public view
+        logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
+        viewer = None
+    try:
+        out = await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
             site=site, sort=sort, dir=dir, page=page, per_page=per_page)
+        if viewer is None:
+            return out
+        # Per-user extras on top of the SAME policy-filtered page; never memoised,
+        # never shared: private/no-store keeps Cloudflare and the browser honest too.
+        try:
+            await asyncio.to_thread(public_deals.add_platform_extras, out["rows"], viewer["user_id"])
+        except Exception:  # extras are a bonus: degrade to the public payload, never 503
+            logging.getLogger(__name__).warning("deals: platform extras failed; public payload", exc_info=True)
+            for r in out["rows"]:
+                for k in ("source", "lot_key", "saved", "flip_score", "max_bid"):
+                    if k != "source" or "lot_key" in r:
+                        r.pop(k, None)
+        return JSONResponse(jsonable_encoder(out), headers=_PRIVATE)
     except HTTPException:
         raise
     except Exception as e:
@@ -1386,6 +1503,53 @@ async def public_deals_pins(
             min_price=min_price, max_price=max_price, site=site)
     except Exception as e:
         raise HTTPException(503, f"pins query failed: {e!r}")
+
+
+def _sold_filters(q, category, state, days) -> dict:
+    return {"q": (q or "").strip() or None, "category": (category or "").strip() or None,
+            "state": (state or "").strip().upper() or None, "days": days}
+
+
+def _anon_safe_viewer(request: Request) -> dict | None:
+    try:
+        return _platform_viewer(request)
+    except Exception:  # noqa: BLE001 - an auth lookup failure reads as anonymous
+        return None
+
+
+@app.get("/deals/sold", response_class=HTMLResponse)
+def public_sold_page(request: Request, q: str | None = Query(None, max_length=80),
+                     category: str | None = Query(None, max_length=40),
+                     state: str | None = Query(None, max_length=2),
+                     days: int | None = None, page: int = Query(1, ge=1)):
+    """Public "Sold prices": confirmed closes only. Plain `def` — it reads the DB."""
+    filters = _sold_filters(q, category, state, days)
+    ctx = {"base_url": PUBLIC_BASE_URL, "filters": filters, "data": None, "error": False,
+           "day_choices": public_sold.DAY_CHOICES, "category_options": []}
+    try:
+        ctx["data"] = public_sold.fetch_sold(**filters, page=page)
+        if scrape_guard.enabled() and not auth_svc.request_has_session(request) \
+                and not _anon_safe_viewer(request):
+            # No account: the pager stops where the scrape guard's depth cap starts.
+            public_sold.cap_pages(ctx["data"], scrape_guard.ANON_MAX_ROWS)
+    except Exception as e:  # noqa: BLE001 - the page says so in plain words
+        print(f"[sold] query failed: {e!r}", file=sys.stderr)
+        ctx["error"] = True
+        return templates.TemplateResponse(request, "deals_sold.html", ctx, status_code=503)
+    ctx["category_options"] = sorted({c["value"] for c in ctx["data"]["categories"]}
+                                     | ({filters["category"]} if filters["category"] else set()))
+    return templates.TemplateResponse(request, "deals_sold.html", ctx)
+
+
+@app.get("/deals/api/sold")
+def public_sold_api(q: str | None = Query(None, max_length=80),
+                    category: str | None = Query(None, max_length=40),
+                    state: str | None = Query(None, max_length=2),
+                    days: int | None = None, page: int = Query(1, ge=1)):
+    try:
+        return public_sold.fetch_sold(**_sold_filters(q, category, state, days), page=page)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(503, f"sold query failed: {e!r}")
 
 
 @app.get("/deals/api/facets")
@@ -1991,18 +2155,28 @@ async def public_sell(request: Request):
 
 @app.get("/platform", response_class=HTMLResponse)
 def public_platform(request: Request):
-    """The software behind the store, with a read-only demo (templates/platform.html).
+    """The liquidator product landing, with the read-only live demo window
+    (templates/platform.html). CTA: /platform/signup (free beta).
 
-    Deliberately unlinked: chair buyers should not land on a software pitch, so
-    this is not in the storefront nav or the sitemap and the page is `noindex`.
-    The handler reads nothing — the Deal finder tab calls the existing public
-    `/deals/api/*` endpoints from the browser (policy: public_deals.py), the
-    other two tabs load invented sample JSON from `static/site/platform/`, and
-    the request-access form posts to the existing `/contact`.
+    Deliberately unlinked from the storefront: chair buyers should not land on
+    a software pitch, so it is not in the buyer nav or the sitemap and the page
+    is `noindex`. The hero's numbers come from platform_api.stats(), which
+    never blocks and never raises — it answers from a memo refreshed in a
+    background thread, so with the database down (or before the first read
+    lands) the page still renders, with the source count only. The demo tabs
+    read the public `/deals/api/*` + `/platform/api/*` endpoints from the
+    browser; two tabs load invented sample JSON from `static/site/platform/`.
     """
     return templates.TemplateResponse(
         request, "platform.html",
-        _public_ctx({"platform_sources": list(_PLATFORM_SOURCE_NAMES.values())}),
+        _public_ctx({
+            "platform_sources": list(_PLATFORM_SOURCE_NAMES.values()),
+            "stats": platform_api.stats(),
+            "sold_head": public_sold.headline(),
+            "sources_tracked": len(platform_api.SITES),
+            "sources_planned": len(platform_api.PLANNED_SITES),
+            "planned_sources": [name for name, _kind in platform_api.PLANNED_SITES.values()],
+        }),
     )
 
 
@@ -2152,6 +2326,16 @@ def public_platform_deals(request: Request):
     )
 
 
+# Bing Webmaster Tools ownership file (public by design). Code from
+# bing.com/webmasters → Add site → XML File.
+@app.get("/BingSiteAuth.xml", include_in_schema=False)
+async def bing_site_auth():
+    return Response(
+        '<?xml version="1.0"?>\n<users>\n\t<user>F1622AF247E88937142BFA0511079194</user>\n</users>\n',
+        media_type="application/xml",
+    )
+
+
 @app.get("/robots.txt", response_class=PlainTextResponse)
 async def robots_txt():
     return (
@@ -2159,11 +2343,25 @@ async def robots_txt():
         "Disallow: /admin\n"
         "Disallow: /api/\n"
         "Disallow: /deals\n"
+        "Disallow: /platform/api/\n"
+        "Disallow: /map/api/\n"
+        "Disallow: /distress/api/\n"
         "Disallow: /reserve/\n"
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
     )
+
+
+# IndexNow key file (Bing ownership check). MUST stay registered AFTER
+# /robots.txt — `/{name}.txt` matches every root .txt path, so any future root
+# *.txt route has to be registered BEFORE this one or it gets shadowed.
+@app.get("/{name}.txt", response_class=PlainTextResponse, include_in_schema=False)
+async def indexnow_key_file(name: str):
+    key = indexnow.key()
+    if not key or name != key:
+        raise HTTPException(404, headers={"Cache-Control": "no-store"})
+    return key
 
 
 def _sitemap_entry(loc: str, lastmod: str | None = None) -> str:
@@ -2247,6 +2445,7 @@ async def _notify_new_inquiry(row: dict) -> None:
         bits.append(f"{who}{(' — ' + contact) if contact else ''}")
         meta = " · ".join(
             str(x) for x in (
+                f"ZIP {row['zip_code']}" if row.get("zip_code") else None,
                 f"qty {row['quantity_interested']}" if row.get("quantity_interested") else None,
                 f"lot {row['lot_id']}" if row.get("lot_id") else None,
             ) if x
@@ -2269,6 +2468,12 @@ _DEPOSIT_ALERT_HEADS = {
     "charge.refunded": "↩ REFUNDED",
 }
 
+_DEPOSIT_KIND_LABELS = {
+    "deposit": "deposit",
+    "full": "paid in full",
+    "financed": "financed via Affirm — collect the rest at pickup",
+}
+
 
 def _dollars(cents: Any) -> str:
     return f"${(int(cents or 0) / 100):,.2f}"
@@ -2285,7 +2490,9 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
         head = _DEPOSIT_ALERT_HEADS.get(event_type, "◉ DEPOSIT UPDATE")
         # A completed session that only reached 'processing' is an ACH debit in
         # flight, not money in the bank — say so rather than crying "PAID".
-        if status == "processing":
+        if status == "paid" and row.get("kind") == deposits.FINANCED_KIND:
+            head = "💰 AFFIRM PAID"
+        elif status == "processing":
             head = "🏦 ACH INITIATED"
         elif status == "failed":
             head = "✗ ACH FAILED"
@@ -2298,7 +2505,7 @@ async def _notify_deposit(row: dict, event_type: str) -> None:
         bits = [f"{head} · #{row.get('id')}"]
         bits.append(
             f"{_dollars(row.get('amount_cents'))} "
-            f"({'deposit' if kind == 'deposit' else 'paid in full'})"
+            f"({_DEPOSIT_KIND_LABELS.get(kind, 'paid in full')})"
             + (f" · via {row['payment_method']}" if row.get("payment_method") else "")
         )
         lot_id = row.get("lot_id")
@@ -2343,11 +2550,54 @@ async def public_contact(payload: dict):
                 if payload.get("quantity_interested")
                 else None
             ),
+            zip_code=(str(payload.get("zip_code") or "")).strip() or None,
         ))
     except ValueError as e:
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_inquiry(row))
-    return {"ok": True, "id": row["id"]}
+    # A buyer who asks about chairs also goes on the alert list (no-op for
+    # sell leads and for people already on it). Never fails the inquiry.
+    asyncio.create_task(asyncio.to_thread(inventory.subscribe_from_inquiry, row, attr))
+    out = {"ok": True, "id": row["id"]}
+    if row.get("kind") == "sell":
+        # Lets the browser attach the optional photos to THIS inquiry only.
+        out["photo_token"] = inquiry_photos.upload_token(row["id"], row.get("created_at"))
+    return out
+
+
+def _photo_count(row: dict | None) -> int:
+    return len(inventory.inquiry_photo_keys(row)) if row else 0
+
+
+@app.post("/contact/{inquiry_id}/photos")
+async def public_contact_photos(inquiry_id: int, request: Request,
+                                token: str = Query(""),
+                                photos: list[UploadFile] = File(...)):
+    """Optional seller photos for a sell inquiry. Private R2 bucket only."""
+    ip = rate_limit.client_ip(request)
+    if not rate_limit.allow(f"inq-photos:{ip}", limit=20):
+        raise HTTPException(429, "rate_limited")
+    blobs = []
+    for f in photos[: inquiry_photos.MAX_PHOTOS + 1]:
+        data = await f.read(inquiry_photos.MAX_BYTES + 1)
+        blobs.append(data)
+    row = await asyncio.to_thread(inventory.get_inquiry, inquiry_id)
+    if row is not None and row.get("kind") != "sell":
+        row = None
+    try:
+        exts = inquiry_photos.validate(row, token, _photo_count(row), blobs)
+    except inquiry_photos.PhotoRejected as e:
+        raise HTTPException(400, str(e))
+    try:
+        keys = await asyncio.to_thread(inquiry_photos.store, inquiry_id, blobs, exts)
+        await asyncio.to_thread(inventory.add_inquiry_photos, inquiry_id, keys)
+    except Exception as e:  # noqa: BLE001 - R2 down / unconfigured
+        log.warning("inquiry photos failed for #%s: %s", inquiry_id, e)
+        raise HTTPException(503, "photo upload failed — email the photos instead")
+    asyncio.create_task(telegram_alerts.send_message(
+        f"📷 {len(keys)} photo(s) added to sell lead #{inquiry_id} ({row.get('name') or '—'})"
+        "\n→ blackwhole.com/admin (Inquiries)", topic="leads"))
+    return {"ok": True, "count": len(keys)}
 
 
 async def _notify_new_subscriber(row: dict) -> None:
@@ -3071,7 +3321,11 @@ async def reserve_success(request: Request, session_id: str = Query("")):
         _public_ctx({
             "deposit": row,
             "is_paid": row.get("status") == "paid",
-            "policy": stripe_gateway.REFUND_POLICY_SHORT,
+            "policy": (
+                stripe_gateway.FINANCED_POLICY_SHORT
+                if row.get("kind") == deposits.FINANCED_KIND
+                else stripe_gateway.REFUND_POLICY_SHORT
+            ),
         }),
     )
 
@@ -3160,6 +3414,9 @@ async def reserve_checkout(lot_id: str, payload: dict):
             stripe_gateway.create_checkout_session, deposit=deposit, lot=row
         )
     except Exception:
+        # The buyer only sees "checkout_unavailable"; Stripe's reason goes to
+        # the log so the operator can tell a one-off from a broken account.
+        log.exception("stripe checkout session failed for deposit %s", deposit["id"])
         # Close the row out rather than leaving a pending record no webhook can
         # ever resolve (there is no session to expire).
         await asyncio.to_thread(
@@ -3232,6 +3489,8 @@ async def stripe_webhook(request: Request):
     except Exception:
         raise HTTPException(400, "invalid signature")
 
+    # Platform subscription events (customer.subscription.*); no-op for others.
+    await asyncio.to_thread(platform_billing.apply_stripe_event, event)
     row, changed = await asyncio.to_thread(deposits.apply_stripe_event, event)
     # `changed` is what keeps a Stripe retry from re-pinging the operator: the
     # state machine no-ops the second delivery and reports False.
@@ -4463,9 +4722,34 @@ async def _auction_sync_loop() -> None:
         await asyncio.sleep(_AUCTION_SYNC_INTERVAL_SEC)
 
 
+# ─────────── platform keyword-alert matcher (sibling loop, web process) ───────────
+_PLATFORM_ALERTS_INTERVAL_SEC = float(os.getenv("PLATFORM_ALERTS_INTERVAL_SEC", "900"))
+_PLATFORM_ALERTS_ENABLED = (os.getenv("PLATFORM_ALERTS_ENABLED", "1").strip().lower()
+                            not in ("0", "false", "no", "off"))
+_platform_alerts_task: asyncio.Task | None = None
+
+
+async def _platform_alerts_tick() -> None:
+    try:
+        from automation import platform_alerts
+        rep = await asyncio.to_thread(platform_alerts.run_pass)
+        if rep.get("matched") or rep.get("emailed") or rep.get("failed"):
+            print(f"[platform-alerts] {rep}")
+    except Exception as e:
+        # One bad pass must not kill the loop.
+        print(f"[platform-alerts] tick error: {e!r}")
+
+
+async def _platform_alerts_loop() -> None:
+    while True:
+        await _platform_alerts_tick()
+        await asyncio.sleep(_PLATFORM_ALERTS_INTERVAL_SEC)
+
+
 @app.on_event("startup")
 async def _start_alerts_loop() -> None:
     global _alerts_task, _tracking_task, _geo_warm_task, _channel_sync_task, _auction_sync_task
+    global _platform_alerts_task
     # Pre-warm the DB pool: constructing it is non-blocking (psycopg_pool fills
     # min_size in worker threads), so the first admin open after a boot doesn't
     # pay the pooler handshake. Skipped when no DSN is configured (tests, CI).
@@ -4506,13 +4790,17 @@ async def _start_alerts_loop() -> None:
               f"(every {_AUCTION_SYNC_INTERVAL_SEC / 60:.0f} min)")
     elif not _AUCTION_SYNC_ENABLED:
         print("[auction-sync] disabled (AUCTION_SYNC_ENABLED=0)")
+    if _PLATFORM_ALERTS_ENABLED and (_platform_alerts_task is None or _platform_alerts_task.done()):
+        _platform_alerts_task = asyncio.create_task(_platform_alerts_loop())
+        print(f"[platform-alerts] matcher started (every {_PLATFORM_ALERTS_INTERVAL_SEC:.0f}s)")
 
 
 @app.on_event("shutdown")
 async def _stop_alerts_loop() -> None:
     global _alerts_task
     await asyncio.to_thread(db.reset_pool)   # close pooled sockets off-loop
-    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task):
+    for task in (_alerts_task, _tracking_task, _channel_sync_task, _auction_sync_task,
+                 _platform_alerts_task):
         if task and not task.done():
             task.cancel()
             try:
@@ -4877,7 +5165,25 @@ def inv_backfill():
 @readcache.cached()
 def inq_list(status: str | None = None):
     # sync handler → FastAPI threadpool; memoised (readcache.py)
-    return {"items": inventory.list_inquiries(status)}
+    items = inventory.list_inquiries(status)
+    for q in items:
+        q["photos"] = inventory.inquiry_photo_keys(q)
+    return {"items": items}
+
+
+@app.get("/api/inquiry-photos/{key:path}")
+def inquiry_photo(key: str):
+    """Operator-only proxy for seller photos in the PRIVATE bucket (/api/ is session-walled)."""
+    try:
+        got = inquiry_photos.fetch(key)
+    except Exception as e:  # noqa: BLE001 - unconfigured / R2 down
+        raise HTTPException(503, f"photo store unavailable: {type(e).__name__}")
+    if got is None:
+        raise HTTPException(404, "no such photo")
+    data, ctype = got
+    return Response(data, media_type=ctype,
+                    headers={"Cache-Control": "private, max-age=604800",
+                             "X-Robots-Tag": "noindex"})
 
 
 @app.patch("/api/inquiries/{inquiry_id}")
@@ -5059,6 +5365,64 @@ async def dep_delete(deposit_id: int):
     if not ok:
         raise HTTPException(404, "not found")
     return {"ok": True}
+
+
+_FINANCED_MIGRATION = (
+    ".venv/bin/python scripts/apply_sql.py scripts/sql/034_deposits_financed.sql"
+)
+
+
+@app.post("/api/deposits/financing-link")
+async def dep_financing_link(payload: dict):
+    """Operator makes an Affirm-only Checkout link for a negotiated amount.
+
+    The money number is the operator's (this is under /api/, so the session
+    middleware gates it) — e.g. $4,500 financed of a $9,000 deal, the rest in
+    cash at pickup. Same row-first-then-session order as `reserve_checkout`.
+    The link is a normal Checkout session: it expires in 24 h unpaid.
+    """
+    if not _reserve_enabled():
+        raise HTTPException(409, "Stripe is not configured (STRIPE_SECRET_KEY unset)")
+    payload = payload or {}
+    lot_id = str(payload.get("lot_id") or "").strip()
+    lot = await asyncio.to_thread(inventory.get, lot_id) if lot_id else None
+    if not lot:
+        raise HTTPException(404, "lot not found")
+    try:
+        deposit = await asyncio.to_thread(
+            deposits.create_financed,
+            lot_id=lot.get("lot_id") or lot_id,
+            quantity=payload.get("quantity"),
+            amount_usd=payload.get("amount_usd"),
+            order_total_usd=payload.get("order_total_usd"),
+            price_per_chair=lot.get("price_per_chair"),
+            buyer_name=payload.get("name"),
+            buyer_email=(payload.get("email") or "").strip() or None,
+            buyer_phone=(payload.get("phone") or "").strip() or None,
+        )
+    except (TypeError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        # 23514 = check_violation: the kind CHECK predates 'financed'.
+        if getattr(e, "sqlstate", None) == "23514":
+            raise HTTPException(409, f"apply migration 034 first: {_FINANCED_MIGRATION}")
+        raise
+
+    try:
+        session = await asyncio.to_thread(
+            stripe_gateway.create_checkout_session, deposit=deposit, lot=lot
+        )
+    except Exception as e:
+        await asyncio.to_thread(
+            deposits.transition, deposit["id"], "canceled",
+            failure_reason="session_create_failed",
+        )
+        # Operator-only route, so Stripe's reason (e.g. Affirm not enabled on
+        # the account) is worth showing.
+        raise HTTPException(502, f"Stripe refused the session: {e}")
+
+    await asyncio.to_thread(deposits.attach_session, deposit["id"], session.id)
+    return {"ok": True, "url": session.url, "deposit_id": deposit["id"]}
 
 
 # ───────────────────────────── site settings API ─────────────────────────────

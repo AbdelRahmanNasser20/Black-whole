@@ -189,11 +189,29 @@ def _read(fn: Callable[[Any], T]) -> T:
     for attempt in (1, 2):
         try:
             with connect() as conn:
-                return fn(conn)
+                return _one_statement(conn, fn)
         except psycopg.OperationalError:
             if attempt == 2 or get_pool() is None:
                 raise
     raise AssertionError("unreachable")
+
+
+def _one_statement(conn: Any, fn: Callable[[Any], T]) -> T:
+    """Run ONE statement in autocommit, then restore the connection's mode.
+
+    In a transaction a statement costs BEGIN + query + COMMIT = 3 round-trips;
+    Render (Oregon) -> Supabase pooler (us-east-1) is ~60 ms each, so every
+    single read paid ~180 ms instead of ~60 ms (measured 2026-11-10). One
+    statement is atomic on its own. The mode goes back to transactional before
+    the pooled connection is returned, so `with connect()` blocks stay atomic."""
+    conn.autocommit = True
+    try:
+        return fn(conn)
+    finally:
+        try:
+            conn.autocommit = False
+        except psycopg.Error:
+            pass  # broken socket: the pool discards it on return
 
 
 def fetch_one(sql: str, params: Sequence[Any] | None = None) -> dict | None:
@@ -207,8 +225,7 @@ def fetch_all(sql: str, params: Sequence[Any] | None = None) -> list[dict]:
 def execute(sql: str, params: Sequence[Any] | None = None) -> int:
     """Run a single write statement; return the affected row count."""
     with connect() as conn:
-        cur = conn.execute(sql, params or ())
-        return cur.rowcount
+        return _one_statement(conn, lambda c: c.execute(sql, params or ()).rowcount)
 
 
 def executemany(sql: str, seq: Iterable[Sequence[Any]]) -> None:

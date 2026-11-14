@@ -184,7 +184,8 @@ def test_create_inquiry_attribution_columns(monkeypatch, ready):
     monkeypatch.setattr(inventory, "connect", lambda: _FakeConn(sink))
     monkeypatch.setattr(inventory, "get_inquiry", lambda i: {"id": i})
     monkeypatch.setattr(attribution, "columns_ready", lambda table: ready)
-    inventory.create_inquiry(kind="buy", name="Jane", email="j@x.com", lot_id="31225",
+    monkeypatch.setattr(inventory, "inquiries_have_zip_column", lambda: True)
+    inventory.create_inquiry(kind="buy", name="Jane", email="j@x.com", lot_id="31225", zip_code="30318",
                              attribution=attribution.from_payload({"attribution": ATTR}))
     assert ("attr_source" in sink["sql"]) is ready
     assert sink["params"][:3] == ("buy", "31225", "Jane")

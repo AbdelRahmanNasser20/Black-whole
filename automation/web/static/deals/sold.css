@@ -1,0 +1,26 @@
+/* static/deals/sold.css — page-local rules for the public /deals/sold page.
+   Layout + spacing only. Colours come from tokens.css, components from components.css. No hex, no radius. */
+.sold { max-width: 1120px; margin: 0 auto; padding: var(--pad); display: grid; gap: calc(var(--gap) * 1.5); }
+.sold h1 { margin: 0; font: 400 var(--fs-2xl)/1.1 var(--display); color: var(--text); }
+.sold h2 { margin: 0 0 10px; font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.sold-lede { margin: 8px 0 0; max-width: 68ch; color: var(--muted); }
+.sold-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sold-filters input, .sold-filters select { height: 32px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font: 400 var(--fs-sm)/1 var(--sans); }
+.sold-filters input[type="search"] { flex: 1 1 240px; min-width: 0; }
+.sold-filters input:focus, .sold-filters select:focus { border-color: var(--border-strong); outline: none; }
+.sold-stats { display: grid; gap: 1px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); background: var(--border); border: 1px solid var(--border); }
+.sold-stat { display: grid; gap: 6px; padding: var(--pad); background: var(--surface); }
+.sold-stat-num { font: 700 var(--fs-2xl)/1 var(--mono); color: var(--text); font-variant-numeric: tabular-nums; }
+.sold-stat--main .sold-stat-num { color: var(--accent); }
+.sold-stat-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.sold-stat-sub { font-size: var(--fs-sm); color: var(--dim); }
+.sold-table { width: 100%; }
+.sold-table .num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sold-price { color: var(--accent); font-weight: 700; }
+.sold-cat { display: block; font: 400 var(--fs-xs)/1.4 var(--mono); color: var(--dim); }
+.sold-count { color: var(--dim); }
+.sold-pages { display: flex; gap: 12px; align-items: center; justify-content: center; margin-top: 12px; font: 400 var(--fs-sm)/1 var(--mono); color: var(--muted); }
+.sold-empty { padding: var(--pad); border: 1px solid var(--border); background: var(--surface); color: var(--muted); }
+.sold-method ul { margin: 0; padding: 0 0 0 1.2em; color: var(--muted); font-size: var(--fs-sm); max-width: 76ch; }
+.sold-method li { margin: 0 0 6px; }
+.sold-method strong { font-weight: 500; color: var(--text); }

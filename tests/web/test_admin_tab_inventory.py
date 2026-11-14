@@ -78,3 +78,28 @@ def test_inventory_js_uses_primitives_and_url_params():
     assert "'is-pending'" in src, "inline edits mark the <tr> is-pending"
     assert "keepOld" in src
     assert "storage_note" not in src
+
+
+def test_pane_has_the_storefront_map():
+    """◎ map = the public /map itself: same stylesheet, same filter ids, same feed. No data-points-url —
+    that attribute auto-mounts on page load, and Leaflet cannot size itself in a hidden pane."""
+    html = TestClient(app).get("/admin").text
+    m = re.search(r'<section class="panel" data-pane="inventory".*?<section class="panel"', html, re.S)
+    pane = m.group(0)
+    assert 'id="inv-map-toggle"' in pane
+    assert "/static/site/map.css" in pane
+    for el_id in ("inv-map-section", "inv-map", "inv-map-list", "map-filters", "map-status", "map-near", "map-radius"):
+        assert f'id="{el_id}"' in pane, el_id
+    assert re.search(r'id="inv-map-section"[^>]*\bhidden\b', pane), "map starts closed"
+    assert "data-points-url" not in pane
+    assert "storage_note" not in pane
+
+
+def test_inventory_js_mounts_the_site_map_without_touching_the_url():
+    src = JS.read_text()
+    assert "import('../site/map.js')" in src
+    assert "mountSiteMap(" in src
+    assert "wireFilters(" in src and "syncUrl: false" in src, "the table's ?status= owns the URL"
+    site = (STATIC / "site/map.js").read_text()
+    assert "export function wireFilters" in site
+    assert "if (!syncUrl) return;" in site

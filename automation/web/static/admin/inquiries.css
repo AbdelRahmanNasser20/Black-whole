@@ -56,3 +56,6 @@
   .card--inquiry .card-band { height: auto; min-height: 28px; flex-wrap: wrap; padding-top: 6px; padding-bottom: 6px; row-gap: 6px; }
   .inquiry-lot { flex-basis: 100%; }
 }
+
+.inquiry-photos { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.inquiry-photos img { width: 84px; height: 84px; object-fit: cover; border: 1px solid var(--border); border-radius: 4px; }

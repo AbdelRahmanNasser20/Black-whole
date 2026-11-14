@@ -269,3 +269,18 @@ def test_list_through_the_index_path_carries_currency(store, monkeypatch):
     b = TestClient(app).get("/api/archive/lots").json()
     assert b["index"] == "table" and b["items"][0]["currency"] == "EUR"
     assert ", currency" in seen[0]
+
+
+def test_index_read_is_memoised(monkeypatch):
+    """The Archive list read all ~11.5k lot_archive rows on every page flip
+    (~1 s on Render, 2026-11-10). The table changes nightly: read it once per 5 min."""
+    calls = []
+    monkeypatch.setattr(lot_archive_view, "_metas_from_index", lambda: calls.append(1) or [])
+    lot_archive_view.reset()
+    assert lot_archive_view._cached_index() == []
+    assert lot_archive_view._cached_index() == []
+    assert calls == [1]
+    lot_archive_view.reset()
+    lot_archive_view._cached_index()
+    assert calls == [1, 1]
+    lot_archive_view.reset()

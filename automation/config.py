@@ -115,6 +115,12 @@ ALERTS_POSTAL_ADDRESS = os.getenv("ALERTS_POSTAL_ADDRESS", "")
 # Public business line shown on /privacy as the way to reach us. Empty hides it.
 PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "(619) 407-8945")
 
+# ── Liquidator platform auth (Supabase) ─────────────────────────────────────
+# Read at request time by web/platform_routes.py and web/platform_auth.py:
+#   SUPABASE_URL              project URL (public)
+#   SUPABASE_PUBLISHABLE_KEY  publishable/anon key for supabase-js (public)
+#   SUPABASE_JWT_SECRET       legacy HS256 secret (SECRET); not needed when the project signs ES256 (JWKS from SUPABASE_URL)
+
 # ── Reserve with deposit (Stripe Checkout) ──────────────────────────────────
 # SHIPS DARK. No STRIPE_SECRET_KEY => no Reserve button on the storefront,
 # /reserve/* and /stripe/webhook return 404, and nothing imports the `stripe`
@@ -163,7 +169,8 @@ GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")
 # the address is the registered business address already on the CAN-SPAM
 # footer and WHOIS, never the storage facility (`inventory.storage_note`).
 PUBLIC_CONTACT_EMAIL = os.getenv("PUBLIC_CONTACT_EMAIL", "abdel.nasser@black-whole.com")
-PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "")
+# Google Voice line — buyers can call or text it.
+PUBLIC_CONTACT_PHONE = os.getenv("PUBLIC_CONTACT_PHONE", "(619) 407-8945")
 PUBLIC_ADDRESS_STREET = os.getenv("PUBLIC_ADDRESS_STREET", "18220 N 68th St")
 PUBLIC_ADDRESS_CITY = os.getenv("PUBLIC_ADDRESS_CITY", "Phoenix")
 PUBLIC_ADDRESS_REGION = os.getenv("PUBLIC_ADDRESS_REGION", "AZ")

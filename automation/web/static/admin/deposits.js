@@ -26,6 +26,8 @@ function money(cents) {
   return MONEY.format(cents / 100);
 }
 
+const KIND_LABEL = {deposit: 'DEPOSIT', full: 'FULL', financed: 'AFFIRM'};
+
 function when(ts) { return ts ? String(ts).replace('T', ' ').slice(0, 16) : ''; }
 
 // ───────── URL ↔ controls ─────────
@@ -72,7 +74,7 @@ function depositCard(d) {
   const canCancel = d.status === 'pending' || d.status === 'processing';
   card.innerHTML = `
     <div class="card-band">
-      <span class="dep-kind dep-kind--${escapeAttr(d.kind)}">${d.kind === 'full' ? 'FULL' : 'DEPOSIT'}</span>
+      <span class="dep-kind dep-kind--${escapeAttr(d.kind)}">${KIND_LABEL[d.kind] || 'DEPOSIT'}</span>
       <span class="dep-amount">${money(d.amount_cents)}</span>
       <span class="dep-qty">× ${d.quantity != null ? escapeHtml(d.quantity) : '?'}</span>
       <span class="card-cat dep-lot">${lotLink}</span>
@@ -87,7 +89,7 @@ function depositCard(d) {
     </div>
     <div class="dep-order">
       order ${money(d.subtotal_cents)}
-      · balance at delivery ${money((d.subtotal_cents || 0) - (d.amount_cents || 0))}
+      · balance at ${d.kind === 'financed' ? 'pickup' : 'delivery'} ${money((d.subtotal_cents || 0) - (d.amount_cents || 0))}
     </div>
     ${ids ? `<div class="dep-ids">${ids}</div>` : ''}
     ${d.failure_reason ? `<div class="dep-fail">${escapeHtml(d.failure_reason)}</div>` : ''}
@@ -221,6 +223,46 @@ async function saveDepositSettings() {
   }
 }
 
+// ───────── Affirm financing link ─────────
+// The operator's number goes straight to the server (auth-walled route); the server re-checks the $50–$30k
+// Affirm band and the order total. The link is a Stripe Checkout URL — copy it into a text to the buyer.
+
+function finMsg(html, kind) {
+  const el = $('#dep-fin-msg');
+  if (!el) return;
+  el.innerHTML = html || '';
+  el.className = 'dep-settings-status' + (kind ? ` dep-msg-${kind}` : '');
+}
+
+async function createFinancingLink() {
+  const val = (id) => ($(id)?.value || '').trim();
+  const body = {
+    lot_id: val('#dep-fin-lot'),
+    quantity: Number(val('#dep-fin-qty')),
+    amount_usd: val('#dep-fin-amount'),
+    order_total_usd: val('#dep-fin-total') || null,
+    name: val('#dep-fin-name'),
+    email: val('#dep-fin-email'),
+    phone: val('#dep-fin-phone'),
+  };
+  if (!body.email && !body.phone) { finMsg('need an email or a phone', 'err'); return; }
+  try {
+    const r = await api('/api/deposits/financing-link', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body),
+    });
+    finMsg(`#${escapeHtml(r.deposit_id)} · <a href="${escapeAttr(r.url)}" target="_blank" rel="noopener">open</a>
+      <button type="button" class="btn btn-small" data-copy>copy link</button> · expires in 24 h`, 'ok');
+    $('#dep-fin-msg [data-copy]')?.addEventListener('click', () => {
+      navigator.clipboard?.writeText(r.url).then(() => toast('Affirm link copied.', 'ok'));
+    });
+    await loadDeposits({keepOld: true});
+  } catch (err) {
+    finMsg(escapeHtml('failed: ' + (err.message || err)), 'err');
+  }
+}
+
 // ───────── mount / load ─────────
 
 let mounted = false;
@@ -236,6 +278,10 @@ export function mount() {
   readParams();
   $('#dep-settings-save')?.addEventListener('click', (e) => {
     pending(e.currentTarget, 'saving…', saveDepositSettings);
+  });
+  $('#dep-finance')?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    pending($('#dep-fin-create'), 'making…', createFinancingLink);
   });
   $('#dep-refresh')?.addEventListener('click', (e) => {
     pending(e.currentTarget, '↻ refreshing…', () => loadDeposits({keepOld: true}));

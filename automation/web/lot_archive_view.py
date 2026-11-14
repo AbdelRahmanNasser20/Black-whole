@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
@@ -27,6 +28,10 @@ _store_holder: dict[str, Any] = {}
 _meta_cache: dict[str, dict] = {}
 _doc_cache: "OrderedDict[str, dict]" = OrderedDict()
 _DOC_CACHE_MAX = 128
+# lot_archive (~11.5k rows) changes nightly; reading all of it on every Archive
+# page flip cost ~1 s on Render (2026-11-10). One read per 5 min.
+_INDEX_TTL = 300.0
+_index_memo: dict[str, tuple[float, list[dict] | None]] = {}
 
 
 class ArchiveUnavailable(RuntimeError):
@@ -49,6 +54,7 @@ def reset() -> None:
         _store_holder.clear()
         _meta_cache.clear()
         _doc_cache.clear()
+        _index_memo.clear()
 
 
 SOURCES = lot_archive.SOURCES
@@ -111,6 +117,16 @@ def _metas_from_store() -> list[dict]:
                 if m:
                     _meta_cache[k] = m
     return [_meta_cache[k] for k, _src in keys if k in _meta_cache]
+
+
+def _cached_index() -> list[dict] | None:
+    hit = _index_memo.get("v")
+    if hit and time.monotonic() - hit[0] < _INDEX_TTL:
+        return hit[1]
+    metas = _metas_from_index()
+    if metas is not None:   # never memoise "table missing / DB down"
+        _index_memo["v"] = (time.monotonic(), metas)
+    return metas
 
 
 def _metas_from_index() -> list[dict] | None:
@@ -187,7 +203,7 @@ def filter_metas(metas: list[dict], *, q: str | None = None, category: str | Non
 
 def list_lots(*, q=None, category=None, outcome=None, min_price=None, max_price=None,
               since=None, until=None, page: int = 1, per_page: int = 50, source=None) -> dict:
-    metas = _metas_from_index()
+    metas = _cached_index()
     index = "table" if metas is not None else "store"
     if metas is None:
         metas = _metas_from_store()

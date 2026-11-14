@@ -55,6 +55,35 @@ No cron, no rebuild step — it all renders from the ledger at request time.
 |---|---|---|
 | `PUBLIC_BASE_URL` | `https://black-whole.com` | canonical/OG/sitemap origin |
 | `GOOGLE_SITE_VERIFICATION` | *(unset)* | Search Console HTML-tag token |
+| `INDEXNOW_KEY` | *(unset)* | IndexNow key (32 hex chars, public — served at `/<key>.txt`). Unset = no pings, `/<key>.txt` 404s |
+
+## Bing + IndexNow (ChatGPT search reads Bing)
+
+ChatGPT search answers from Bing's index, so the site has to be in Bing,
+not only Google. IndexNow tells Bing the moment a page changes:
+`lot_channels` pings the lot page, `/listings` and the city page on every
+site add / remove / restore (`automation/indexnow.py`, background thread,
+failures logged and swallowed). Dark until `INDEXNOW_KEY` is set.
+
+One-time operator setup:
+
+1. Make a key: `openssl rand -hex 16`.
+2. Render → Env Groups → `blackwhole-secrets` → add `INDEXNOW_KEY` = the key
+   (saving redeploys the web service).
+3. Put the same `INDEXNOW_KEY=…` line in the laptop `listing_automation/.env`.
+4. Check: `curl -i https://black-whole.com/<key>.txt` → 200, body = the key.
+5. Open bing.com/webmasters and sign in with the Google account that owns
+   Search Console.
+6. Import from Google Search Console → black-whole.com. (Fallback: verify by
+   DNS CNAME in Cloudflare, proxy status grey cloud / DNS only.)
+7. Bing → Sitemaps: confirm `sitemap.xml` is listed (~72 URLs).
+8. `.venv/bin/python scripts/indexnow_submit.py --dry-run`, then without
+   `--dry-run`. Expect 200 or 202. 403 = key file unreachable,
+   422 = host mismatch.
+9. Bing → URL Inspection → live test + Request indexing for `/`,
+   `/listings` and one lot page.
+10. Cloudflare → Security → Bots: confirm "Block AI bots" is off and that
+    Security Events show no challenges for bingbot / OAI-SearchBot.
 
 ## Where visitors come from (traffic attribution)
 
