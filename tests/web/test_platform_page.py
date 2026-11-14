@@ -1,18 +1,24 @@
-"""GET /platform — the software page: one product window (read-only demo) over a dark backdrop.
+"""GET /platform — the liquidator product landing with the read-only live demo window.
 
 What this guards:
-  · the page renders with NO database (the handler reads nothing; the window's sections fetch from the
-    browser: /platform/api/auctions with the public /deals/api/* as fallback, /platform/api/sites);
-  · the hero stays almost wordless, the sections keep their order, and the copy never claims "all" sites
-    or a natural-language search that does not exist yet;
-  · the window has its five sections, the two sample ones are labelled as sample in the server-rendered
-    HTML (not only by JS), and Favorites is the visitor's own stars in this browser — never the operator's;
-  · GET /platform/api/sources is public, read-only, memoised, and answers names only when the read fails;
-  · it is reachable by direct URL only — not in the storefront nav/footer, not in the sitemap, noindex;
-  · the sample JSON is invented and stays that way: no contact details, no private fields, and the same
-    vocabulary as the real ledger (statuses, channels, channel states);
-  · the request-access form posts to the existing /contact with the lead tagged in `message`
-    (`inquiries` has no source column — no schema change).
+  · the request path renders with NO database: the handler's only read is
+    platform_api.stats(), which answers from a memo and refreshes in a background
+    thread, so a dead DB (or a cold start) still renders the page — numbers simply
+    missing (tests/platform/test_landing.py covers the stats contract itself);
+  · the conversion is /platform/signup and nothing else: the page WRITES nothing —
+    no form, no POST anywhere in its scripts;
+  · the demo window keeps its five sections in order, the two sample ones are
+    labelled as sample in the server-rendered HTML (not only by JS), and Favorites
+    is the visitor's own stars in this browser — never the operator's;
+  · GET /platform/api/sources is public, read-only, memoised, and answers names
+    only when the read fails;
+  · it is reachable by direct URL only — not in the storefront nav/footer, not in
+    the sitemap, noindex;
+  · the copy stays honest: no "all sites", no testimonials or customer counts, no
+    invented prices, no promise of features that do not exist, and no number about
+    the feed baked into the template;
+  · the sample JSON is invented and stays that way: no contact details, no private
+    fields, and the same vocabulary as the real ledger.
 """
 import inspect
 import json
@@ -25,7 +31,7 @@ from fastapi.testclient import TestClient
 
 from automation import channels, inventory
 from automation.web import auth as auth_svc
-from automation.web import public_deals, readcache
+from automation.web import platform_api, public_deals, readcache
 from automation.web.app import app
 
 app_module = sys.modules["automation.web.app"]
@@ -36,7 +42,6 @@ JS = (WEB / "static/site/platform.js").read_text()
 AUCTIONS_JS = (SAMPLE_DIR / "auctions.js").read_text()
 SECTIONS = ("auctions", "favorites", "inventory", "buyers", "sites")
 TEMPLATE = (WEB / "templates/platform.html").read_text()
-LEAD_TAG = "[PLATFORM PAGE]"
 
 
 @pytest.fixture(autouse=True)
@@ -46,10 +51,13 @@ def _no_auth(monkeypatch):
     yield
     auth_svc.reset_caches()
 
+from automation.web import public_sold  # noqa: E402
+
 
 @pytest.fixture
 def no_db(monkeypatch):
-    """Any DB read from the page handler is a failure, not a slow test."""
+    """Any synchronous DB read from the page handler is a failure, not a slow test.
+    stats() is memo-only on the request path; pin it to None so no thread spawns."""
     def boom(*a, **k):
         raise AssertionError("GET /platform must not touch the database")
     monkeypatch.setattr(public_deals, "fetch_facets", boom)
@@ -58,6 +66,8 @@ def no_db(monkeypatch):
     monkeypatch.setattr(inventory, "get", boom)
     monkeypatch.setattr(app_module.db, "fetch_all", boom)
     monkeypatch.setattr(app_module.db, "fetch_one", boom)
+    monkeypatch.setattr(platform_api, "stats", lambda: None)
+    monkeypatch.setattr(public_sold, "headline", lambda: None)
 
 
 def _client():
@@ -148,89 +158,85 @@ def test_page_is_noindex_and_out_of_the_sitemap(no_db, monkeypatch):
     monkeypatch.setattr(inventory, "list_sold_showcase", lambda: [])
     assert "/platform" not in _client().get("/sitemap.xml").text
     # robots.txt must NOT disallow it: a crawler has to fetch the page to see the noindex.
-    assert "/platform" not in _client().get("/robots.txt").text
+    # (only its JSON prefix is disallowed — scrape_guard)
+    assert "/platform" not in _client().get("/robots.txt").text.replace("Disallow: /platform/api/", "")
 
 
-def test_no_nav_or_footer_link_points_at_the_page(no_db):
+def test_no_storefront_nav_or_self_link(no_db):
     # the shared storefront chrome never mentions it …
     assert "/platform" not in (WEB / "templates/_public_base.html").read_text()
     # … so a buyer page carries no link to it …
     assert 'href="/platform' not in _client().get("/sell").text
-    # … and the page does not link to itself from its own header or footer either.
+    # … and the landing links its signup, never itself.
     html = _page()
-    assert 'href="/platform' not in html
+    assert 'href="/platform"' not in html
+    assert 'href="/platform/signup"' in html
 
+
+# ───────────────────────── honesty: copy and numbers ─────────────────────────
 
 def test_copy_makes_no_price_or_customer_claims(no_db):
     html = _page().lower()
-    for banned in ("testimonial", "trusted by", "per month", "/mo", "customers use", "join ", "free trial"):
+    for banned in ("testimonial", "trusted by", "per month", "/mo", "customers use",
+                   "free trial", "$0", "$9", "$19", "$29", "$49", "$99"):
         assert banned not in html, banned
-    assert "no price list" in html
+    # no live checkout, no invented Pro price — billing ships dark
+    assert "stripe" not in html and "/platform/api/subscribe" not in html
+    assert "not priced yet" in html
     # No number about the feed is baked into the template: the counts come from the endpoints at runtime.
     for slot in ("pf-au-count", "pf-n-auctions", "pf-sites-count", "pf-n-sites"):
         assert TEMPLATE.split(f'id="{slot}"', 1)[1].split("</span>", 1)[0].split(">", 1)[1].strip() == "", slot
 
 
-# ───────────────────────── hero, order, words ─────────────────────────
+def test_copy_stays_inside_the_honesty_limits(no_db):
+    html = _page()
+    text = " ".join(re.sub(r"<[^>]+>", " ", html.split('<main', 1)[1].split("</main>", 1)[0]).split()).lower()
+    for banned in ("all surplus", "all sites", "all auction", "every site", "every auction", "every surplus"):
+        assert banned not in text, banned
+    # natural-language search does not exist: the landing must not promise it at all
+    assert "plain-english search" not in text and "natural-language" not in text
+    # no count of sites is baked into the demo's Sites strip: it comes from the endpoint at runtime
+    strip = TEMPLATE.split('id="pf-pane-sites"', 1)[1].split("</ul>", 1)[0]
+    words = re.sub(r"<[^>]+>", " ", re.sub(r"\{[#%].*?[#%]\}", "", strip, flags=re.S))
+    assert not re.search(r"\d", words)
+    # planned sources appear only under roadmap framing
+    product = html.split('id="product"', 1)[1].split("</section>", 1)[0]
+    assert "On the roadmap" in product and "HiBid" in product
 
-def _words(text: str) -> list[str]:
-    return re.sub(r"<[^>]+>", " ", text).split()
 
-
-def test_hero_is_almost_wordless_and_jumps_to_the_window(no_db):
+def test_hero_sells_the_signup(no_db):
     html = _page()
     hero = html.split('class="pf-hero"', 1)[1].split("</section>", 1)[0]
     headline = hero.split('class="pf-headline">', 1)[1].split("</h1>", 1)[0]
-    sub = hero.split('class="pf-hero-sub">', 1)[1].split("</p>", 1)[0]
-    assert 1 <= len(_words(headline)) <= 6, headline
-    assert 1 <= len(_words(sub)) <= 14, sub
-    assert hero.count("<p") == 1, "one sub-line, no lede paragraphs"
-    assert hero.count('class="pf-cta"') == 1 and '<a class="pf-cta" href="#app">' in hero
-    # the backdrop must not depend on hero.jpg existing: a colour and gradients sit under it
-    css = (WEB / "static/site/platform.css").read_text()
-    rule = css.split(".pf-backdrop {", 1)[1].split("}", 1)[0]
-    assert "background-color" in rule and "url(/static/site/platform/hero.jpg)" in rule
-    assert "linear-gradient" in rule and "radial-gradient" in rule
+    assert 1 <= len(re.sub(r"<[^>]+>", " ", headline).split()) <= 10, headline
+    assert '<a class="pf-cta" href="/platform/signup">' in hero
+    assert "Get free early access" in hero
+    assert 'href="#app"' in hero, "a quiet path to the live demo"
+    # the whole page runs on the product's own dark tokens
+    assert 'class="pf-page" data-theme="dark"' in html
 
 
 def test_sections_come_in_the_agreed_order(no_db):
     html = _page()
-    marks = ['class="pf-hero"', 'id="app"', 'id="why"', 'id="access"']
+    marks = ['class="pf-hero"', 'id="app"', 'id="pf-win"', 'id="product"', 'id="pricing"', 'class="pf-close"']
     at = [html.index(m) for m in marks]
     assert at == sorted(at), dict(zip(marks, at))
-    # the hero and the window share one dark backdrop; the window sits directly under the hero
-    stage = html.split('class="pf-backdrop" data-theme="dark"', 1)[1].split('id="why"', 1)[0]
-    assert 'class="pf-hero"' in stage and 'id="pf-win"' in stage
-    # no separate map section or tabbed console any more: the window replaced both
-    assert 'id="map"' not in html and 'id="demo"' not in html and "pf-console" not in html
     # the buyers map keeps its own partial + files
     assert '/static/site/platform/map.css' in html and '/static/site/platform/map.js' in html
     assert '{% include "_platform_map.html" %}' in TEMPLATE
-    for h2 in re.findall(r"<h2[^>]*>(.*?)</h2>", TEMPLATE, re.S):
-        assert len(_words(h2)) <= 4, h2
 
 
-def test_copy_stays_inside_the_honesty_limits(no_db):
+def test_stats_slots_render_only_from_context(no_db, monkeypatch):
+    # with stats: both numbers appear, formatted, as count-up targets
+    monkeypatch.setattr(platform_api, "stats", lambda: {"sold_outcomes": 1234567, "open_now": 8901})
     html = _page()
-    text = " ".join(_words(html.split('<main', 1)[1].split("</main>", 1)[0])).lower()
-    for banned in ("all surplus", "all sites", "all auction", "every site", "every auction", "every surplus"):
-        assert banned not in text, banned
-    # no count of sites is baked in: it comes from the sites endpoint at runtime
-    strip = TEMPLATE.split('id="pf-pane-sites"', 1)[1].split("</ul>", 1)[0]
-    assert not re.search(r"\d", " ".join(_words(re.sub(r"\{[#%].*?[#%]\}", "", strip, flags=re.S))))
-    # natural-language search does not exist yet: only ever labelled as coming
-    why = html.split('id="why"', 1)[1].split("</section>", 1)[0]
-    assert re.search(r"Coming</span>\s*Plain-English search", why)
-    assert "plain-english search" not in text.replace("coming plain-english search", "")
-
-
-def test_why_block_is_three_short_rows(no_db):
-    assert TEMPLATE.count("WHY LIQUIDATORS — COPY BLOCK") == 2, "start + end markers for the copy agent"
-    why = _page().split('id="why"', 1)[1].split("</section>", 1)[0]
-    pains = re.findall(r'class="pf-why-pain">(.*?)</span>', why)
-    fixes = re.findall(r'class="pf-why-fix">(.*?)</span>', why)
-    assert len(pains) == len(fixes) == 3
-    assert 25 <= sum(len(_words(t)) for t in pains + fixes) <= 45
+    assert "1,234,567" in html and "8,901" in html
+    assert 'data-countup="1234567"' in html
+    # without stats (no_db pinned it to None first): no number, page still whole
+    monkeypatch.setattr(platform_api, "stats", lambda: None)
+    html = _page()
+    assert "data-countup" not in html
+    assert f"{len(platform_api.SITES)} sources tracked" in html
 
 
 # ───────────────────────── the sources strip ─────────────────────────
@@ -393,7 +399,7 @@ def test_crm_sample_has_no_contact_details(inv_sample, crm_sample):
         assert b["thread"] and all(m["from"] in ("buyer", "seller") for m in b["thread"]), b["id"]
 
 
-# ───────────────────────── the script ─────────────────────────
+# ───────────────────────── the scripts ─────────────────────────
 
 def test_scripts_read_only_public_endpoints():
     assert "const PRIMARY_URL = '/platform/api/auctions';" in AUCTIONS_JS
@@ -405,10 +411,19 @@ def test_scripts_read_only_public_endpoints():
         assert "/listings" not in src and "/catalog" not in src and "/subscribe" not in src
         for verb in ("PATCH", "PUT", "DELETE"):
             assert verb not in src
-    # the only write is the request-access POST
-    assert JS.count("method: 'POST'") == 1 and "api('/contact'" in JS
-    assert "POST" not in AUCTIONS_JS
+    # the page writes NOTHING: the conversion is a plain link to /platform/signup
+    for src in (JS, AUCTIONS_JS):
+        assert "POST" not in src and "method:" not in src
     assert "fetch(" not in AUCTIONS_JS.replace("fetchPrimary(", "").replace("fetchFallback(", ""), "go through ui/state.js api()"
+
+
+def test_counters_are_server_rendered_and_motion_safe():
+    # the one deliberate motion: counters animate real, already-rendered numbers …
+    block = JS.split("function initCounters()", 1)[1].split("\n}\n", 1)[0]
+    assert "prefers-reduced-motion: reduce" in block, "reduced motion keeps the finished numbers"
+    assert "el.dataset.countup" in block
+    # … and the markup carries the finished figure, so no JS still shows the truth
+    assert 'data-countup="{{ stats.sold_outcomes }}">{{ "{:,}".format(stats.sold_outcomes) }}' in TEMPLATE
 
 
 def test_auctions_fall_back_when_the_new_route_is_missing():
@@ -436,38 +451,35 @@ def test_script_never_claims_live_without_the_endpoint_saying_so():
     assert "status: 'open'" in AUCTIONS_JS.split("const f = ", 1)[1].split(";", 1)[0]
 
 
-# ───────────────────────── the form ─────────────────────────
-
-def test_access_form_posts_to_contact_with_the_lead_tagged(monkeypatch):
-    assert f"export const LEAD_TAG = '{LEAD_TAG}';" in JS
-    assert "kind: 'buy'" in JS          # the only two kinds `inquiries` accepts are buy | sell
-    seen = {}
-
-    def fake_create(**kw):
-        seen.update(kw)
-        if kw["kind"] not in ("buy", "sell"):
-            raise ValueError("kind must be 'buy' or 'sell'")
-        return {"id": 77, **kw}
-
-    async def no_ping(row):
-        seen["pinged"] = row["id"]
-
-    monkeypatch.setattr(inventory, "create_inquiry", fake_create)
-    monkeypatch.setattr(app_module, "_notify_new_inquiry", no_ping)
-    # exactly the shape platform.js::accessPayload builds
-    payload = {"kind": "buy", "name": "Test Person", "email": "test@example.com",
-               "message": f"{LEAD_TAG} I am: liquidator | Company: Example Liquidators | Pallets of returns."}
-    r = _client().post("/contact", json=payload)
-    assert r.status_code == 200 and r.json() == {"ok": True, "id": 77}
-    assert seen["kind"] == "buy" and seen["email"] == "test@example.com"
-    assert seen["message"].startswith(LEAD_TAG)
-    assert seen["lot_id"] is None and seen["quantity_interested"] is None
-
-
-def test_access_form_markup(no_db):
+def test_sold_proof_section_renders_from_the_memo_only(no_db, monkeypatch):
+    # with a headline: the share of bid-on closes that did NOT sell, and the count behind it
+    monkeypatch.setattr(public_sold, "headline", lambda: {
+        "sold": 4110, "not_sold": 4774, "sold_share": 46.3, "median": 260.0, "p25": 42.0, "p75": 2225.0})
     html = _page()
-    form = html.split('id="pf-access-form"', 1)[1].split("</form>", 1)[0]
-    for field in ('name="name"', 'name="email"', 'name="company"', 'name="role"', 'name="note"'):
-        assert field in form
-    assert "REQUEST ACCESS" in form
-    assert 'name="phone"' not in form
+    assert 'id="proof"' in html and 'href="/deals/sold"' in html
+    assert "54%" in html and "4,110" in html and "4,774" in html
+    # without one: the section and its link stay, no invented number
+    monkeypatch.setattr(public_sold, "headline", lambda: None)
+    html = _page()
+    assert 'id="proof"' in html and 'href="/deals/sold"' in html
+    assert "54%" not in html
+
+
+def test_asset_links_carry_a_real_cache_key(no_db):
+    # `?v={{ now }}` rendered as `?v=` (no `now` in the context): a browser kept the old CSS after a deploy.
+    html = _page()
+    assert "?v=\"" not in html
+    assert "platform.css?v=" in html
+
+
+def test_hero_plays_the_real_feed_behind_the_claim(no_db):
+    # The moving background is a capture of the live Auctions view (real data),
+    # never the Inventory/Buyers sample views. Decoration only: hidden from readers.
+    html = _page()
+    hero = html.split('class="pf-hero"', 1)[1].split("</section>", 1)[0]
+    assert '<div class="pf-hero-media" aria-hidden="true">' in hero
+    assert 'src="/static/site/platform/hero/feed.webp?v=' in hero
+    assert _client().get("/static/site/platform/hero/feed.webp").status_code == 200
+    css = _client().get("/static/site/platform.css").text
+    assert "pfHeroDrift" in css
+    assert ".pf-hero-shot { animation: none" in css.split("prefers-reduced-motion: reduce", 1)[1]

@@ -174,3 +174,26 @@ def verify_webhook(payload: bytes, sig_header: str) -> dict:
         payload, sig_header, config.STRIPE_WEBHOOK_SECRET
     )
     return event.to_dict()
+
+
+# ── platform subscription (liquidator platform, dark behind PLATFORM_BILLING_ENABLED)
+
+def create_platform_customer(*, email: str, user_id: str) -> str:
+    """Create a Stripe customer for a platform user; returns its id."""
+    stripe = _stripe()
+    customer = stripe.Customer.create(email=email, metadata={"platform_user_id": str(user_id)})
+    return customer["id"]
+
+
+def create_subscription_checkout(*, customer_id: str, price_id: str, base_url: str) -> Any:
+    """Checkout session in subscription mode. The price id is server config,
+    never a client value."""
+    stripe = _stripe()
+    base = base_url.rstrip("/")
+    return stripe.checkout.Session.create(
+        mode="subscription",
+        customer=customer_id,
+        line_items=[{"price": price_id, "quantity": 1}],
+        success_url=f"{base}/platform/alerts?subscribed=1",
+        cancel_url=f"{base}/platform/alerts?canceled=1",
+    )

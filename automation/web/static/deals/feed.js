@@ -183,7 +183,12 @@ async function loadLots({append = false} = {}) {
       if (append) { grid.insertAdjacentHTML('beforeend', html); return null; }
       return html;
     },
-    errorMessage: err => "Couldn't load lots. " + (err.status ? `The server said ${err.status}.` : 'The database didn\'t answer in 15 s.'),
+    // 401 = the anonymous depth cap (scrape guard): deeper pages need a free account.
+    errorMessage: err => err.status === 401 ? 'Sign in to see more lots.'
+      : "Couldn't load lots. " + (err.status ? `The server said ${err.status}.` : 'The database didn\'t answer in 15 s.'),
+    onError: err => {
+      if (err.status === 401) grid.insertAdjacentHTML('beforeend', '<p><a class="btn btn-primary btn-small" href="/platform/signup">Sign in to see more</a></p>');
+    },
   });
   if (!body) { $('#feed-more').hidden = true; return undefined; }
   lastBody = body;

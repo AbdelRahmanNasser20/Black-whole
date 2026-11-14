@@ -261,6 +261,8 @@ _fail_until: dict[str, float] = {}
 def clear_cache() -> None:
     readcache.invalidate_all()
     _fail_until.clear()
+    with _stats_lock:
+        _stats.update(at=0.0, data=None, refreshing=False, fail_until=0.0)
 
 
 def _lots(status: str) -> tuple[str, list[dict]]:
@@ -364,6 +366,64 @@ def auctions(*, q=None, site=None, category=None, state=None, status="open", no_
         "items": [{k: i[k] for k in ITEM_KEYS} for i in items[start:start + per_page]],
         "facets": facets,
     }
+
+
+# ── landing-page stats ───────────────────────────────────────────────────────
+# Real counts for /platform's hero. Rules:
+#   · Never invented, never hardcoded: both numbers come from the database.
+#   · Never blocking: the counts scan deal_lots (~260k rows) and take seconds
+#     over the pooler, so `stats()` answers from a memo and refreshes in a
+#     daemon thread. The first view after a deploy — and every view while the
+#     DB is down — renders the page without numbers (the template degrades to
+#     the source count, which needs no DB).
+#   · No double counting: deal_lots carries the GovDeals outcomes, so GovDeals
+#     rows in sold_comps are left out rather than de-duplicated row by row —
+#     an undercount, never an overcount.
+STATS_TTL = 6 * 3600
+
+_STATS_SQL = """
+SELECT
+  (SELECT count(*) FROM deal_lots WHERE outcome_complete)
+  + (SELECT count(*) FROM sold_comps WHERE source <> 'govdeals') AS sold_outcomes,
+  (SELECT count(*) FROM (
+     SELECT DISTINCT ON (source, source_lot_id) status, end_date
+     FROM listing_snapshots
+     WHERE observed_at > now() - make_interval(days => %s)
+     ORDER BY source, source_lot_id, observed_at DESC
+   ) latest WHERE status = 'active' AND end_date > now()) AS open_now
+"""
+
+_stats_lock = threading.Lock()
+_stats: dict[str, Any] = {"at": 0.0, "data": None, "refreshing": False, "fail_until": 0.0}
+
+
+def _refresh_stats() -> None:
+    try:
+        row = db.fetch_one(_STATS_SQL, (OPEN_WINDOW_DAYS,))
+        data = {"sold_outcomes": int(row["sold_outcomes"]), "open_now": int(row["open_now"])}
+    except Exception:
+        log.warning("platform stats read failed", exc_info=True)
+        data = None
+    with _stats_lock:
+        _stats["refreshing"] = False
+        if data is not None:      # a failure keeps the last good numbers …
+            _stats["data"], _stats["at"] = data, time.monotonic()
+        else:                      # … and backs off, so an outage is not re-queried per page view
+            _stats["fail_until"] = time.monotonic() + FAIL_BACKOFF
+
+
+def stats() -> dict | None:
+    """The landing page's numbers, or None while none have been read yet.
+    Never blocks and never raises: stale-while-revalidate via a daemon thread,
+    with FAIL_BACKOFF between refresh attempts while the database is down."""
+    with _stats_lock:
+        now = time.monotonic()
+        stale = _stats["data"] is None or now - _stats["at"] >= STATS_TTL
+        if not stale or _stats["refreshing"] or now < _stats["fail_until"]:
+            return _stats["data"]
+        _stats["refreshing"] = True
+    threading.Thread(target=_refresh_stats, name="platform-stats", daemon=True).start()
+    return _stats["data"]
 
 
 # ── endpoint 2: sites ────────────────────────────────────────────────────────

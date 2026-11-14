@@ -21,6 +21,7 @@
 {% endblock %}
 {% block topbar_nav %}
 <a href="/deals" aria-current="page">Deals</a>
+<a href="/deals/sold">Sold prices</a>
 <a href="/sources">Sources</a>
 {% endblock %}
 
@@ -74,6 +75,7 @@
 {% endblock %}
 
 {% block content %}
+<a href="{{ trap_path }}" rel="nofollow" aria-hidden="true" tabindex="-1" hidden>Full export</a>
 <details class="feed-about" id="feed-about">
   <summary><span class="feed-about-kicker">What this is</span> <span class="feed-about-title">Government surplus, priced by the unit.</span></summary>
   <div class="feed-about-body">
@@ -96,6 +98,12 @@
     </dl>
   </div>
 </details>
+
+{% if platform_authed %}
+<meta name="platform-authed" content="1">
+{% else %}
+<p class="feed-cta"><a class="btn btn-primary btn-small" href="/platform/signup">Sign up free for alerts + max bid</a></p>
+{% endif %}
 
 <div class="chips" id="feed-chips" data-state="loading" aria-label="Category">{% for _ in range(6) %}<span class="sk sk-pill" aria-hidden="true"></span>{% endfor %}</div>
 
@@ -133,4 +141,5 @@
 {% block scripts %}
 <script type="module" src="/static/deals/feed.js?v={{ asset_v }}"></script>
 <script type="module" src="/static/deals/map.js?v={{ asset_v }}"></script>
+{% if platform_authed %}<script type="module" src="/static/deals/platform.js?v={{ asset_v }}"></script>{% endif %}
 {% endblock %}

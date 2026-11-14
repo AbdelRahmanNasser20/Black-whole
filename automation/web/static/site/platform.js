@@ -10,16 +10,15 @@
 //                       status: Live, Paused or Planned. The names are already in the HTML; a failed read
 //                       leaves them names-only and claims nothing.
 //
-// The one write on the page is the request-access form: POST /contact (existing endpoint, unchanged),
-// with the lead tagged in `message` because `inquiries` has no source column. Everything else — sorting,
-// filtering, selecting a lot, approving a draft reply — changes memory only and is gone on reload.
-import {api, pending, fmt, esc} from '../ui/state.js';
+// This page WRITES NOTHING: the conversion is a plain link to /platform/signup. Everything here —
+// sorting, filtering, selecting a lot, approving a draft reply — changes memory only and is gone on
+// reload. The hero counters are server-rendered real numbers; initCounters only animates them once.
+import {api, fmt, esc} from '../ui/state.js';
 import * as auctions from './platform/auctions.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-export const LEAD_TAG = '[PLATFORM PAGE]';
 const SAMPLE_BASE = '/static/site/platform/';
 
 function words(v) { return String(v || '').replace(/_/g, ' '); }
@@ -368,41 +367,23 @@ function initCrm() {
 onOpen.buyers = loadCrm;
 onSearch.buyers = q => { crm.q = q; if (crm.data) renderBuyers(); };
 
-// ═════════════════════════ request access ═════════════════════════
-// POST /contact as-is. `inquiries` has no source column, so the page tags the lead in the message text.
-export function accessPayload(fields) {
-  const clean = k => String(fields[k] || '').trim();
-  const parts = [`I am: ${clean('role') || 'not given'}`];
-  if (clean('company')) parts.push(`Company: ${clean('company')}`);
-  if (clean('note')) parts.push(clean('note'));
-  // The tag leads the message so it survives the 240-character Telegram preview and any truncation.
-  return {kind: 'buy', name: clean('name'), email: clean('email'), message: `${LEAD_TAG} ${parts.join(' | ')}`};
-}
-
-function initAccess() {
-  const form = $('#pf-access-form');
-  if (!form) return;
-  const result = form.querySelector('.mf-result');
-  const show = (text, ok) => {
-    result.textContent = text;
-    result.classList.toggle('mf-result--ok', ok); result.classList.toggle('mf-result--err', !ok);
-    result.hidden = false;
-  };
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const payload = accessPayload(Object.fromEntries(new FormData(form).entries()));
-    if (!payload.name) { show('Add your name so I know who is asking.', false); form.elements.name.focus(); return; }
-    if (!/^\S+@\S+\.\S+$/.test(payload.email)) { show('Add an email address I can reply to.', false); form.elements.email.focus(); return; }
-    try {
-      const data = await pending(form.querySelector('button[type="submit"]'), 'REQUESTING…', () => api('/contact', {
-        method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload),
-      })) || {};
-      show(`Access requested. Request #${data.id} is in the inbox, and the reply will come by email.`, true);
-      form.reset();
-    } catch (err) {
-      show(`The request did not send${err.message ? ': ' + err.message : ''}. Try again in a moment.`, false);
-    }
-  });
+// ═════════════════════════ hero counters ═════════════════════════
+// The page's one deliberate motion: each server-rendered real number counts up once on load.
+// The target is already in the markup, so without JavaScript — or with reduced motion — the
+// finished number is simply there.
+function initCounters() {
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const el of $$('[data-countup]')) {
+    const target = Number(el.dataset.countup);
+    if (!Number.isFinite(target) || target <= 0) continue;
+    const t0 = performance.now(), dur = 900;
+    const step = now => {
+      const k = Math.min(1, (now - t0) / dur);
+      el.textContent = Math.round(target * (1 - Math.pow(1 - k, 3))).toLocaleString('en-US');
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
 }
 
 // ═════════════════════════ sites (LIVE) ═════════════════════════
@@ -458,6 +439,7 @@ onSearch.sites = q => { sites.q = q; renderSites(); };
 
 if ($('#pf-win')) {
   auctions.init({showSection: name => showTab(name), clearSearch});
-  initInv(); initCrm(); initShell(); initAccess();
+  initInv(); initCrm(); initShell();
   loadSites();
 }
+initCounters();
