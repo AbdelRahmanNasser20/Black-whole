@@ -39,7 +39,7 @@ class FakeDB:
         if sql == platform_alerts.ALERTS_SQL:
             return list(self.alerts)
         assert sql == platform_alerts.MATCH_SQL
-        created, now, _, pat, st, _, mp, _, src, _, aid = params
+        created, now, _, pat, st, _, mp, _, src, _, aid, *_policy = params
         rx = like_to_re(pat)
         floor = max(created, now - timedelta(days=2))
         done = {(a, s, k) for (a, s, k, *_r) in self.sends}
@@ -79,6 +79,7 @@ def env(monkeypatch):
     monkeypatch.setattr(platform_email, "send_alert_email", send)
     monkeypatch.setenv("PLATFORM_BASE_URL", "https://p.test")
     monkeypatch.delenv("PLATFORM_ALERTS_DAILY_CAP", raising=False)
+    monkeypatch.setenv("RESEND_API_KEY", "k")
     f.mails, f.ok = mails, ok
     return f
 
@@ -158,3 +159,38 @@ def test_one_alert_raising_does_not_starve_others(env, monkeypatch):
     r = platform_alerts.run_pass(NOW)
     assert r["emailed"] == 1 and not [s for s in env.sends if s[0] == 1]
     assert [s[0] for s in env.sends] == [2]
+
+
+def test_match_sql_applies_the_public_exclusion_policy():
+    # An alert email is a public surface: seating lots and the operator's tracked /
+    # favorited / listed lots must never reach it (same policy as public /deals).
+    from automation.web import public_deals
+    where, args = public_deals.exclusion_where()
+    assert where in platform_alerts.MATCH_SQL
+    assert " d." not in platform_alerts.MATCH_SQL and "(d." not in platform_alerts.MATCH_SQL
+    assert platform_alerts.MATCH_SQL.count("%s") == 11 + len(args)
+
+
+def test_match_args_end_with_the_policy_args(env, monkeypatch):
+    from automation.web import public_deals
+    seen = []
+    real = db.fetch_all
+
+    def spy(sql, params=None):
+        if sql == platform_alerts.MATCH_SQL:
+            seen.append(params)
+        return real(sql, params)
+    monkeypatch.setattr(db, "fetch_all", spy)
+    env.add_alert(); env.add_lot(1)
+    platform_alerts.run_pass(NOW)
+    assert list(seen[0][11:]) == public_deals.exclusion_where()[1]
+
+
+def test_no_resend_key_records_nothing(env, monkeypatch):
+    # Rows go in before the send. Without a key nothing can be sent, so a pass must
+    # not mark lots as sent (they would never be emailed once the key is set).
+    monkeypatch.delenv("RESEND_API_KEY")
+    env.add_alert(); env.add_lot(1)
+    rep = platform_alerts.run_pass(NOW)
+    assert env.sends == [] and env.mails == [] and env.fired == {}
+    assert rep["emailed"] == 0

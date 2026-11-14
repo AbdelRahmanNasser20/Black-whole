@@ -20,6 +20,7 @@ import os
 from datetime import datetime, timezone
 
 from automation import db, platform_email
+from automation.web import public_deals
 
 logger = logging.getLogger(__name__)
 
@@ -33,19 +34,24 @@ ALERTS_SQL = (
     "WHERE a.active AND u.onboarded_at IS NOT NULL AND u.email IS NOT NULL ORDER BY a.id"
 )
 
-# first_seen_at window first (indexable / selective), then the cheap filters.
+# first_seen_at window first (indexable / selective), then the cheap filters, then the
+# public exclusion policy: an alert email is a public surface, so it never carries a
+# seating lot or a lot the operator tracks, starred or listed (same rule as /deals).
+# The table stays unaliased because exclusion_where() names `deal_lots.` itself.
 MATCH_SQL = (
-    "SELECT d.site AS source, d.native_id AS lot_key, d.title, d.current_bid, d.end_utc, "
-    "d.state, d.asset_id, d.account_id FROM deal_lots d "
-    "WHERE d.first_seen_at > greatest(%s::timestamptz, %s::timestamptz - interval '2 days') "
-    "AND d.end_utc > %s::timestamptz AND d.outcome_complete IS NOT TRUE "
-    "AND d.title ILIKE %s ESCAPE '\\' "
-    "AND (%s::text IS NULL OR d.state = %s::text) "
-    "AND (%s::real IS NULL OR d.current_bid <= %s::real) "
-    "AND (%s::text IS NULL OR d.site = %s::text) "
+    "SELECT deal_lots.site AS source, deal_lots.native_id AS lot_key, deal_lots.title, "
+    "deal_lots.current_bid, deal_lots.end_utc, deal_lots.state, deal_lots.asset_id, "
+    "deal_lots.account_id FROM deal_lots "
+    "WHERE deal_lots.first_seen_at > greatest(%s::timestamptz, %s::timestamptz - interval '2 days') "
+    "AND deal_lots.end_utc > %s::timestamptz AND deal_lots.outcome_complete IS NOT TRUE "
+    "AND deal_lots.title ILIKE %s ESCAPE '\\' "
+    "AND (%s::text IS NULL OR deal_lots.state = %s::text) "
+    "AND (%s::real IS NULL OR deal_lots.current_bid <= %s::real) "
+    "AND (%s::text IS NULL OR deal_lots.site = %s::text) "
     "AND NOT EXISTS (SELECT 1 FROM platform_alert_sends s WHERE s.alert_id = %s "
-    "AND s.source = d.site AND s.lot_key = d.native_id) "
-    f"ORDER BY d.first_seen_at DESC LIMIT {MAX_LOTS_PER_ALERT}"
+    "AND s.source = deal_lots.site AND s.lot_key = deal_lots.native_id) "
+    f"AND {public_deals.exclusion_where()[0]} "
+    f"ORDER BY deal_lots.first_seen_at DESC LIMIT {MAX_LOTS_PER_ALERT}"
 )
 
 SENDS_TODAY_SQL = (
@@ -103,7 +109,7 @@ def _do_alert(a: dict, now: datetime, day_start: datetime, cap: int, rep: dict, 
     st, src, mp = a.get("state_filter"), a.get("source_filter"), a.get("max_price")
     rows = db.fetch_all(MATCH_SQL, (
         a["created_at"], now, now, f"%{escape_like(kw)}%",
-        st, st, mp, mp, src, src, a["id"]))
+        st, st, mp, mp, src, src, a["id"], *public_deals.exclusion_where()[1]))
     if not rows:
         return
     rep["matched"] += len(rows)
@@ -137,6 +143,11 @@ def run_pass(now: datetime | None = None) -> dict:
     rep = {"matched": 0, "emailed": 0, "skipped_dup": 0, "users": 0, "failed": 0}
     users: set = set()
     cap = _cap()
+    if not os.getenv("RESEND_API_KEY", "").strip():
+        # Send rows go in before the email. With no key nothing can go out, so a pass
+        # would mark every match as sent and those lots would never be emailed.
+        logger.warning("platform-alerts: pass skipped (RESEND_API_KEY unset)")
+        return rep
     for a in db.fetch_all(ALERTS_SQL):
         try:
             _do_alert(a, now, day_start, cap, rep, users)

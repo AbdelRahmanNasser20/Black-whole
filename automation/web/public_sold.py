@@ -113,6 +113,12 @@ def _stats(row: dict) -> dict:
             "median": _num(row["median"]), "p25": _num(row["p25"]), "p75": _num(row["p75"])}
 
 
+def cap_pages(data: dict, max_rows: int) -> dict:
+    """Stop the pager at `max_rows` rows (the anonymous depth the scrape guard allows)."""
+    data["pages"] = max(1, min(data["pages"], max_rows // PER_PAGE))
+    return data
+
+
 def fetch_sold(*, q: str | None = None, category: str | None = None,
                state: str | None = None, days: int | None = None, page: int = 1) -> dict:
     """Summary + per-category table + one page of sold lots, on one connection."""

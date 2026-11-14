@@ -123,6 +123,9 @@ def test_saved_page_lists_lots(monkeypatch):
         assert "FROM platform_saved_lots" in sql and "LEFT JOIN deal_lots" in sql
         for frag in ("tracked_lots", "auction_favorites", "deal_list_items"):
             assert frag in sql, frag
+        # every selected column names a table that is in the FROM/JOIN (an undefined alias = a 500 in Postgres)
+        cols = sql.split("SELECT", 1)[1].split(" FROM platform_saved_lots", 1)[0]
+        assert {c.strip().split(".")[0] for c in cols.split(",")} == {"s", "deal_lots"}
         return [
             {"source": "govdeals", "lot_key": "1/2/3", "title": "Banquet chairs", "current_bid": 100.0,
              "end_utc": END, "bid_count": 2, "outcome_complete": False, "asset_id": 1, "account_id": 2},

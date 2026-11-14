@@ -127,7 +127,9 @@ def test_anonymous_depth_is_capped(monkeypatch):
     r = c.get("/deals/api/lots?page=3&per_page=100")
     assert r.status_code == 401 and r.json() == {"detail": "sign_in_required"}
     assert c.get("/deals/api/sold?page=5").status_code == 401      # 5 × 50 rows
-    assert c.get("/deals/sold?page=5").status_code == 401
+    # an HTML page sends a person to sign in; it never answers raw JSON
+    r = c.get("/deals/sold?page=5", follow_redirects=False)
+    assert r.status_code == 302 and r.headers["location"] == "/platform/signup"
     assert c.get("/platform/api/auctions?page=9&per_page=25").status_code == 401
 
 
@@ -145,6 +147,26 @@ def test_depth_reads_bad_numbers_as_the_default():
     # an oversized per_page is clamped by the endpoint, so it is counted clamped
     assert sg.depth("/platform/api/auctions", {"per_page": "5000"}) == 100
     assert sg.depth("/deals/api/sold", {"page": "2", "per_page": "9999"}) == 100
+    # /deals/api/lots serves 25 rows a page for any per_page it does not offer
+    assert sg.depth("/deals/api/lots", {"page": "400", "per_page": "1"}) == 10000
+    assert sg.depth("/deals/api/lots", {"page": "2", "per_page": "50"}) == 100
+    assert sg.depth("/platform/api/auctions", {"page": "3", "per_page": "1"}) == 3   # this one honours it
+
+
+def test_sold_pager_stops_at_the_anonymous_depth(monkeypatch):
+    from automation.web import public_sold
+    monkeypatch.setattr(sg, "ANON_MAX_ROWS", 200)
+    from tests.web.test_public_sold import DATA
+    monkeypatch.setattr(public_sold, "fetch_sold", lambda **kw: dict(DATA, total=5000, pages=100))
+    html = _c().get("/deals/sold").text
+    assert "Page 1 of 4" in html
+    monkeypatch.setattr(app_mod, "_platform_viewer", lambda request: {"id": 1, "onboarded_at": "x"})
+    assert "Page 1 of 100" in _c().get("/deals/sold").text
+
+
+def test_feed_tells_an_anonymous_reader_to_sign_in_on_401():
+    js = _c().get("/static/deals/feed.js").text
+    assert "err.status === 401" in js and "/platform/signup" in js and "Sign in to see more" in js
 
 
 # ── crawler rules ────────────────────────────────────────────────────────────

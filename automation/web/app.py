@@ -193,6 +193,8 @@ async def _scrape_guard_middleware(request: Request, call_next):
         except Exception:  # noqa: BLE001 - an auth lookup failure reads as anonymous
             viewer = None
         if not viewer:
+            if not scrape_guard.is_json(path):   # an HTML page: send the person to sign in
+                return RedirectResponse("/platform/signup", status_code=302)
             return JSONResponse({"detail": "sign_in_required"}, status_code=401)
     response = await call_next(request)
     if scrape_guard.is_json(path):
@@ -1475,6 +1477,13 @@ def _sold_filters(q, category, state, days) -> dict:
             "state": (state or "").strip().upper() or None, "days": days}
 
 
+def _anon_safe_viewer(request: Request) -> dict | None:
+    try:
+        return _platform_viewer(request)
+    except Exception:  # noqa: BLE001 - an auth lookup failure reads as anonymous
+        return None
+
+
 @app.get("/deals/sold", response_class=HTMLResponse)
 def public_sold_page(request: Request, q: str | None = Query(None, max_length=80),
                      category: str | None = Query(None, max_length=40),
@@ -1486,6 +1495,10 @@ def public_sold_page(request: Request, q: str | None = Query(None, max_length=80
            "day_choices": public_sold.DAY_CHOICES, "category_options": []}
     try:
         ctx["data"] = public_sold.fetch_sold(**filters, page=page)
+        if scrape_guard.enabled() and not auth_svc.request_has_session(request) \
+                and not _anon_safe_viewer(request):
+            # No account: the pager stops where the scrape guard's depth cap starts.
+            public_sold.cap_pages(ctx["data"], scrape_guard.ANON_MAX_ROWS)
     except Exception as e:  # noqa: BLE001 - the page says so in plain words
         print(f"[sold] query failed: {e!r}", file=sys.stderr)
         ctx["error"] = True

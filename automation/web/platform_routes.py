@@ -225,8 +225,8 @@ def platform_saved_page(request: Request):
     # points at an operator-hidden lot renders as "no longer listed", never its title.
     ex_where, ex_args = public_deals.exclusion_where()
     rows = db.fetch_all(
-        "SELECT s.source, s.lot_key, d.asset_id, d.account_id, d.title, d.current_bid, "
-        "d.bid_count, d.end_utc, d.outcome_complete "
+        "SELECT s.source, s.lot_key, deal_lots.asset_id, deal_lots.account_id, deal_lots.title, "
+        "deal_lots.current_bid, deal_lots.bid_count, deal_lots.end_utc, deal_lots.outcome_complete "
         "FROM platform_saved_lots s LEFT JOIN deal_lots "
         "ON deal_lots.site = s.source AND deal_lots.native_id = s.lot_key AND " + ex_where + " "
         "WHERE s.user_id = %s ORDER BY s.created_at DESC",

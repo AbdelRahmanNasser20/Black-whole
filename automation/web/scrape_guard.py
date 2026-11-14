@@ -54,6 +54,9 @@ _PAGES = ("/deals/sold",)
 # The endpoints clamp an oversized per_page themselves, so the depth is counted on the clamped value.
 _PAGED = {"/deals/api/lots": (25, 100), "/deals/api/sold": (50, 50), "/deals/sold": (50, 50),
           "/platform/api/auctions": (50, 100)}
+# endpoints that serve only these sizes and fall back to the default for any other value
+# (public_deals.clamp_page). per_page=1 there is 25 rows a page, so it is counted as 25.
+_SIZES = {"/deals/api/lots": (25, 50, 100)}
 
 _BANS: dict[str, float] = {}
 
@@ -117,7 +120,10 @@ def depth(path: str, query) -> int:
     if path not in _PAGED:
         return 0
     size, largest = _PAGED[path]
-    return _pos(query.get("page"), 1) * min(_pos(query.get("per_page"), size), largest)
+    per_page = min(_pos(query.get("per_page"), size), largest)
+    if path in _SIZES and per_page not in _SIZES[path]:
+        per_page = size
+    return _pos(query.get("page"), 1) * per_page
 
 
 def reset() -> None:
