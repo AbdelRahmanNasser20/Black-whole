@@ -1107,7 +1107,7 @@ def delete_inquiry(inquiry_id: int) -> bool:
 # blast job filters on.
 
 SUBSCRIBER_STATUSES = ("new", "contacted", "matched", "unsubscribed")
-SUBSCRIBER_SOURCES = ("site_listings", "site_landing", "site_detail", "operator")
+SUBSCRIBER_SOURCES = ("site_listings", "site_landing", "site_detail", "site_inquiry", "operator")
 
 
 def create_subscriber(
@@ -1174,6 +1174,48 @@ def create_subscriber(
         subscriber_id = cur.fetchone()["id"]
         conn.commit()
     return get_subscriber(subscriber_id)
+
+
+def subscribe_from_inquiry(inquiry: dict | None, attribution: dict | None = None) -> dict | None:
+    """Put the buyer behind a BUY inquiry on the alert list.
+
+    Carries name, email, phone, ZIP and chair count. Returns the new subscriber,
+    or None when there is nothing to do: a sell lead, a platform-page lead, or a
+    person already on the list (same email or same phone — this also keeps an
+    unsubscribed person off it). Never raises: an inquiry must not fail because
+    of the alert list.
+    """
+    try:
+        if not inquiry or inquiry.get("kind") != "buy":
+            return None
+        if (inquiry.get("message") or "").startswith(_NO_ZIP_LEAD_TAGS):
+            return None
+        email = (inquiry.get("email") or "").strip() or None
+        phone = (inquiry.get("phone") or "").strip() or None
+        digits = re.sub(r"\D", "", phone or "")[-10:]
+        if not email and not phone:
+            return None
+        with connect() as conn:
+            dup = conn.execute(
+                "SELECT id FROM subscribers WHERE (%s::text IS NOT NULL AND lower(email) = lower(%s::text)) "
+                "OR (%s::text <> '' AND right(regexp_replace(coalesce(phone, ''), '\\D', '', 'g'), 10) = %s::text) "
+                "LIMIT 1",
+                (email, email, digits, digits),
+            ).fetchone()
+        if dup:
+            return None
+        lot = inquiry.get("lot_id")
+        return create_subscriber(
+            name=inquiry.get("name"), email=email, phone=phone,
+            zip_code=clean_zip(inquiry.get("zip_code")),
+            quantity_wanted=inquiry.get("quantity_interested"),
+            notes=f"From inquiry #{inquiry.get('id')}" + (f" (lot {lot})" if lot else ""),
+            source="site_inquiry", attribution=attribution,
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"[inventory] subscribe_from_inquiry failed for inquiry "
+              f"{(inquiry or {}).get('id')}: {type(e).__name__}: {e}")
+        return None
 
 
 def generate_unsubscribe_token() -> str:

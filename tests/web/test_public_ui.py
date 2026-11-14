@@ -248,6 +248,7 @@ def landing(monkeypatch):
         lambda: {"lots": 3, "chairs": 900, "cities": 2, "moved": 4900},
     )
     monkeypatch.setattr(inventory, "list_public", lambda: [])
+    monkeypatch.setattr(inventory, "get", lambda lot_id: None)
 
 
 def test_landing_copy_follows_the_gate(monkeypatch, landing):
@@ -294,3 +295,60 @@ def test_landing_contact_offers_call_and_text(monkeypatch):
     html = _client().get("/").text
     assert 'href="tel:+16194078945"' in html
     assert 'href="sms:+16194078945"' in html
+
+
+# ───────────────────── landing hero: moving photos + quote form ─────────────
+
+def _lot_with_photo(n):
+    return {"lot_id": f"L{n}", "title": f"Lot {n}", "status": "live",
+            "quantity_remaining": 100, "price_per_chair": 20.0,
+            "city": "Atlanta", "state": "GA",
+            "hero_image_url": f"https://cdn.example.com/p/{n}.jpg", "image_urls": []}
+
+
+def test_landing_hero_has_no_form_and_shop_goes_to_the_map(landing):
+    html = _client().get("/").text
+    hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
+    assert "<form" not in hero                           # the ZIP-less quote form is gone
+    assert '<a href="/map" class="btn btn-primary">SHOP AVAILABLE CHAIRS</a>' in hero
+
+
+def test_landing_hero_shows_moving_lot_photos_when_lots_have_them(monkeypatch, landing):
+    from automation.web import readcache
+    readcache.invalidate_all()
+    monkeypatch.setattr(inventory, "list_public", lambda: [_lot_with_photo(n) for n in range(6)])
+    html = _client().get("/").text
+    readcache.invalidate_all()
+    hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
+    assert "hero--media" in html
+    assert hero.count('class="hero-shot"') == 6          # 4 lot photos (capped) + 2 stock rooms
+    assert "https://cdn.example.com/p/0.jpg" in hero
+    assert "animation-duration: 36s" in hero             # 6 s per photo
+
+
+def test_landing_hero_stock_rooms_play_last_and_are_served(landing):
+    html = _client().get("/").text
+    hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
+    assert hero.index("hero/banquet-room.jpg") < hero.index("hero/white-tables.jpg")
+    for name in ("banquet-room.jpg", "white-tables.jpg"):
+        assert _client().get(f"/static/site/hero/{name}").status_code == 200
+
+
+def test_landing_hero_plays_the_picked_photos_in_the_operators_order(monkeypatch, landing):
+    from automation.web import readcache
+    readcache.invalidate_all()
+    monkeypatch.setattr(inventory, "list_public", lambda: [_lot_with_photo(n) for n in range(6)])
+    galleries = {
+        "31225-atl": [f"https://cdn.example.com/p/boise/{n}.jpg" for n in range(8)],
+        "blue-silver-frame-3000": [f"https://cdn.example.com/p/blue/{n}.jpg" for n in range(4)],
+    }
+    monkeypatch.setattr(inventory, "get", lambda lot_id: {
+        "lot_id": lot_id, "hero_image_url": galleries[lot_id][0], "image_urls": galleries[lot_id]})
+    html = _client().get("/").text
+    readcache.invalidate_all()
+    hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
+    order = [hero.index(u) for u in ("boise/0.jpg", "boise/2.jpg", "blue/0.jpg", "boise/1.jpg")]
+    assert order == sorted(order)                        # hall, tables, blue, classroom
+    assert hero.count('class="hero-shot"') == 6
+    assert hero.index("boise/1.jpg") < hero.index("hero/banquet-room.jpg")   # stock rooms play last
+    assert "cdn.example.com/p/0.jpg" not in hero         # picks win over the featured lots

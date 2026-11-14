@@ -766,6 +766,36 @@ def _gallery_srcs(row: dict) -> list[str]:
     return lot_images.gallery_srcs(row)
 
 
+# Home-page hero photos, in the operator's order (2026-11-14): the Boise hall
+# full of chairs, the chairs around banquet tables, the 3,000 blue chairs, the
+# Boise classroom. (lot_id, position in that lot's public gallery).
+HERO_PICKS = (("31225-atl", 0), ("31225-atl", 2),
+              ("blue-silver-frame-3000", 0), ("31225-atl", 1))
+
+
+# Stock room photos the operator picked (Pexels, free licence; 2026-11-14).
+# They play after our own photos. They are rooms, not our stock.
+HERO_STOCK = ("/static/site/hero/banquet-room.jpg",    # pexels.com/photo/14636170
+              "/static/site/hero/white-tables.jpg")    # pexels.com/photo/2649771
+
+
+def _hero_shots(featured: list[dict]) -> list[str]:
+    """The picked photos that still exist; else the featured lots' own heroes."""
+    shots: list[str] = []
+    rows: dict[str, dict | None] = {}
+    for lot_id, i in HERO_PICKS:
+        try:
+            if lot_id not in rows:
+                rows[lot_id] = inventory.get(lot_id)
+            urls = lot_images.resolve(rows[lot_id]).urls if rows[lot_id] else []
+        except Exception:  # noqa: BLE001 — a missing pick must not break the page
+            urls = []
+        if i < len(urls):
+            shots.append(urls[i])
+    shots = shots or [r["hero_src"] for r in featured if r.get("hero_src")][:4]
+    return shots + list(HERO_STOCK)
+
+
 @readcache.cached(ttl=60)
 def _landing_data() -> dict:
     """Counts + featured carousel for `/`. Memoised: this is the most-hit
@@ -787,6 +817,7 @@ def _landing_data() -> dict:
     prices = [float(r["price_per_chair"]) for r in rows
               if r.get("price_per_chair") and float(r["price_per_chair"]) > 0]
     return {"counts": counts, "featured": featured,
+            "hero_shots": _hero_shots(featured),
             "min_price": min(prices) if prices else None}
 
 
@@ -797,14 +828,16 @@ def public_landing(request: Request):
         data = _landing_data()
         counts, featured = data["counts"], data["featured"]
         min_price = data.get("min_price")
+        hero_shots = data.get("hero_shots") or []
     except Exception:
         counts = {"lots": 0, "chairs": 0, "cities": 0, "moved": 0}
         featured = []
         min_price = None
+        hero_shots = []
     return templates.TemplateResponse(
         request, "landing.html",
         _public_ctx({
-            "stats": counts, "featured": featured,
+            "stats": counts, "featured": featured, "hero_shots": hero_shots,
             "intent": _intent_line(counts, min_price),
             "site_faq": seo_copy.SITE_FAQ,
             "site_faq_jsonld": seo_copy.faq_jsonld(seo_copy.SITE_FAQ),
@@ -2386,6 +2419,9 @@ async def public_contact(payload: dict):
     except ValueError as e:
         raise HTTPException(400, str(e))
     asyncio.create_task(_notify_new_inquiry(row))
+    # A buyer who asks about chairs also goes on the alert list (no-op for
+    # sell leads and for people already on it). Never fails the inquiry.
+    asyncio.create_task(asyncio.to_thread(inventory.subscribe_from_inquiry, row, attr))
     out = {"ok": True, "id": row["id"]}
     if row.get("kind") == "sell":
         # Lets the browser attach the optional photos to THIS inquiry only.
