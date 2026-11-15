@@ -53,5 +53,29 @@
 .feed-more-wrap:has(> [hidden]) { display: none; }
 body[data-view="map"] .feed-grid, body[data-view="map"] .feed-more-wrap { display: none; }
 
+/* ── view switch: cards | table | map ──────────────────────────────── */
+.feed-view-seg .seg-btn { cursor: pointer; }
+.feed-table-wrap, .feed-pager { display: none; }
+body[data-view="table"] .feed-grid, body[data-view="table"] .feed-more-wrap { display: none; }
+body[data-view="table"] .feed-table-wrap { display: block; min-height: 160px; margin: 0 0 var(--gap); }
+body[data-view="table"] .feed-pager:not([hidden]) {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; margin: 0 0 var(--gap);
+}
+.feed-pager-where { font: 400 var(--fs-sm)/1.4 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.feed-pager-where strong { color: var(--text); }
+.feed-table .feed-td-title { color: var(--text); text-decoration: none; font-weight: 500; }
+.feed-table a.feed-td-title:hover { color: var(--accent); text-decoration: underline; }
+.feed-table td:first-child { min-width: 220px; }
+.feed-table .feed-td-site a { color: var(--muted); white-space: nowrap; }
+.feed-table .feed-td-qty { color: var(--muted); }
+.feed-table .feed-td-ends { white-space: nowrap; }
+.feed-table tr.is-closed td { color: var(--muted); }
+.feed-table-wrap .ui-empty, .feed-table-wrap .ui-error { padding: 32px 12px; }
+@media (max-width: 767px) {   /* a phone keeps lot, place, bid, bids, ends */
+  .feed-table .feed-td-site, .feed-table .feed-td-unit { display: none; }
+  .feed-table td:first-child { min-width: 150px; }
+  .feed-view-seg { order: -1; }
+}
+
 /* ── footer ────────────────────────────────────────────────────────── */
 .feed-footer .footer-note { margin: 0 0 4px; }

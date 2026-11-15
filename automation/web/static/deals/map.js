@@ -3,18 +3,20 @@
 // grid, the toggle, and the filters; the two talk through the §6 contract:
 //   feed.js → document 'feed:params'  detail = {params: URLSearchParams, total, rows}   (after every lots load)
 //   map.js  → document 'feed:bbox'    detail = {bbox: 'S,W,N,E' | ''}                  (viewport moved / list restored)
-//   feed.js → body[data-view="map"]   (from ?view=map or the #feed-view-toggle click) — map.js watches it.
+//   feed.js → body[data-view="map"]   (from ?view=map or the #feed-view-toggle switch) — map.js watches it.
+//   map.js  → document 'feed:view-request' detail = {view: 'cards'}                  (the empty state's "Show list")
 // Public pins carry no photos, no verdicts, no distance: title · city, ST · bid · bids · timer · links only.
 import {load, api, esc, fmt, skeleton} from '../ui/state.js';
 import {card, tickTimers} from '../ui/card.js';
+import {mount as mountGlMap} from '../ui/glmap.js';   // MapLibre GL; the style URL comes from #feed-map[data-style-url]
 
 const $ = (s, r = document) => r.querySelector(s);
 const FILTER_KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'site'];
 const PINS_CAP_LABEL = '5,000';
 const VIEWPORT_DEBOUNCE_MS = 400;
 
-let map = null;            // AdminMap handle (lazy — costs nothing until the map view opens)
-let mounting = null;       // in-flight AdminMap.mount() promise
+let map = null;            // glmap handle (lazy — costs nothing until the map view opens)
+let mounting = null;       // in-flight mount() promise
 let shown = false;
 let fitted = false;        // fit once per map session; later pin refreshes keep the operator's viewport
 let lastParams = null;     // URLSearchParams from the last feed:params
@@ -30,18 +32,6 @@ function ensureCss() {
   const link = document.createElement('link');
   link.rel = 'stylesheet'; link.href = '/static/deals/map.css';
   document.head.appendChild(link);
-}
-
-function ensureAdminMap() {
-  if (window.AdminMap) return Promise.resolve(window.AdminMap);
-  const existing = document.querySelector('script[src^="/static/admin_map.js"]');
-  return new Promise((resolve, reject) => {
-    const s = existing || document.createElement('script');
-    const done = () => window.AdminMap ? resolve(window.AdminMap) : reject(new Error('admin_map.js loaded without AdminMap'));
-    s.addEventListener('load', done, {once: true});
-    s.addEventListener('error', () => reject(new Error('admin_map.js failed to load')), {once: true});
-    if (!existing) { s.src = '/static/admin_map.js'; document.head.appendChild(s); }
-  });
 }
 
 // feed.js may have placed #feed-map and #feed-map-panel as siblings anywhere in main; the 70/30 split
@@ -90,7 +80,7 @@ function popupHtml(pt) {
 async function mountMap() {
   if (map) return map;
   if (!mounting) {
-    mounting = ensureAdminMap().then((AdminMap) => AdminMap.mount(els.box)).then((m) => {
+    mounting = mountGlMap(els.box, {styleUrl: els.box.dataset.styleUrl || ''}).then((m) => {
       map = m;
       let lastBbox = '';
       const announce = debounce(VIEWPORT_DEBOUNCE_MS, () => {
@@ -160,7 +150,9 @@ function loadPanel({keepOld = false} = {}) {
     isEmpty: (d) => !(d.points || []).length,
     empty: {glyph: '⌖', title: 'No lots in this area', body: 'Zoom out or clear a filter.',
             cta: {label: 'Show list', onClick: showList}},
-    errorMessage: (err) => err.status ? `Couldn't load the map pins. The server said ${err.status}.`
+    // err.mapFailed = the map library or its style did not arrive (glmap.js); the lots themselves are fine.
+    errorMessage: (err) => err.mapFailed ? 'The map could not load. The cards and the table still work.'
+      : err.status ? `Couldn't load the map pins. The server said ${err.status}.`
       : `Couldn't load the map pins. ${err.message || 'Network error.'}`,
     onError: () => { if (els) els.box.classList.remove('map-loading'); },
   }).then((d) => { if (d) { tickTimers(els.panel); updateCount(); } return d; });
@@ -181,11 +173,8 @@ function showList() {
   shown = false; fitted = false;
   els.split.hidden = true; els.box.hidden = true; els.panel.hidden = true;
   document.dispatchEvent(new CustomEvent('feed:bbox', {detail: {bbox: ''}}));
-  const body = document.body;
-  if (body.dataset.view === 'map') {
-    const toggle = $('#feed-view-toggle');       // feed.js owns the URL — let its click handler drop view=map
-    if (toggle) toggle.click();
-    if (body.dataset.view === 'map') body.dataset.view = '';
+  if (document.body.dataset.view === 'map') {     // feed.js owns the URL and the view — ask it to leave the map
+    document.dispatchEvent(new CustomEvent('feed:view-request', {detail: {view: 'cards'}}));
   }
 }
 
