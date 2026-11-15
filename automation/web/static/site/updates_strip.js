@@ -12,10 +12,11 @@ if (form) {
     const input = form.elements.email;
     const email = input.value.trim();
     if (!/^\S+@\S+\.\S+$/.test(email)) { say('Enter an email address.', false); input.focus(); return; }
+    // One success message for a new and a known address: the server answers both the same way.
     pending(form.querySelector('button[type="submit"]'), 'Saving…', () => api('/subscribe', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({email, source: form.elements.source.value}),
-    })).then(() => { say('You are on the list.', true); form.reset(); })
+    })).then(() => { say('Thanks. We will be in touch.', true); form.reset(); })
       .catch((err) => say(err.status === 429 ? 'Too many tries from this address. Try again later.'
         : 'That did not save. Try again in a moment.', false));
   });

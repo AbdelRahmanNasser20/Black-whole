@@ -74,3 +74,51 @@ def test_feed_keeps_the_view_in_the_url_and_in_local_storage():
     assert "'feed.view'" in js
     assert "list: 'cards'" in js          # old ?view=list links still open the cards
     assert "renderTable" in js and "renderPager" in js
+
+
+# --- the table pager and the anonymous depth cap (scrape guard) ---
+
+def _lots(monkeypatch, viewer=None, per_page=50, total=20000):
+    web = __import__("automation.web.app", fromlist=["x"])
+    shared = {"rows": [], "total": total, "page": 1, "per_page": per_page, "pages": -(-total // per_page)}
+    monkeypatch.setattr(web.public_deals, "fetch_page", lambda **kw: shared)
+    monkeypatch.setattr(web.public_deals, "add_platform_extras", lambda rows, uid: None)
+    monkeypatch.setattr(web, "_platform_viewer", lambda request: viewer)
+    return web, shared
+
+
+def test_anonymous_lots_payload_names_the_last_page_it_may_read(monkeypatch):
+    web, shared = _lots(monkeypatch)
+    body = TestClient(app).get("/deals/api/lots?per_page=50").json()
+    assert body["max_page"] == web.scrape_guard.ANON_MAX_ROWS // 50 == 20
+    assert "max_page" not in shared          # the page dict is shared: never written to
+
+
+def test_max_page_follows_the_served_page_size(monkeypatch):
+    web, _ = _lots(monkeypatch, per_page=25)
+    assert TestClient(app).get("/deals/api/lots").json()["max_page"] == 40
+
+
+def test_signed_in_viewer_and_guard_off_get_no_cap(monkeypatch):
+    web, _ = _lots(monkeypatch, viewer={"user_id": "u"})
+    assert "max_page" not in TestClient(app).get("/deals/api/lots?per_page=50").json()
+    web, _ = _lots(monkeypatch)
+    monkeypatch.setenv("SCRAPE_GUARD_ENABLED", "0")
+    assert "max_page" not in TestClient(app).get("/deals/api/lots?per_page=50").json()
+
+
+def test_pager_and_feed_honour_the_cap_and_the_last_page():
+    views = (STATIC / "deals/views.js").read_text()
+    feed = (STATIC / "deals/feed.js").read_text()
+    assert "max_page" in views                  # the pager stops at the cap
+    assert "lastGoodPage" in feed               # a 401 goes back to the last page that loaded
+    assert "body.page > body.pages" in feed     # a page past the end clamps to the last page
+    assert "st.view !== view" in feed           # a late answer from the old view is dropped
+
+
+def test_map_popup_lists_every_lot_at_the_point_and_survives_tile_errors():
+    js = (STATIC / "ui/glmap.js").read_text()
+    assert "POPUP_MAX" in js and "more" in js
+    assert "(e.features || []).map((f) => f.properties.popup)" in js   # all pins under the click, not the first
+    assert "gl-popup-item" in js
+    assert "styledata" in js and "sourceId" in js

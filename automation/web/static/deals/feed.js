@@ -14,7 +14,7 @@
 // body.dataset.view and hides the grid; map.js does the rest.
 import {load, api, pending, fmt, esc} from '../ui/state.js';
 import {tickTimers} from '../ui/card.js';
-import {renderCards, renderTable, renderPager} from './views.js';
+import {renderCards, renderTable, renderPager, lastPage} from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -50,6 +50,7 @@ st.view = (() => {
 const isTable = () => st.view === 'table';
 let facets = null;
 let lastBody = null;
+let lastGoodPage = '';   // table: the last page that loaded, to go back to when a deeper one is refused
 
 // ── URL / query helpers ─────────────────────────────────────────────────
 function filterParams() {
@@ -201,7 +202,9 @@ function emptyArgs() {
   else cta = {label: 'Clear filters', onClick: resetFilters};
   return {glyph: '⌕', title, body: 'Try fewer filters, or search everywhere.', cta};
 }
-async function loadLots({append = false} = {}) {
+async function loadLots({append = false, clamped = false} = {}) {
+  let refused = false;
+  const view = st.view;                            // an answer that lands after a view switch is dropped
   const table = isTable();
   if (table) append = false;                       // a table page replaces the last one
   const grid = table ? $('#feed-table') : $('#feed-grid');
@@ -219,11 +222,30 @@ async function loadLots({append = false} = {}) {
     errorMessage: err => err.status === 401 ? 'Sign in to see more lots.'
       : "Couldn't load lots. " + (err.status ? `The server said ${err.status}.` : 'The database didn\'t answer in 15 s.'),
     onError: err => {
-      if (err.status === 401) grid.insertAdjacentHTML('beforeend', '<p><a class="btn btn-primary btn-small" href="/platform/signup">Sign in to see more</a></p>');
+      if (err.status === 401) { refused = true; grid.insertAdjacentHTML('beforeend', '<p><a class="btn btn-primary btn-small" href="/platform/signup">Sign in to see more</a></p>'); }
     },
   });
-  if (!body) { $('#feed-more').hidden = true; $('#feed-pager').hidden = true; return undefined; }
+  if (st.view !== view) return undefined;          // the visitor moved on: this view's state is not ours to write
+  if (!body) {
+    // Table, deeper page refused (the anonymous depth cap): go back to the last page that loaded
+    // (page 1 for a deep link) so Prev/Next stay on screen, and say why.
+    const back = lastGoodPage || '1';
+    if (table && refused && st.page !== back) {
+      st.page = back; pushUrl();
+      const again = await loadLots();
+      if (again && st.view === view) $('#feed-pager').insertAdjacentHTML('beforeend',
+        ' <span class="feed-pager-where">Sign in to see more lots.</span>');
+      return again;
+    }
+    $('#feed-more').hidden = true; $('#feed-pager').hidden = true; return undefined;
+  }
+  // A page past the end (a stale link): open the last page this viewer can read instead of an empty table.
+  if (table && body.total > 0 && (body.page > body.pages || body.page > lastPage(body)) && !clamped) {
+    st.page = String(lastPage(body)); pushUrl();
+    return loadLots({clamped: true});
+  }
   lastBody = body;
+  if (table) lastGoodPage = String(body.page);
   if (String(body.page) !== st.page) { st.page = String(body.page); pushUrl(); }
   renderCount(); renderMore(); tickTimers(grid);
   document.dispatchEvent(new CustomEvent('feed:params', {detail: {
@@ -234,14 +256,17 @@ async function loadLots({append = false} = {}) {
 async function restoreDepth() {
   if (isTable()) { await loadLots(); return; }     // the table opens on its own page number
   const target = Math.min(Math.max(1, Number(st.page) || 1), MAX_RESTORE_PAGES);
+  const view = st.view;
   st.page = '1';
   const first = await loadLots();
   if (!first) return;
   for (let p = 2; p <= target; p++) {
+    if (st.view !== view) return;                  // the visitor switched view during the restore
     st.page = String(p);
     const b = await loadLots({append: true});
     if (!b || !b.rows.length) break;
   }
+  if (st.view !== view) return;
   pushUrl();
 }
 

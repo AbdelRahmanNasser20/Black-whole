@@ -44,17 +44,29 @@ export function renderTable(rows) {
 </table>`;
 }
 
+// The last page this viewer can open: the list's own last page, or the server's `max_page` when it sends one
+// (a visitor with no account reads the first rows only; deeper pages need a free account).
+export function lastPage({pages = 1, max_page} = {}) {
+  const all = Math.max(1, Number(pages) || 1), cap = Number(max_page) || 0;
+  return cap > 0 ? Math.min(all, cap) : all;
+}
+
 // Pager for a paged list. Buttons carry data-page; the page that owns the list listens for the click.
-export function renderPager({page = 1, pages = 1, total = 0, per_page = 0} = {}) {
-  page = Number(page) || 1; pages = Math.max(1, Number(pages) || 1);
-  if (pages <= 1) return '';
+export function renderPager({page = 1, pages = 1, total = 0, per_page = 0, max_page} = {}) {
+  page = Number(page) || 1;
+  const all = Math.max(1, Number(pages) || 1);
+  pages = lastPage({pages: all, max_page});
+  const capped = pages < all;
+  if (all <= 1) return '';
   const first = (page - 1) * per_page + 1, last = Math.min(total, page * per_page);
   const btn = (label, target, off, name) =>
     `<button class="btn btn-ghost btn-small" type="button" data-page="${target}"${off ? ' disabled' : ''} aria-label="${name}">${label}</button>`;
   return btn('← Prev', page - 1, page <= 1, 'Previous page')
     + `<span class="feed-pager-where">Page <strong>${esc(fmt.int(page))}</strong> of ${esc(fmt.int(pages))}`
     + (per_page ? ` · lots ${esc(fmt.int(first))}–${esc(fmt.int(last))} of ${esc(fmt.int(total))}` : '') + '</span>'
-    + btn('Next →', page + 1, page >= pages, 'Next page');
+    + btn('Next →', page + 1, page >= pages, 'Next page')
+    + (capped && page >= pages
+      ? ' <a class="btn btn-primary btn-small" href="/platform/signup">Sign in to see more</a>' : '');
 }
 
 // The shared MapLibre map (static/ui/glmap.js). Rejects with err.mapFailed when the library or style cannot load.

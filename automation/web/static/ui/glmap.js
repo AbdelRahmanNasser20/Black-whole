@@ -10,6 +10,7 @@ const CDN = 'https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/';   // pi
 const DEFAULT_STYLE = 'https://tiles.openfreemap.org/styles/positron';
 const LOAD_TIMEOUT_MS = 20000;
 const SRC = 'glmap-points';
+const POPUP_MAX = 10;           // lots listed in one popup when several share a point
 
 // Popup + control chrome painted with the page tokens (the map itself is styled by the style URL).
 const CSS = `
@@ -20,6 +21,9 @@ const CSS = `
     box-shadow: var(--shadow-overlay, none); max-width: 280px;
   }
   .gl-map-box .maplibregl-popup-tip { display: none; }
+  .gl-map-box .maplibregl-popup-content { max-height: 260px; overflow-y: auto; }
+  .gl-map-box .gl-popup-item + .gl-popup-item { border-top: 1px solid var(--border); margin-top: 8px; padding-top: 8px; }
+  .gl-map-box .gl-popup-more { color: var(--muted); margin: 8px 0 0; }
   .gl-map-box .maplibregl-popup-content a { color: var(--info, var(--accent)); }
   .gl-map-box .maplibregl-popup-content .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .gl-map-box .maplibregl-popup-close-button { color: var(--muted); font-size: 16px; padding: 2px 6px; }
@@ -96,12 +100,19 @@ export async function mount(container, opts = {}) {
   } catch (err) { throw failed(err.message || 'the map could not start'); }   // no WebGL
 
   await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(failed('the map style timed out')), LOAD_TIMEOUT_MS);
-    map.once('load', () => { clearTimeout(timer); resolve(); });
-    map.once('error', (e) => {                      // before 'load' = the style or its sources did not arrive
-      if (map.loaded()) return;
-      clearTimeout(timer); reject(failed((e && e.error && e.error.message) || 'the map style failed to load'));
-    });
+    // Only a style that never arrives fails the map. One bad tile, sprite or glyph is an 'error' event too;
+    // those leave a usable map, so they are ignored (they carry sourceId/tile, or come after the style).
+    let styleArrived = false;
+    const done = (fn, arg) => { clearTimeout(timer); map.off('error', onError); fn(arg); };
+    const timer = setTimeout(() => (styleArrived ? done(resolve)
+      : done(reject, failed('the map style timed out'))), LOAD_TIMEOUT_MS);
+    const onError = (e) => {
+      if (styleArrived || (e && (e.sourceId || e.tile))) return;
+      done(reject, failed((e && e.error && e.error.message) || 'the map style failed to load'));
+    };
+    map.once('styledata', () => { styleArrived = true; });
+    map.once('load', () => done(resolve));
+    map.on('error', onError);
   }).catch((err) => { try { map.remove(); } catch (_) {} container.classList.remove('gl-map-box'); throw err; });
 
   map.addControl(new gl.NavigationControl({showCompass: false}), 'top-left');
@@ -124,9 +135,14 @@ export async function mount(container, opts = {}) {
     } catch (_) { /* the source was replaced under the click */ }
   });
   map.on('click', 'glmap-pins', (e) => {
-    const f = e.features && e.features[0];
-    if (!f || !f.properties.popup) return;
-    new gl.Popup({maxWidth: '280px', offset: 8}).setLngLat(f.geometry.coordinates).setHTML(f.properties.popup).addTo(map);
+    // Every lot under the click: one seller yard can hold dozens of lots at the same point, and pins
+    // stop clustering past zoom 12. The popup HTML is built (and escaped) by the page that set the points.
+    const seen = new Set();
+    const all = (e.features || []).map((f) => f.properties.popup).filter((h) => h && !seen.has(h) && seen.add(h));
+    if (!all.length) return;
+    const html = all.slice(0, POPUP_MAX).map((h) => `<div class="gl-popup-item">${h}</div>`).join('')
+      + (all.length > POPUP_MAX ? `<p class="gl-popup-more">+${all.length - POPUP_MAX} more at this location</p>` : '');
+    new gl.Popup({maxWidth: '280px', offset: 8}).setLngLat(e.features[0].geometry.coordinates).setHTML(html).addTo(map);
   });
   for (const layer of ['glmap-clusters', 'glmap-pins']) {
     map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
