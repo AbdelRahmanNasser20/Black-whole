@@ -1,0 +1,20 @@
+{#- templates/_updates_strip.html — the one-field "early access" email strip, above the footer of
+    every public page (storefront + platform via _public_base.html; /deals, /deals/sold, /sources via
+    their own footer block). Stored as a `site_updates` subscriber by static/site/updates_strip.js.
+    Nothing is sent from here, so the copy never promises a schedule. Never include it on the admin. -#}
+<link rel="stylesheet" href="/static/site/updates_strip.css?v={{ asset_v }}">
+<section class="updates-strip" id="updates-strip" aria-labelledby="updates-strip-title">
+  <div class="updates-strip-copy">
+    <h2 class="updates-strip-title" id="updates-strip-title">Get early access</h2>
+    <p class="updates-strip-line">New features and the best finds, by email. No spam.</p>
+  </div>
+  <form class="updates-strip-form" novalidate>
+    <input type="hidden" name="source" value="site_updates">
+    <label class="updates-strip-label" for="updates-strip-email">Email address</label>
+    <input class="updates-strip-input" id="updates-strip-email" name="email" type="email" required
+           autocomplete="email" placeholder="you@email.com">
+    <button class="updates-strip-btn" type="submit">Notify me</button>
+    <p class="updates-strip-result" role="status" hidden></p>
+  </form>
+</section>
+<script type="module" src="/static/site/updates_strip.js?v={{ asset_v }}"></script>

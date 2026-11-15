@@ -135,6 +135,9 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
+# Vector basemap for the public MapLibre maps (static/ui/glmap.js). Same default as the CRM map.
+templates.env.globals["map_style_url"] = (
+    os.getenv("PUBLIC_MAP_STYLE_URL", "").strip() or "https://tiles.openfreemap.org/styles/positron")
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
@@ -1468,6 +1471,10 @@ async def public_deals_lots(
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
             site=site, sort=sort, dir=dir, page=page, per_page=per_page)
         if viewer is None:
+            if scrape_guard.enabled() and not auth_svc.request_has_session(request) and out.get("per_page"):
+                # The last page a visitor with no account may read (the scrape guard's depth
+                # cap), so a pager stops there. A copy: `out` can be a shared, memoised dict.
+                return {**out, "max_page": max(1, scrape_guard.ANON_MAX_ROWS // out["per_page"])}
             return out
         # Per-user extras on top of the SAME policy-filtered page; never memoised,
         # never shared: private/no-store keeps Cloudflare and the browser honest too.
@@ -2625,9 +2632,23 @@ async def _notify_new_subscriber(row: dict) -> None:
         pass
 
 
+SUBSCRIBE_PER_IP_LIMIT = 10   # per hour, the email strip only; each new signup fires a Telegram ping
+_STRIP_SOURCE = "site_updates"
+_EMAIL_SHAPE = re.compile(r"^\S+@\S+\.\S+$")
+
+
 @app.post("/subscribe")
-async def public_subscribe(payload: dict):
+async def public_subscribe(payload: dict, request: Request):
     payload = payload or {}
+    strip = (payload.get("source") or "").strip() == _STRIP_SOURCE
+    if strip:
+        # The strip is one anonymous field on every page, so it alone is limited. The chair
+        # alert forms keep their old behaviour: an office or a carrier NAT shares one IP.
+        # A rejected post is not counted.
+        if not _EMAIL_SHAPE.match((payload.get("email") or "").strip()):
+            raise HTTPException(400, "Enter an email address.")
+        if not rate_limit.allow(f"subscribe:{rate_limit.client_ip(request)}", limit=SUBSCRIBE_PER_IP_LIMIT):
+            raise HTTPException(429, "Too many signups from this address. Try again in an hour.")
     attr = attribution.from_payload(payload)   # pure: no I/O on the loop
     try:
         row = await asyncio.to_thread(lambda: inventory.create_subscriber(
@@ -2653,7 +2674,12 @@ async def public_subscribe(payload: dict):
         ))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
-    asyncio.create_task(_notify_new_subscriber(row))
+    if not row.get("duplicate"):   # already on the list: no second ping
+        asyncio.create_task(_notify_new_subscriber(row))
+    if strip:
+        # One answer for a new, a repeat and an unsubscribed address: a row id would tell
+        # a caller whether someone is already on file.
+        return {"ok": True}
     return {"ok": True, "id": row["id"]}
 
 

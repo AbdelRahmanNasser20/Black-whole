@@ -6,20 +6,28 @@
 // Contract with Workstream D (map.js), on `document`:
 //   dispatch  feed:params  detail = {params: URLSearchParams (filters, no page/per_page/bbox/view), total, rows,
 //                                    page, view, bbox}   — after every successful lots load
-//   dispatch  feed:view    detail = {view: 'list'|'map'}  — after the toggle or a URL-driven view change (additive)
+//   dispatch  feed:view    detail = {view: 'cards'|'table'|'map'} — after the switch or a URL-driven view change
 //   listen    feed:bbox    detail = {bbox: 'S,W,N,E' | ''} — sets st.bbox, reloads from page 1
-// `view=map`: this file only toggles body.dataset.view + the toggle label and hides the grid; D does the rest.
+//   listen    feed:view-request  detail = {view} — another module asks for a view (the map's "Show list")
+// Three views over the same filters (#feed-view-toggle): cards (Load more), table (a real pager, 50 rows a page),
+// map. The view lives in the URL (wins) and in localStorage 'feed.view'. `view=map`: this file sets
+// body.dataset.view and hides the grid; map.js does the rest.
 import {load, api, pending, fmt, esc} from '../ui/state.js';
-import {card, tickTimers} from '../ui/card.js';
+import {tickTimers} from '../ui/card.js';
+import {renderCards, renderTable, renderPager, lastPage} from './views.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
 const KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'sort', 'dir', 'page', 'view'];
-const DEFAULTS = {status: 'active', sort: 'ends', page: '1', view: 'list'};
+const DEFAULTS = {status: 'active', sort: 'ends', page: '1', view: 'cards'};
+const VIEWS = ['cards', 'table', 'map'];
+const VIEW_ALIAS = {list: 'cards'};   // links shared before the table existed
+const VIEW_STORE = 'feed.view';
 const FILTER_KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price'];
 const NARROWING_KEYS = ['category', 'state', 'site', 'max_bids', 'ending_within', 'min_price', 'max_price'];
 const PER_PAGE = 24;          // divisible by 4/3/2 columns; the server clamps to its own choices and reports back
+const TABLE_PER_PAGE = 50;    // one of the server's own page sizes
 const MAX_RESTORE_PAGES = 10; // refresh restores `page` depth by appending pages 1..N, capped
 const CAT_LABELS = {
   general_merchandise: 'General', vehicles: 'Vehicles', collectibles_jewelry: 'Collectibles & jewelry',
@@ -32,9 +40,17 @@ const siteLabel = v => ((facets && facets.sites) || []).find(s => s.value === v)
 const st = Object.assign({}, DEFAULTS, Object.fromEntries(
   KEYS.map(k => [k, new URLSearchParams(location.search).get(k)]).filter(([, v]) => v)));
 st.bbox = '';
-if (st.view !== 'map') st.view = 'list';
+function storedView() { try { return localStorage.getItem(VIEW_STORE) || ''; } catch (_) { return ''; } }
+// The URL wins; with no view in the URL, the visitor's last choice; else cards.
+st.view = (() => {
+  const fromUrl = new URLSearchParams(location.search).get('view') || '';
+  const want = VIEW_ALIAS[fromUrl] || fromUrl || storedView();
+  return VIEWS.includes(want) ? want : DEFAULTS.view;
+})();
+const isTable = () => st.view === 'table';
 let facets = null;
 let lastBody = null;
+let lastGoodPage = '';   // table: the last page that loaded, to go back to when a deeper one is refused
 
 // ── URL / query helpers ─────────────────────────────────────────────────
 function filterParams() {
@@ -48,7 +64,7 @@ function apiQs() {
   const p = filterParams();
   if (st.bbox) p.set('bbox', st.bbox);
   p.set('page', st.page || '1');
-  p.set('per_page', String(PER_PAGE));
+  p.set('per_page', String(isTable() ? TABLE_PER_PAGE : PER_PAGE));
   return p.toString();
 }
 function pushUrl() {
@@ -93,9 +109,20 @@ function syncControls() {
 }
 function applyView() {
   document.body.dataset.view = st.view;
-  const btn = $('#feed-view-toggle');
-  btn.textContent = st.view === 'map' ? 'List' : 'Map';
-  btn.setAttribute('aria-pressed', st.view === 'map' ? 'true' : 'false');
+  $$('#feed-view-toggle [data-view]').forEach(b => {
+    const on = b.dataset.view === st.view;
+    b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+  });
+}
+function setView(view) {
+  if (!VIEWS.includes(view) || view === st.view) return;
+  const leftMap = st.view === 'map';
+  st.view = view; st.page = '1';
+  if (leftMap) st.bbox = '';                       // the map's viewport filter does not follow you out of the map
+  try { localStorage.setItem(VIEW_STORE, view); } catch (_) {}
+  pushUrl(); applyView();
+  document.dispatchEvent(new CustomEvent('feed:view', {detail: {view}}));
+  loadLots();                                      // the target element and the page size differ per view
 }
 function renderActiveFilters() {
   const chips = [];
@@ -158,7 +185,10 @@ function renderCount() {
 function renderMore() {
   const btn = $('#feed-more');
   const b = lastBody;
-  const remaining = b ? b.total - b.page * b.per_page : 0;
+  const pager = $('#feed-pager');
+  pager.innerHTML = isTable() && b ? renderPager(b) : '';
+  pager.hidden = !pager.innerHTML;
+  const remaining = b && !isTable() ? b.total - b.page * b.per_page : 0;
   btn.hidden = !(remaining > 0);
   if (remaining > 0) btn.textContent = `Load more (${fmt.int(remaining)} remaining)`;
 }
@@ -172,14 +202,19 @@ function emptyArgs() {
   else cta = {label: 'Clear filters', onClick: resetFilters};
   return {glyph: '⌕', title, body: 'Try fewer filters, or search everywhere.', cta};
 }
-async function loadLots({append = false} = {}) {
-  const grid = $('#feed-grid');
+async function loadLots({append = false, clamped = false} = {}) {
+  let refused = false;
+  const view = st.view;                            // an answer that lands after a view switch is dropped
+  const table = isTable();
+  if (table) append = false;                       // a table page replaces the last one
+  const grid = table ? $('#feed-table') : $('#feed-grid');
   const body = await load(grid, ({signal}) => api('/deals/api/lots?' + apiQs(), {signal}), {
-    skeleton: 'card', count: 8, keepOld: append,
+    skeleton: table ? 'row' : 'card', count: 8, keepOld: append,
     isEmpty: b => !b.total,
     empty: emptyArgs(),
     render: b => {
-      const html = b.rows.map(r => card(r)).join('');
+      if (table) return renderTable(b.rows);
+      const html = renderCards(b.rows);
       if (append) { grid.insertAdjacentHTML('beforeend', html); return null; }
       return html;
     },
@@ -187,11 +222,30 @@ async function loadLots({append = false} = {}) {
     errorMessage: err => err.status === 401 ? 'Sign in to see more lots.'
       : "Couldn't load lots. " + (err.status ? `The server said ${err.status}.` : 'The database didn\'t answer in 15 s.'),
     onError: err => {
-      if (err.status === 401) grid.insertAdjacentHTML('beforeend', '<p><a class="btn btn-primary btn-small" href="/platform/signup">Sign in to see more</a></p>');
+      if (err.status === 401) { refused = true; grid.insertAdjacentHTML('beforeend', '<p><a class="btn btn-primary btn-small" href="/platform/signup">Sign in to see more</a></p>'); }
     },
   });
-  if (!body) { $('#feed-more').hidden = true; return undefined; }
+  if (st.view !== view) return undefined;          // the visitor moved on: this view's state is not ours to write
+  if (!body) {
+    // Table, deeper page refused (the anonymous depth cap): go back to the last page that loaded
+    // (page 1 for a deep link) so Prev/Next stay on screen, and say why.
+    const back = lastGoodPage || '1';
+    if (table && refused && st.page !== back) {
+      st.page = back; pushUrl();
+      const again = await loadLots();
+      if (again && st.view === view) $('#feed-pager').insertAdjacentHTML('beforeend',
+        ' <span class="feed-pager-where">Sign in to see more lots.</span>');
+      return again;
+    }
+    $('#feed-more').hidden = true; $('#feed-pager').hidden = true; return undefined;
+  }
+  // A page past the end (a stale link): open the last page this viewer can read instead of an empty table.
+  if (table && body.total > 0 && (body.page > body.pages || body.page > lastPage(body)) && !clamped) {
+    st.page = String(lastPage(body)); pushUrl();
+    return loadLots({clamped: true});
+  }
   lastBody = body;
+  if (table) lastGoodPage = String(body.page);
   if (String(body.page) !== st.page) { st.page = String(body.page); pushUrl(); }
   renderCount(); renderMore(); tickTimers(grid);
   document.dispatchEvent(new CustomEvent('feed:params', {detail: {
@@ -200,15 +254,19 @@ async function loadLots({append = false} = {}) {
   return body;
 }
 async function restoreDepth() {
+  if (isTable()) { await loadLots(); return; }     // the table opens on its own page number
   const target = Math.min(Math.max(1, Number(st.page) || 1), MAX_RESTORE_PAGES);
+  const view = st.view;
   st.page = '1';
   const first = await loadLots();
   if (!first) return;
   for (let p = 2; p <= target; p++) {
+    if (st.view !== view) return;                  // the visitor switched view during the restore
     st.page = String(p);
     const b = await loadLots({append: true});
     if (!b || !b.rows.length) break;
   }
+  if (st.view !== view) return;
   pushUrl();
 }
 
@@ -245,15 +303,22 @@ $('#feed-more').addEventListener('click', e => pending(e.currentTarget, 'Loading
   pushUrl();
   return loadLots({append: true});
 }).then(renderMore));   // pending() restores the button's old label on settle; re-render the countdown after it
-$('#feed-view-toggle').addEventListener('click', () => {
-  st.view = st.view === 'map' ? 'list' : 'map';
-  pushUrl(); applyView();
-  document.dispatchEvent(new CustomEvent('feed:view', {detail: {view: st.view}}));
-  if (st.view === 'list' && st.bbox) { st.bbox = ''; set({}); }
+$('#feed-view-toggle').addEventListener('click', e => {
+  const b = e.target.closest('[data-view]');
+  if (b) setView(b.dataset.view);
+});
+document.addEventListener('feed:view-request', e => setView((e.detail && e.detail.view) || DEFAULTS.view));
+$('#feed-pager').addEventListener('click', e => {
+  const b = e.target.closest('[data-page]');
+  if (!b || b.disabled) return;
+  st.page = String(Math.max(1, Number(b.dataset.page) || 1));
+  pushUrl();
+  loadLots().then(() => $('#feed-controls').scrollIntoView({block: 'start'}));
 });
 document.addEventListener('feed:bbox', e => {
   const bbox = (e.detail && e.detail.bbox) || '';
   if (bbox === st.bbox) return;
+  if (bbox && st.view !== 'map') return;           // a late viewport event after the visitor left the map
   st.bbox = bbox;
   set({});
 });
@@ -269,4 +334,4 @@ syncControls();
 document.dispatchEvent(new CustomEvent('feed:view', {detail: {view: st.view}}));
 loadChips();
 restoreDepth();
-setInterval(() => tickTimers($('#feed-grid')), 30000);
+setInterval(() => { tickTimers($('#feed-grid')); tickTimers($('#feed-table')); }, 30000);
