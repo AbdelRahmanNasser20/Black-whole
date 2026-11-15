@@ -11,16 +11,18 @@ Two halves, one shape:
 `fetch_page` / `fetch_pins` / `fetch_facets` UNION the two. Three rules,
 enforced so no caller can forget them:
 
-1. **Chair-buyer isolation.** The operator resells seating. A chair buyer who
-   finds this page must never see the lots he is bidding on, so we exclude:
-   the seating category, any seating word in the title, and every lot in
-   `tracked_lots` / `auction_favorites` / `deal_list_items` (the three places
-   the operator marks interest). Override lists via env, never by editing SQL.
-   The SQL form (`exclusion_where`) guards `deal_lots`; the table-agnostic form
+1. **Operator picks stay private.** Every lot in `tracked_lots` /
+   `auction_favorites` / `deal_list_items` (the three places the operator
+   marks interest) is hidden from every public surface. Seating lots are
+   PUBLIC like any other category (operator decision 2026-11-15);
+   `PUBLIC_DEALS_HIDE_SEATING=1` brings the old chair-buyer isolation back
+   (seating category + seating words in the title). The SQL form
+   (`exclusion_where`) guards `deal_lots`; the table-agnostic form
    (`OperatorPicks` + `is_excluded`) guards the snapshot half.
-2. **No source photos, no verdicts, no home distance.** `PUBLIC_COLS` is the
-   allow-list; the copyright-bearing image columns, the LLM verdict join, and
-   `DEALS_HOME_*` distance never reach a public response.
+2. **No verdicts, no home distance, no archived photos.** `PUBLIC_COLS` is
+   the allow-list; the LLM verdict join, `DEALS_HOME_*` distance and our own
+   archived copies of auction photos never reach a public response. The lot
+   page may hotlink the SOURCE site's own photo URL (`lot_pages`), nothing else.
 3. **One connection per request; facets/pins cached 5 min.** The pooler
    handshake is ~1.3 s, so rows+count share a connection and the expensive
    whole-table stats are memoized in-process.
@@ -93,12 +95,23 @@ def _cached(key: str, loader):
 
 # ── exclusion policy ─────────────────────────────────────────────────────────
 
+def hide_seating() -> bool:
+    """Seating lots are public since 2026-11-15 (operator decision). Set
+    PUBLIC_DEALS_HIDE_SEATING=1 to hide them again (category + title words)."""
+    return os.getenv("PUBLIC_DEALS_HIDE_SEATING", "").strip() == "1"
+
+
 def exclusion_where() -> tuple[str, list]:
-    """SQL fragment (and args) that hides every lot a chair buyer must not see."""
+    """SQL fragment (and args) that hides every lot the public must not see:
+    the operator's picks always, seating lots only when `hide_seating()`."""
+    seat, args = "", []
+    if hide_seating():
+        seat = ("(canonical_category IS NULL OR canonical_category <> ALL(%s)) "
+                "AND COALESCE(title, '') !~* %s AND ")
+        args = [sorted(EXCLUDED_CATEGORIES), EXCLUDED_TITLE_SQL_RE]
     where = (
-        "(canonical_category IS NULL OR canonical_category <> ALL(%s)) "
-        "AND COALESCE(title, '') !~* %s "
-        "AND NOT EXISTS (SELECT 1 FROM tracked_lots t "
+        f"{seat}"
+        "NOT EXISTS (SELECT 1 FROM tracked_lots t "
         "  WHERE t.asset_id = deal_lots.asset_id AND t.account_id = deal_lots.account_id) "
         "AND NOT EXISTS (SELECT 1 FROM auction_favorites f "
         "  WHERE f.asset_id = deal_lots.asset_id::text || '/' || deal_lots.account_id::text) "
@@ -106,7 +119,7 @@ def exclusion_where() -> tuple[str, list]:
         "  WHERE li.asset_id = deal_lots.asset_id AND li.account_id = deal_lots.account_id "
         "    AND li.auction_id = deal_lots.auction_id)"
     )
-    return where, [sorted(EXCLUDED_CATEGORIES), EXCLUDED_TITLE_SQL_RE]
+    return where, args
 
 
 def seating_where() -> tuple[str, list]:
@@ -120,17 +133,18 @@ def seating_where() -> tuple[str, list]:
 
 
 def is_seating(row: dict) -> bool:
-    """Python twin of `seating_where` — the category + title half of the
-    public exclusion. Alias kept separate so the Chairs feed reads as intent."""
-    return is_excluded(row)
-
-
-def is_excluded(row: dict) -> bool:
-    """Pure half of the policy (category + title). Membership needs the DB —
-    see `is_operator_lot` (deal_lots keys) or `is_operator_pick` (any source)."""
+    """Python twin of `seating_where` (category + title). The operator-only
+    Chairs feed keeps exactly these lots, whatever the public policy is."""
     if (row.get("canonical_category") or "") in EXCLUDED_CATEGORIES:
         return True
     return bool(_TITLE_RX.search(row.get("title") or ""))
+
+
+def is_excluded(row: dict) -> bool:
+    """Pure half of the PUBLIC policy: a seating lot, and only while
+    `hide_seating()` is on. Membership needs the DB — see `is_operator_lot`
+    (deal_lots keys) or `is_operator_pick` (any source)."""
+    return hide_seating() and is_seating(row)
 
 
 def is_operator_lot(asset_id: int, account_id: int, auction_id: int) -> bool:

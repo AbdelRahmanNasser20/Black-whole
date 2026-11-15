@@ -333,8 +333,10 @@ def normalise(row: dict, status: str, picks: public_deals.OperatorPicks,
     if not title or not (city or state):
         return None
     canon = canonical_category(str(row.get("category_code") or "")) if source in MAESTRO else None
-    is_seat = public_deals.is_excluded({"title": f"{title} {category or ''}", "canonical_category": canon})
-    if is_seat != seating:
+    probe = {"title": f"{title} {category or ''}", "canonical_category": canon}
+    if seating and not public_deals.is_seating(probe):
+        return None
+    if not seating and public_deals.is_excluded(probe):
         return None
     url = spec.url(lot_id, row)
     pick = public_deals.is_operator_pick(picks, source_lot_id=lot_id, title=title, url=url)

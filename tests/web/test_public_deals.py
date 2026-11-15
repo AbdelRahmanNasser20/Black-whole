@@ -8,7 +8,18 @@ import pytest
 from automation.web import public_deals as pd
 
 
-def test_exclusion_where_names_every_operator_table():
+def test_exclusion_where_hides_only_operator_picks_by_default():
+    # Operator decision 2026-11-15: seating lots are public; his picks never are.
+    where, args = pd.exclusion_where()
+    assert "canonical_category" not in where and "title" not in where and args == []
+    for tbl in ("tracked_lots", "auction_favorites", "deal_list_items"):
+        assert f"FROM {tbl}" in where
+    assert not pd.is_excluded({"canonical_category": "seating_furniture", "title": "Stacking chairs x 200"})
+    assert pd.is_seating({"canonical_category": "seating_furniture", "title": "Desk"})   # the Chairs feed test is unchanged
+
+
+def test_exclusion_where_names_every_operator_table(monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     where, args = pd.exclusion_where()
     assert "canonical_category <> ALL(%s)" in where
     assert "COALESCE(title, '') !~* %s" in where
@@ -34,7 +45,8 @@ def test_title_regex_blocks_seating_only():
     assert not rx.search("Wheelchair accessible van")  # 'chair' must be a whole word
 
 
-def test_is_excluded_row():
+def test_is_excluded_row(monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     assert pd.is_excluded({"canonical_category": "seating_furniture", "title": "Desk"})
     assert pd.is_excluded({"canonical_category": "other", "title": "Stacking chairs x 200"})
     assert not pd.is_excluded({"canonical_category": "other", "title": "Vulcan fryer"})

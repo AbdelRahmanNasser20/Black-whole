@@ -250,8 +250,14 @@ def test_extract_returns_none_for_a_poll_row_and_unknown_source():
     {**_row("gsa"), "source": "govdeals", "source_lot_id": "1/2/3"},      # GovDeals is served from deal_lots
     {**_row("gsa"), "source": "hibid"},                                  # no spec for this source
 ])
-def test_policy_drops_the_lot(row):
+def test_policy_drops_the_lot(row, monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     assert ds.normalise(row, "active", NO_PICKS) is None
+
+
+def test_seating_lot_is_public_by_default():
+    rec = ds.normalise(_row("gsa", title="Lot of 40 Banquet Chairs"), "active", NO_PICKS)
+    assert rec is not None and rec["title"] == "Lot of 40 Banquet Chairs"
 
 
 def test_operator_picks_drop_for_every_source():

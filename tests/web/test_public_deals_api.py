@@ -78,6 +78,7 @@ def test_viewer_hides_photos_for_public_and_shows_them_for_operator(client):
 
 
 def test_viewer_404s_excluded_lot_for_public_only(client, monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     monkeypatch.setattr(app_mod.db, "fetch_one",
                         lambda sql, params=(): dict(LOT, canonical_category="seating_furniture"))
     assert client.get("/deals/305/10340/1").status_code == 404

@@ -43,7 +43,15 @@ def client(monkeypatch):
 
 # ── policy: what the SQL may read ────────────────────────────────────────────
 
-def test_base_where_keeps_chair_buyer_isolation():
+def test_base_where_hides_operator_picks_and_shows_seating_by_default():
+    where, args = ps.base_where()
+    assert "canonical_category" not in where and args == ["USD"]
+    for tbl in ("tracked_lots", "auction_favorites", "deal_list_items"):
+        assert f"FROM {tbl}" in where
+
+
+def test_base_where_keeps_chair_buyer_isolation(monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     where, args = ps.base_where()
     assert "canonical_category <> ALL(%s)" in where
     assert "COALESCE(title, '') !~* %s" in where

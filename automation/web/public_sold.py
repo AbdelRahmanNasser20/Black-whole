@@ -8,9 +8,10 @@ came from the site's own close record (bidbox → detail → search precedence,
    A lot that closed with a top bid under its reserve is counted, and shown,
    as NOT sold — its top bid is never a sold price.
 2. **USD only.** `final_price` is never aggregated across currencies.
-3. **Chair-buyer isolation**, the same policy as /deals: `public_deals` owns
-   the category + title lists; the three operator tables are joined on the
-   `asset/account/auction` parts of `lot_key`. `PUBLIC_COLS` is the allow-list.
+3. **The same policy as /deals**: the operator's picks are hidden (the three
+   operator tables are joined on the `asset/account/auction` parts of
+   `lot_key`); seating lots only while `public_deals.hide_seating()` is on.
+   `PUBLIC_COLS` is the allow-list.
 """
 from __future__ import annotations
 
@@ -36,10 +37,14 @@ _A, _B, _C = (f"split_part(lot_archive.lot_key, '/', {i})" for i in (1, 2, 3))
 
 def base_where() -> tuple[str, list]:
     """Every read starts here: the public exclusion policy + one currency."""
+    seat, seat_args = "", []
+    if public_deals.hide_seating():
+        seat = ("(canonical_category IS NULL OR canonical_category <> ALL(%s)) "
+                "AND COALESCE(title, '') !~* %s AND ")
+        seat_args = [sorted(public_deals.EXCLUDED_CATEGORIES), public_deals.EXCLUDED_TITLE_SQL_RE]
     where = (
-        "(canonical_category IS NULL OR canonical_category <> ALL(%s)) "
-        "AND COALESCE(title, '') !~* %s "
-        "AND currency = %s "
+        f"{seat}"
+        "currency = %s "
         "AND NOT EXISTS (SELECT 1 FROM tracked_lots t "
         f"  WHERE t.asset_id::text = {_A} AND t.account_id::text = {_B}) "
         "AND NOT EXISTS (SELECT 1 FROM auction_favorites f "
@@ -48,8 +53,7 @@ def base_where() -> tuple[str, list]:
         f"  WHERE li.asset_id::text = {_A} AND li.account_id::text = {_B} "
         f"    AND li.auction_id::text = {_C})"
     )
-    return where, [sorted(public_deals.EXCLUDED_CATEGORIES),
-                   public_deals.EXCLUDED_TITLE_SQL_RE, CURRENCY]
+    return where, [*seat_args, CURRENCY]
 
 
 def build_where(*, q: str | None = None, category: str | None = None,

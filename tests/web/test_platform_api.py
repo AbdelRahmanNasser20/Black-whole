@@ -176,8 +176,13 @@ def test_closed_lot_with_no_bids_has_no_final_price():
     _row(city=None, state="ZA-WC"),                                    # no usable place
     _row("municibid", "55", "Pickup truck"),                           # no normaliser for this source
 ])
-def test_policy_drops_the_lot(row):
+def test_policy_drops_the_lot(row, monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     assert api._normalise(row, "open", NO_PICKS) is None
+
+
+def test_seating_lot_is_public_by_default():
+    assert api._normalise(_row(title="Lot of 40 Banquet Chairs"), "open", NO_PICKS) is not None
 
 
 def test_operator_picks_are_dropped_for_every_source():
