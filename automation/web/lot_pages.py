@@ -28,6 +28,9 @@ Rules:
 """
 from __future__ import annotations
 
+import html
+import re
+
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -46,6 +49,19 @@ DEAL_LOT_SITES = ("govdeals", "allsurplus", "txauction")      # sources that liv
 ARCHIVE_SOURCES = ("govdeals", "allsurplus")                  # sources with confirmed closes
 _MAESTRO_HOST = {"govdeals": "https://www.govdeals.com", "allsurplus": "https://www.allsurplus.com"}
 SOURCE_NAMES = {**deals_sources.SITES, "txauction": "TXAuction"}
+
+_DROP_BLOCKS = re.compile(r"<(script|style)\b.*?</\1\s*>", re.I | re.S)
+_BREAK_TAGS = re.compile(r"<\s*(?:br\s*/?|/p|/li|/div|/tr|/h[1-6])\s*>", re.I)
+_ANY_TAG = re.compile(r"<[^>]*>")
+
+
+def plain_text(value) -> str:
+    """A source description as words: listings store HTML, the page shows none."""
+    text = _DROP_BLOCKS.sub("", str(value or ""))
+    text = _ANY_TAG.sub("", _BREAK_TAGS.sub("\n", text))
+    lines = (" ".join(line.split()) for line in html.unescape(text).splitlines())
+    return "\n".join(line for line in lines if line)
+
 
 _DL_COLS = ("site, native_id, asset_id, account_id, auction_id, title, description, "
             "canonical_category, native_category_name, city, state, lat, lng, bid_count, "
@@ -155,7 +171,7 @@ def _from_deal_lots(source: str, key: str, now: datetime) -> dict | None | bool:
     usd = row.get("currency_code") == public_sold.CURRENCY
     return _finish({
         "source": source, "key": key, "backing": "deal_lots", "price_on_source": not usd,
-        "title": row.get("title"), "description": (row.get("description") or "")[:DESC_MAX] or None,
+        "title": row.get("title"), "description": plain_text(row.get("description"))[:DESC_MAX] or None,
         "category": row.get("canonical_category"), "native_category": row.get("native_category_name"),
         "city": row.get("city"), "state": row.get("state"), "lat": row.get("lat"), "lng": row.get("lng"),
         "current_bid": _num(row.get("current_bid")) if usd else None, "bid_count": row.get("bid_count"),

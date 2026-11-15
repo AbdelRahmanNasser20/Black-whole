@@ -343,3 +343,13 @@ def test_chairs_feed_rows_link_the_operator_view_or_nothing():
     snap = cf.shape_snapshot({"id": "municibid:9", "source": "municibid", "title": "40 chairs",
                               "viewer_url": "/deals/lot/40-chairs-pa-municibid-9", "operator_pick": True})
     assert snap["viewer_url"] is None
+
+
+def test_description_html_becomes_plain_text():
+    # Source listings store HTML; the page (and JSON-LD) show words, never tags.
+    from automation.web import lot_pages
+    raw = "<p><strong>(800set)</strong> Glass &amp; case</p><ul><li>New</li><li>Boxed<br>sealed</li></ul><script>x()</script>"
+    out = lot_pages.plain_text(raw)
+    assert "<" not in out and ">" not in out and "x()" not in out
+    assert out == "(800set) Glass & case\nNew\nBoxed\nsealed"
+    assert lot_pages.plain_text(None) == "" and lot_pages.plain_text("plain  words") == "plain words"
