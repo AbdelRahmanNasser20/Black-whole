@@ -34,6 +34,7 @@ a url builder). `source='govdeals'` is refused here on purpose.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
@@ -275,10 +276,40 @@ _PHOTO_FILE_RX = re.compile(r"^[A-Za-z0-9_.-]+\.(?:jpe?g|png|webp)(?:\?[A-Za-z0-
 MAESTRO_PHOTO_BASE = "https://webassets.lqdt1.com/assets/photos/"
 
 
+# Hosts a public page may hotlink a photo from: the auction sites' own domains
+# and the CDNs they serve images from. A link on any other host is dropped.
+# `DEAL_LOT_PHOTO_HOSTS` (comma list) adds a host when a source moves its images.
+PHOTO_HOSTS = (
+    "lqdt1.com", "govdeals.com", "allsurplus.com",                     # GovDeals / AllSurplus (maestro CDN)
+    "gsaauctions.gov", "ppms.gov", "gsa.gov",                          # GSA Auctions
+    "municibid.com", "storagemunicibidpro.blob.core.windows.net",      # Municibid
+    "michigan.gov",                                                    # MiBid
+    "txauction.com", "cloudfront.net",                                 # TXAuction (CloudFront)
+    "publicsurplus.com", "purplewave.com",
+)
+# Never hotlinked, whatever the allow-list or the env says: our own buckets and
+# site (private archive copies, the auth-walled photo proxy) and Supabase Storage.
+PHOTO_HOSTS_NEVER = ("r2.dev", "r2.cloudflarestorage.com", "supabase.co", "supabase.in", "black-whole.com")
+
+
+def _host_in(host: str, suffixes) -> bool:
+    return any(host == s or host.endswith("." + s) for s in suffixes)
+
+
+def _photo_hosts() -> tuple[str, ...]:
+    extra = tuple(h.strip().lower().lstrip(".") for h in (os.getenv("DEAL_LOT_PHOTO_HOSTS") or "").split(",") if h.strip())
+    return PHOTO_HOSTS + extra
+
+
 def safe_photo_url(value: Any) -> str | None:
-    """An https image link from the source site, or None. Nothing else passes."""
+    """An https image link on an auction site's own host, or None. Nothing else passes."""
     s = str(value or "").strip()
-    return s if len(s) <= 500 and _PHOTO_URL_RX.match(s) else None
+    if len(s) > 500 or not _PHOTO_URL_RX.match(s):
+        return None
+    host = s[len("https://"):].split("/", 1)[0].lower()
+    if _host_in(host, PHOTO_HOSTS_NEVER) or not _host_in(host, _photo_hosts()):
+        return None
+    return s
 
 
 def photo_url(source: str, lot_id: str, value: Any) -> str | None:
@@ -444,8 +475,80 @@ def _lots(status: str, view: str = "public") -> list[dict]:
             raise
         built = {"public": build(rows, status, picks),
                  "seating": build(rows, status, picks, seating=True)}
-        _cache[status] = (time.monotonic(), built)
+        _store(status, built)
         return built[view]
+
+
+def _store(status: str, built: dict[str, list[dict]]) -> None:
+    """Put one status' built views in the memo, with a (source, lot id) index
+    of the public rows so one lot is a dict lookup, not a scan."""
+    built["index"] = {(r["source"], r["source_lot_id"]): r for r in built["public"]}
+    _cache[status] = (time.monotonic(), built)
+
+
+# ── memo-only access (a request that must never start the read) ──────────────
+_STATUSES = {"active": ("open",), "closed": ("closed",), "all": ("open", "closed")}
+_refreshing: set[str] = set()
+_refresh_lock = threading.Lock()
+
+
+def _spawn_refresh(status: str) -> None:
+    """Load one status in a daemon thread, at most one at a time per status.
+    A failure is swallowed here (`_lots` already records the back-off)."""
+    with _refresh_lock:
+        if status in _refreshing:
+            return
+        _refreshing.add(status)
+
+    def run() -> None:
+        try:
+            _lots(status)
+        except Exception:  # noqa: BLE001 - the next request retries after FAIL_BACKOFF
+            pass
+        finally:
+            with _refresh_lock:
+                _refreshing.discard(status)
+
+    threading.Thread(target=run, name=f"deals-sources-{status}", daemon=True).start()
+
+
+def _warm(status: str) -> dict | None:
+    """The memo for `open` / `closed` when it is fresh; else None, and one
+    background refresh is started. NEVER reads the database itself."""
+    hit = _cache.get(status)
+    if hit and time.monotonic() - hit[0] < CACHE_TTL:
+        return hit[1]
+    _spawn_refresh(status)
+    return hit[1] if hit else None            # a stale memo still answers while it reloads
+
+
+def peek(status: str = "active") -> list[dict] | None:
+    """The cached public rows for a status, or None while the memo is cold.
+    The list is the memo's own: read it, never change it."""
+    parts = [_warm(s) for s in _STATUSES[status]]
+    if any(p is None for p in parts):
+        return None
+    return [r for p in parts for r in p["public"]]
+
+
+def find(source: str, lot_id: str, *, now: datetime | None = None) -> dict | None:
+    """One public lot from the memo by (source, lot id): a copy of that row, or
+    None. A cold memo is a miss (and starts the background load) — the heavy
+    snapshot read never runs inside a request. An open lot whose end has passed
+    is not returned as live."""
+    now = now or datetime.now(timezone.utc)
+    hit = None
+    for status in ("open", "closed"):
+        memo = _warm(status)
+        if memo is None or hit is not None:
+            continue                          # keep going: every cold status gets its refresh
+        row = memo.get("index", {}).get((source, lot_id))
+        if row is None:
+            continue
+        if status == "open" and not (row["end_utc"] and row["end_utc"] > now):
+            continue
+        hit = dict(row)
+    return hit
 
 
 def lots(status: str = "active", *, now: datetime | None = None,

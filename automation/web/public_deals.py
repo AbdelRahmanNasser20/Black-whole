@@ -101,6 +101,44 @@ def hide_seating() -> bool:
     return os.getenv("PUBLIC_DEALS_HIDE_SEATING", "").strip() == "1"
 
 
+# ── the keys a star can be stored under ──────────────────────────────────────
+# `tracked_lots` and `deal_list_items` key on deal_lots' own integer ids (real
+# for GovDeals / AllSurplus, synthetic for every other site), so an id join
+# covers every source. `auction_favorites.asset_id` is TEXT and has two shapes:
+#   GovDeals / AllSurplus   "<asset_id>/<account_id>"
+#   every other site        "<prefix>:<last part of the native id>"
+#                           (tx:<auction_lot_id>, ps:<auc>, bs:<lot guid> — written by
+#                            app.py's favorite-key parser and deals/listings_bridge.asset_key)
+# A foreign site's deal_lots row carries synthetic integer ids that never appear
+# in a star, so the pair alone hid nothing (PR #174 review). One helper + its SQL
+# twin, built from the same constant map.
+FAVORITE_PREFIX: dict[str, str] = {"txauction": "tx", "publicsurplus": "ps", "bidspotter": "bs"}
+
+
+def favorite_keys(*, site: Any = None, native_id: Any = None,
+                  asset_id: Any = None, account_id: Any = None) -> list[str]:
+    """Every `auction_favorites.asset_id` value that can mean this lot."""
+    keys: list[str] = []
+    if asset_id is not None and account_id is not None:
+        keys.append(f"{asset_id}/{account_id}")
+    prefix = FAVORITE_PREFIX.get(str(site or ""))
+    last = str(native_id or "").rsplit("/", 1)[-1].strip()
+    if prefix and last:
+        keys.append(f"{prefix}:{last}")
+    return keys
+
+
+# SQL twin of `favorite_keys` for a `deal_lots` row. Constants only (the map
+# above is code, never input); a site with no prefix yields NULL, which IN ignores.
+_FAVORITE_KEYS_SQL = (
+    "deal_lots.asset_id::text || '/' || deal_lots.account_id::text, "
+    "CASE deal_lots.site "
+    + "".join(f"WHEN '{site}' THEN '{prefix}:' || regexp_replace(deal_lots.native_id, '^.*/', '') "
+              for site, prefix in FAVORITE_PREFIX.items())
+    + "END"
+)
+
+
 def exclusion_where() -> tuple[str, list]:
     """SQL fragment (and args) that hides every lot the public must not see:
     the operator's picks always, seating lots only when `hide_seating()`."""
@@ -114,7 +152,7 @@ def exclusion_where() -> tuple[str, list]:
         "NOT EXISTS (SELECT 1 FROM tracked_lots t "
         "  WHERE t.asset_id = deal_lots.asset_id AND t.account_id = deal_lots.account_id) "
         "AND NOT EXISTS (SELECT 1 FROM auction_favorites f "
-        "  WHERE f.asset_id = deal_lots.asset_id::text || '/' || deal_lots.account_id::text) "
+        f"  WHERE f.asset_id IN ({_FAVORITE_KEYS_SQL})) "
         "AND NOT EXISTS (SELECT 1 FROM deal_list_items li "
         "  WHERE li.asset_id = deal_lots.asset_id AND li.account_id = deal_lots.account_id "
         "    AND li.auction_id = deal_lots.auction_id)"
@@ -147,13 +185,18 @@ def is_excluded(row: dict) -> bool:
     return hide_seating() and is_seating(row)
 
 
-def is_operator_lot(asset_id: int, account_id: int, auction_id: int) -> bool:
+def is_operator_lot(asset_id: int, account_id: int, auction_id: int, *,
+                    site: Any = None, native_id: Any = None) -> bool:
+    """Is this `deal_lots` row one the operator tracks, starred or listed?
+    Pass the row's `site` + `native_id`: a star on a non-GovDeals lot is stored
+    under its prefixed native key (`favorite_keys`), not the integer pair."""
+    keys = favorite_keys(site=site, native_id=native_id, asset_id=asset_id, account_id=account_id)
     row = db.fetch_one(
         "SELECT EXISTS (SELECT 1 FROM tracked_lots WHERE asset_id=%s AND account_id=%s) "
-        "OR EXISTS (SELECT 1 FROM auction_favorites WHERE asset_id=%s) "
+        "OR EXISTS (SELECT 1 FROM auction_favorites WHERE asset_id = ANY(%s)) "
         "OR EXISTS (SELECT 1 FROM deal_list_items WHERE asset_id=%s AND account_id=%s AND auction_id=%s) "
         "AS hit",
-        (asset_id, account_id, f"{asset_id}/{account_id}", asset_id, account_id, auction_id),
+        (asset_id, account_id, keys, asset_id, account_id, auction_id),
     )
     return bool(row and row["hit"])
 
@@ -374,6 +417,27 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
         "total": total, "page": page, "per_page": per_page,
         "pages": max(1, -(-total // per_page)),
     }
+
+
+def similar_rows(*, category=None, state=None, limit: int = 12) -> list[dict]:
+    """Live public lots in one category (and state), soonest to end first — the
+    lot page's "similar lots". ONE statement and no count (a lot page is the
+    most-crawled URL shape; `fetch_page` pays a second whole-set count). The
+    snapshot half comes from the memo only (`deals_sources.peek`), so this never
+    starts the heavy snapshot read inside a request."""
+    from . import deals_sources
+    now = datetime.now(timezone.utc)
+    fees = fee_model_from_env()
+    where, args = build_public_where(category=category, state=state, status="active")
+    with db.connect() as conn:
+        rows = conn.execute(
+            f"SELECT {PUBLIC_COLS} FROM deal_lots WHERE {where} "
+            "ORDER BY end_utc ASC NULLS LAST LIMIT %s", (*args, limit)).fetchall()
+    out = [enrich_public(_with_source(dict(r)), fees) for r in rows]
+    memo = [r for r in (deals_sources.peek("active") or []) if r["end_utc"] and r["end_utc"] > now]
+    snap = deals_sources.apply_filters(memo, category=category, state=state, now=now)
+    out += [enrich_snapshot(dict(r), fees) for r in snap[:limit]]
+    return _merge_sorted(out, "end_utc", "asc")[:limit]
 
 
 # ── signed-in extras (liquidator platform) ───────────────────────────────────

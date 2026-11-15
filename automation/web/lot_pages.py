@@ -5,7 +5,8 @@ three, in order, and returns one shape:
 
 1. `deal_lots` by `(site, native_id)` — GovDeals, AllSurplus, TXAuction.
 2. the `deals_sources` memo (newest `listing_snapshots` row per lot) — every
-   other recorder source. No DB read on this path.
+   other recorder source. Memo only (`deals_sources.find`): a cold memo is a
+   miss and starts the background load; the heavy read never runs in a request.
 3. `lot_archive` by `(source, lot_key)` — a closed lot that has left 1 and 2.
 
 Rules:
@@ -15,9 +16,11 @@ Rules:
   filter, `public_sold.base_where`). A hidden `deal_lots` row never falls
   through to another table.
 * **"Sold for $X" is a confirmed sale only**: the `lot_archive` row says
-  `outcome = 'sold'` with a USD `final_price` (the rule `public_sold.SOLD`
-  uses). Any other ended lot says the final price is not confirmed and is
-  `noindex`.
+  `outcome = 'sold'` with a `final_price` whose currency is exactly `USD`
+  (the rule `public_sold.SOLD` uses; an unknown currency is not USD). Any
+  other ended lot says the final price is not confirmed and is `noindex`.
+* **A "$" is only ever a USD amount.** A live lot in another currency shows no
+  price, no cost total and no Offer (`price_on_source`).
 * **Photos are the source site's own links**, at most `MAX_PHOTOS`, https
   only. Never `archived_hero_url` / `gallery_urls` (our private copies).
   `photos_mode()` (site setting `deal_lot_photos`) can switch them off.
@@ -103,7 +106,7 @@ def confirmed_sale(archive: dict | None) -> tuple[float | None, datetime | None]
         return None, None
     closed = _aware(archive.get("closed_at"))
     if (archive.get("outcome") == "sold" and archive.get("final_price") is not None
-            and (archive.get("currency") or public_sold.CURRENCY) == public_sold.CURRENCY):
+            and archive.get("currency") == public_sold.CURRENCY):       # NULL = unknown, never USD
         return float(archive["final_price"]), closed
     return None, closed
 
@@ -115,6 +118,7 @@ def _finish(lot: dict, archive: dict | None, now: datetime) -> dict:
     end = lot.get("end_utc")
     lot["ended"] = bool(lot.get("ended") or lot["sold_price"] is not None or (end and end <= now))
     lot["photos"] = [p for p in lot.get("photos") or [] if p][:MAX_PHOTOS]
+    lot.setdefault("price_on_source", False)
     lot["path"] = deal_lot_urls.build(lot["source"], lot["key"], title=lot.get("title"), state=lot.get("state"))
     return lot
 
@@ -146,12 +150,15 @@ def _from_deal_lots(source: str, key: str, now: datetime) -> dict | None | bool:
         if not row.pop("public_ok") or public_deals.is_excluded(row):
             return False
         archive = _archive_row(conn, source, key)
+    # The bid is shown with a "$": only a USD amount may be. Any other currency
+    # (an AllSurplus lot in CAD) shows no number; the source page has the price.
+    usd = row.get("currency_code") == public_sold.CURRENCY
     return _finish({
-        "source": source, "key": key, "backing": "deal_lots",
+        "source": source, "key": key, "backing": "deal_lots", "price_on_source": not usd,
         "title": row.get("title"), "description": (row.get("description") or "")[:DESC_MAX] or None,
         "category": row.get("canonical_category"), "native_category": row.get("native_category_name"),
         "city": row.get("city"), "state": row.get("state"), "lat": row.get("lat"), "lng": row.get("lng"),
-        "current_bid": _num(row.get("current_bid")), "bid_count": row.get("bid_count"),
+        "current_bid": _num(row.get("current_bid")) if usd else None, "bid_count": row.get("bid_count"),
         "end_utc": _aware(row.get("end_utc")), "first_seen_at": _aware(row.get("first_seen_at")),
         "ended": bool(row.get("outcome_complete") or row.get("outcome")),
         "url": _source_url(source, key),
@@ -162,8 +169,7 @@ def _from_deal_lots(source: str, key: str, now: datetime) -> dict | None | bool:
 def _from_snapshots(source: str, key: str, now: datetime) -> dict | None:
     if source not in deals_sources.SOURCES:
         return None
-    hit = next((r for r in deals_sources.lots("all", now=now)
-                if r["source"] == source and r["source_lot_id"] == key), None)
+    hit = deals_sources.find(source, key, now=now)       # memo only; cold = miss
     if hit is None:
         return None
     archive = None
@@ -212,15 +218,26 @@ def resolve(source: str, key: str, *, now: datetime | None = None) -> dict | Non
         lot = _from_deal_lots(source, key, now)
         if lot is False:
             return None
-        if lot:
-            return lot
-    lot = _from_snapshots(source, key, now) or _from_archive(source, key, now)
+    else:
+        lot = None
+    lot = lot or _from_snapshots(source, key, now) or _from_archive(source, key, now)
     if lot is None or lot.get("path") is None or not (lot.get("title") or "").strip():
         return None
     return lot
 
 
 # ── view model ───────────────────────────────────────────────────────────────
+
+SIMILAR_POOL = 12          # rows memoised per (category, state); the page shows SIMILAR of them
+
+
+def _similar_pool(category: str | None, state: str | None) -> list[dict]:
+    """Memoised 5 min (`public_deals._cached`): every lot page of one category
+    + state shares ONE count-less read, so a crawl cannot load the database."""
+    return public_deals._cached(
+        f"similar:{category or ''}:{state or ''}",
+        lambda: public_deals.similar_rows(category=category, state=state, limit=SIMILAR_POOL))
+
 
 def similar(lot: dict) -> list[dict]:
     """Up to SIMILAR live public lots in the same category (and state when
@@ -230,9 +247,8 @@ def similar(lot: dict) -> list[dict]:
         for state in ([lot["state"], None] if lot.get("state") else [None]):
             if not lot.get("category") and not state:
                 break
-            rows = public_deals.fetch_page(category=lot.get("category"), state=state,
-                                           status="active", per_page=25)["rows"]
-            rows = [r for r in rows if r.get("viewer_url") and r["viewer_url"] != lot["path"]]
+            rows = [r for r in _similar_pool(lot.get("category"), state)
+                    if r.get("viewer_url") and r["viewer_url"] != lot["path"]]
             if len(rows) >= 3:
                 break
         return rows[:SIMILAR]
@@ -287,7 +303,8 @@ def jsonld(lot: dict, base_url: str, *, photos: bool) -> list[dict]:
     if photos and lot["photos"]:
         product["image"] = lot["photos"]
     price = price_of(lot)
-    if price is not None:
+    # An ended lot with no confirmed sale has no price to offer: the last bid seen is not one.
+    if price is not None and not (lot["ended"] and lot["sold_price"] is None):
         offer: dict[str, Any] = {
             "@type": "Offer", "price": f"{price:.2f}", "priceCurrency": public_sold.CURRENCY, "url": url,
             "availability": "https://schema.org/" + ("SoldOut" if lot["ended"] else "InStock"),

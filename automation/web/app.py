@@ -223,7 +223,7 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
         return templates.TemplateResponse(
             request, "404.html",
             _public_ctx({"lots": lots, "robots_noindex": True, "no_canonical": True}),
-            status_code=404,
+            status_code=404, headers=getattr(exc, "headers", None),
         )
     return await fastapi_http_exception_handler(request, exc)
 
@@ -1140,7 +1140,9 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
     operator = (not auth_svc.auth_enabled()) or auth_svc.request_has_session(request)
     if not operator and (
         public_deals.is_excluded(row)
-        or await asyncio.to_thread(public_deals.is_operator_lot, asset_id, account_id, auction_id)
+        or await asyncio.to_thread(
+            lambda: public_deals.is_operator_lot(
+                asset_id, account_id, auction_id, site=row.get("site"), native_id=row.get("native_id")))
     ):
         raise HTTPException(status_code=404, detail="lot not archived")
     if not operator:
@@ -1452,6 +1454,8 @@ async def public_deals_page(request: Request):
         viewer = None
     return templates.TemplateResponse(request, "deals_public.html", {
         "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
+        # Google indexes the plain page only; a filter, a page or a view is a variant of it.
+        "robots_index": not request.query_params,
         "per_page_choices": public_deals.PER_PAGE_CHOICES,
         "platform_authed": viewer is not None},
         headers=_PRIVATE if viewer else None)
@@ -4806,6 +4810,14 @@ async def _start_alerts_loop() -> None:
         _geo_warm_task = asyncio.create_task(asyncio.to_thread(_geo._pgeocode_us))
     except Exception as e:  # never block startup on the geocoder
         print(f"[geo] pgeocode pre-warm skipped: {e!r}")
+    # First deals-sitemap build: a daemon thread, so a crawler's first fetch after a
+    # deploy does not get (and cache) an empty list. Only with a database to read.
+    if os.getenv("BLACKWHOLE_DB_URL"):
+        try:
+            from . import deal_sitemap
+            deal_sitemap.warm()
+        except Exception as e:  # never block startup on the sitemap
+            print(f"[deal-sitemap] warm-up skipped: {e!r}")
     if _tracking_task is None or _tracking_task.done():
         _tracking_task = asyncio.create_task(_tracking_loop())
         print(f"[tracking] bid-history poller started (tick={_SCHEDULER_TICK_SEC:.0f}s)")

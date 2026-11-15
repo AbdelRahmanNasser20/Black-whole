@@ -53,12 +53,17 @@ def world(monkeypatch):
     state = {"conn": Conn(), "snap": [], "archive_only": None}
     monkeypatch.setattr(lp.db, "connect", lambda: state["conn"])
     monkeypatch.setattr(lp.db, "fetch_one", lambda sql, params=(): state["archive_only"])
-    monkeypatch.setattr(ds, "lots", lambda status="active", now=None, seating=False: [dict(r) for r in state["snap"]])
+    # the lot page reads the snapshot memo through `find` only (never the loading `lots`)
+    monkeypatch.setattr(ds, "lots", lambda *a, **kw: pytest.fail("a lot page must not load the snapshot set"))
+    monkeypatch.setattr(ds, "find", lambda source, key, now=None: next(
+        (dict(r) for r in state["snap"] if r["source"] == source and r["source_lot_id"] == key), None))
     monkeypatch.setattr(lp.site_settings, "get_all", lambda: {"deal_lot_photos": state.get("photos", 2)})
-    monkeypatch.setattr(pd, "fetch_page", lambda **kw: {"rows": []})
+    monkeypatch.setattr(pd, "similar_rows", lambda **kw: [])
     lp.clear_cache()
+    pd.clear_cache()
     yield state
     lp.clear_cache()
+    pd.clear_cache()
 
 
 # ───────────────────────── resolve ─────────────────────────
@@ -190,10 +195,11 @@ def test_similar_never_raises_and_skips_itself(world, monkeypatch):
     lot = lp.resolve("govdeals", "305/10340/1", now=NOW)
     rows = [{"title": f"L{i}", "viewer_url": f"/deals/lot/l{i}-tx-govdeals-{i}.1.1"} for i in range(9)] + \
            [{"title": "self", "viewer_url": lot["path"]}, {"title": "no page", "viewer_url": None}]
-    monkeypatch.setattr(pd, "fetch_page", lambda **kw: {"rows": rows})
+    monkeypatch.setattr(pd, "similar_rows", lambda **kw: rows)
     out = lp.similar(lot)
     assert len(out) == lp.SIMILAR and lot["path"] not in [r["viewer_url"] for r in out]
-    monkeypatch.setattr(pd, "fetch_page", lambda **kw: (_ for _ in ()).throw(RuntimeError("db down")))
+    pd.clear_cache()                                     # the pool is memoised per (category, state)
+    monkeypatch.setattr(pd, "similar_rows", lambda **kw: (_ for _ in ()).throw(RuntimeError("db down")))
     assert lp.similar(lot) == []
 
 
@@ -245,11 +251,11 @@ def test_wrong_text_part_301s_to_the_canonical_url(client):
 def test_old_id_url_301s_for_the_public_and_stays_the_operator_view(client, monkeypatch):
     monkeypatch.setattr(app_mod.db, "fetch_one", lambda sql, params=(): dict(DL, seller="City", gallery_urls=None,
                         archived_hero_url=None, images_archived=False, opening_bid=1.0, has_reserve=False, final_bid=None))
-    monkeypatch.setattr(pd, "is_operator_lot", lambda a, b, c: False)
+    monkeypatch.setattr(pd, "is_operator_lot", lambda a, b, c, **kw: False)
     monkeypatch.setattr("deals.tracking_store.history", lambda a, b: [])
     r = client.get("/deals/305/10340/1")
     assert r.status_code == 301 and r.headers["location"] == PATH
-    monkeypatch.setattr(pd, "is_operator_lot", lambda a, b, c: True)
+    monkeypatch.setattr(pd, "is_operator_lot", lambda a, b, c, **kw: True)
     assert client.get("/deals/305/10340/1").status_code == 404           # an operator pick has no public page
     client.cookies.set(auth_svc.SESSION_COOKIE, auth_svc.issue_session_token())
     r = client.get("/deals/305/10340/1")

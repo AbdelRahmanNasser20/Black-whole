@@ -20,6 +20,16 @@ from . import deal_lot_urls, deal_sitemap, lot_pages
 
 router = APIRouter()
 EDGE_CACHE = "public, max-age=60, s-maxage=300"       # lets Cloudflare absorb a crawl
+SITEMAP_CACHE = "public, max-age=3600"
+# A miss is never cached: a lot can be a 404 only because the snapshot memo is
+# still loading, and the same URL answers 200 a moment later.
+NOT_FOUND = {"Cache-Control": "no-store"}
+
+
+def _sitemap_cache() -> str:
+    """An hour once the list is built; `no-cache` while the first build runs, so
+    no crawler or edge keeps the empty first answer."""
+    return SITEMAP_CACHE if deal_sitemap.ready() else "no-cache"
 
 
 def _app():
@@ -42,14 +52,14 @@ def _signed_in(request: Request) -> bool:
 def deal_lot_page(request: Request, tail: str):
     parsed = deal_lot_urls.parse(tail)
     if not parsed:
-        raise HTTPException(404, "lot not found")
+        raise HTTPException(404, "lot not found", headers=NOT_FOUND)
     try:
         lot = lot_pages.resolve(*parsed)
     except Exception as e:  # noqa: BLE001 - never a stack trace on a public page
         print(f"[lot-page] read failed for {parsed}: {e!r}", file=sys.stderr)
         raise HTTPException(503, "lot page temporarily unavailable")
     if lot is None:
-        raise HTTPException(404, "lot not found")
+        raise HTTPException(404, "lot not found", headers=NOT_FOUND)
     if request.url.path != lot["path"]:
         # Only source + key pick the lot; the text in front must be the canonical one.
         return RedirectResponse(lot["path"], status_code=301)
@@ -64,7 +74,7 @@ def deal_lot_page(request: Request, tail: str):
 @router.get("/sitemap-index.xml", include_in_schema=False)
 def sitemap_index():
     return Response(deal_sitemap.index_xml(_app().PUBLIC_BASE_URL), media_type="application/xml",
-                    headers={"Cache-Control": "public, max-age=3600"})
+                    headers={"Cache-Control": _sitemap_cache()})
 
 
 @router.get("/sitemaps/deals-{n}.xml", include_in_schema=False)
@@ -72,4 +82,4 @@ def sitemap_deals_child(n: int):
     xml = deal_sitemap.child_xml(_app().PUBLIC_BASE_URL, n)
     if xml is None:
         raise HTTPException(404, "no such sitemap")
-    return Response(xml, media_type="application/xml", headers={"Cache-Control": "public, max-age=3600"})
+    return Response(xml, media_type="application/xml", headers={"Cache-Control": _sitemap_cache()})

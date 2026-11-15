@@ -42,13 +42,13 @@ def _cap() -> int:
         return 50_000
 
 
-_state: dict[str, Any] = {"at": 0.0, "urls": [], "busy": False}
+_state: dict[str, Any] = {"at": 0.0, "urls": [], "busy": False, "built": False}
 _lock = threading.Lock()
 
 
 def clear_cache() -> None:
     with _lock:
-        _state.update(at=0.0, urls=[], busy=False)
+        _state.update(at=0.0, urls=[], busy=False, built=False)
 
 
 def _day(v: Any) -> str | None:
@@ -105,13 +105,25 @@ def _refresh() -> None:
     with _lock:
         _state["busy"] = False
         if urls is not None:
-            _state["urls"], _state["at"] = urls, time.monotonic()
+            _state["urls"], _state["at"], _state["built"] = urls, time.monotonic(), True
         else:
             _state["at"] = time.monotonic() - TTL + RETRY
 
 
 def _spawn() -> None:
     threading.Thread(target=_refresh, name="deal-sitemap", daemon=True).start()
+
+
+def ready() -> bool:
+    """Has the first build landed? Until it has, the files are valid but hold
+    only the two list pages, and the routes answer `no-cache`."""
+    return bool(_state["built"])
+
+
+def warm() -> None:
+    """Start the first build now (called once at web startup). Returns at once:
+    the build runs in a daemon thread and never blocks startup."""
+    urls()
 
 
 def urls() -> list[tuple[str, str | None]]:

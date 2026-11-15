@@ -45,7 +45,7 @@ def client(monkeypatch):
     monkeypatch.setattr(pd, "fetch_page", lambda **kw: dict(PAGE, echo=kw))
     monkeypatch.setattr(pd, "fetch_pins", lambda **kw: {"points": [], "capped": False})
     monkeypatch.setattr(pd, "fetch_facets", lambda: {"categories": [], "states": [], "stats": {"tracked": 210932}, "cached_at": 0})
-    monkeypatch.setattr(pd, "is_operator_lot", lambda a, b, c: False)
+    monkeypatch.setattr(pd, "is_operator_lot", lambda a, b, c, **kw: False)
     monkeypatch.setattr(app_mod.db, "fetch_one", lambda sql, params=(): dict(LOT))
     monkeypatch.setattr("deals.tracking_store.history", lambda a, b: [])
     return TestClient(app, base_url="https://testserver")

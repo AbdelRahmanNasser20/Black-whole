@@ -90,7 +90,7 @@
         <span class="rail-label">{% if lot.sold_price is not none %}Sold for{% elif lot.ended %}Last bid seen{% else %}Current bid{% endif %}</span>
         {% if lot.ended %}<span class="badge badge-closed">ended</span>{% else %}<span class="badge badge-live">live</span>{% endif %}
       </div>
-      <div class="big">{% if price is not none %}${{ '{:,.2f}'.format(price) }}{% else %}—{% endif %}</div>
+      <div class="big">{% if price is not none %}${{ '{:,.2f}'.format(price) }}{% elif lot.price_on_source %}<span class="data-line">Price shown on the auction site</span>{% else %}—{% endif %}</div>
       <dl>
         {% if lot.bid_count is not none %}<dt>Bids</dt><dd>{{ lot.bid_count }}</dd>{% endif %}
         {% if not lot.ended %}
