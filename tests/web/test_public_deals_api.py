@@ -66,14 +66,13 @@ def test_lots_passes_paging_and_rejects_bad_status(client):
     assert client.get("/deals/api/lots?status=bogus").status_code == 400
 
 
-def test_viewer_hides_photos_for_public_and_shows_them_for_operator(client):
-    html = client.get("/deals/305/10340/1").text
-    assert "cdn.example.com/hero.jpg" not in html and "deal_card.js" not in html
-    assert 'id="bid-rail"' in html and "storage_note" not in html
-    assert "<dd>City</dd>" not in html  # seller never renders for the public
+def test_id_url_sends_the_public_to_the_lot_page_and_is_the_operator_view(client):
+    r = client.get("/deals/305/10340/1", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/deals/lot/lot-of-30-laptops-tx-govdeals-305.10340.1"
     client.cookies.set(auth_svc.SESSION_COOKIE, auth_svc.issue_session_token())
     html = client.get("/deals/305/10340/1").text
-    assert "cdn.example.com/hero.jpg" in html
+    assert "cdn.example.com/hero.jpg" in html                 # archived copies: operator session only
     assert 'id="bid-rail"' in html and "storage_note" not in html
 
 
@@ -86,8 +85,9 @@ def test_viewer_404s_excluded_lot_for_public_only(client, monkeypatch):
     assert client.get("/deals/305/10340/1").status_code == 200
 
 
-def test_robots_disallows_deals(client):
-    assert "Disallow: /deals" in client.get("/robots.txt").text
+def test_robots_closes_the_feed_json_not_the_pages(client):
+    lines = client.get("/robots.txt").text.splitlines()
+    assert "Disallow: /deals/api/" in lines and "Disallow: /deals" not in lines
 
 
 # ───────────────────────── every recorder source (deals_sources) ─────────────────────────

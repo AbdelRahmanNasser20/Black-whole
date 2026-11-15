@@ -37,7 +37,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .. import db
-from . import deals_query
+from . import deal_lot_urls, deals_query
 from deals.fees import fee_model_from_env
 from deals.quantity import lot_quantity, unit_price
 
@@ -66,7 +66,7 @@ PUBLIC_COLS = (
     "asset_id, account_id, auction_id, title, canonical_category, "
     "native_category_name, city, state, bid_count, current_bid, currency_code, "
     "end_utc, outcome, final_bid, final_bid_count, outcome_complete, "
-    "first_seen_at, lat, lng, site"
+    "first_seen_at, lat, lng, site, native_id"
 )
 PUBLIC_SORTS = {"ends": "end_utc", "newest": "first_seen_at",
                 "bid": "current_bid", "bids": "bid_count"}
@@ -285,7 +285,12 @@ def _with_source(row: dict) -> dict:
 
 
 def enrich_public(row: dict, fees) -> dict:
-    return deals_query.enrich(row, fees)  # PUBLIC_COLS already excludes private fields
+    site = row.get("source") or GOVDEALS
+    row = deals_query.enrich(row, fees)  # PUBLIC_COLS already excludes private fields
+    row["source"] = site                 # enrich() stamps govdeals; keep the row's real site
+    # Public rows link the canonical lot page; the id-trio URL is the operator view.
+    row["viewer_url"] = deal_lot_urls.for_row(row)
+    return row
 
 
 def enrich_snapshot(row: dict, fees=None) -> dict:
@@ -453,16 +458,17 @@ def fetch_pins(*, q=None, category=None, state=None, max_bids=None,
             where, args = build_public_where(**{k: v for k, v in params.items() if k != "site"})
             points = db.fetch_all(
                 "SELECT asset_id, account_id, auction_id, title, current_bid, bid_count, "
-                "end_utc, city, state, lat, lng FROM deal_lots "
+                "end_utc, city, state, lat, lng, site, native_id FROM deal_lots "
                 f"WHERE {where} AND lat IS NOT NULL AND lng IS NOT NULL "
                 "ORDER BY end_utc ASC LIMIT %s",
                 (*args, PINS_CAP + 1),
             )
             for p in points:
-                p["source"] = GOVDEALS
+                p["source"] = p.pop("site", None) or GOVDEALS
                 p["govdeals_url"] = f"https://www.govdeals.com/en/asset/{p['asset_id']}/{p['account_id']}"
                 p["url"] = p["govdeals_url"]
-                p["viewer_url"] = f"/deals/{p['asset_id']}/{p['account_id']}/{p['auction_id']}"
+                p["viewer_url"] = deal_lot_urls.for_row(p)
+                p.pop("native_id", None)
         for r in _snapshot_rows(status=status, q=q, category=category, state=state,
                                 max_bids=max_bids, ending_within=ending_within,
                                 min_price=min_price, max_price=max_price, bbox=None,

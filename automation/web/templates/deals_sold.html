@@ -6,7 +6,11 @@
 {% block title %}Sold prices — confirmed government surplus sales{% endblock %}
 {% block head %}
 <meta name="description" content="What government surplus lots sold for: confirmed closing prices only. A top bid under the reserve is not counted as a sale.">
-<meta name="robots" content="noindex,nofollow">
+{#- Open to crawlers since 2026-11-15 (operator decision). Only the plain first page is indexed;
+    a filtered or deeper page is a duplicate view, so it is followed but not indexed. -#}
+{% set plain = not (filters.q or filters.category or filters.state or filters.days) and (not data or data.page == 1) %}
+<meta name="robots" content="{{ 'index,follow' if plain else 'noindex,follow' }}">
+{% if plain %}<link rel="canonical" href="{{ base_url }}/deals/sold">{% endif %}
 <link rel="stylesheet" href="/static/deals/sold.css?v={{ asset_v }}">
 {% endblock %}
 {% block topbar_nav %}

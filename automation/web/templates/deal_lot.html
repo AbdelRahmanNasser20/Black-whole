@@ -1,0 +1,112 @@
+{#- templates/deal_lot.html — the public auction-lot page, one shape for every source (lot_pages.view).
+    Context: lot, place, price, cost, similar, meta, robots, show_photos, photos_need_sign_in, jsonld, canonical_url.
+    Never renders: seller, contact, bidders, verdicts, our archived photo copies, storage_note. -#}
+{% extends "_base.html" %}
+{% set nav_active = 'deals' %}
+{% set category = (lot.category or 'lot')|replace('_', ' ') %}
+{% block title %}{{ meta.title }}{% endblock %}
+{% block head %}
+<meta name="description" content="{{ meta.description }}">
+<meta name="robots" content="{{ robots }}">
+<link rel="canonical" href="{{ canonical_url }}">
+<meta property="og:title" content="{{ lot.title }}">
+<meta property="og:description" content="{{ meta.description }}">
+<meta property="og:url" content="{{ canonical_url }}">
+{% if show_photos %}<meta property="og:image" content="{{ lot.photos[0] }}">{% endif %}
+{% include "partials/_lot_jsonld.html" %}
+<link rel="stylesheet" href="/static/deals/detail.css?v={{ asset_v }}">
+{% endblock %}
+{% block content %}
+<a class="back-link" href="/deals" data-back>← Back to deals</a>
+<h1 class="page-title">{{ lot.title }}</h1>
+<p class="crumbs mono"><a class="crumb-src" href="/deals?site={{ lot.source }}">{{ lot.source_name }}</a> · {% if lot.category %}<a href="/deals?category={{ lot.category }}">{{ category }}</a>{% else %}{{ category }}{% endif %}{% if place %} · {{ place }}{% endif %}</p>
+
+<div class="detail">
+  <div class="detail-main">
+    {% if lot.ended %}
+    <section class="section" id="lot-ended">
+      <div class="section-body">
+        {% if lot.sold_price is not none %}
+        <p class="big">Sold for ${{ '{:,.2f}'.format(lot.sold_price) }}</p>
+        <p class="muted data-line">Confirmed by {{ lot.source_name }}'s own close record{% if lot.closed_at %} · closed {{ lot.closed_at.strftime('%b %d, %Y') }}{% endif %}{% if lot.bid_count is not none %} · {{ lot.bid_count }} bid{{ '' if lot.bid_count == 1 else 's' }}{% endif %}.</p>
+        {% else %}
+        <p><strong>Auction ended — final price not confirmed.</strong></p>
+        <p class="muted data-line">A top bid is not a sale: the lot can close under its reserve. We show a sold price only when the auction site's close record confirms it.</p>
+        {% endif %}
+      </div>
+    </section>
+    {% endif %}
+
+    {% include "partials/_lot_photos.html" %}
+
+    {% if not lot.ended %}{% include "partials/_lot_cost.html" %}{% endif %}
+
+    <section class="section">
+      <div class="section-head"><h2>Location &amp; pickup</h2></div>
+      <div class="section-body">
+        <dl class="facts">
+          <dt>Location</dt><dd>{{ place or '—' }}</dd>
+          <dt>Pickup</dt><dd>Pickup terms and the exact address are on the {{ lot.source_name }} listing.</dd>
+        </dl>
+      </div>
+    </section>
+
+    {% if lot.description %}
+    <section class="section">
+      <div class="section-head"><h2>Description</h2></div>
+      <div class="section-body"><pre class="desc">{{ lot.description }}</pre></div>
+    </section>
+    {% endif %}
+
+    <section class="section" id="lot-similar">
+      <div class="section-head"><h2>{{ 'Live lots like this' if lot.ended else 'Similar lots' }}</h2><a class="mono section-link" href="/deals{% if lot.category %}?category={{ lot.category }}{% endif %}">Browse all →</a></div>
+      <div class="section-body">
+        {% if similar %}
+        <ul class="bidders">
+          {% for s in similar %}<li><a href="{{ s.viewer_url }}">{{ s.title }}</a> <span class="mono">· {{ [s.city, s.state]|select|join(', ') }}{% if s.current_bid is not none %} · ${{ '%.0f'|format(s.current_bid) }}{% endif %}</span></li>{% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">No similar live lots right now. <a href="/deals">Browse the whole feed</a>.</p>
+        {% endif %}
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="section-head"><h2>Lot facts</h2></div>
+      <div class="section-body">
+        <dl class="facts">
+          <dt>Source</dt><dd>{{ lot.source_name }}</dd>
+          <dt>Lot key</dt><dd class="mono">{{ lot.key }}</dd>
+          {% if lot.native_category %}<dt>Category on site</dt><dd>{{ lot.native_category }}</dd>{% endif %}
+          {% if lot.first_seen_at %}<dt>First seen</dt><dd>{{ lot.first_seen_at.strftime('%b %d, %Y') }}</dd>{% endif %}
+        </dl>
+      </div>
+    </section>
+  </div>
+
+  <aside class="detail-rail">
+    <div class="rail-card" id="bid-rail">
+      <div class="rail-row">
+        <span class="rail-label">{% if lot.sold_price is not none %}Sold for{% elif lot.ended %}Last bid seen{% else %}Current bid{% endif %}</span>
+        {% if lot.ended %}<span class="badge badge-closed">ended</span>{% else %}<span class="badge badge-live">live</span>{% endif %}
+      </div>
+      <div class="big">{% if price is not none %}${{ '{:,.2f}'.format(price) }}{% else %}—{% endif %}</div>
+      <dl>
+        {% if lot.bid_count is not none %}<dt>Bids</dt><dd>{{ lot.bid_count }}</dd>{% endif %}
+        {% if not lot.ended %}
+        <dt>Time left</dt><dd><span data-ends="{{ lot.end_utc.isoformat() if lot.end_utc else '' }}">—</span></dd>
+        {% endif %}
+        <dt>{{ 'Ended' if lot.ended else 'Ends' }}</dt><dd>{{ lot.end_utc.strftime('%b %d, %Y %H:%M UTC') if lot.end_utc else '—' }}</dd>
+        {% if not lot.ended and cost.total is not none %}<dt>Bid + premium</dt><dd>${{ '%.2f'|format(cost.total) }} <span class="muted">est.</span></dd>{% endif %}
+      </dl>
+      <div class="rail-actions">
+        {% if lot.url %}<a class="btn btn-primary" href="{{ lot.url }}" target="_blank" rel="noopener nofollow">{{ 'View on ' if lot.ended else 'Bid on ' }}{{ lot.source_name }} ↗</a>{% endif %}
+        <button class="btn btn-ghost" type="button" data-copy>Copy link</button>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}
+{% block scripts %}
+<script type="module" src="/static/deals/detail.js?v={{ asset_v }}"></script>
+{% endblock %}

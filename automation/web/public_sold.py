@@ -22,7 +22,7 @@ from datetime import date, datetime
 from typing import Any
 
 from .. import db
-from . import public_deals
+from . import deal_lot_urls, public_deals
 
 PUBLIC_COLS = ("source", "lot_key", "title", "canonical_category", "city", "state",
                "closed_at", "final_price", "bid_count")
@@ -31,7 +31,6 @@ DAY_CHOICES = (30, 90)
 PER_PAGE = 50
 MAX_PAGE = 200
 CURRENCY = "USD"
-_KEY3 = re.compile(r"^\d+/\d+/\d+$")
 _A, _B, _C = (f"split_part(lot_archive.lot_key, '/', {i})" for i in (1, 2, 3))
 
 
@@ -74,11 +73,11 @@ def build_where(*, q: str | None = None, category: str | None = None,
     return where, args
 
 
-def viewer_url(source: str | None, lot_key: str | None) -> str | None:
-    """Our own lot page exists for GovDeals `asset/account/auction` keys only."""
-    if source == public_deals.GOVDEALS and lot_key and _KEY3.match(lot_key):
-        return f"/deals/{lot_key}"
-    return None
+def viewer_url(source: str | None, lot_key: str | None, *, title: str | None = None,
+               state: str | None = None) -> str | None:
+    """The canonical lot page. It resolves from `lot_archive` itself, so every
+    sold row with an encodable key has one."""
+    return deal_lot_urls.build(source, lot_key, title=title, state=state)
 
 
 def share(sold: int, not_sold: int) -> float | None:
@@ -100,15 +99,6 @@ _AGG = (f"count(*) FILTER (WHERE {SOLD}) AS sold, "
         f"percentile_cont(0.25) WITHIN GROUP (ORDER BY final_price) FILTER (WHERE {SOLD}) AS p25, "
         f"percentile_cont(0.5) WITHIN GROUP (ORDER BY final_price) FILTER (WHERE {SOLD}) AS median, "
         f"percentile_cont(0.75) WITHIN GROUP (ORDER BY final_price) FILTER (WHERE {SOLD}) AS p75")
-
-
-# Our lot page reads `deal_lots`; link a sold row only when that row exists.
-# The CASE keeps the integer casts away from a non-numeric key.
-_HAS_PAGE = ("CASE WHEN p.lot_key ~ '^[0-9]+/[0-9]+/[0-9]+$' THEN EXISTS ("
-             "SELECT 1 FROM deal_lots d "
-             "WHERE d.asset_id = split_part(p.lot_key, '/', 1)::bigint "
-             "AND d.account_id = split_part(p.lot_key, '/', 2)::bigint "
-             "AND d.auction_id = split_part(p.lot_key, '/', 3)::bigint) ELSE false END")
 
 
 def _stats(row: dict) -> dict:
@@ -139,10 +129,8 @@ def fetch_sold(*, q: str | None = None, category: str | None = None,
             f"GROUP BY 1 HAVING count(*) FILTER (WHERE {SOLD}) > 0 ORDER BY 2 DESC",
             tuple(args)).fetchall()
         rows = conn.execute(
-            f"SELECT p.*, {_HAS_PAGE} AS has_page FROM ("
             f"SELECT {', '.join(PUBLIC_COLS)} FROM lot_archive WHERE {where} AND {SOLD} "
-            "ORDER BY closed_at DESC NULLS LAST, lot_key LIMIT %s OFFSET %s) p "
-            "ORDER BY closed_at DESC NULLS LAST, lot_key",
+            "ORDER BY closed_at DESC NULLS LAST, lot_key LIMIT %s OFFSET %s",
             tuple(args) + (PER_PAGE, (page - 1) * PER_PAGE)).fetchall()
     summary = _stats(top)
     summary["reserve_not_met"] = summary.pop("not_sold")
@@ -154,7 +142,7 @@ def fetch_sold(*, q: str | None = None, category: str | None = None,
         r = dict(r)
         r["final_price"] = _num(r["final_price"])
         r["closed_at"] = _iso(r["closed_at"])
-        r["viewer_url"] = viewer_url(r["source"], r["lot_key"]) if r.pop("has_page") else None
+        r["viewer_url"] = viewer_url(r["source"], r["lot_key"], title=r.get("title"), state=r.get("state"))
         out_rows.append(r)
     total = summary["sold"]
     return {"summary": summary,

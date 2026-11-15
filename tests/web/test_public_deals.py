@@ -5,6 +5,7 @@ import re
 
 import pytest
 
+from automation.web import deal_lot_urls
 from automation.web import public_deals as pd
 
 
@@ -150,7 +151,8 @@ def test_page_merges_both_halves_in_sort_order(union):
     assert [(r["source"], r.get("asset_id") or r.get("source_lot_id")) for r in body["rows"]] == [
         ("govdeals", 1), ("gsa", "g1"), ("govdeals", 2), ("purple_wave", "p1"), ("govdeals", 3)]
     gd, gsa = body["rows"][0], body["rows"][1]
-    assert gd["url"] == gd["govdeals_url"] and gd["viewer_url"] == "/deals/1/10/1" and gd["landed_cost"] == 11.25
+    assert gd["url"] == gd["govdeals_url"] and gd["viewer_url"] == deal_lot_urls.for_row(gd) and gd["landed_cost"] == 11.25
+    assert gd["viewer_url"].startswith("/deals/lot/") and gd["viewer_url"].endswith("-govdeals-1.10.1")
     assert gsa["viewer_url"] is None and gsa["landed_cost"] is None            # no invented buyer premium
     assert (gsa["quantity"], gsa["quantity_source"], gsa["unit_bid"]) == (4, "title", 25.0)   # lot_quantity ran on the snapshot title
     # bid sorts: NULLS LAST on both halves, in both directions
@@ -185,7 +187,8 @@ def test_pins_union_keeps_only_mapped_points(union):
     assert [(p["source"], p.get("asset_id") or p.get("source_lot_id")) for p in pins["points"]] == [
         ("govdeals", 1), ("gsa", "g1"), ("govdeals", 2), ("govdeals", 3)]
     gd, gsa = pins["points"][0], pins["points"][1]
-    assert gd["viewer_url"] == "/deals/1/10/1" and gd["url"] == gd["govdeals_url"]
+    assert gd["viewer_url"].endswith("-govdeals-1.10.1") and gd["url"] == gd["govdeals_url"]
+    assert "native_id" not in gd
     assert gsa["viewer_url"] is None and gsa["url"] == "https://example.test/g1" and gsa["source_name"] == "GSA Auctions"
     assert "raw" not in gsa and pins["capped"] is False
     assert {p["source"] for p in pd.fetch_pins(site="gsa")["points"]} == {"gsa"}

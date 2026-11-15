@@ -1,0 +1,3 @@
+{#- partials/_lot_jsonld.html — Product/Offer + BreadcrumbList. |tojson escapes < > & so a title can never close the tag. -#}
+{% for block in jsonld %}<script type="application/ld+json">{{ block|tojson }}</script>
+{% endfor %}
