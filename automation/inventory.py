@@ -1107,7 +1107,10 @@ def delete_inquiry(inquiry_id: int) -> bool:
 # blast job filters on.
 
 SUBSCRIBER_STATUSES = ("new", "contacted", "matched", "unsubscribed")
-SUBSCRIBER_SOURCES = ("site_listings", "site_landing", "site_detail", "site_inquiry", "operator")
+SUBSCRIBER_SOURCES = ("site_listings", "site_landing", "site_detail", "site_inquiry", "operator",
+                      "site_updates")
+# `site_updates` = the one-field "early access" strip in the public footer: an email and nothing
+# else. One row per address — a repeat (or a person who unsubscribed) gets their old row back.
 
 
 def create_subscriber(
@@ -1132,6 +1135,14 @@ def create_subscriber(
         raise ValueError("email or phone required")
     if source not in SUBSCRIBER_SOURCES:
         raise ValueError(f"invalid source: {source}")
+    if source == "site_updates" and (email or "").strip():
+        with connect() as conn:
+            dup = conn.execute(
+                "SELECT * FROM subscribers WHERE lower(email) = lower(%s) ORDER BY id LIMIT 1",
+                (email.strip(),),
+            ).fetchone()
+        if dup:
+            return {**_row_to_dict(dup), "duplicate": True}
     now = _now()
     # Server-side unsubscribe capability token (PRD §6): >=32 urlsafe bytes,
     # generated at insert so every subscriber has a working one-click unsubscribe

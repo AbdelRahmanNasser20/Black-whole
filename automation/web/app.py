@@ -135,6 +135,9 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
+# Vector basemap for the public MapLibre maps (static/ui/glmap.js). Same default as the CRM map.
+templates.env.globals["map_style_url"] = (
+    os.getenv("PUBLIC_MAP_STYLE_URL", "").strip() or "https://tiles.openfreemap.org/styles/positron")
 from automation.web.ui_preview import router as _ui_preview_router  # noqa: E402
 app.include_router(_ui_preview_router)
 from automation.web.ebay_deletion import router as _ebay_deletion_router  # noqa: E402
@@ -2625,8 +2628,13 @@ async def _notify_new_subscriber(row: dict) -> None:
         pass
 
 
+SUBSCRIBE_PER_IP_LIMIT = 10   # per hour; each new signup fires a Telegram ping
+
+
 @app.post("/subscribe")
-async def public_subscribe(payload: dict):
+async def public_subscribe(payload: dict, request: Request):
+    if not rate_limit.allow(f"subscribe:{rate_limit.client_ip(request)}", limit=SUBSCRIBE_PER_IP_LIMIT):
+        raise HTTPException(429, "Too many signups from this address. Try again in an hour.")
     payload = payload or {}
     attr = attribution.from_payload(payload)   # pure: no I/O on the loop
     try:
@@ -2653,7 +2661,8 @@ async def public_subscribe(payload: dict):
         ))
     except (ValueError, TypeError) as e:
         raise HTTPException(400, str(e))
-    asyncio.create_task(_notify_new_subscriber(row))
+    if not row.get("duplicate"):   # already on the list: no second ping
+        asyncio.create_task(_notify_new_subscriber(row))
     return {"ok": True, "id": row["id"]}
 
 
