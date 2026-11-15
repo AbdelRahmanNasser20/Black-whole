@@ -8,17 +8,28 @@ export const STAR_KEY = 'pf.stars.v1';
 export const FILTERS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'min_price', 'max_price'];
 export const MAX_SEARCHES = 10;      // the account cap (PLATFORM_MAX_ALERTS_PER_USER default)
 const NUMERIC = ['max_bids', 'ending_within', 'min_price', 'max_price'];
+const ZERO_IS_NOTHING = ['ending_within', 'min_price', 'max_price'];   // 0 bids means "no bids"; these at 0 mean no filter
+const CEILING = {max_bids: 1000, ending_within: 720, min_price: 100000000, max_price: 100000000};
 
 // Keep only real filters, in one shape: strings trimmed, numbers as numbers, state upper, site lower.
+// The rules are the server's (platform_finds.FindBody): what it would refuse is dropped here, so a
+// search saved in the browser is one the account can take later.
 export function clean(raw) {
   const out = {};
   for (const k of FILTERS) {
     let v = raw ? raw[k] : null;
     if (v === undefined || v === null || String(v).trim() === '') continue;
-    if (NUMERIC.includes(k)) { v = Number(v); if (!Number.isFinite(v) || v < 0) continue; }
-    else v = String(v).trim().slice(0, 80);
-    if (k === 'state') v = v.toUpperCase();
-    if (k === 'site') v = v.toLowerCase();
+    if (NUMERIC.includes(k)) {
+      v = Number(v);
+      if (!Number.isFinite(v) || v < 0 || v > CEILING[k]) continue;
+      if (v === 0 && ZERO_IS_NOTHING.includes(k)) continue;
+      if (k === 'max_bids' || k === 'ending_within') v = Math.floor(v);
+    } else v = String(v).replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 80);
+    if (v === '') continue;
+    if (k === 'q' && v.length < 2) continue;                 // a 1-letter keyword is not a search
+    if (k === 'state') { v = v.toUpperCase(); if (!/^[A-Z]{2}$/.test(v)) continue; }
+    if (k === 'site') { v = v.toLowerCase(); if (!/^[a-z0-9_]{1,40}$/.test(v)) continue; }
+    if (k === 'category' && !/^[a-z0-9_]{1,40}$/.test(v)) continue;
     out[k] = v;
   }
   return Object.keys(out).length ? out : null;

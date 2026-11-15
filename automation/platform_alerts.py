@@ -75,6 +75,15 @@ SENT_SQL = "SELECT source, lot_key FROM platform_alert_sends WHERE alert_id = %s
 EXTRA_FILTERS = ("category", "min_price", "max_bids", "ending_within")   # migration 037
 FEED_ROWS = 100
 
+# The feed path's deal_lots read: the keyword path's columns (site + native_id = the
+# dedupe key, as in MATCH_SQL) plus first_seen_at for the window. The WHERE comes from
+# public_deals.build_public_where, so the public exclusion policy is always part of it.
+FEED_SELECT = (
+    "SELECT deal_lots.site AS source, deal_lots.native_id AS lot_key, deal_lots.title, "
+    "deal_lots.current_bid, deal_lots.end_utc, deal_lots.state, deal_lots.asset_id, "
+    "deal_lots.account_id, deal_lots.first_seen_at FROM deal_lots WHERE "
+)
+
 
 def escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -145,27 +154,46 @@ def _snapshot_matches(a: dict, kw: str, now: datetime) -> list[dict]:
 
 
 def _feed_matches(a: dict, kw: str, now: datetime) -> list[dict]:
-    """A saved search with the 037 filters (or no keyword): one reader for both
-    halves, the public feed itself, newest first. Same filters the Finds page shows."""
-    out = public_deals.fetch_page(
-        q=kw or None, category=a.get("category"), state=a.get("state_filter"),
-        site=a.get("source_filter"), max_bids=a.get("max_bids"),
-        ending_within=a.get("ending_within"), min_price=a.get("min_price"),
-        max_price=a.get("max_price"), status="active", sort="newest", page=1, per_page=FEED_ROWS)
-    rows = []
-    for r in out.get("rows") or []:
-        ref = public_deals.lot_ref(r)
-        if ref:
-            rows.append({**r, "source": ref[0], "lot_key": ref[1]})
-    return _fresh(rows, a, now)
+    """A saved search with the 037 filters (or no keyword). Same filters and same public
+    policy as the Finds page (`public_deals.build_public_where` + the snapshot memo), but
+    its own read: no count(*) (the matcher never uses a total), and the deal_lots rows keep
+    their REAL site and native id. `public_deals.fetch_page` rows are GovDeals-shaped
+    (source and link overwritten), which would email a TXAuction lot with a GovDeals link
+    and store a key the keyword path does not use. A failed snapshot read costs that half only."""
+    f = dict(q=kw or None, category=a.get("category"), state=a.get("state_filter"),
+             max_bids=a.get("max_bids"), ending_within=a.get("ending_within"),
+             min_price=a.get("min_price"), max_price=a.get("max_price"))
+    site = a.get("source_filter")
+    rows: list[dict] = []
+    if public_deals.govdeals_half(site):
+        where, args = public_deals.build_public_where(**f, status="active")
+        rows = [dict(r) for r in db.fetch_all(
+            f"{FEED_SELECT}{where} ORDER BY deal_lots.first_seen_at DESC NULLS LAST LIMIT %s",
+            (*args, FEED_ROWS))]
+    if site != public_deals.GOVDEALS:
+        try:
+            from automation.web import deals_sources
+            items = deals_sources.apply_filters(
+                deals_sources.lots("active", now=now), **f, site=site, now=now)
+            rows += [{**i, "lot_key": i["source_lot_id"]} for i in items]
+        except Exception as e:
+            logger.warning("platform-alerts: snapshot half skipped for alert %s: %r", a.get("id"), e)
+    return _fresh(rows, a, now)[:MAX_LOTS_PER_ALERT]
+
+
+def alert_is_narrow(a: dict, kw: str) -> bool:
+    """An alert must name what it watches: a keyword (2+ letters), a category, a state or
+    a site. A price or a bid ceiling alone would match almost every new lot. The API
+    refuses such an alert (platform_finds.alert_allowed); this guards a row that exists."""
+    return len(kw) >= 2 or bool(a.get("category") or a.get("state_filter") or a.get("source_filter"))
 
 
 def _do_alert(a: dict, now: datetime, day_start: datetime, cap: int, rep: dict, users: set) -> None:
     kw = (a.get("keyword") or "").strip()
     st, src, mp = a.get("state_filter"), a.get("source_filter"), a.get("max_price")
     extra = any(a.get(k) is not None for k in EXTRA_FILTERS)
-    if not kw and not extra and st is None and src is None and mp is None:
-        return   # a row with no filter must never match every lot
+    if not alert_is_narrow(a, kw):
+        return   # no keyword, category, state or site: it would match almost every lot
     if kw and not extra:
         rows = db.fetch_all(MATCH_SQL, (
             a["created_at"], now, now, f"%{escape_like(kw)}%",

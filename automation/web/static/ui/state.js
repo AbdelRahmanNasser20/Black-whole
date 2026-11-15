@@ -29,7 +29,7 @@ export async function api(url, opts) {
   if (!res.ok) {
     let detail = res.statusText;
     try { detail = (await res.json()).detail || detail; } catch {}
-    const err = new Error(detail); err.status = res.status; throw err;
+    const err = new Error(detail); err.status = res.status; err.detail = detail; throw err;
   }
   const ct = res.headers.get('content-type') || '';
   return ct.includes('application/json') ? res.json() : res.text();

@@ -21,6 +21,7 @@ def snap(n, title="Forklift", source="gsa", state="GA", bid=500.0, seen_h=1, end
 class FakeDB:
     def __init__(self):
         self.alerts, self.sends, self.deal_rows, self.queries = [], [], [], []
+        self.feed_rows, self.feed_calls = [], []
 
     def alert(self, id=1, keyword="forklift", **extra):
         self.alerts.append({"id": id, "user_id": UID, "keyword": keyword, "state_filter": None,
@@ -33,6 +34,9 @@ class FakeDB:
             return list(self.alerts)
         if sql == platform_alerts.MATCH_SQL:
             return list(self.deal_rows)
+        if sql.startswith(platform_alerts.FEED_SELECT):      # the feed path's own deal_lots read
+            self.feed_calls.append((sql, params))
+            return list(self.feed_rows)
         if sql == platform_alerts.SENT_SQL:
             return [{"source": s, "lot_key": k} for (a, s, k, *_r) in self.sends if a == params[0]]
         raise AssertionError(sql)
@@ -108,31 +112,82 @@ def test_snapshot_read_failure_does_not_stop_the_deal_lots_half(env, monkeypatch
     assert rep["emailed"] == 1 and [k for (_a, _s, k, *_r) in env.sends] == ["1/2/3"]
 
 
-def test_a_search_with_the_new_filters_reads_the_public_feed(env, monkeypatch):
+def deal(site, native_id, title, asset=5, account=-10, seen_h=3):
+    """A deal_lots row as FEED_SELECT returns it: the row's REAL site and native id."""
+    return {"source": site, "lot_key": native_id, "title": title, "current_bid": 300.0,
+            "end_utc": NOW + timedelta(days=1), "state": "GA", "asset_id": asset, "account_id": account,
+            "first_seen_at": NOW - timedelta(hours=seen_h)}
+
+
+def test_a_search_with_the_new_filters_reads_both_halves_with_no_count(env, monkeypatch):
     env.alert(keyword=None, name="GA vehicles", category="vehicles", state_filter="GA", max_bids=3,
               min_price=100.0, ending_within=48)
-    asked = {}
-
-    def fetch_page(**kw):
-        asked.update(kw)
-        return {"rows": [
-            dict(snap(7, title="Truck"), source_name="GSA"),
-            {"source": "govdeals", "asset_id": 1, "account_id": 2, "auction_id": 3, "title": "Van",
-             "current_bid": 300.0, "end_utc": NOW + timedelta(days=1), "state": "GA",
-             "first_seen_at": NOW - timedelta(hours=3), "govdeals_url": "https://www.govdeals.com/en/asset/1/2"},
-            dict(snap(8, title="Stale bus", seen_h=100)),
-        ], "total": 3}
-
-    monkeypatch.setattr(public_deals, "fetch_page", fetch_page)
+    env.feed_rows = [deal("govdeals", "1/2/3", "Van", asset=1, account=2), deal("govdeals", "9/9/9", "Old van", seen_h=100)]
+    env.snaps = [snap(7, title="Truck", cat="vehicles", bids=1), snap(8, title="Stale bus", cat="vehicles", seen_h=100)]
+    monkeypatch.setattr(public_deals, "fetch_page", lambda **k: pytest.fail("fetch_page counts the whole set"))
+    urls = {}
+    monkeypatch.setattr("deals.sites.lot_url", lambda lot: urls.setdefault(lot["native_id"], f"https://site.test/{lot['site']}/{lot['native_id']}"))
     rep = platform_alerts.run_pass(NOW)
-    assert asked == {"q": None, "category": "vehicles", "state": "GA", "site": None, "max_bids": 3,
-                     "ending_within": 48, "min_price": 100.0, "max_price": None, "status": "active",
-                     "sort": "newest", "page": 1, "per_page": 100}
     assert platform_alerts.MATCH_SQL not in env.queries          # one reader for this kind of search
+    (sql, params), = env.feed_calls
+    assert "count(" not in sql.lower()                           # the matcher never uses a total
+    assert sql.count("%s") == len(params) and params[-1] == platform_alerts.FEED_ROWS
+    assert "ORDER BY deal_lots.first_seen_at DESC" in sql and "deal_lots.native_id AS lot_key" in sql
     assert sorted((s, k) for (_a, s, k, *_r) in env.sends) == [("govdeals", "1/2/3"), ("gsa", "7")]
     assert rep["emailed"] == 1 and env.mails[0]["alert"]["keyword"] == "GA vehicles"
-    assert {l["url"] for l in env.mails[0]["lots"]} == {"https://example.test/gsa/7",
-                                                       "https://www.govdeals.com/en/asset/1/2"}
+    assert {l["url"] for l in env.mails[0]["lots"]} == {"https://example.test/gsa/7", "https://site.test/govdeals/1/2/3"}
+
+
+def test_feed_path_links_and_keys_come_from_the_rows_real_site(env, monkeypatch):
+    # A TXAuction lot lives in deal_lots with synthetic ids. Its link and its dedupe key
+    # are the site's own (site + native_id), the same shape the keyword path stores.
+    env.alert(keyword="trailer", category="vehicles")
+    env.feed_rows = [deal("txauction", "880/4412", "Utility trailer", asset=5, account=-10)]
+    env.snaps = [snap(3, title="Boat trailer", source="municibid", cat="vehicles")]
+    asked = []
+
+    def lot_url(lot):
+        asked.append(dict(lot))
+        return f"https://{lot['site']}.test/lot/{lot['native_id']}"
+
+    monkeypatch.setattr("deals.sites.lot_url", lot_url)
+    platform_alerts.run_pass(NOW)
+    assert sorted((s, k) for (_a, s, k, *_r) in env.sends) == [("municibid", "3"), ("txauction", "880/4412")]
+    urls = {l["title"]: l["url"] for l in env.mails[0]["lots"]}
+    assert urls == {"Utility trailer": "https://txauction.test/lot/880/4412",
+                    "Boat trailer": "https://example.test/municibid/3"}
+    assert "govdeals" not in " ".join(urls.values())
+    assert asked[0]["site"] == "txauction" and asked[0]["native_id"] == "880/4412"
+    # the next pass sends nothing: the stored key is the one the reader produces
+    assert platform_alerts.run_pass(NOW + timedelta(minutes=15))["emailed"] == 0 and len(env.mails) == 1
+
+
+def test_feed_path_snapshot_failure_keeps_the_deal_lots_half(env, monkeypatch):
+    env.alert(keyword=None, category="vehicles")
+    env.feed_rows = [deal("govdeals", "1/2/3", "Van", asset=1, account=2)]
+    monkeypatch.setattr("deals.sites.lot_url", lambda lot: "https://site.test/x")
+
+    def boom(*a, **k):
+        raise RuntimeError("snapshot down")
+    monkeypatch.setattr(deals_sources, "lots", boom)
+    rep = platform_alerts.run_pass(NOW)
+    assert rep["emailed"] == 1 and [k for (_a, _s, k, *_r) in env.sends] == ["1/2/3"]
+
+
+def test_feed_path_with_a_snapshot_only_site_skips_the_deal_lots_read(env):
+    env.alert(keyword=None, source_filter="gsa", category="vehicles")
+    env.snaps = [snap(7, title="Truck", cat="vehicles")]
+    platform_alerts.run_pass(NOW)
+    assert env.feed_calls == [] and [(s, k) for (_a, s, k, *_r) in env.sends] == [("gsa", "7")]
+
+
+@pytest.mark.parametrize("extra", [{"min_price": 0.0}, {"max_bids": 1000}, {"ending_within": 720}, {"max_price": 50.0}])
+def test_an_alert_with_no_keyword_category_state_or_site_is_skipped(env, extra):
+    # Such a row would match almost every new lot. The API refuses it; the matcher skips one that exists.
+    env.alert(keyword=None, **extra)
+    env.feed_rows = [deal("govdeals", "1/2/3", "Van", asset=1, account=2)]
+    env.snaps = [snap(1)]
+    assert platform_alerts.run_pass(NOW)["matched"] == 0 and env.sends == [] and env.feed_calls == []
 
 
 def test_a_row_with_no_filter_at_all_never_matches_everything(env, monkeypatch):

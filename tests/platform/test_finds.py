@@ -170,7 +170,8 @@ def test_before_migration_037_only_the_old_columns_are_used(monkeypatch):
     got = r.json()
     assert got["q"] == "forklift" and got["state"] == "GA" and got["max_price"] == 5000
     assert got["category"] is None and got["name"] is None and got["degraded"] is True
-    assert c.post("/platform/api/finds", json={"state": "ga"}).status_code == 409        # keyword is NOT NULL there
+    r = c.post("/platform/api/finds", json={"state": "ga"})                              # keyword is NOT NULL there
+    assert r.status_code == 422 and r.json()["detail"]["error"] == "keyword_required"   # 409 is the cap's code only
     assert c.post(f"/platform/api/finds/{got['id']}/seen").json() == {"ok": True}       # a no-op, never a 500
     assert c.patch(f"/platform/api/finds/{got['id']}", json={"alert": False}).json()["alert"] is False
     assert c.get("/platform/api/finds").json()["finds"][0]["q"] == "forklift"
@@ -196,12 +197,12 @@ def test_star_import_is_one_bounded_insert(monkeypatch):
     f, c = setup(monkeypatch)
     lots = [{"source": "gsa", "lot_key": "A1"}, {"source": "govdeals", "lot_key": "1/2/3"}]
     r = c.post("/platform/api/saved/import", json={"lots": lots})
-    assert r.status_code == 200 and r.json() == {"ok": True, "received": 2}
-    uid, sources, keys = f.saved[0]
+    assert r.status_code == 200 and r.json() == {"ok": True, "received": 2, "imported": 2}
+    uid, sources, keys = f.saved[0][:3]
     assert uid == ME and sources == ["gsa", "govdeals"] and keys == ["A1", "1/2/3"]
     assert c.post("/platform/api/saved/import", json={"lots": [{"source": "gsa", "lot_key": "x"}] * 201}).status_code == 422
     assert c.post("/platform/api/saved/import", json={"lots": [{"source": "", "lot_key": "x"}]}).status_code == 422
-    assert c.post("/platform/api/saved/import", json={"lots": []}).json() == {"ok": True, "received": 0}
+    assert c.post("/platform/api/saved/import", json={"lots": []}).json() == {"ok": True, "received": 0, "imported": 0}
     assert len(f.saved) == 1                                                             # nothing to write, no query
 
 

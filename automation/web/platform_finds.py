@@ -10,7 +10,8 @@ A visitor with no account keeps searches in the browser (static/site/platform/fi
 and reads the public /deals/api/lots. These endpoints are the signed-in half only:
 per-user, so `Cache-Control: private, no-store` and no memo of any kind.
 
-Before migration 037 the code stores the four old columns and needs a keyword.
+Before migration 037 the code stores the four old columns and needs a keyword (422
+`keyword_required`), and an alert on a search whose extra filters were dropped is held off.
 """
 from __future__ import annotations
 
@@ -31,6 +32,8 @@ _PRIVATE = {"Cache-Control": "private, no-store"}
 FILTERS = ("q", "category", "state", "site", "max_bids", "ending_within", "min_price", "max_price")
 LOTS_PER_FIND = 50          # one of the feed's own page sizes
 IMPORT_MAX = 200
+EXTRA = ("category", "min_price", "max_bids", "ending_within")      # stored by migration 037 only
+ALERT_KEYS = ("q", "category", "state", "site")                     # one of these makes an alert narrow enough
 
 _columns_ready = False
 
@@ -63,8 +66,33 @@ def _max_finds() -> int:
         return 10
 
 
+def _max_saved_lots() -> int:
+    try:
+        return int(os.getenv("PLATFORM_MAX_SAVED_LOTS", "500"))
+    except ValueError:
+        return 500
+
+
 def _private(payload) -> JSONResponse:
     return JSONResponse(jsonable_encoder(payload), headers=_PRIVATE)
+
+
+def _no_control(v):
+    """Text fields take printable text only: a NUL breaks the Postgres driver (a 500),
+    and a newline has no place in a name, a keyword or a lot key."""
+    if isinstance(v, str) and any(ord(ch) < 32 or ord(ch) == 127 for ch in v):
+        raise ValueError("control characters are not allowed")
+    return v
+
+
+def _refuse(code: str) -> HTTPException:
+    return HTTPException(status_code=422, detail={"error": code})
+
+
+def alert_allowed(find: dict) -> bool:
+    """An alert must name what it watches: a keyword, a category, a state or a site.
+    A price or a bid ceiling alone would match almost every new lot."""
+    return any(find.get(k) for k in ALERT_KEYS)
 
 
 class FindBody(BaseModel):
@@ -82,6 +110,7 @@ class FindBody(BaseModel):
     @field_validator("name", "q", mode="before")
     @classmethod
     def _blank_is_none(cls, v):
+        _no_control(v)                      # before the strip, or a trailing newline slips through
         v = v.strip() if isinstance(v, str) else v
         return v or None
 
@@ -103,10 +132,14 @@ class FindPatch(BaseModel):
     alert: bool | None = None
     name: str | None = Field(None, max_length=80)
 
+    _name_text = field_validator("name")(classmethod(lambda cls, v: _no_control(v)))
+
 
 class ImportLot(BaseModel):
     source: str = Field(min_length=1, max_length=40)
     lot_key: str = Field(min_length=1, max_length=200)
+
+    _text = field_validator("source", "lot_key")(classmethod(lambda cls, v: _no_control(v)))
 
 
 class ImportBody(BaseModel):
@@ -160,34 +193,66 @@ def list_finds(user: dict = Depends(onboarded_user)):
     return _private({"finds": [as_find(r) for r in rows], "max": _max_finds()})
 
 
+def _existing(user_id, q, state, site, max_price, extra: list | None) -> dict | None:
+    """The caller's row with exactly these filters, if any (keyword compared without case).
+    Two tabs, or a lost answer during the browser merge, must not store a search twice."""
+    sql = ("SELECT * FROM platform_alerts WHERE user_id = %s "
+           "AND lower(keyword) IS NOT DISTINCT FROM lower(%s::text) "
+           "AND state_filter IS NOT DISTINCT FROM %s::text "
+           "AND source_filter IS NOT DISTINCT FROM %s::text "
+           "AND max_price IS NOT DISTINCT FROM %s::real ")
+    args = [user_id, q, state, site, max_price]
+    if extra is not None:
+        sql += ("AND category IS NOT DISTINCT FROM %s::text AND min_price IS NOT DISTINCT FROM %s::real "
+                "AND max_bids IS NOT DISTINCT FROM %s::integer "
+                "AND ending_within IS NOT DISTINCT FROM %s::integer ")
+        args += extra
+    return db.fetch_one(sql + "ORDER BY id LIMIT 1", tuple(args))
+
+
 @router.post("/platform/api/finds")
 def create_find(body: FindBody, user: dict = Depends(onboarded_user)):
     state = body.state.upper() if body.state else None
     site = body.site.lower() if body.site else None
-    cols = ["user_id", "keyword", "state_filter", "source_filter", "max_price", "active"]
-    vals = [user["user_id"], body.q, state, site, body.max_price, body.alert]
+    if body.alert and not alert_allowed({"q": body.q, "category": body.category, "state": state, "site": site}):
+        raise _refuse("alert_needs_filter")
     full = has_finds_columns()
-    if full:
-        cols += ["name", "category", "min_price", "max_bids", "ending_within"]
-        vals += [body.name, body.category, body.min_price, body.max_bids, body.ending_within]
-    elif body.q is None:
-        raise HTTPException(status_code=409, detail={"error": "keyword_required"})
-    # Cap shared with alerts (same table). Best-effort under concurrency, like create_alert.
-    row = db.fetch_one(
-        f"INSERT INTO platform_alerts ({', '.join(cols)}) "
-        f"SELECT {', '.join(['%s'] * len(cols))} "
-        "WHERE (SELECT count(*) FROM platform_alerts WHERE user_id = %s) < %s RETURNING *",
-        (*vals, user["user_id"], _max_finds()))
-    if row is None:
-        raise HTTPException(status_code=409, detail={"error": "alert_limit", "max": _max_finds()})
-    out = as_find(row)
+    extra = [body.category, body.min_price, body.max_bids, body.ending_within]
+    if not full and body.q is None:
+        raise _refuse("keyword_required")      # the old table needs a keyword; 409 is the cap's code only
+    # Before 037 the extra filters cannot be stored. An alert on the remaining, wider
+    # search would email lots the user never asked for, so the alert is held off.
+    held = bool(body.alert and not full and any(v is not None for v in extra))
+    active = bool(body.alert and not held)
+    dup = _existing(user["user_id"], body.q, state, site, body.max_price, extra if full else None)
+    if dup is not None:
+        out = {**as_find(dup), "duplicate": True}
+    else:
+        cols = ["user_id", "keyword", "state_filter", "source_filter", "max_price", "active"]
+        vals = [user["user_id"], body.q, state, site, body.max_price, active]
+        if full:
+            cols += ["name", "category", "min_price", "max_bids", "ending_within"]
+            vals += [body.name, *extra]
+        # Cap shared with alerts (same table). Best-effort under concurrency, like create_alert.
+        row = db.fetch_one(
+            f"INSERT INTO platform_alerts ({', '.join(cols)}) "
+            f"SELECT {', '.join(['%s'] * len(cols))} "
+            "WHERE (SELECT count(*) FROM platform_alerts WHERE user_id = %s) < %s RETURNING *",
+            (*vals, user["user_id"], _max_finds()))
+        if row is None:
+            raise HTTPException(status_code=409, detail={"error": "alert_limit", "max": _max_finds()})
+        out = as_find(row)
     if not full:
         out["degraded"] = True   # only keyword, state, site and max price were stored
+    if held:
+        out["alert_held"] = True  # the alert stays off until the search can be stored in full
     return _private(out)
 
 
 @router.patch("/platform/api/finds/{find_id}")
 def patch_find(find_id: int, body: FindPatch, user: dict = Depends(onboarded_user)):
+    if body.alert and not alert_allowed(as_find(_mine(find_id, user))):
+        raise _refuse("alert_needs_filter")
     if has_finds_columns():
         row = db.fetch_one(
             "UPDATE platform_alerts SET active = COALESCE(%s, active), name = COALESCE(%s, name) "
@@ -237,11 +302,16 @@ def find_seen(find_id: int, user: dict = Depends(onboarded_user)):
 
 @router.post("/platform/api/saved/import")
 def import_saved(body: ImportBody, user: dict = Depends(onboarded_user)):
-    """Browser stars -> the account, after sign-in. One statement, at most IMPORT_MAX lots."""
+    """Browser stars -> the account, after sign-in. One statement, at most IMPORT_MAX lots,
+    and never past the per-user ceiling (PLATFORM_MAX_SAVED_LOTS): the saved list is read
+    on every signed-in feed call."""
+    imported = 0
     if body.lots:
-        db.execute(
+        imported = db.execute(
             "INSERT INTO platform_saved_lots (user_id, source, lot_key) "
             "SELECT %s, s, k FROM unnest(%s::text[], %s::text[]) AS t(s, k) "
+            "LIMIT greatest(0, %s - (SELECT count(*) FROM platform_saved_lots WHERE user_id = %s)) "
             "ON CONFLICT (user_id, source, lot_key) DO NOTHING",
-            (user["user_id"], [l.source for l in body.lots], [l.lot_key for l in body.lots]))
-    return _private({"ok": True, "received": len(body.lots)})
+            (user["user_id"], [l.source for l in body.lots], [l.lot_key for l in body.lots],
+             _max_saved_lots(), user["user_id"])) or 0
+    return _private({"ok": True, "received": len(body.lots), "imported": imported})

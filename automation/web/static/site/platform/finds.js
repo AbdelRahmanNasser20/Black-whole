@@ -206,22 +206,31 @@ function say(text, ok = true) {
 }
 
 async function addSearch(filters) {
+  // Check what was typed first: clean() drops what the server would refuse, and a dropped
+  // word or state must be said, not saved as a wider search.
+  const typedQ = String((filters && filters.q) || '').trim();
+  const typedState = String((filters && filters.state) || '').trim();
+  if (typedQ.length === 1) { say('Use a search word of 2 letters or more.', false); return; }
+  if (typedState && !/^[A-Za-z]{2}$/.test(typedState)) { say('State is the 2-letter code, for example GA.', false); return; }
   const f = clean(filters);
   if (!f) { say('Type a search word, a state, or a max bid.', false); return; }
-  if (f.q && f.q.length < 2) { say('Use a search word of 2 letters or more.', false); return; }
-  if (f.state && !/^[A-Z]{2}$/.test(f.state)) { say('State is the 2-letter code, for example GA.', false); return; }
   if (signedIn) {
     try {
       const made = await api('/platform/api/finds', {method: 'POST', credentials: 'include',
         headers: {'Content-Type': 'application/json'}, body: JSON.stringify(f)});
-      st.finds.push(made);
-      say(made.degraded ? 'Saved. Only the search word, state, site and max bid were stored for now.' : 'Search saved.');
+      if (!st.finds.some((it) => it.id === made.id)) st.finds.push(made);   // an identical search comes back as the one on file
+      say(made.duplicate ? 'That search is already saved.'
+        : made.alert_held ? 'Saved. The email alert stays off until this search can be stored in full.'
+        : made.degraded ? 'Saved. Only the search word, state, site and max bid were stored for now.' : 'Search saved.');
       $('#finds-add').reset();
       return select(made.id);
     } catch (err) {
-      const code = err.status;
-      say(code === 409 ? `An account holds ${st.max} saved searches. Delete one first.`
-        : code === 422 ? 'The server did not take that search. Check the search word and the state.'
+      // The answer's own code decides the message; a status alone can mean more than one thing.
+      const code = err.detail && typeof err.detail === 'object' ? err.detail.error : null;
+      say(code === 'alert_limit' ? `An account holds ${st.max} saved searches. Delete one first.`
+        : code === 'keyword_required' ? 'Add a search word. A search with no word cannot be stored in an account yet.'
+        : code === 'alert_needs_filter' ? 'An email alert needs a search word, a category, a state or a site.'
+        : err.status === 422 ? 'The server did not take that search. Check the search word and the state.'
         : 'The search was not saved. Try again.', false);
       return;
     }
@@ -265,7 +274,11 @@ async function toggleAlert() {
     Object.assign(find, next);
     paintPanel(find);
     toast(find.alert ? 'Email alert on. New matching lots go to your email.' : 'Email alert off.', 'ok');
-  } catch { toast('The alert did not change. Try again.', 'err'); }
+  } catch (err) {
+    const code = err.detail && typeof err.detail === 'object' ? err.detail.error : null;
+    toast(code === 'alert_needs_filter' ? 'An email alert needs a search word, a category, a state or a site.'
+      : 'The alert did not change. Try again.', 'err');
+  }
   btn.disabled = false;
 }
 
@@ -304,6 +317,14 @@ async function start() {
   if (signedIn) {
     const moved = await mergeAll();          // what the browser kept before sign-in → the account
     if (moved.searches) toast(`${moved.searches} saved search${moved.searches === 1 ? '' : 'es'} moved to your account.`, 'ok');
+    const notes = [];
+    if (moved.held) notes.push(`${moved.held} email alert${moved.held === 1 ? ' stays' : 's stay'} off until the search can be stored in full.`);
+    if (moved.capped) notes.push(`Your account is full (${st.max} saved searches). ${moved.kept} more are still in this browser.`);
+    for (const r of moved.rejected) {
+      notes.push(`“${describe(r.search)}” could not be saved to your account`
+        + (r.error === 'keyword_required' ? ' yet: it needs a search word.' : '.') + ' It is still in this browser.');
+    }
+    if (notes.length) say(notes.join(' '), false);
   }
   try { await loadFinds(); }
   catch {
