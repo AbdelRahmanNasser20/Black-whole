@@ -1,7 +1,8 @@
 {#- automation/web/templates/deals_public.html — public "Surplus Radar" feed on the shared shell (plan §6).
     Mounts on _base.html. Never renders auction photos, verdicts, distance, or inventory.storage_note.
     Data comes from /deals/api/* (public_deals.py owns every exclusion — nothing is filtered here or in feed.js).
-    Element ids below are the §6 contract Workstream D's map.js builds against — keep them. -#}
+    Element ids below are the §6 contract Workstream D's map.js builds against — keep them.
+    Three views (#feed-view-toggle: cards | table | map) share the filters; #feed-actions is an empty slot. -#}
 {% set nav_active = 'deals' %}
 {% extends "_base.html" %}
 {% from "_ui/macros.html" import skeleton_cards %}
@@ -118,16 +119,24 @@
   </select>
   <select class="select" id="feed-state" aria-label="State"><option value="">All states</option></select>
   <select class="select" id="feed-site" aria-label="Site"><option value="">All sites</option></select>
-  <button class="btn btn-ghost btn-small" type="button" id="feed-view-toggle" aria-pressed="false">Map</button>
+  <div class="seg feed-view-seg" id="feed-view-toggle" role="group" aria-label="View">
+    <button class="seg-btn is-active" type="button" data-view="cards" aria-pressed="true">Cards</button>
+    <button class="seg-btn" type="button" data-view="table" aria-pressed="false">Table</button>
+    <button class="seg-btn" type="button" data-view="map" aria-pressed="false">Map</button>
+  </div>
+  {#- Slot for per-search actions ("Save this search"); the module that owns the button mounts into it. -#}
+  <div id="feed-actions"></div>
   <span class="result-count" id="feed-count" aria-live="polite"></span>
 </div>
 
 <div class="active-filters" id="feed-filters" hidden></div>
 
-<div id="feed-map" hidden></div>
+<div id="feed-map" data-style-url="{{ map_style_url }}" hidden></div>
 <aside id="feed-map-panel" hidden aria-label="Lots in view"></aside>
 
 <div id="feed-grid" class="grid feed-grid" data-state="loading" aria-live="polite">{{ skeleton_cards(8) }}</div>
+<div id="feed-table" class="table-wrap feed-table-wrap" aria-live="polite"></div>
+<nav id="feed-pager" class="feed-pager" aria-label="Pages" hidden></nav>
 <div class="load-more feed-more-wrap"><button id="feed-more" class="btn" type="button" hidden>Load more</button></div>
 {% endblock %}
 
