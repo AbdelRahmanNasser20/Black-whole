@@ -210,6 +210,27 @@ def _saved_lot_url(r: dict) -> str:
         return ""
 
 
+def _fill_from_snapshots(lots: list[dict]) -> None:
+    """A saved lot from a snapshot-only source (GSA, Municibid, ...) has no deal_lots row.
+    Read it from the public snapshot memo, which already carries the exclusion policy.
+    Any failure leaves the row as "no longer listed"."""
+    missing = [l for l in lots if not l["live"]]
+    if not missing:
+        return
+    try:
+        from automation.web import deals_sources
+        by_id = {i["id"]: i for i in deals_sources.lots("active")}
+    except Exception:
+        logger.warning("saved page: snapshot read failed", exc_info=True)
+        return
+    for l in missing:
+        hit = by_id.get(f"{l['source']}:{l['lot_key']}")
+        if hit:
+            l.update(live=True, title=hit.get("title"), current_bid=hit.get("current_bid"),
+                     bid_count=hit.get("bid_count"), end_utc=hit.get("end_utc"),
+                     outcome_complete=hit.get("outcome_complete"), url=hit.get("url") or "")
+
+
 @router.get("/platform/saved", response_class=HTMLResponse)
 def platform_saved_page(request: Request):
     try:
@@ -232,6 +253,7 @@ def platform_saved_page(request: Request):
         "WHERE s.user_id = %s ORDER BY s.created_at DESC",
         (*ex_args, user["user_id"]))
     lots = [{**r, "live": r.get("title") is not None, "url": _saved_lot_url(r)} for r in rows]
+    _fill_from_snapshots(lots)
     return _render(request, "platform_saved.html", {
         "user_email": user["email"], "lots": lots, "robots_noindex": True})
 
@@ -287,3 +309,11 @@ def platform_subscribe(_gate: None = Depends(_billing_gate), user: dict = Depend
     session = stripe_gateway.create_subscription_checkout(
         customer_id=customer_id, price_id=price_id, base_url=base)
     return {"ok": True, "url": session["url"]}
+
+
+# ---- Finds (saved searches) -------------------------------------------------
+# Own module, mounted here so app.py needs no edit. Imported last: platform_finds
+# never imports this module, so there is no cycle.
+from automation.web import platform_finds  # noqa: E402
+
+router.include_router(platform_finds.router)

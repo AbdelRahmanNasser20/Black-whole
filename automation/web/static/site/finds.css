@@ -1,0 +1,55 @@
+/* static/site/finds.css — /platform/finds (saved searches). Tokens only (static/ui/tokens.css).
+   Cards and the table come from static/deals/feed.css + ui/components.css, unchanged. */
+#finds { max-width: 1400px; }
+.finds-head { display: flex; flex-wrap: wrap; gap: 8px 24px; align-items: flex-end; justify-content: space-between; margin: 0 0 var(--gap); }
+.finds-title { font: 400 28px/1.1 var(--display, var(--sans)); margin: 0 0 6px; color: var(--text); }
+.finds-lede { margin: 0; color: var(--muted); max-width: 62ch; font-size: var(--fs-sm); }
+.finds-mode { margin: 0; color: var(--muted); font-size: var(--fs-sm); max-width: 46ch; }
+.finds-mode a, .finds-more a, .finds-more-filters, .feed-finds-link { color: var(--info, var(--accent)); }
+
+.finds-add { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; padding: 12px; margin: 0 0 var(--gap);
+  border: 1px solid var(--border); background: var(--surface); }
+.finds-field { display: grid; gap: 4px; font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.finds-field input { height: 32px; padding: 0 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text);
+  font: 400 var(--fs-sm)/1 var(--sans); text-transform: none; letter-spacing: 0; min-width: 0; }
+.finds-field input:focus { border-color: var(--accent); outline: none; }
+.finds-field--q { flex: 1 1 220px; }
+.finds-field--q input { width: 100%; }
+.finds-field input[name="state"] { width: 64px; text-transform: uppercase; }
+.finds-field input[name="max_price"] { width: 110px; }
+.finds-more-filters { font-size: var(--fs-sm); align-self: center; }
+.finds-add-msg { flex: 1 0 100%; margin: 0; font-size: var(--fs-sm); color: var(--ok, var(--text)); }
+.finds-add-msg.is-err { color: var(--danger, var(--accent)); }
+
+.finds-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 var(--gap); }
+.finds-tab { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 34px; padding: 4px 10px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted); font: 400 var(--fs-sm)/1.2 var(--sans); cursor: pointer; text-align: left; }
+.finds-tab:hover { color: var(--text); border-color: var(--border-strong, var(--border)); }
+.finds-tab.is-active { color: var(--text); border-color: var(--accent); box-shadow: inset 0 -2px 0 var(--accent); }
+.finds-tab-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 34ch; }
+.finds-badge { flex: 0 0 auto; min-width: 22px; padding: 2px 6px; text-align: center; font: 500 var(--fs-xs)/1.3 var(--mono);
+  font-variant-numeric: tabular-nums; border: 1px solid var(--border); color: var(--dim, var(--muted)); }
+.finds-badge.is-new { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+.finds-panel-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; justify-content: space-between; margin: 0 0 12px; }
+.finds-name { margin: 0 0 4px; font: 500 var(--fs-md, 15px)/1.3 var(--sans); color: var(--text); overflow-wrap: anywhere; }
+.finds-count { margin: 0; color: var(--muted); font: 400 var(--fs-xs)/1.4 var(--mono); }
+.finds-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#finds-alert.is-on { border-color: var(--accent); color: var(--text); }
+.finds-grid, .finds-table { min-height: 120px; }
+.finds-grid .ui-empty, .finds-grid .ui-error { grid-column: 1 / -1; padding: 32px 12px; }
+.finds-more { grid-column: 1 / -1; margin: 12px 0 0; padding: 0 8px 8px; color: var(--muted); font-size: var(--fs-sm); }
+#finds-map { height: min(62vh, 560px); min-height: 320px; border: 1px solid var(--border); }
+.finds-map-note { margin: 8px 0 0; color: var(--muted); font-size: var(--fs-sm); }
+.finds-empty { padding: 32px 12px; border: 1px dashed var(--border); text-align: center; color: var(--muted); }
+.finds-empty h2 { margin: 0 0 8px; font: 500 var(--fs-md, 15px)/1.3 var(--sans); color: var(--text); }
+.finds-empty p { margin: 0; }
+.feed-finds-link { font-size: var(--fs-xs); margin-left: 6px; white-space: nowrap; }
+
+@media (min-width: 1024px) { .finds-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (min-width: 1400px) { .finds-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (max-width: 640px) {
+  .finds-tools { width: 100%; }
+  .finds-tab-name { max-width: 24ch; }
+  #finds-map { height: 60vh; }
+}

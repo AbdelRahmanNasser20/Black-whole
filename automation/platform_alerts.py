@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from automation import db, platform_email
 from automation.web import public_deals
@@ -27,9 +27,10 @@ logger = logging.getLogger(__name__)
 WINDOW_DAYS = 2
 MAX_LOTS_PER_ALERT = 200
 
+# a.* on purpose: migration 037 adds the saved-search filters (category, min_price,
+# max_bids, ending_within, name). Whole rows read the same before and after it.
 ALERTS_SQL = (
-    "SELECT a.id, a.user_id, a.keyword, a.state_filter, a.source_filter, a.max_price, "
-    "a.created_at, u.email FROM platform_alerts a "
+    "SELECT a.*, u.email FROM platform_alerts a "
     "JOIN platform_users u ON u.user_id = a.user_id "
     "WHERE a.active AND u.onboarded_at IS NOT NULL AND u.email IS NOT NULL ORDER BY a.id"
 )
@@ -67,6 +68,13 @@ INSERT_SEND_SQL = (
 
 FIRED_SQL = "UPDATE platform_alerts SET last_fired_at = %s WHERE id = %s"
 
+# What an alert already sent. MATCH_SQL does this inside the query for deal_lots, the
+# rows read from the snapshot memo or the public feed are checked against this list.
+SENT_SQL = "SELECT source, lot_key FROM platform_alert_sends WHERE alert_id = %s"
+
+EXTRA_FILTERS = ("category", "min_price", "max_bids", "ending_within")   # migration 037
+FEED_ROWS = 100
+
 
 def escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
@@ -91,7 +99,10 @@ def _base_url() -> str:
 
 
 def _lot_dict(r: dict) -> dict:
-    url = ""
+    url = r.get("url") or r.get("govdeals_url") or ""
+    if url:   # a feed or snapshot row carries the auction site's own link
+        return {"title": r.get("title"), "current_bid": r.get("current_bid"),
+                "end_utc": r.get("end_utc"), "state": r.get("state"), "url": url}
     try:
         from deals import sites
         url = sites.lot_url({"site": r["source"], "asset_id": r.get("asset_id"),
@@ -102,14 +113,66 @@ def _lot_dict(r: dict) -> dict:
             "end_utc": r.get("end_utc"), "state": r.get("state"), "url": url}
 
 
+def _aware(dt):
+    return dt if (dt is None or dt.tzinfo) else dt.replace(tzinfo=timezone.utc)
+
+
+def _fresh(rows: list[dict], a: dict, now: datetime) -> list[dict]:
+    """Same window as MATCH_SQL: first seen after the alert was made and inside
+    WINDOW_DAYS, still open, and not already sent for this alert."""
+    floor = max(_aware(a["created_at"]), now - timedelta(days=WINDOW_DAYS))
+    live = [r for r in rows if r.get("first_seen_at") and _aware(r["first_seen_at"]) > floor
+            and r.get("end_utc") and _aware(r["end_utc"]) > now]
+    if not live:
+        return []
+    sent = {(x["source"], x["lot_key"]) for x in db.fetch_all(SENT_SQL, (a["id"],))}
+    return [r for r in live if (r["source"], r["lot_key"]) not in sent]
+
+
+def _snapshot_matches(a: dict, kw: str, now: datetime) -> list[dict]:
+    """The sources that are not in deal_lots (GSA, Municibid, ...), from the public
+    snapshot memo. It already carries the exclusion policy. A failed read costs this
+    half only, never the deal_lots half."""
+    try:
+        from automation.web import deals_sources
+        items = deals_sources.apply_filters(
+            deals_sources.lots("active", now=now), q=kw, state=a.get("state_filter"),
+            max_price=a.get("max_price"), site=a.get("source_filter"), now=now)
+    except Exception as e:
+        logger.warning("platform-alerts: snapshot half skipped for alert %s: %r", a.get("id"), e)
+        return []
+    return _fresh([{**i, "lot_key": i["source_lot_id"]} for i in items], a, now)
+
+
+def _feed_matches(a: dict, kw: str, now: datetime) -> list[dict]:
+    """A saved search with the 037 filters (or no keyword): one reader for both
+    halves, the public feed itself, newest first. Same filters the Finds page shows."""
+    out = public_deals.fetch_page(
+        q=kw or None, category=a.get("category"), state=a.get("state_filter"),
+        site=a.get("source_filter"), max_bids=a.get("max_bids"),
+        ending_within=a.get("ending_within"), min_price=a.get("min_price"),
+        max_price=a.get("max_price"), status="active", sort="newest", page=1, per_page=FEED_ROWS)
+    rows = []
+    for r in out.get("rows") or []:
+        ref = public_deals.lot_ref(r)
+        if ref:
+            rows.append({**r, "source": ref[0], "lot_key": ref[1]})
+    return _fresh(rows, a, now)
+
+
 def _do_alert(a: dict, now: datetime, day_start: datetime, cap: int, rep: dict, users: set) -> None:
-    kw = (a["keyword"] or "").strip()
-    if not kw:
-        return
+    kw = (a.get("keyword") or "").strip()
     st, src, mp = a.get("state_filter"), a.get("source_filter"), a.get("max_price")
-    rows = db.fetch_all(MATCH_SQL, (
-        a["created_at"], now, now, f"%{escape_like(kw)}%",
-        st, st, mp, mp, src, src, a["id"], *public_deals.exclusion_where()[1]))
+    extra = any(a.get(k) is not None for k in EXTRA_FILTERS)
+    if not kw and not extra and st is None and src is None and mp is None:
+        return   # a row with no filter must never match every lot
+    if kw and not extra:
+        rows = db.fetch_all(MATCH_SQL, (
+            a["created_at"], now, now, f"%{escape_like(kw)}%",
+            st, st, mp, mp, src, src, a["id"], *public_deals.exclusion_where()[1]))
+        rows = (list(rows) + _snapshot_matches(a, kw, now))[:MAX_LOTS_PER_ALERT]
+    else:
+        rows = _feed_matches(a, kw, now)
     if not rows:
         return
     rep["matched"] += len(rows)
@@ -129,7 +192,8 @@ def _do_alert(a: dict, now: datetime, day_start: datetime, cap: int, rep: dict, 
         return
     db.execute(FIRED_SQL, (now, a["id"]))
     ok = platform_email.send_alert_email(
-        a["email"], {"keyword": kw}, [_lot_dict(r) for r in fresh], unsub)
+        a["email"], {"keyword": kw or a.get("name") or "your saved search"},
+        [_lot_dict(r) for r in fresh], unsub)
     if ok:
         rep["emailed"] += 1
         users.add(str(a["user_id"]))

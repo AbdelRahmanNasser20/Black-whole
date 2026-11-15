@@ -1,0 +1,101 @@
+{#- templates/platform_finds.html — GET /platform/finds: a liquidator's saved searches ("Finds").
+    One page, two modes (platform_finds.py):
+      no account  the searches live in this browser (finds_store.js) and the lots come from the public
+                  /deals/api/lots. Nothing here needs sign-in to work.
+      signed in   the searches are the account's rows (/platform/api/finds*), alerts can be switched on.
+    Every lot shown is already public: public_deals.py owns the policy, nothing is filtered or added here.
+    Views reuse static/deals/views.js (cards | table) and static/ui/glmap.js (map). noindex: a personal page. -#}
+{% set nav_active = 'finds' %}
+{% extends "_base.html" %}
+{% block title %}Saved searches — your newest finds | Black Whole{% endblock %}
+{% block head %}
+<meta name="description" content="Save a search once and see the newest matching government surplus lots every day, in a list or on a map.">
+<meta name="robots" content="noindex,nofollow">
+<link rel="stylesheet" href="/static/deals/feed.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/deals/map.css?v={{ asset_v }}">
+<link rel="stylesheet" href="/static/site/finds.css?v={{ asset_v }}">
+{% endblock %}
+{% block topbar_nav %}
+<a href="/deals">Deals</a>
+<a href="/deals/sold">Sold prices</a>
+<a href="/platform/finds" aria-current="page">Saved searches</a>
+<a href="/sources">Sources</a>
+{% endblock %}
+
+{% block content %}
+<div id="finds" data-signed-in="{{ 1 if signed_in else 0 }}" data-style-url="{{ map_style_url }}">
+  <header class="finds-head">
+    <div>
+      <h1 class="finds-title">Saved searches</h1>
+      <p class="finds-lede">Save a search once. Each one shows the lots that are new since yesterday, from every auction site we track.</p>
+    </div>
+    <p class="finds-mode" id="finds-mode">
+      {% if signed_in %}
+      Signed in as <span class="mono">{{ user_email }}</span> · <a href="/platform/saved">Saved lots</a>
+      {% else %}
+      Kept in this browser. <a href="/platform/signup">Sign in free</a> to get email alerts and keep your searches on every device.
+      {% endif %}
+    </p>
+  </header>
+
+  <form class="finds-add" id="finds-add" autocomplete="off" novalidate>
+    <label class="finds-field finds-field--q"><span>Search word</span>
+      <input type="search" name="q" maxlength="80" placeholder="forklift, laptops, fryer…"></label>
+    <label class="finds-field"><span>State</span>
+      <input type="text" name="state" maxlength="2" size="3" placeholder="GA" pattern="[A-Za-z]{2}"></label>
+    <label class="finds-field"><span>Max bid $</span>
+      <input type="number" name="max_price" min="1" step="50" inputmode="numeric" placeholder="any"></label>
+    <button type="submit" class="btn btn-primary btn-small">Save search</button>
+    <a class="finds-more-filters" href="/deals">More filters on Deals →</a>
+    <p class="finds-add-msg" id="finds-add-msg" role="status" hidden></p>
+  </form>
+
+  <nav class="finds-tabs" id="finds-tabs" aria-label="Your saved searches"></nav>
+
+  <section class="finds-panel" id="finds-panel" hidden aria-live="polite">
+    <div class="finds-panel-head">
+      <div>
+        <h2 class="finds-name" id="finds-name"></h2>
+        <p class="finds-count" id="finds-count"></p>
+      </div>
+      <div class="finds-tools">
+        <div class="seg" role="group" aria-label="Which lots" id="finds-scope">
+          <button class="seg-btn is-active" type="button" data-scope="new" aria-pressed="true">New</button>
+          <button class="seg-btn" type="button" data-scope="all" aria-pressed="false">All</button>
+        </div>
+        <div class="seg" role="group" aria-label="View" id="finds-view">
+          <button class="seg-btn is-active" type="button" data-view="cards" aria-pressed="true">Cards</button>
+          <button class="seg-btn" type="button" data-view="table" aria-pressed="false">Table</button>
+          <button class="seg-btn" type="button" data-view="map" aria-pressed="false">Map</button>
+        </div>
+        <button type="button" class="btn btn-ghost btn-small" id="finds-alert" aria-pressed="false">Email alert: off</button>
+        <a class="btn btn-ghost btn-small" id="finds-open" href="/deals">Open in Deals</a>
+        <button type="button" class="btn btn-ghost btn-small finds-delete" id="finds-delete">Delete</button>
+      </div>
+    </div>
+    <div id="finds-cards" class="grid finds-grid"></div>
+    <div id="finds-table" class="table-wrap finds-table" hidden></div>
+    <div id="finds-map-wrap" hidden>
+      <div id="finds-map" role="region" aria-label="Map of lots in this search"></div>
+      <p class="finds-map-note" id="finds-map-note"></p>
+    </div>
+  </section>
+
+  <section class="finds-empty" id="finds-empty" hidden>
+    <h2>No saved searches yet</h2>
+    <p>Type a search word above, or set any filters on <a href="/deals">Deals</a> and press <strong>Save this search</strong>.</p>
+  </section>
+</div>
+{% endblock %}
+
+{% block footer %}
+{% include "_updates_strip.html" %}
+<footer class="footer feed-footer">
+  <p class="footer-note">Lots come from public surplus listings (GovDeals, GSA Auctions, Purple Wave, AllSurplus and others). We are not affiliated with those sites or any agency.</p>
+  <p class="footer-note">© 2026 Black Whole</p>
+</footer>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/site/platform/finds.js?v={{ asset_v }}"></script>
+{% endblock %}

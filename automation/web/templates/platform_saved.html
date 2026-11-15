@@ -34,6 +34,8 @@
 {% endblock %}
 
 {% block scripts %}
+{# Signed-in page: move the searches and stars this browser kept before sign-in into the account. #}
+<script type="module">import {mergeAll} from "/static/site/platform/merge.js?v={{ asset_v }}"; mergeAll();</script>
 <script>
 (function () {
   document.getElementById("sv-list").addEventListener("click", function (ev) {
