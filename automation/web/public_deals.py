@@ -453,6 +453,10 @@ def lot_ref(row: dict) -> tuple[str, str] | None:
     /platform/saved does not read, so offering Save on them would save a lot the
     saved page could only render as "no longer listed"."""
     if None in (row.get("asset_id"), row.get("account_id"), row.get("auction_id")):
+        # A snapshot-only source (GSA, Municibid, ...): its own lot id is the key. The saved
+        # page reads these back from the deals_sources memo (platform_routes.platform_saved_page).
+        if row.get("source") and row.get("source_lot_id"):
+            return str(row["source"]), str(row["source_lot_id"])
         return None
     # The row's real site: the saved page joins deal_lots.site = source.
     return (row.get("source") or GOVDEALS), f"{row['asset_id']}/{row['account_id']}/{row['auction_id']}"

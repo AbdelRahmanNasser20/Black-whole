@@ -163,9 +163,38 @@ def test_viewer_lookup_failure_serves_anonymous(env, monkeypatch):
     assert TestClient(webapp.app).get("/deals").status_code == 200
 
 
-def test_snapshot_source_rows_get_no_save_button():
+def test_snapshot_source_rows_can_be_saved_and_render_on_the_saved_page(monkeypatch):
     row = {"source": "publicsurplus", "source_lot_id": "77", "asset_id": None, "account_id": None, "auction_id": None}
-    assert public_deals.lot_ref(row) is None
+    assert public_deals.lot_ref(row) == ("publicsurplus", "77")
+    # the saved page has no deal_lots row for it: it reads the public snapshot memo (policy already applied)
+    from automation.web import deals_sources
+    monkeypatch.setattr(db, "fetch_all", lambda sql, params=None: [
+        {"source": "publicsurplus", "lot_key": "77", "title": None, "asset_id": None, "account_id": None},
+        {"source": "publicsurplus", "lot_key": "gone", "title": None, "asset_id": None, "account_id": None}])
+    monkeypatch.setattr(deals_sources, "lots", lambda status="active", **k: [
+        {"id": "publicsurplus:77", "source": "publicsurplus", "source_lot_id": "77", "title": "PS forklift",
+         "current_bid": 900.0, "bid_count": 2, "end_utc": END, "outcome_complete": False,
+         "url": "https://www.publicsurplus.com/sms/auction/view?auc=77"}] if status == "active" else [])
+    app = FastAPI()
+    app.include_router(platform_routes.router)
+    monkeypatch.setattr(platform_auth, "maybe_user", lambda request: AUTHED)
+    r = TestClient(app).get("/platform/saved")
+    assert r.status_code == 200 and "PS forklift" in r.text and "auc=77" in r.text
+    assert r.text.lower().count("no longer listed") == 1          # the unknown key only
+
+
+def test_saved_page_survives_a_snapshot_read_failure(monkeypatch):
+    from automation.web import deals_sources
+    monkeypatch.setattr(db, "fetch_all", lambda sql, params=None: [
+        {"source": "gsa", "lot_key": "A1", "title": None, "asset_id": None, "account_id": None}])
+    def boom(*a, **k):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(deals_sources, "lots", boom)
+    app = FastAPI()
+    app.include_router(platform_routes.router)
+    monkeypatch.setattr(platform_auth, "maybe_user", lambda request: AUTHED)
+    r = TestClient(app).get("/platform/saved")
+    assert r.status_code == 200 and "no longer listed" in r.text.lower()
 
 
 def test_allsurplus_deal_lot_ref_and_saved_roundtrip(monkeypatch):

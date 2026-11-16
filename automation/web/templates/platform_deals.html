@@ -66,6 +66,9 @@
     <option value="newest">Newest</option>
   </select>
   <button type="button" class="pt-reset" id="pd-reset">Clear filters</button>
+  {# Saves the search word, site, state, bids, ending and max bid. This feed's category names are the
+     auction sites' own, so a category is not carried into a saved search (save_feed.js). #}
+  <button type="button" class="pt-reset" id="pd-save" title="Save the search word, site, state and price filters">Save this search</button>
 </form>
 
 <section class="pt-feed" id="pd-feed" aria-label="Auctions">
@@ -100,4 +103,5 @@
 
 {% block scripts %}
 <script type="module" src="/static/site/platform/deals.js?v={{ asset_v }}"></script>
+<script type="module" src="/static/site/platform/save_feed.js?v={{ asset_v }}"></script>
 {% endblock %}

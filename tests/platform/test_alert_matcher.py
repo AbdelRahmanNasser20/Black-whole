@@ -77,6 +77,8 @@ def env(monkeypatch):
     def send(to, alert, lots, unsub):
         mails.append((to, alert, lots, unsub)); return ok["v"]
     monkeypatch.setattr(platform_email, "send_alert_email", send)
+    from automation.web import deals_sources
+    monkeypatch.setattr(deals_sources, "lots", lambda status="active", **k: [])   # deal_lots half only here
     monkeypatch.setenv("PLATFORM_BASE_URL", "https://p.test")
     monkeypatch.delenv("PLATFORM_ALERTS_DAILY_CAP", raising=False)
     monkeypatch.setenv("RESEND_API_KEY", "k")
