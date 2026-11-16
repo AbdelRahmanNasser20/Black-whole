@@ -999,8 +999,9 @@ def public_listing_detail(request: Request, lot_id: str):
     that has a slug 301s to the slug URL (query string kept, so feed UTM tags
     survive) — every Facebook post, feed row and short link ever sent keeps
     resolving."""
-    data = _detail_data(lot_id)
-    if data is None:
+    try:
+        data = _detail_data(lot_id)
+    except _LotNotFound:
         visits.track(request)
         raise HTTPException(404, "listing not found")
     if data.get("redirect"):
@@ -1016,14 +1017,19 @@ def public_listing_detail(request: Request, lot_id: str):
     )
 
 
+class _LotNotFound(Exception):
+    """Raised (never returned) so readcache does not keep one memo entry per
+    unknown URL a crawler tries."""
+
+
 @readcache.cached(ttl=60)
-def _detail_data(lot_id: str) -> dict | None:
+def _detail_data(lot_id: str) -> dict:
     """The detail page's row + derived context, memoised 60 s per `lot_id`
-    (slug or id). None = 404; `redirect` = 301 to the slug URL. A cron or
-    laptop write shows here within a minute, like `/`."""
+    (slug or id). `_LotNotFound` = 404 (not memoised); `redirect` = 301 to the
+    slug URL. A cron or laptop write shows here within a minute, like `/`."""
     row = inventory.get_public(lot_id)
     if not row or row.get("status") in ("hidden",):
-        return None
+        raise _LotNotFound(lot_id)
     if row.get("slug") and lot_id != row["slug"]:
         return {"redirect": lot_urls.public_path(row)}
     lot_id = str(row["lot_id"])

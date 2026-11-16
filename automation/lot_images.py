@@ -295,8 +295,9 @@ def sized(url: str | None, width: int) -> str | None:
     """
     if not url or width not in VARIANT_WIDTHS or not variants_enabled() or not has_variants(url):
         return url
-    base, sep, query = url.partition("?")
-    return variant_path(base, width) + sep + query
+    parts = urlsplit(url.strip())  # same parse as has_variants; a #fragment is dropped
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{parts.scheme}://{parts.netloc}{variant_path(parts.path, width)}{query}"
 
 
 def srcset(url: str | None) -> str:

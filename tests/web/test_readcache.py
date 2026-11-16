@@ -31,6 +31,30 @@ def test_hit_within_ttl_skips_the_function():
     assert calls == ["x"]
 
 
+def test_store_is_capped_and_expired_entries_are_evicted(monkeypatch):
+    monkeypatch.setattr(readcache, "MAX_ENTRIES", 3)
+
+    @readcache.cached(ttl=30)
+    def page(key: str):
+        return key
+
+    for k in "abcde":
+        page(k)
+    assert readcache.stats()["entries"] == 3                # oldest dropped, never unbounded
+
+    @readcache.cached(ttl=0.01)
+    def short(key: str):
+        return key
+
+    readcache.invalidate_all()
+    short("x")
+    time.sleep(0.02)
+    for k in "abc":
+        page(k)                                             # 4th insert -> expired "x" goes first
+    assert readcache.stats()["entries"] == 3
+    assert not any(k[1].endswith(".short") for k in readcache._store)
+
+
 def test_key_includes_arguments_and_defaults():
     calls = []
 

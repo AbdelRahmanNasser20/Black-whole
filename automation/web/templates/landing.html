@@ -35,13 +35,15 @@
   </style>
   {#- Only the first photo is in the HTML, visible at first paint (it is the LCP).
       The others are in its `data-shots` ([src, srcset, full], in the operator's order);
-      site.js adds them after `load` and then starts the 6 s cross-fade. -#}
+      site.js adds them after `load` and then starts the 6 s cross-fade. No full-size
+      candidate in srcset: a DPR-3 phone would pick it, and the photo sits under a
+      dark gradient, so 800 px is enough. -#}
   {%- set lead = hero_shots[0] -%}
   {%- set more = [] -%}
-  {%- for u in hero_shots[1:] %}{% set _ = more.append([sized(u, 800), (srcset(u) ~ ", " ~ u ~ " 1560w") if srcset(u) else "", u]) %}{% endfor %}
+  {%- for u in hero_shots[1:] %}{% set _ = more.append([sized(u, 800), srcset(u), u]) %}{% endfor %}
   <div class="hero-media{% if hero_shots | length == 1 %} hero-media--single{% endif %}" aria-hidden="true">
     <img class="hero-shot" src="{{ sized(lead, 800) }}" alt=""
-         {%- if srcset(lead) %} srcset="{{ srcset(lead) }}, {{ lead }} 1560w" sizes="100vw" data-full="{{ lead }}" onerror="this.onerror=null;this.removeAttribute('srcset');this.src=this.dataset.full"{% endif %}
+         {%- if srcset(lead) %} srcset="{{ srcset(lead) }}" sizes="100vw" data-full="{{ lead }}" onerror="this.onerror=null;this.removeAttribute('srcset');this.src=this.dataset.full"{% endif %}
          fetchpriority="high" decoding="async"
          {%- if more %} data-shots="{{ more | tojson | forceescape }}"{% endif %}>
   </div>

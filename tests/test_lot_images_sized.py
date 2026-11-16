@@ -45,6 +45,13 @@ def test_sized_ignores_unknown_widths_and_the_kill_switch(monkeypatch):
     assert lot_images.srcset(P) == ""
 
 
+def test_sized_strips_spaces_and_drops_a_fragment():
+    assert lot_images.sized(P + " ", 320) == "https://pub-abc.r2.dev/p/0123abcd/9f8e7d6c5b4a.w320.jpg"
+    assert lot_images.sized(" " + P + "?v=9#top", 800) == \
+        "https://pub-abc.r2.dev/p/0123abcd/9f8e7d6c5b4a.w800.jpg?v=9"
+    assert lot_images.sized(P + "#x", 320) == "https://pub-abc.r2.dev/p/0123abcd/9f8e7d6c5b4a.w320.jpg"
+
+
 def test_srcset_lists_every_copy():
     assert lot_images.srcset(P + "?v=7") == (
         "https://pub-abc.r2.dev/p/0123abcd/9f8e7d6c5b4a.w320.jpg?v=7 320w, "

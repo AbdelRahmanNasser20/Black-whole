@@ -470,6 +470,23 @@ def test_detail_404_is_not_cached_as_a_page(monkeypatch, lot):
     tracked = []
     monkeypatch.setattr(app_module.visits, "track",
                         lambda request, lot_id=None: tracked.append(lot_id))
-    assert _client().get("/listings/nope").status_code == 404
-    assert _client().get("/listings/nope").status_code == 404
-    assert tracked == [None, None]
+    from automation.web import readcache
+    before = readcache.stats()["entries"]
+    for n in range(3):
+        assert _client().get(f"/listings/nope-{n}").status_code == 404
+    assert tracked == [None, None, None]
+    assert readcache.stats()["entries"] == before          # an unknown URL leaves no memo entry
+
+
+def test_hero_srcset_has_no_full_size_candidate(monkeypatch, landing):
+    # A 390 px DPR-3 phone wants ~1170 px; with the full photo listed it would
+    # skip the 800 px copy. The hero sits under a dark gradient — 800 is enough.
+    galleries = {"31225-atl": [f"{R2}/boise{n}.jpg?v=1" for n in range(3)],
+                 "blue-silver-frame-3000": [f"{R2}/blue0.jpg?v=2"]}
+    monkeypatch.setattr(inventory, "get", lambda lot_id: {
+        "lot_id": lot_id, "hero_image_url": galleries[lot_id][0], "image_urls": galleries[lot_id]})
+    hero = _client().get("/").text.split('<section class="hero', 1)[1].split("</section>", 1)[0]
+    lead = hero.split('<img class="hero-shot"', 1)[1].split(">", 1)[0]
+    assert f'srcset="{R2}/boise0.w320.jpg?v=1 320w, {R2}/boise0.w800.jpg?v=1 800w"' in lead
+    assert "1560w" not in hero
+    assert all(full not in srcset for _src, srcset, full in _hero_more(hero))   # copies only
