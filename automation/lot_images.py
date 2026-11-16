@@ -37,6 +37,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 # Photo folders the pipeline creates but must never publish: `_originals/` are
 # the pre-dewatermark files, `_screenshots/` are debug captures of the GovDeals
@@ -251,6 +252,66 @@ def gallery_srcs(row: dict, *, local_route: str = "/image") -> list[str]:
             for p in resolved.local_paths
         ]
     return []
+
+
+# Small copies of every public photo (SITE-SPEED, 2026-11-16). A phone shows a
+# card at ~400 px and a thumbnail at 68 px, but the stored photo is ~1560 px.
+# `r2_images` writes `<name>.w320.jpg` and `<name>.w800.jpg` next to each
+# disguised `p/…/<name>.jpg`, made from the disguised bytes themselves — never
+# from the original. `scripts/backfill_image_variants.py` does the old rows.
+VARIANT_WIDTHS = (320, 800)
+_OPAQUE_JPG = re.compile(r"^/p/[^?#]+(?<!\.c)\.jpg$")
+_VARIANT = re.compile(r"\.w\d+\.jpg$")
+
+
+def variants_enabled() -> bool:
+    """Kill switch: `LOT_IMAGE_VARIANTS=0` makes `sized` return the full URL."""
+    return os.environ.get("LOT_IMAGE_VARIANTS", "1").strip().lower() not in ("0", "off", "false", "no")
+
+
+def has_variants(url: str | None) -> bool:
+    """True for a URL that gets small copies: a disguised `p/…/*.jpg` object
+    (not the catalog twin, not already a variant)."""
+    u = (url or "").strip()
+    if not u.startswith("http"):
+        return False
+    path = urlsplit(u).path
+    return bool(_OPAQUE_JPG.match(path)) and not _VARIANT.search(path)
+
+
+def variant_path(path: str, width: int) -> str:
+    """Object key of a small copy: `p/a/b.jpg` → `p/a/b.w320.jpg`."""
+    return f"{path[: -len('.jpg')]}.w{int(width)}.jpg"
+
+
+def sized(url: str | None, width: int) -> str | None:
+    """The `width` px copy of a public photo URL, `?v=` kept.
+
+    Anything without small copies (a local `/image/` path, a stock photo, a
+    legacy lot-id key, None) comes back unchanged, so a template can call this
+    on every photo and never build a URL that cannot exist. Templates also set
+    `data-full` + an `onerror` swap, so a copy that is missing on R2 falls back
+    to the full photo instead of a broken image.
+    """
+    if not url or width not in VARIANT_WIDTHS or not variants_enabled() or not has_variants(url):
+        return url
+    base, sep, query = url.partition("?")
+    return variant_path(base, width) + sep + query
+
+
+def srcset(url: str | None) -> str:
+    """`srcset` value with every small copy, or "" when the URL has none."""
+    if not url or sized(url, VARIANT_WIDTHS[0]) == url:
+        return ""
+    return ", ".join(f"{sized(url, w)} {w}w" for w in VARIANT_WIDTHS)
+
+
+def origin(url: str | None) -> str | None:
+    """`https://host` of an absolute URL (for `<link rel=preconnect>`), else None."""
+    parts = urlsplit((url or "").strip())
+    if parts.scheme in ("http", "https") and parts.netloc:
+        return f"{parts.scheme}://{parts.netloc}"
+    return None
 
 
 def storage_backend(url: str | None) -> str:

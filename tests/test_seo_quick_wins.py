@@ -191,9 +191,11 @@ def test_lost_lot_renders_with_noindex_live_and_sold_without(client, monkeypatch
     assert 'name="robots" content="noindex' not in client.get("/listings/10340").text
     sold = dict(ROW, lot_id="old", status="sold_out", quantity_remaining=0)
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: sold)
+    readcache.invalidate_all()  # lot pages are memoised 60 s
     assert 'name="robots" content="noindex' not in client.get("/listings/old").text
     bare_sold = dict(sold, hero_image_url=None, image_urls=None, quantity_original=0)
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: bare_sold)
+    readcache.invalidate_all()  # lot pages are memoised 60 s
     assert 'name="robots" content="noindex,follow"' in client.get("/listings/old").text
 
 
@@ -203,6 +205,7 @@ def test_sold_twin_canonicalises_to_the_live_lot(client, monkeypatch):
                 quantity_remaining=0, quantity_original=210)
     rows = {"gd-28859-2863": live, "gd-28859-2863-sold": twin}
     monkeypatch.setattr(web_app.inventory, "get", lambda lot_id: rows.get(lot_id))
+    readcache.invalidate_all()  # lot pages are memoised 60 s
     r = client.get("/listings/gd-28859-2863-sold")
     assert 'rel="canonical" href="https://black-whole.com/listings/gd-28859-2863"' in r.text
     r2 = client.get("/listings/gd-28859-2863")
@@ -210,6 +213,7 @@ def test_sold_twin_canonicalises_to_the_live_lot(client, monkeypatch):
     # a `-sold` row with no live twin keeps its own canonical
     monkeypatch.setattr(web_app.inventory, "get",
                         lambda lot_id: twin if lot_id == "gd-28859-2863-sold" else None)
+    readcache.invalidate_all()  # lot pages are memoised 60 s
     r3 = client.get("/listings/gd-28859-2863-sold")
     assert 'rel="canonical" href="https://black-whole.com/listings/gd-28859-2863-sold"' in r3.text
 

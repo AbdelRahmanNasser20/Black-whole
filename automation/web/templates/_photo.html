@@ -1,0 +1,11 @@
+{#- templates/_photo.html — one <img> for a lot photo (SITE-SPEED, 2026-11-16).
+    `src` = the full public URL. The browser gets the small copy (`sized`, 320/800 px)
+    and a srcset of the copies; a photo without copies renders its full URL with no
+    srcset. If a copy is missing on R2, `onerror` swaps to `data-full` once, so a
+    buyer never sees a broken image. -#}
+{%- macro lot_photo(src, alt, sizes, size=800, width=800, height=600, lazy=true, priority=none, id=none, cls=none) -%}
+{%- set ss = srcset(src) -%}
+<img{% if id %} id="{{ id }}"{% endif %}{% if cls %} class="{{ cls }}"{% endif %} src="{{ sized(src, size) }}"
+     {% if ss %}srcset="{{ ss }}" sizes="{{ sizes }}" data-full="{{ src }}" onerror="this.onerror=null;this.removeAttribute('srcset');this.src=this.dataset.full"{% endif %}
+     alt="{{ alt }}"{% if lazy %} loading="lazy"{% endif %}{% if priority %} fetchpriority="{{ priority }}"{% endif %} decoding="async" width="{{ width }}" height="{{ height }}">
+{%- endmacro -%}

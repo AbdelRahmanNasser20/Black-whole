@@ -1,7 +1,9 @@
 {% extends "_public_base.html" %}
+{% from "_photo.html" import lot_photo %}{% set CARD_SIZES = "(max-width: 700px) 100vw, 400px" %}
 {% block title %}Bulk Banquet Chairs for Sale | Black Whole Liquidation{% endblock %}
 {% block meta_description %}Wholesale banquet, stacking, and event chairs sold by the lot. Local pickup in the listed city or nationwide freight — priced to move.{% endblock %}
 {% block body_class %}page-landing{% endblock %}
+{% block preconnect %}{% if hero_shots and photo_origin(hero_shots[0]) %}<link rel="preconnect" href="{{ photo_origin(hero_shots[0]) }}">{% endif %}{% endblock %}
 {% block head_extra %}
 {% if site_faq_jsonld %}<script type="application/ld+json">{{ site_faq_jsonld | safe }}</script>{% endif %}
 <link rel="stylesheet" href="/static/ui/skeleton.css?v={{ asset_v }}">
@@ -16,7 +18,7 @@
   {% if hero_shots %}
   {% set slot = 100 / (hero_shots | length) %}
   <style>
-    .hero-shot { animation-duration: {{ (hero_shots | length) * 6 }}s; }
+    .hero-media.is-playing .hero-shot { animation-duration: {{ (hero_shots | length) * 6 }}s; }
     @keyframes heroShot {
       0% { opacity: 0; transform: scale(1.04); }
       {{ "%.2f" | format(slot * 0.2) }}% { opacity: 1; }
@@ -24,13 +26,24 @@
       {{ "%.2f" | format([slot * 1.28, 100] | min) }}% { opacity: 0; transform: scale(1.14); }
       100% { opacity: 0; transform: scale(1.14); }
     }
+    @keyframes heroShotLead {
+      0% { opacity: 1; transform: scale(1.04); }
+      {{ "%.2f" | format(slot) }}% { opacity: 1; }
+      {{ "%.2f" | format([slot * 1.28, 100] | min) }}% { opacity: 0; transform: scale(1.14); }
+      100% { opacity: 0; transform: scale(1.14); }
+    }
   </style>
-  <div class="hero-media" aria-hidden="true">
-    {% for src in hero_shots %}
-    <img class="hero-shot" src="{{ src }}" alt=""
-         {% if not loop.first %}loading="lazy"{% else %}fetchpriority="high"{% endif %}
-         decoding="async" style="animation-delay: {{ loop.index0 * 6 }}s">
-    {% endfor %}
+  {#- Only the first photo is in the HTML, visible at first paint (it is the LCP).
+      The others are in its `data-shots` ([src, srcset, full], in the operator's order);
+      site.js adds them after `load` and then starts the 6 s cross-fade. -#}
+  {%- set lead = hero_shots[0] -%}
+  {%- set more = [] -%}
+  {%- for u in hero_shots[1:] %}{% set _ = more.append([sized(u, 800), (srcset(u) ~ ", " ~ u ~ " 1560w") if srcset(u) else "", u]) %}{% endfor %}
+  <div class="hero-media{% if hero_shots | length == 1 %} hero-media--single{% endif %}" aria-hidden="true">
+    <img class="hero-shot" src="{{ sized(lead, 800) }}" alt=""
+         {%- if srcset(lead) %} srcset="{{ srcset(lead) }}, {{ lead }} 1560w" sizes="100vw" data-full="{{ lead }}" onerror="this.onerror=null;this.removeAttribute('srcset');this.src=this.dataset.full"{% endif %}
+         fetchpriority="high" decoding="async"
+         {%- if more %} data-shots="{{ more | tojson | forceescape }}"{% endif %}>
   </div>
   {% endif %}
   <div class="hero-grid">
@@ -115,7 +128,7 @@
     <a class="lot-card" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+          {{ lot_photo(item.hero_src, item.title, CARD_SIZES) }}
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}

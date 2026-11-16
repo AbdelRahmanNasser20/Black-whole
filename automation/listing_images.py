@@ -238,6 +238,38 @@ def prepare_for_web(data: bytes, ext: str, *, key: str) -> tuple[bytes, str, str
     return optimize_for_web(data, ext)
 
 
+VARIANT_QUALITY = 70  # the disguise grain makes these heavy; q70 = -16% vs q78 at 800 px
+
+
+def web_variants(public_jpeg: bytes, widths=None) -> list[tuple[int, bytes]]:
+    """Small copies of an ALREADY-PUBLIC (disguised) JPEG: `[(width, bytes)]`.
+
+    Input must be the bytes that are already on the public bucket — a pure
+    downscale of those, so no pixel goes public that was not public before.
+    Never pass an original. Width is capped at the source width (no upscale);
+    [] when the bytes are not an image.
+    """
+    from automation import lot_images  # stdlib-only module, no cycle
+
+    widths = widths or lot_images.VARIANT_WIDTHS
+    try:
+        img = Image.open(io.BytesIO(public_jpeg))
+        img.load()
+    except Exception:
+        return []
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    out: list[tuple[int, bytes]] = []
+    for w in widths:
+        tw = min(int(w), img.width)
+        th = max(1, round(img.height * tw / img.width))
+        small = img if tw == img.width else img.resize((tw, th), Image.LANCZOS)
+        buf = io.BytesIO()
+        small.save(buf, format="JPEG", quality=VARIANT_QUALITY, optimize=True, progressive=True)
+        out.append((int(w), buf.getvalue()))
+    return out
+
+
 def public_copies(lot_id, paths, *, out_dir: Path | None = None) -> list[Path]:
     """Local disguised copies for uploaders that post files (FB / eBay drafts).
 

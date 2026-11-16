@@ -4,6 +4,25 @@
    Colours + faces come from static/ui/tokens.css `:root[data-theme="light"]` — no hex in this file.
    ========================================================================= */
 
+/* Fonts on our own host (SITE-SPEED, 2026-11-16): no render-blocking Google
+   Fonts CSS. Latin subsets copied from Google Fonts (SIL Open Font License).
+   Archivo Black is preloaded in _public_base.html. */
+@font-face { font-family: "Archivo Black"; font-style: normal; font-weight: 400; font-display: swap;
+  src: url("/static/site/fonts/archivo-black.woff2") format("woff2"); }
+@font-face { font-family: "Fraunces"; font-style: normal; font-weight: 300 800; font-display: swap;
+  src: url("/static/site/fonts/fraunces.woff2") format("woff2"); }
+@font-face { font-family: "JetBrains Mono"; font-style: normal; font-weight: 400 700; font-display: swap;
+  src: url("/static/site/fonts/jetbrains-mono.woff2") format("woff2"); }
+/* Fallbacks sized to the real faces, so the swap does not move the layout
+   (the 0.115 CLS on / and the spec-sheet shift on the lot page). Numbers from
+   the fonts' own metrics: Archivo Black caps = Arial Black; vs Arial ×1.133;
+   Fraunces vs Georgia ×1.16. */
+@font-face { font-family: "Archivo Black Fallback"; src: local("Arial Black"), local("ArialMT-Black");
+  ascent-override: 87.8%; descent-override: 21%; line-gap-override: 0%; }
+@font-face { font-family: "Archivo Black Fallback 2"; src: local("Arial"), local("ArialMT"), local("Roboto"), local("Helvetica Neue");
+  size-adjust: 113.3%; ascent-override: 77.5%; descent-override: 18.5%; line-gap-override: 0%; }
+@font-face { font-family: "Fraunces Fallback"; src: local("Georgia"), local("Noto Serif"), local("Times New Roman");
+  size-adjust: 116%; ascent-override: 84.3%; descent-override: 22%; line-gap-override: 0%; }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
@@ -135,11 +154,16 @@ a:hover { color: var(--accent); }
   content: ""; position: absolute; inset: 0;
   background: linear-gradient(90deg, color-mix(in srgb, var(--text) 88%, transparent) 0%, color-mix(in srgb, var(--text) 66%, transparent) 55%, color-mix(in srgb, var(--text) 42%, transparent) 100%);
 }
+/* The first photo shows at first paint (SITE-SPEED): it is the page's LCP.
+   site.js adds the others after `load`, then sets .is-playing to start the loop. */
 .hero-shot {
   position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
-  opacity: 0; animation: heroShot 24s linear infinite;  /* duration set in landing.html */
+  opacity: 0;
 }
-.hero-shot:only-child { opacity: 1; animation: heroZoom 24s ease-in-out infinite alternate; }
+.hero-shot:first-child { opacity: 1; transform: scale(1.04); }
+.hero-media.is-playing .hero-shot { animation: heroShot 24s linear infinite; }  /* duration set in landing.html */
+.hero-media.is-playing .hero-shot:first-child { animation-name: heroShotLead; }
+.hero-media--single .hero-shot { opacity: 1; animation: heroZoom 24s ease-in-out infinite alternate; }
 @keyframes heroZoom { from { transform: scale(1.02); } to { transform: scale(1.12); } }
 .hero--media .hero-grid { position: relative; z-index: 1; color: var(--bg); }
 .hero--media .hero-tag { color: color-mix(in srgb, var(--bg) 72%, transparent); }
@@ -148,13 +172,14 @@ a:hover { color: var(--accent); }
 .hero--media .hero-cta .btn-ghost { color: var(--bg); }
 .hero--media .hero-cta .btn:hover { background: var(--bg); color: var(--text); }
 @media (prefers-reduced-motion: reduce) {
-  .hero-shot { animation: none; }
+  .hero-shot, .hero-media.is-playing .hero-shot, .hero-media--single .hero-shot { animation: none; }
   .hero-shot:first-child { opacity: 1; }
 }
 
+/* Movement only, no opacity 0: hero text is visible at first paint (SITE-SPEED). */
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(14px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { transform: translateY(14px); }
+  to   { transform: translateY(0); }
 }
 
 /* =========================================================================

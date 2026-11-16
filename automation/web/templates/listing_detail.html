@@ -1,4 +1,5 @@
 {% extends "_public_base.html" %}
+{% from "_photo.html" import lot_photo %}
 {% block title %}{{ seo_title }}{% endblock %}
 {% block meta_description %}{{ seo_description }}{% endblock %}
 {% block og_type %}product{% endblock %}
@@ -8,6 +9,7 @@
   <meta name="twitter:card" content="summary_large_image">
   {%- endif %}
 {% endblock %}
+{% block preconnect %}{% if photo_origin(hero or (images[0] if images else none)) %}<link rel="preconnect" href="{{ photo_origin(hero or images[0]) }}">{% endif %}{% endblock %}
 {% block head_extra %}
   <script type="application/ld+json">{{ product_jsonld | safe }}</script>
   {% if copy and copy.faq_jsonld %}<script type="application/ld+json">{{ copy.faq_jsonld | safe }}</script>{% endif %}
@@ -26,9 +28,8 @@
   <div class="detail-gallery">
     {% if hero or images %}
       <div class="gal-main">
-        <img id="gal-main-img"
-             src="{{ hero or images[0] }}"
-             alt="{{ item.title }}" fetchpriority="high" width="1200" height="900">
+        {{ lot_photo(hero or images[0], item.title, "(max-width: 900px) 100vw, 55vw",
+                     lazy=false, priority="high", id="gal-main-img", width=1200, height=900) }}
         <div class="lot-stamp lot-stamp--big{% if item.is_sold %} lot-stamp--sold{% endif %}">
           {% if item.is_sold %}SOLD
           {%- elif item.quantity_remaining and item.quantity_remaining > 0 %}AVAILABLE
@@ -39,7 +40,8 @@
       <div class="gal-thumbs">
         {% for img in images %}
           <button class="gal-thumb" data-src="{{ img }}" aria-label="view image">
-            <img src="{{ img }}" alt="{{ item.title }} — photo {{ loop.index }}" loading="lazy" width="200" height="150">
+            {{ lot_photo(img, item.title ~ " — photo " ~ loop.index, "120px", size=320,
+                         priority="low", width=200, height=150) }}
           </button>
         {% endfor %}
       </div>
