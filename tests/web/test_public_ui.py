@@ -405,7 +405,9 @@ def test_detail_photo_without_copies_renders_unchanged(lot):
     assert "srcset" not in main and "onerror" not in main
 
 
-def test_listings_first_two_cards_are_eager_and_use_copies(monkeypatch):
+def test_listings_cards_stay_lazy_and_use_copies(monkeypatch):
+    # The /listings LCP is the page text. Eager card photos fought site.css for
+    # the slow link and pushed first paint from 2.8 s to 4.6 s (weak phone lab).
     rows = [dict(make_lot(lot_id=f"L{n}", hero_image_url=f"{R2}/{n}.jpg", image_urls=[]))
             for n in range(4)]
     monkeypatch.setattr(inventory, "list_public", lambda: [dict(r) for r in rows])
@@ -413,7 +415,7 @@ def test_listings_first_two_cards_are_eager_and_use_copies(monkeypatch):
     html = _client().get("/listings").text
     grid = html.split('id="lot-grid"', 1)[1]
     imgs = [chunk.split(">", 1)[0] for chunk in grid.split("<img")[1:5]]
-    assert ['loading="lazy"' in i for i in imgs] == [False, False, True, True]
+    assert all('loading="lazy"' in i and 'fetchpriority' not in i for i in imgs)
     assert f'src="{R2}/0.w800.jpg"' in imgs[0] and 'srcset=' in imgs[0]
 
 

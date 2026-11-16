@@ -61,7 +61,7 @@
      data-search="{{ (item.title or '') }} {{ item.lot_id }} {{ item.chair_type or '' }} {{ item.location_labels | join(' ') }}">
     <div class="lot-img">
       {% if item.hero_src %}
-        {{ lot_photo(item.hero_src, item.title, CARD_SIZES, lazy=loop.index > 2, priority="high" if loop.first else none) }}
+        {{ lot_photo(item.hero_src, item.title, CARD_SIZES) }}
       {% else %}
         <div class="lot-img-fallback">◉</div>
       {% endif %}

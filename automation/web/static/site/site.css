@@ -16,13 +16,13 @@
 /* Fallbacks sized to the real faces, so the swap does not move the layout
    (the 0.115 CLS on / and the spec-sheet shift on the lot page). Numbers from
    the fonts' own metrics: Archivo Black caps = Arial Black; vs Arial ×1.133;
-   Fraunces vs Georgia ×1.16. */
+   Fraunces (text optical size) vs Georgia ×1.057 — checked in Chrome: same width and height. */
 @font-face { font-family: "Archivo Black Fallback"; src: local("Arial Black"), local("ArialMT-Black");
   ascent-override: 87.8%; descent-override: 21%; line-gap-override: 0%; }
 @font-face { font-family: "Archivo Black Fallback 2"; src: local("Arial"), local("ArialMT"), local("Roboto"), local("Helvetica Neue");
   size-adjust: 113.3%; ascent-override: 77.5%; descent-override: 18.5%; line-gap-override: 0%; }
 @font-face { font-family: "Fraunces Fallback"; src: local("Georgia"), local("Noto Serif"), local("Times New Roman");
-  size-adjust: 116%; ascent-override: 84.3%; descent-override: 22%; line-gap-override: 0%; }
+  size-adjust: 105.7%; ascent-override: 92.5%; descent-override: 24.1%; line-gap-override: 0%; }
 
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
