@@ -1,0 +1,18 @@
+{#- partials/_lot_cost.html — all-in cost block. Context: cost (lot_costs.estimate), lot.
+    A premium shows only for a source on file and is always labelled an estimate. No tax number, ever. -#}
+<section class="section" id="lot-cost">
+  <div class="section-head"><h2>All-in cost</h2></div>
+  <div class="section-body">
+    {% if cost.known %}
+    <dl class="facts">
+      {% if cost.bid is not none %}<dt>Current bid</dt><dd class="mono">${{ '%.2f'|format(cost.bid) }}</dd>{% endif %}
+      <dt>Buyer's premium</dt><dd class="mono">{{ '%g'|format(cost.pct) }} %{% if cost.premium is not none %} · ${{ '%.2f'|format(cost.premium) }}{% endif %} <span class="muted">(estimate)</span></dd>
+      {% if cost.total is not none %}<dt>Bid + premium</dt><dd class="mono"><strong>${{ '%.2f'|format(cost.total) }}</strong></dd>{% endif %}
+    </dl>
+    <p class="muted data-line">The premium is an estimate from the usual {{ lot.source_name }} rate. The seller sets the real rate; confirm it on the listing.</p>
+    {% else %}
+    <p class="muted">We do not have {{ lot.source_name }}'s buyer's premium on file. Check the listing before you bid.</p>
+    {% endif %}
+    <p class="muted data-line">{{ cost.tax_note }} Pickup and transport are extra.</p>
+  </div>
+</section>

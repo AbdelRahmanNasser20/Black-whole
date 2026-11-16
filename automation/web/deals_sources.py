@@ -12,11 +12,13 @@ Rules, enforced here so no caller can forget them:
 1. **Allow-list, twice.** The SQL extracts a fixed set of fields from `raw`
    per source (it never selects `raw` itself; see `SOURCES`), and every row
    leaves through `ROW_KEYS`. Seller contact fields (GSA `coEmail`/`coPhone`,
-   Purple Wave `*_contact`), street addresses, photos and the source's own
-   lat/lng never reach a response.
-2. **public_deals policy.** No seating lots (`public_deals.is_excluded` on
-   title + category) and nothing the operator starred / tracked / listed
-   (`public_deals.is_operator_pick`). If the pick tables cannot be read the
+   Purple Wave `*_contact`), street addresses and the source's own lat/lng
+   never reach a response. The one photo field is `photo_url`: the SOURCE
+   site's own image link (operator decision 2026-11-15), https only, never a
+   copy we hold.
+2. **public_deals policy.** Nothing the operator starred / tracked / listed
+   (`public_deals.is_operator_pick`), and no seating lots while
+   `public_deals.hide_seating()` is on. If the pick tables cannot be read the
    whole read fails — nothing is published unfiltered.
 3. **City-level pins.** `geo.resolve_place` on city + state only, memoised; a
    lot whose city does not resolve gets `lat`/`lng` null (no state centroid).
@@ -32,6 +34,7 @@ a url builder). `source='govdeals'` is refused here on purpose.
 from __future__ import annotations
 
 import logging
+import os
 import re
 import threading
 import time
@@ -41,7 +44,7 @@ from typing import Any, Callable
 
 from .. import db
 from ..alerts import geo
-from . import public_deals
+from . import deal_lot_urls, public_deals
 from deals.categories import canonical_category
 
 log = logging.getLogger(__name__)
@@ -78,6 +81,7 @@ class SourceSpec:
     currency: tuple[str, ...] = ()
     ref_a: tuple[str, ...] = ()
     ref_b: tuple[str, ...] = ()
+    photo: tuple[str, ...] = ()               # the source's own image link (or file name)
     url: Callable[[str, dict], str | None] = lambda lot_id, row: None
 
 
@@ -122,12 +126,13 @@ SOURCES: dict[str, SourceSpec] = {
     "allsurplus": SourceSpec(
         name="AllSurplus", title=("assetShortDescription",), category=("categoryDescription",),
         category_code=("assetCategory",), city=("locationCity",), state=("locationState",),
-        country=("country",), currency=("currencyCode",), url=_url_maestro("https://www.allsurplus.com")),
+        country=("country",), currency=("currencyCode",), photo=("photo",),
+        url=_url_maestro("https://www.allsurplus.com")),
     # gsaauctions.gov list items. `locationCity`/`locationST` is the GSA sales
     # office, NOT where the property sits — use the property* fields only.
     "gsa": SourceSpec(
         name="GSA Auctions", title=("itemName",), city=("propertyCity",), state=("propertyState",),
-        ref_a=("itemDescURL",), url=_url_gsa),
+        ref_a=("itemDescURL",), photo=("imageURL",), url=_url_gsa),
     # purplewave.com /v1/search/search items. `title` is the AUCTION's name
     # ("Tuesday August 04 Government Auction"); the lot is `first_line_description`.
     "purple_wave": SourceSpec(
@@ -139,15 +144,17 @@ SOURCES: dict[str, SourceSpec] = {
         name="Public Surplus", title=("title",), state=("location",), url=_url_public_surplus),
     # municibid.com srp-markers-data items.
     "municibid": SourceSpec(
-        name="Municibid", title=("title",), city=("city",), state=("state",), url=_url_municibid),
+        name="Municibid", title=("title",), city=("city",), state=("state",),
+        photo=("primaryImageUrl",), url=_url_municibid),
     # mibid.michigan.gov rawAuctions items: `location` is a city, state is always MI.
     "mibid": SourceSpec(
-        name="MiBid", title=("title",), city=("location",), state_const="MI", url=_url_mibid),
+        name="MiBid", title=("title",), city=("location",), state_const="MI",
+        photo=("primaryImage",), url=_url_mibid),
 }
 assert GOVDEALS not in SOURCES, "GovDeals rows come from deal_lots, never from listing_snapshots"
 for _src, _spec in SOURCES.items():
     assert _SRC_RX.match(_src), _src
-    for _f in ("title", "city", "state", "category", "category_code", "country", "currency", "ref_a", "ref_b"):
+    for _f in ("title", "city", "state", "category", "category_code", "country", "currency", "ref_a", "ref_b", "photo"):
         for _k in getattr(_spec, _f):
             assert _KEY_RX.match(_k), (_src, _f, _k)
 
@@ -160,9 +167,9 @@ ROW_KEYS = (
     "id", "source", "source_name", "source_lot_id", "asset_id", "account_id", "auction_id",
     "title", "canonical_category", "native_category_name", "city", "state", "lat", "lng",
     "bid_count", "current_bid", "currency_code", "end_utc", "outcome", "final_bid",
-    "final_bid_count", "outcome_complete", "first_seen_at", "url", "viewer_url",
+    "final_bid_count", "outcome_complete", "first_seen_at", "url", "viewer_url", "photo_url",
 )
-_FIELDS = ("title", "category", "category_code", "city", "state", "country", "currency", "ref_a", "ref_b")
+_FIELDS = ("title", "category", "category_code", "city", "state", "country", "currency", "ref_a", "ref_b", "photo")
 
 
 # ── the one query ────────────────────────────────────────────────────────────
@@ -225,7 +232,7 @@ SELECT p.source, p.source_lot_id, p.current_bid, p.bid_count, p.end_date,
          WHERE m.source = p.source AND m.source_lot_id = p.source_lot_id) AS first_seen,
        d.f->>0 AS title, d.f->>1 AS category, d.f->>2 AS category_code,
        d.f->>3 AS city, d.f->>4 AS state, d.f->>5 AS country, d.f->>6 AS currency,
-       d.f->>7 AS ref_a, d.f->>8 AS ref_b
+       d.f->>7 AS ref_a, d.f->>8 AS ref_b, d.f->>9 AS photo
 FROM picked p
 JOIN LATERAL (
   SELECT jsonb_build_array(
@@ -264,6 +271,59 @@ def _read(status: str) -> tuple[list[dict], public_deals.OperatorPicks]:
 
 
 # ── normalise (pure) ─────────────────────────────────────────────────────────
+_PHOTO_URL_RX = re.compile(r"^https://[A-Za-z0-9.-]+/[A-Za-z0-9/_.~%:@=&?+,;!()-]*$")
+_PHOTO_FILE_RX = re.compile(r"^[A-Za-z0-9_.-]+\.(?:jpe?g|png|webp)(?:\?[A-Za-z0-9=&_.-]*)?$", re.I)
+MAESTRO_PHOTO_BASE = "https://webassets.lqdt1.com/assets/photos/"
+
+
+# Hosts a public page may hotlink a photo from: the auction sites' own domains
+# and the CDNs they serve images from. A link on any other host is dropped.
+# `DEAL_LOT_PHOTO_HOSTS` (comma list) adds a host when a source moves its images.
+PHOTO_HOSTS = (
+    "lqdt1.com", "govdeals.com", "allsurplus.com",                     # GovDeals / AllSurplus (maestro CDN)
+    "gsaauctions.gov", "ppms.gov", "gsa.gov",                          # GSA Auctions
+    "municibid.com", "storagemunicibidpro.blob.core.windows.net",      # Municibid
+    "michigan.gov",                                                    # MiBid
+    "txauction.com", "cloudfront.net",                                 # TXAuction (CloudFront)
+    "publicsurplus.com", "purplewave.com",
+)
+# Never hotlinked, whatever the allow-list or the env says: our own buckets and
+# site (private archive copies, the auth-walled photo proxy) and Supabase Storage.
+PHOTO_HOSTS_NEVER = ("r2.dev", "r2.cloudflarestorage.com", "supabase.co", "supabase.in", "black-whole.com")
+
+
+def _host_in(host: str, suffixes) -> bool:
+    return any(host == s or host.endswith("." + s) for s in suffixes)
+
+
+def _photo_hosts() -> tuple[str, ...]:
+    extra = tuple(h.strip().lower().lstrip(".") for h in (os.getenv("DEAL_LOT_PHOTO_HOSTS") or "").split(",") if h.strip())
+    return PHOTO_HOSTS + extra
+
+
+def safe_photo_url(value: Any) -> str | None:
+    """An https image link on an auction site's own host, or None. Nothing else passes."""
+    s = str(value or "").strip()
+    if len(s) > 500 or not _PHOTO_URL_RX.match(s):
+        return None
+    host = s[len("https://"):].split("/", 1)[0].lower()
+    if _host_in(host, PHOTO_HOSTS_NEVER) or not _host_in(host, _photo_hosts()):
+        return None
+    return s
+
+
+def photo_url(source: str, lot_id: str, value: Any) -> str | None:
+    """The source's own photo link for one lot. A maestro row stores a file
+    name; its CDN path needs the account id (the second part of the lot id)."""
+    if source in MAESTRO:
+        parts = lot_id.split("/")
+        name = str(value or "").strip()
+        if len(parts) >= 2 and parts[1].isdigit() and _PHOTO_FILE_RX.match(name):
+            return f"{MAESTRO_PHOTO_BASE}{parts[1]}/{name}"
+        return None
+    return safe_photo_url(value)
+
+
 def _text(v: Any, limit: int = 200) -> str | None:
     """Whitespace-collapsed display text with any email / phone number removed."""
     s = _PHONE_RX.sub(" ", _EMAIL_RX.sub(" ", str(v or "")))
@@ -333,8 +393,10 @@ def normalise(row: dict, status: str, picks: public_deals.OperatorPicks,
     if not title or not (city or state):
         return None
     canon = canonical_category(str(row.get("category_code") or "")) if source in MAESTRO else None
-    is_seat = public_deals.is_excluded({"title": f"{title} {category or ''}", "canonical_category": canon})
-    if is_seat != seating:
+    probe = {"title": f"{title} {category or ''}", "canonical_category": canon}
+    if seating and not public_deals.is_seating(probe):
+        return None
+    if not seating and public_deals.is_excluded(probe):
         return None
     url = spec.url(lot_id, row)
     pick = public_deals.is_operator_pick(picks, source_lot_id=lot_id, title=title, url=url)
@@ -360,7 +422,9 @@ def normalise(row: dict, status: str, picks: public_deals.OperatorPicks,
         "final_bid": bid if (closed and bids and bid is not None) else None,
         "final_bid_count": bids if closed else None, "outcome_complete": closed,
         "first_seen_at": _aware(row.get("first_seen")), "url": url, "viewer_url": None,
+        "photo_url": photo_url(source, lot_id, row.get("photo")),
     }
+    rec["viewer_url"] = deal_lot_urls.for_row(rec)
     if seating:
         rec["operator_pick"] = pick
     return rec
@@ -411,8 +475,80 @@ def _lots(status: str, view: str = "public") -> list[dict]:
             raise
         built = {"public": build(rows, status, picks),
                  "seating": build(rows, status, picks, seating=True)}
-        _cache[status] = (time.monotonic(), built)
+        _store(status, built)
         return built[view]
+
+
+def _store(status: str, built: dict[str, list[dict]]) -> None:
+    """Put one status' built views in the memo, with a (source, lot id) index
+    of the public rows so one lot is a dict lookup, not a scan."""
+    built["index"] = {(r["source"], r["source_lot_id"]): r for r in built["public"]}
+    _cache[status] = (time.monotonic(), built)
+
+
+# ── memo-only access (a request that must never start the read) ──────────────
+_STATUSES = {"active": ("open",), "closed": ("closed",), "all": ("open", "closed")}
+_refreshing: set[str] = set()
+_refresh_lock = threading.Lock()
+
+
+def _spawn_refresh(status: str) -> None:
+    """Load one status in a daemon thread, at most one at a time per status.
+    A failure is swallowed here (`_lots` already records the back-off)."""
+    with _refresh_lock:
+        if status in _refreshing:
+            return
+        _refreshing.add(status)
+
+    def run() -> None:
+        try:
+            _lots(status)
+        except Exception:  # noqa: BLE001 - the next request retries after FAIL_BACKOFF
+            pass
+        finally:
+            with _refresh_lock:
+                _refreshing.discard(status)
+
+    threading.Thread(target=run, name=f"deals-sources-{status}", daemon=True).start()
+
+
+def _warm(status: str) -> dict | None:
+    """The memo for `open` / `closed` when it is fresh; else None, and one
+    background refresh is started. NEVER reads the database itself."""
+    hit = _cache.get(status)
+    if hit and time.monotonic() - hit[0] < CACHE_TTL:
+        return hit[1]
+    _spawn_refresh(status)
+    return hit[1] if hit else None            # a stale memo still answers while it reloads
+
+
+def peek(status: str = "active") -> list[dict] | None:
+    """The cached public rows for a status, or None while the memo is cold.
+    The list is the memo's own: read it, never change it."""
+    parts = [_warm(s) for s in _STATUSES[status]]
+    if any(p is None for p in parts):
+        return None
+    return [r for p in parts for r in p["public"]]
+
+
+def find(source: str, lot_id: str, *, now: datetime | None = None) -> dict | None:
+    """One public lot from the memo by (source, lot id): a copy of that row, or
+    None. A cold memo is a miss (and starts the background load) — the heavy
+    snapshot read never runs inside a request. An open lot whose end has passed
+    is not returned as live."""
+    now = now or datetime.now(timezone.utc)
+    hit = None
+    for status in ("open", "closed"):
+        memo = _warm(status)
+        if memo is None or hit is not None:
+            continue                          # keep going: every cold status gets its refresh
+        row = memo.get("index", {}).get((source, lot_id))
+        if row is None:
+            continue
+        if status == "open" and not (row["end_utc"] and row["end_utc"] > now):
+            continue
+        hit = dict(row)
+    return hit
 
 
 def lots(status: str = "active", *, now: datetime | None = None,

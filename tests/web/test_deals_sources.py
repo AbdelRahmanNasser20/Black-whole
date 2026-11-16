@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from automation.web import deal_lot_urls
 from automation.web import deals_sources as ds
 from automation.web import public_deals as pd
 
@@ -98,9 +99,12 @@ def _geo(monkeypatch):
 
 def test_sql_is_an_allow_list_parameterised_and_bounded():
     sql = ds._SQL
-    for banned in ("coEmail", "coPhone", "contractOfficer", "item_contact", "imageURL", "image_url", "photo",
+    for banned in ("coEmail", "coPhone", "contractOfficer", "item_contact", "image_url", "photos", "assetPhotos",
                    "propertyAddr", "locationAddress", "latitude", "longitude", "lotInfo", "seller", "img"):
         assert f"'{banned}" not in sql, banned
+    # one photo key per source, and only the source's own link (operator decision 2026-11-15)
+    assert "WHEN 'gsa' THEN s.raw->'imageURL'" in sql and "WHEN 'allsurplus' THEN s.raw->'photo'" in sql
+    assert "d.f->>9 AS photo" in sql
     assert not re.search(r"(SELECT|,)\s*(\w\.)?raw\s*(,|FROM|AS)", sql, re.I)     # raw is never returned whole
     assert "observed_at > now() - make_interval" in sql and "LIMIT %s" in sql and "LIMIT 1" in sql
     assert "s.raw ?| %s" in sql                                                   # title-key guard is a bound array
@@ -173,7 +177,8 @@ def test_every_source_sample_normalises_to_the_row_shape():
         assert rec is not None, sample
         assert tuple(rec) == ds.ROW_KEYS
         assert rec["source"] == sample.split("_us")[0] and rec["source_name"] == ds.SITES[rec["source"]]
-        assert rec["asset_id"] is None and rec["viewer_url"] is None and rec["currency_code"] == "USD"
+        assert rec["asset_id"] is None and rec["currency_code"] == "USD"
+        assert rec["viewer_url"].startswith("/deals/lot/") and rec["viewer_url"] == deal_lot_urls.for_row(rec)
         assert rec["outcome_complete"] is False and rec["end_utc"].tzinfo is not None
 
 
@@ -221,13 +226,27 @@ def test_bad_ids_never_become_urls():
 
 def test_no_seller_field_or_value_can_leave():
     leak = re.compile(r"email|phone|contact|officer|addr|image|photo|raw|seller|img|lat$|lng$", re.I)
-    assert not [k for k in ds.ROW_KEYS if leak.search(k) and k not in ("lat", "lng")]
+    assert [k for k in ds.ROW_KEYS if leak.search(k) and k not in ("lat", "lng")] == ["photo_url"]
     dirty = _row("gsa", title="Skid steer - call Bob 555-123-4567 or bob@seller.com", city="woodward ok bob@seller.com")
     rec = ds.normalise(dirty, "active", NO_PICKS)
     assert rec["title"] == "Skid steer - call Bob or" and rec["city"] == "woodward ok"
     blob = repr(rec)
-    for s in ("alfonso", "8179780771", "ppms.gov", "Oklahoma Ave", "AlfonsoBrown"):
+    for s in ("alfonso", "8179780771", "Oklahoma Ave", "AlfonsoBrown"):
         assert s not in blob
+
+
+def test_photo_url_is_the_source_link_and_nothing_else():
+    assert ds.photo_url("gsa", "1", "https://www.ppms.gov/gw/auction/ppms/api/v1/auction/image/31Q.jpg") \
+        == "https://www.ppms.gov/gw/auction/ppms/api/v1/auction/image/31Q.jpg"
+    # a maestro row holds a file name; the CDN path needs the account id from the lot id
+    assert ds.photo_url("allsurplus", "3/32415", "32415_3_ab-cd.jpg?cb=241210") \
+        == "https://webassets.lqdt1.com/assets/photos/32415/32415_3_ab-cd.jpg?cb=241210"
+    for bad in (None, "", "http://plain.example/a.jpg", "javascript:alert(1)", "//cdn/a.jpg",
+                'https://x.example/a.jpg" onerror="x', "https://x.example/a b.jpg", "data:image/png;base64,AA"):
+        assert ds.photo_url("gsa", "1", bad) is None, bad
+    assert ds.photo_url("allsurplus", "3/32415", "../../etc/passwd") is None
+    assert ds.photo_url("allsurplus", "nope", "a.jpg") is None
+    assert ds.normalise(_row("public_surplus"), "active", NO_PICKS)["photo_url"] is None   # no photo key on file
 
 
 def test_extract_returns_none_for_a_poll_row_and_unknown_source():
@@ -250,8 +269,14 @@ def test_extract_returns_none_for_a_poll_row_and_unknown_source():
     {**_row("gsa"), "source": "govdeals", "source_lot_id": "1/2/3"},      # GovDeals is served from deal_lots
     {**_row("gsa"), "source": "hibid"},                                  # no spec for this source
 ])
-def test_policy_drops_the_lot(row):
+def test_policy_drops_the_lot(row, monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     assert ds.normalise(row, "active", NO_PICKS) is None
+
+
+def test_seating_lot_is_public_by_default():
+    rec = ds.normalise(_row("gsa", title="Lot of 40 Banquet Chairs"), "active", NO_PICKS)
+    assert rec is not None and rec["title"] == "Lot of 40 Banquet Chairs"
 
 
 def test_operator_picks_drop_for_every_source():

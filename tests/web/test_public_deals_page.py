@@ -22,7 +22,8 @@ def test_deals_page_shell():
     for el_id in ("feed-q", "feed-chips", "feed-controls", "feed-sort", "feed-state", "feed-view-toggle",
                   "feed-count", "feed-filters", "feed-grid", "feed-more", "feed-rail", "feed-map", "feed-map-panel"):
         assert f'id="{el_id}"' in html, el_id
-    assert 'name="robots" content="noindex' in html
+    # the plain page is indexed since 2026-11-15 (filter / page / view variants are not)
+    assert 'name="robots" content="index,follow"' in html
     assert "/static/deals/feed.js" in html and "/static/ui/state.js" in html
     assert "/static/deals_public.js" not in html and "/static/deals_public.css" not in html
     # server-shipped skeleton so the first paint is the grid's twin, not an empty box

@@ -6,7 +6,7 @@ NOT public. It is the exact inverse of the public `/deals` seating exclusion:
 * **GovDeals** half: `deal_lots WHERE public_deals.seating_where()` — the same
   category list + `\\y` title regex that `exclusion_where()` negates.
 * **Every other source**: `deals_sources.lots(seating=True)` — built from the
-  same snapshot read as /deals, kept where `public_deals.is_excluded` is True.
+  same snapshot read as /deals, kept where `public_deals.is_seating` is True.
 
 So a live lot is in exactly one of `/deals` or this feed (operator picks are
 the one carve-out: hidden from /deals always, shown here when they are seating,

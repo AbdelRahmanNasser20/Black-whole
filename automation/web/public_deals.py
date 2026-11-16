@@ -11,16 +11,18 @@ Two halves, one shape:
 `fetch_page` / `fetch_pins` / `fetch_facets` UNION the two. Three rules,
 enforced so no caller can forget them:
 
-1. **Chair-buyer isolation.** The operator resells seating. A chair buyer who
-   finds this page must never see the lots he is bidding on, so we exclude:
-   the seating category, any seating word in the title, and every lot in
-   `tracked_lots` / `auction_favorites` / `deal_list_items` (the three places
-   the operator marks interest). Override lists via env, never by editing SQL.
-   The SQL form (`exclusion_where`) guards `deal_lots`; the table-agnostic form
+1. **Operator picks stay private.** Every lot in `tracked_lots` /
+   `auction_favorites` / `deal_list_items` (the three places the operator
+   marks interest) is hidden from every public surface. Seating lots are
+   PUBLIC like any other category (operator decision 2026-11-15);
+   `PUBLIC_DEALS_HIDE_SEATING=1` brings the old chair-buyer isolation back
+   (seating category + seating words in the title). The SQL form
+   (`exclusion_where`) guards `deal_lots`; the table-agnostic form
    (`OperatorPicks` + `is_excluded`) guards the snapshot half.
-2. **No source photos, no verdicts, no home distance.** `PUBLIC_COLS` is the
-   allow-list; the copyright-bearing image columns, the LLM verdict join, and
-   `DEALS_HOME_*` distance never reach a public response.
+2. **No verdicts, no home distance, no archived photos.** `PUBLIC_COLS` is
+   the allow-list; the LLM verdict join, `DEALS_HOME_*` distance and our own
+   archived copies of auction photos never reach a public response. The lot
+   page may hotlink the SOURCE site's own photo URL (`lot_pages`), nothing else.
 3. **One connection per request; facets/pins cached 5 min.** The pooler
    handshake is ~1.3 s, so rows+count share a connection and the expensive
    whole-table stats are memoized in-process.
@@ -35,7 +37,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from .. import db
-from . import deals_query
+from . import deal_lot_urls, deals_query
 from deals.fees import fee_model_from_env
 from deals.quantity import lot_quantity, unit_price
 
@@ -64,7 +66,7 @@ PUBLIC_COLS = (
     "asset_id, account_id, auction_id, title, canonical_category, "
     "native_category_name, city, state, bid_count, current_bid, currency_code, "
     "end_utc, outcome, final_bid, final_bid_count, outcome_complete, "
-    "first_seen_at, lat, lng, site"
+    "first_seen_at, lat, lng, site, native_id"
 )
 PUBLIC_SORTS = {"ends": "end_utc", "newest": "first_seen_at",
                 "bid": "current_bid", "bids": "bid_count"}
@@ -93,20 +95,69 @@ def _cached(key: str, loader):
 
 # ── exclusion policy ─────────────────────────────────────────────────────────
 
+def hide_seating() -> bool:
+    """Seating lots are public since 2026-11-15 (operator decision). Set
+    PUBLIC_DEALS_HIDE_SEATING=1 to hide them again (category + title words)."""
+    return os.getenv("PUBLIC_DEALS_HIDE_SEATING", "").strip() == "1"
+
+
+# ── the keys a star can be stored under ──────────────────────────────────────
+# `tracked_lots` and `deal_list_items` key on deal_lots' own integer ids (real
+# for GovDeals / AllSurplus, synthetic for every other site), so an id join
+# covers every source. `auction_favorites.asset_id` is TEXT and has two shapes:
+#   GovDeals / AllSurplus   "<asset_id>/<account_id>"
+#   every other site        "<prefix>:<last part of the native id>"
+#                           (tx:<auction_lot_id>, ps:<auc>, bs:<lot guid> — written by
+#                            app.py's favorite-key parser and deals/listings_bridge.asset_key)
+# A foreign site's deal_lots row carries synthetic integer ids that never appear
+# in a star, so the pair alone hid nothing (PR #174 review). One helper + its SQL
+# twin, built from the same constant map.
+FAVORITE_PREFIX: dict[str, str] = {"txauction": "tx", "publicsurplus": "ps", "bidspotter": "bs"}
+
+
+def favorite_keys(*, site: Any = None, native_id: Any = None,
+                  asset_id: Any = None, account_id: Any = None) -> list[str]:
+    """Every `auction_favorites.asset_id` value that can mean this lot."""
+    keys: list[str] = []
+    if asset_id is not None and account_id is not None:
+        keys.append(f"{asset_id}/{account_id}")
+    prefix = FAVORITE_PREFIX.get(str(site or ""))
+    last = str(native_id or "").rsplit("/", 1)[-1].strip()
+    if prefix and last:
+        keys.append(f"{prefix}:{last}")
+    return keys
+
+
+# SQL twin of `favorite_keys` for a `deal_lots` row. Constants only (the map
+# above is code, never input); a site with no prefix yields NULL, which IN ignores.
+_FAVORITE_KEYS_SQL = (
+    "deal_lots.asset_id::text || '/' || deal_lots.account_id::text, "
+    "CASE deal_lots.site "
+    + "".join(f"WHEN '{site}' THEN '{prefix}:' || regexp_replace(deal_lots.native_id, '^.*/', '') "
+              for site, prefix in FAVORITE_PREFIX.items())
+    + "END"
+)
+
+
 def exclusion_where() -> tuple[str, list]:
-    """SQL fragment (and args) that hides every lot a chair buyer must not see."""
+    """SQL fragment (and args) that hides every lot the public must not see:
+    the operator's picks always, seating lots only when `hide_seating()`."""
+    seat, args = "", []
+    if hide_seating():
+        seat = ("(canonical_category IS NULL OR canonical_category <> ALL(%s)) "
+                "AND COALESCE(title, '') !~* %s AND ")
+        args = [sorted(EXCLUDED_CATEGORIES), EXCLUDED_TITLE_SQL_RE]
     where = (
-        "(canonical_category IS NULL OR canonical_category <> ALL(%s)) "
-        "AND COALESCE(title, '') !~* %s "
-        "AND NOT EXISTS (SELECT 1 FROM tracked_lots t "
+        f"{seat}"
+        "NOT EXISTS (SELECT 1 FROM tracked_lots t "
         "  WHERE t.asset_id = deal_lots.asset_id AND t.account_id = deal_lots.account_id) "
         "AND NOT EXISTS (SELECT 1 FROM auction_favorites f "
-        "  WHERE f.asset_id = deal_lots.asset_id::text || '/' || deal_lots.account_id::text) "
+        f"  WHERE f.asset_id IN ({_FAVORITE_KEYS_SQL})) "
         "AND NOT EXISTS (SELECT 1 FROM deal_list_items li "
         "  WHERE li.asset_id = deal_lots.asset_id AND li.account_id = deal_lots.account_id "
         "    AND li.auction_id = deal_lots.auction_id)"
     )
-    return where, [sorted(EXCLUDED_CATEGORIES), EXCLUDED_TITLE_SQL_RE]
+    return where, args
 
 
 def seating_where() -> tuple[str, list]:
@@ -120,26 +171,32 @@ def seating_where() -> tuple[str, list]:
 
 
 def is_seating(row: dict) -> bool:
-    """Python twin of `seating_where` — the category + title half of the
-    public exclusion. Alias kept separate so the Chairs feed reads as intent."""
-    return is_excluded(row)
-
-
-def is_excluded(row: dict) -> bool:
-    """Pure half of the policy (category + title). Membership needs the DB —
-    see `is_operator_lot` (deal_lots keys) or `is_operator_pick` (any source)."""
+    """Python twin of `seating_where` (category + title). The operator-only
+    Chairs feed keeps exactly these lots, whatever the public policy is."""
     if (row.get("canonical_category") or "") in EXCLUDED_CATEGORIES:
         return True
     return bool(_TITLE_RX.search(row.get("title") or ""))
 
 
-def is_operator_lot(asset_id: int, account_id: int, auction_id: int) -> bool:
+def is_excluded(row: dict) -> bool:
+    """Pure half of the PUBLIC policy: a seating lot, and only while
+    `hide_seating()` is on. Membership needs the DB — see `is_operator_lot`
+    (deal_lots keys) or `is_operator_pick` (any source)."""
+    return hide_seating() and is_seating(row)
+
+
+def is_operator_lot(asset_id: int, account_id: int, auction_id: int, *,
+                    site: Any = None, native_id: Any = None) -> bool:
+    """Is this `deal_lots` row one the operator tracks, starred or listed?
+    Pass the row's `site` + `native_id`: a star on a non-GovDeals lot is stored
+    under its prefixed native key (`favorite_keys`), not the integer pair."""
+    keys = favorite_keys(site=site, native_id=native_id, asset_id=asset_id, account_id=account_id)
     row = db.fetch_one(
         "SELECT EXISTS (SELECT 1 FROM tracked_lots WHERE asset_id=%s AND account_id=%s) "
-        "OR EXISTS (SELECT 1 FROM auction_favorites WHERE asset_id=%s) "
+        "OR EXISTS (SELECT 1 FROM auction_favorites WHERE asset_id = ANY(%s)) "
         "OR EXISTS (SELECT 1 FROM deal_list_items WHERE asset_id=%s AND account_id=%s AND auction_id=%s) "
         "AS hit",
-        (asset_id, account_id, f"{asset_id}/{account_id}", asset_id, account_id, auction_id),
+        (asset_id, account_id, keys, asset_id, account_id, auction_id),
     )
     return bool(row and row["hit"])
 
@@ -271,7 +328,12 @@ def _with_source(row: dict) -> dict:
 
 
 def enrich_public(row: dict, fees) -> dict:
-    return deals_query.enrich(row, fees)  # PUBLIC_COLS already excludes private fields
+    site = row.get("source") or GOVDEALS
+    row = deals_query.enrich(row, fees)  # PUBLIC_COLS already excludes private fields
+    row["source"] = site                 # enrich() stamps govdeals; keep the row's real site
+    # Public rows link the canonical lot page; the id-trio URL is the operator view.
+    row["viewer_url"] = deal_lot_urls.for_row(row)
+    return row
 
 
 def enrich_snapshot(row: dict, fees=None) -> dict:
@@ -357,6 +419,27 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
     }
 
 
+def similar_rows(*, category=None, state=None, limit: int = 12) -> list[dict]:
+    """Live public lots in one category (and state), soonest to end first — the
+    lot page's "similar lots". ONE statement and no count (a lot page is the
+    most-crawled URL shape; `fetch_page` pays a second whole-set count). The
+    snapshot half comes from the memo only (`deals_sources.peek`), so this never
+    starts the heavy snapshot read inside a request."""
+    from . import deals_sources
+    now = datetime.now(timezone.utc)
+    fees = fee_model_from_env()
+    where, args = build_public_where(category=category, state=state, status="active")
+    with db.connect() as conn:
+        rows = conn.execute(
+            f"SELECT {PUBLIC_COLS} FROM deal_lots WHERE {where} "
+            "ORDER BY end_utc ASC NULLS LAST LIMIT %s", (*args, limit)).fetchall()
+    out = [enrich_public(_with_source(dict(r)), fees) for r in rows]
+    memo = [r for r in (deals_sources.peek("active") or []) if r["end_utc"] and r["end_utc"] > now]
+    snap = deals_sources.apply_filters(memo, category=category, state=state, now=now)
+    out += [enrich_snapshot(dict(r), fees) for r in snap[:limit]]
+    return _merge_sorted(out, "end_utc", "asc")[:limit]
+
+
 # ── signed-in extras (liquidator platform) ───────────────────────────────────
 # Applied AFTER fetch_page, to rows that already passed `exclusion_where()` /
 # the snapshot filters, so tenants see exactly the public lot set. Nothing here
@@ -439,16 +522,17 @@ def fetch_pins(*, q=None, category=None, state=None, max_bids=None,
             where, args = build_public_where(**{k: v for k, v in params.items() if k != "site"})
             points = db.fetch_all(
                 "SELECT asset_id, account_id, auction_id, title, current_bid, bid_count, "
-                "end_utc, city, state, lat, lng FROM deal_lots "
+                "end_utc, city, state, lat, lng, site, native_id FROM deal_lots "
                 f"WHERE {where} AND lat IS NOT NULL AND lng IS NOT NULL "
                 "ORDER BY end_utc ASC LIMIT %s",
                 (*args, PINS_CAP + 1),
             )
             for p in points:
-                p["source"] = GOVDEALS
+                p["source"] = p.pop("site", None) or GOVDEALS
                 p["govdeals_url"] = f"https://www.govdeals.com/en/asset/{p['asset_id']}/{p['account_id']}"
                 p["url"] = p["govdeals_url"]
-                p["viewer_url"] = f"/deals/{p['asset_id']}/{p['account_id']}/{p['auction_id']}"
+                p["viewer_url"] = deal_lot_urls.for_row(p)
+                p.pop("native_id", None)
         for r in _snapshot_rows(status=status, q=q, category=category, state=state,
                                 max_bids=max_bids, ending_within=ending_within,
                                 min_price=min_price, max_price=max_price, bbox=None,

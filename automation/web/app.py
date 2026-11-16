@@ -82,6 +82,7 @@ from .. import freight_log
 from .. import attribution
 from .. import warp_rates
 from ..alerts import blast as alerts_blast
+from . import deal_lot_urls
 from . import deals_query
 from . import deals_sources
 from . import platform_api
@@ -145,6 +146,8 @@ app.include_router(_ebay_deletion_router)
 from automation.web import platform_auth  # noqa: E402
 from automation.web.platform_routes import router as _platform_router  # noqa: E402
 app.include_router(_platform_router)
+from automation.web.lot_page_routes import router as _lot_page_router  # noqa: E402
+app.include_router(_lot_page_router)   # /deals/lot/..., /sitemap-index.xml, /sitemaps/deals-N.xml
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
@@ -186,7 +189,7 @@ async def _scrape_guard_middleware(request: Request, call_next):
         scrape_guard.ban(ip)
         print(f"[scrape_guard] trap hit, feed closed for {ip}", file=sys.stderr)
         return JSONResponse({"detail": "Not Found"}, status_code=404)
-    wait = scrape_guard.ban_left(ip) or scrape_guard.over_limit(ip)
+    wait = scrape_guard.ban_left(ip) or scrape_guard.over_limit(ip, path)
     if wait:
         return JSONResponse({"detail": "rate_limited"}, status_code=429,
                             headers={"Retry-After": str(wait)})
@@ -220,7 +223,7 @@ async def _http_exception_handler(request: Request, exc: StarletteHTTPException)
         return templates.TemplateResponse(
             request, "404.html",
             _public_ctx({"lots": lots, "robots_noindex": True, "no_canonical": True}),
-            status_code=404,
+            status_code=404, headers=getattr(exc, "headers", None),
         )
     return await fastapi_http_exception_handler(request, exc)
 
@@ -1123,9 +1126,10 @@ async def api_visits_summary(days: int = Query(30, ge=1, le=365)):
 
 @app.get("/deals/{asset_id}/{account_id}/{auction_id}", response_class=HTMLResponse)
 async def deal_listing(request: Request, asset_id: int, account_id: int, auction_id: int):
-    """Archived-lot viewer. Public visitors get text only (no source photos —
-    copyright) and never see a seating/operator lot (chair-buyer isolation);
-    an operator session sees everything."""
+    """The OPERATOR's archived-lot viewer (bid history, bidders, archived
+    photos). A public visitor is sent to the canonical lot page
+    (`/deals/lot/...`, `lot_page_routes`) with a 301, or gets a 404 for a lot
+    the public policy hides."""
     row = await asyncio.to_thread(
         db.fetch_one,
         """SELECT * FROM deal_lots
@@ -1136,9 +1140,16 @@ async def deal_listing(request: Request, asset_id: int, account_id: int, auction
     operator = (not auth_svc.auth_enabled()) or auth_svc.request_has_session(request)
     if not operator and (
         public_deals.is_excluded(row)
-        or await asyncio.to_thread(public_deals.is_operator_lot, asset_id, account_id, auction_id)
+        or await asyncio.to_thread(
+            lambda: public_deals.is_operator_lot(
+                asset_id, account_id, auction_id, site=row.get("site"), native_id=row.get("native_id")))
     ):
         raise HTTPException(status_code=404, detail="lot not archived")
+    if not operator:
+        target = deal_lot_urls.for_row({**row, "source": row.get("site") or public_deals.GOVDEALS})
+        if not target:
+            raise HTTPException(status_code=404, detail="lot not archived")
+        return RedirectResponse(target, status_code=301)
     from deals import tracking, tracking_store
     history = await asyncio.to_thread(tracking_store.history, asset_id, account_id)
     fees = fee_model_from_env()
@@ -1443,6 +1454,8 @@ async def public_deals_page(request: Request):
         viewer = None
     return templates.TemplateResponse(request, "deals_public.html", {
         "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
+        # Google indexes the plain page only; a filter, a page or a view is a variant of it.
+        "robots_index": not request.query_params,
         "per_page_choices": public_deals.PER_PAGE_CHOICES,
         "platform_authed": viewer is not None},
         headers=_PRIVATE if viewer else None)
@@ -2349,7 +2362,7 @@ async def robots_txt():
         "User-agent: *\n"
         "Disallow: /admin\n"
         "Disallow: /api/\n"
-        "Disallow: /deals\n"
+        "Disallow: /deals/api/\n"
         "Disallow: /platform/api/\n"
         "Disallow: /map/api/\n"
         "Disallow: /distress/api/\n"
@@ -2357,6 +2370,7 @@ async def robots_txt():
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
+        f"Sitemap: {PUBLIC_BASE_URL}/sitemap-index.xml\n"
     )
 
 
@@ -4796,6 +4810,14 @@ async def _start_alerts_loop() -> None:
         _geo_warm_task = asyncio.create_task(asyncio.to_thread(_geo._pgeocode_us))
     except Exception as e:  # never block startup on the geocoder
         print(f"[geo] pgeocode pre-warm skipped: {e!r}")
+    # First deals-sitemap build: a daemon thread, so a crawler's first fetch after a
+    # deploy does not get (and cache) an empty list. Only with a database to read.
+    if os.getenv("BLACKWHOLE_DB_URL"):
+        try:
+            from . import deal_sitemap
+            deal_sitemap.warm()
+        except Exception as e:  # never block startup on the sitemap
+            print(f"[deal-sitemap] warm-up skipped: {e!r}")
     if _tracking_task is None or _tracking_task.done():
         _tracking_task = asyncio.create_task(_tracking_loop())
         print(f"[tracking] bid-history poller started (tick={_SCHEDULER_TICK_SEC:.0f}s)")

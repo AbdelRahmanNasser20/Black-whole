@@ -177,3 +177,23 @@ def test_feed_json_is_marked_noindex_and_robots_disallows_it():
     for line in ("Disallow: /deals", "Disallow: /platform/api/", "Disallow: /map/api/",
                  "Disallow: /distress/api/"):
         assert line in robots, line
+
+
+# ───────────────────────── lot pages (what a search crawler reads) ─────────────────────────
+
+def test_both_lot_url_shapes_are_guarded():
+    assert sg.is_guarded("/deals/1/2/3") and sg.is_guarded("/deals/lot/desk-az-govdeals-1.2.3")
+    assert sg.is_lot_page("/deals/lot/desk-az-govdeals-1.2.3") and not sg.is_lot_page("/deals/lot/a/b")
+    assert not sg.is_lot_page("/deals/sold") and not sg.is_guarded("/deals")
+
+
+def test_lot_pages_have_their_own_bucket_and_never_spend_the_feed_or_global_one(monkeypatch):
+    monkeypatch.setattr(sg, "LOT_PER_MIN", 3)
+    monkeypatch.setattr(sg, "PER_MIN", 2)
+    monkeypatch.setattr(sg, "GLOBAL_PER_MIN", 2)
+    lot = "/deals/lot/desk-az-govdeals-1.2.3"
+    assert [sg.over_limit("9.9.9.9", lot) for _ in range(3)] == [0, 0, 0]     # a crawl of lot pages...
+    assert sg.over_limit("9.9.9.9", lot) > 0                                   # ...is limited on its own count
+    assert sg.over_limit("9.9.9.9", "/deals/api/lots") == 0                    # and left the feed bucket untouched
+    assert sg.over_limit("8.8.8.8", "/deals/api/lots") == 0                    # nor did it trip the global ceiling
+    assert not sg.is_banned("9.9.9.9")                                         # over-limit never bans: only the trap does

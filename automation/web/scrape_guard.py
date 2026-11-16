@@ -48,7 +48,12 @@ BAN_HOURS = _int("SCRAPE_GUARD_BAN_HOURS", 12)
 TRAP_PATH = "/deals/api/export-all.json"
 ROBOTS_TAG = "noindex, nofollow, noarchive"
 JSON_PREFIXES = ("/deals/api/", "/platform/api/", "/map/api/", "/distress/api/")
-_LOT_PAGE = re.compile(r"^/deals/\d+/\d+/\d+$")
+_LOT_PAGE = re.compile(r"^/deals/(?:\d+/\d+/\d+|lot/[^/]+)$")
+# Lot pages are what a search crawler reads, one URL each, so they get their own
+# (wider) per-IP bucket and no global ceiling: a crawl must not 429 the feed JSON
+# for people, and nothing here ever bans — only the trap link does.
+LOT_PER_MIN = _int("SCRAPE_GUARD_LOT_PER_MIN", 240)
+LOT_PER_HOUR = _int("SCRAPE_GUARD_LOT_PER_HOUR", 6000)
 _PAGES = ("/deals/sold",)
 # list endpoints a caller can page through → (default page size, largest the endpoint serves).
 # The endpoints clamp an oversized per_page themselves, so the depth is counted on the clamped value.
@@ -95,9 +100,19 @@ def ban_left(ip: str) -> int:
     return left
 
 
-def over_limit(ip: str) -> int:
+def is_lot_page(path: str) -> bool:
+    return bool(_LOT_PAGE.match(path))
+
+
+def over_limit(ip: str, path: str = "") -> int:
     """Count one request. 0 = allowed, else the seconds to wait."""
     now = time.time()
+    if is_lot_page(path):
+        if not rate_limit.allow(f"sg:lot:m:{ip}", limit=LOT_PER_MIN, window_s=60):
+            return max(1, int(60 - now % 60))
+        if not rate_limit.allow(f"sg:lot:h:{ip}", limit=LOT_PER_HOUR, window_s=3600):
+            return max(1, int(3600 - now % 3600))
+        return 0
     if not rate_limit.allow(f"sg:m:{ip}", limit=PER_MIN, window_s=60):
         return max(1, int(60 - now % 60))
     if not rate_limit.allow(f"sg:h:{ip}", limit=PER_HOUR, window_s=3600):

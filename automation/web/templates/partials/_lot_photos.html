@@ -1,0 +1,17 @@
+{#- partials/_lot_photos.html — the ONE place an auction photo renders in public.
+    Context: lot.photos (the SOURCE site's own https links, max 3), show_photos, photos_need_sign_in.
+    Gate = site setting `deal_lot_photos` (0 off · 1 signed-in · 2 everyone), read in lot_pages.photos_mode().
+    Hotlinked only: never our archived copies, never proxied, no referrer sent. -#}
+{% if show_photos %}
+<section class="section">
+  <div class="section-head"><h2>Photos</h2></div>
+  <div class="section-body">
+    <div class="gallery" id="lot-photos">
+      {% for p in lot.photos %}<a href="{{ lot.url or p }}" target="_blank" rel="noopener nofollow"><img src="{{ p }}" alt="{{ lot.title }}{% if not loop.first %} — photo {{ loop.index }}{% endif %}" loading="lazy" referrerpolicy="no-referrer" onerror="this.closest('a').hidden=true"></a>{% endfor %}
+    </div>
+    <p class="muted data-line">Photo from the {{ lot.source_name }} listing.{% if lot.url %} More photos are on the listing.{% endif %}</p>
+  </div>
+</section>
+{% elif photos_need_sign_in %}
+<p class="muted photo-note"><a href="/platform/signup">Sign in (free)</a> to see the photos for this lot.</p>
+{% endif %}

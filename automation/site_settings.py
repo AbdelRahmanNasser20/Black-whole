@@ -54,6 +54,10 @@ for _c in _channels.CHANNELS:
     SPEC[f"channel_{_c}_enabled"] = {**_SWITCH, "default": 1 if _c in _channels.FEED_CHANNELS else 0}
 # Pacing for the browser-driven channels (fb_marketplace, craigslist): at most
 # `daily_cap` list actions per UTC day, `spacing_s` seconds apart.
+# Auction-lot page photos (`/deals/lot/...`): 0 = off, 1 = signed-in visitors,
+# 2 = everyone. They are the SOURCE site's own image links, never our copies.
+# Operator decision 2026-11-15: everyone. No seed row needed (default applies).
+SPEC["deal_lot_photos"] = {"type": int, "min": 0, "max": 2, "default": 2}
 SPEC["browser_channel_daily_cap"] = {"type": int, "min": 0, "max": 50, "default": 4}
 SPEC["browser_channel_spacing_s"] = {"type": int, "min": 60, "max": 86_400, "default": 1200}
 

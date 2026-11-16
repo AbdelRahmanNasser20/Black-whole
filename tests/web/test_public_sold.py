@@ -43,7 +43,15 @@ def client(monkeypatch):
 
 # ── policy: what the SQL may read ────────────────────────────────────────────
 
-def test_base_where_keeps_chair_buyer_isolation():
+def test_base_where_hides_operator_picks_and_shows_seating_by_default():
+    where, args = ps.base_where()
+    assert "canonical_category" not in where and args == ["USD"]
+    for tbl in ("tracked_lots", "auction_favorites", "deal_list_items"):
+        assert f"FROM {tbl}" in where
+
+
+def test_base_where_keeps_chair_buyer_isolation(monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     where, args = ps.base_where()
     assert "canonical_category <> ALL(%s)" in where
     assert "COALESCE(title, '') !~* %s" in where
@@ -81,11 +89,13 @@ def test_public_cols_never_leak_private_fields():
         assert col not in ps.PUBLIC_COLS
 
 
-def test_viewer_url_only_for_a_govdeals_three_part_key():
-    assert ps.viewer_url("govdeals", "305/10340/1") == "/deals/305/10340/1"
-    assert ps.viewer_url("govdeals", "305/10340") is None
-    assert ps.viewer_url("allsurplus", "305/10340/1") is None
-    assert ps.viewer_url("govdeals", "a/b/c") is None
+def test_viewer_url_is_the_canonical_lot_page_for_any_archived_source():
+    # The lot page resolves from lot_archive itself, so a sold row needs no deal_lots row.
+    assert ps.viewer_url("govdeals", "305/10340/1", title="Vulcan Fryer", state="TX") \
+        == "/deals/lot/vulcan-fryer-tx-govdeals-305.10340.1"
+    assert ps.viewer_url("allsurplus", "305/10340/1", title="Lathe", state=None) \
+        == "/deals/lot/lathe-us-allsurplus-305.10340.1"
+    assert ps.viewer_url("ebay", "1/2/3") is None and ps.viewer_url("govdeals", "a b") is None
 
 
 def test_share_is_none_without_a_denominator():
@@ -121,9 +131,12 @@ def test_page_renders_numbers_and_the_honesty_labels(client):
     assert "60%" in html                       # share of bid-on closes that sold
     assert "Confirmed close" in html
     assert "reserve" in html.lower()
-    # hard rules shared with /deals: no photos, no private fields, noindex until the operator decides
+    # hard rules shared with /deals: no photos on a list page, no private fields
     assert "<img" not in html and "storage_note" not in html
-    assert 'name="robots" content="noindex' in html
+    # open to crawlers since 2026-11-15; a filtered or deeper page is followed but not indexed
+    assert 'name="robots" content="index,follow"' in html and 'rel="canonical"' in html
+    filtered = client.get("/deals/sold?state=TX").text
+    assert 'name="robots" content="noindex,follow"' in filtered and 'rel="canonical"' not in filtered
 
 
 def test_page_shows_a_plain_message_when_the_read_fails(monkeypatch):

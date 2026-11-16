@@ -89,7 +89,9 @@ def _offline(monkeypatch):
 
 # ───────────────────────── partition ─────────────────────────
 
-def test_every_live_lot_is_in_exactly_one_view():
+def test_every_live_lot_is_in_exactly_one_view(monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
+    ds.clear_cache()
     public = {r["id"] for r in ds.lots("active")} | {f"govdeals:{r['asset_id']}/{r['account_id']}/{r['auction_id']}"
                                                      for r in _gd_public()}
     chairs = {r["id"] for r in cf.fetch(min_qty=0)["rows"]}
@@ -102,7 +104,17 @@ def test_every_live_lot_is_in_exactly_one_view():
                       "govdeals:1/10/100", "govdeals:2/10/100"}
 
 
-def test_seating_sql_is_the_inverse_of_the_public_exclusion():
+def test_seating_lots_are_public_by_default_and_still_in_the_chairs_feed():
+    # Operator decision 2026-11-15: seating is public like any other category.
+    public = {r["id"] for r in ds.lots("active")}
+    chairs = {r["id"] for r in cf.fetch(min_qty=0)["rows"]}
+    assert {"municibid:101", "municibid:102", "municibid:103", "municibid:104", "municibid:107"} <= public
+    assert {"municibid:101", "municibid:107", "govdeals:1/10/100"} <= chairs     # the operator feed is unchanged
+    assert "municibid:105" in public and "municibid:105" not in chairs
+
+
+def test_seating_sql_is_the_inverse_of_the_public_exclusion(monkeypatch):
+    monkeypatch.setenv("PUBLIC_DEALS_HIDE_SEATING", "1")   # the old chair-buyer isolation, still a switch
     ex_sql, ex_args = pd.exclusion_where()
     seat_sql, seat_args = pd.seating_where()
     assert seat_args == ex_args[:2]                                       # same category list, same \y regex
