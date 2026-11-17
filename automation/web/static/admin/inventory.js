@@ -162,6 +162,12 @@ function rowHtml(item) {
                  placeholder="extra locations — Baltimore, MD x1200; Orlando, FL"
                  title="Every place this lot sits. Blank = single location (uses the city above).">
         </div>
+        <div class="inv-sub inv-locs">
+          <input class="inv-loc-input mono tiny" data-field="pickup_address" maxlength="160"
+                 value="${escapeAttr(item.pickup_address || '')}"
+                 placeholder="pickup address buyers may see — 675 Great SW Pkwy SW, Atlanta, GA 30336"
+                 title="The site chat shows this street address to buyers. Street address only: no unit, gate or code. Blank = the chat gives the city only.">
+        </div>
         <div class="inv-sub inv-chair" title="Chair data for freight. Blank = the standard (Idaho) chair: 13 lb, 35 per pallet, 80 in.">
           <label>LB/CHAIR <input type="number" class="inv-chair-num" data-field="chair_weight_lb" min="1" max="100" step="0.1"
                  value="${item.chair_weight_lb ?? ''}" placeholder="13" aria-label="Chair weight in pounds"></label>

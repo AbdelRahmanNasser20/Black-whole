@@ -54,3 +54,21 @@ ALTER TABLE public.platform_alert_sends ADD CONSTRAINT platform_alert_sends_aler
   FOREIGN KEY (alert_id) REFERENCES public.platform_alerts(id) ON DELETE CASCADE;
 ```
 Deleting an alert that already sent mail now removes its dedupe rows instead of failing with a FK error.
+
+## `chat_sessions` (migration 038, PENDING)
+
+Storefront chat sessions. Writer and reader: `automation/site_chat_store.py` only. RLS on, `service_role_all` policy.
+
+```sql
+CREATE TABLE public.chat_sessions (
+    id UUID PRIMARY KEY, created_at TIMESTAMPTZ, updated_at TIMESTAMPTZ, completed_at TIMESTAMPTZ,
+    status TEXT CHECK (status IN ('open','completed')), step TEXT, answered INTEGER,
+    state JSONB,                       -- script state: answers, question and answer log, picked lots (bounded)
+    name TEXT, phone TEXT, email TEXT, zip_code VARCHAR(10), quantity INTEGER, lot_ids TEXT[], inquiry_id BIGINT,
+    visitor_id VARCHAR(40), first_seen TIMESTAMPTZ, visit_days INTEGER, page VARCHAR(200), trail JSONB,
+    device VARCHAR(20), country CHAR(2),
+    attr_source VARCHAR(200), attr_medium VARCHAR(200), attr_campaign VARCHAR(200),
+    attr_referrer VARCHAR(200), attr_landing VARCHAR(200)
+);
+ALTER TABLE public.inventory ADD COLUMN pickup_address TEXT;   -- street address the chat may show a buyer
+```

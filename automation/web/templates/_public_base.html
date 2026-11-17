@@ -79,6 +79,9 @@
   </main>
 
   {% include "_updates_strip.html" %}
+  {#- The buyer chat. site_chat_on(request) decides (automation/web/site_chat_routes.py): storefront pages
+      only, and only once migration 038 is applied. -#}
+  {% if site_chat_on(request) %}{% include "_site_chat.html" %}{% endif %}
   <footer class="site-footer">
     <div class="foot-row">
       <div class="foot-col">

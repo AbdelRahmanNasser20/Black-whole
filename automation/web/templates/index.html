@@ -409,6 +409,7 @@
     <a class="seg-btn" data-sales-view="inquiries" href="?tab=inquiries">Inquiries<span class="sales-count" id="sales-count-inquiries" hidden></span><kbd>i</kbd></a>
     <a class="seg-btn" data-sales-view="deposits" href="?tab=deposits">Deposits<kbd>d</kbd></a>
     <a class="seg-btn" data-sales-view="subscribers" href="?tab=subscribers">Subscribers<kbd>s</kbd></a>
+    <a class="seg-btn" data-sales-view="chats" href="?tab=chats">Chats<kbd>c</kbd></a>
   </div>
 </nav>
 
@@ -518,6 +519,45 @@
   </div>
 
   <div class="sub-list" id="sub-list" data-state="loading" aria-busy="true">
+    {{ skeleton_rows(5) }}
+  </div>
+</section>
+
+<!-- ───────────── Sales › Chats ───────────── -->
+<section class="panel" data-pane="chats" hidden>
+  {#- Storefront chat sessions (automation/site_chat_store.py). Read-only: a finished chat is also an inquiry,
+      and it is worked on the Inquiries view. This pane's CSS lives in static/admin/chats.css. -#}
+  {% from "_ui/macros.html" import skeleton_rows %}
+  <link rel="stylesheet" href="/static/admin/chats.css?v={{ asset_v }}">
+  <div class="hero hero-compact">
+    <div class="hero-eyebrow">INBOX / SITE CHAT</div>
+    <h1 class="hero-title">What buyers told the chat.</h1>
+    <p class="hero-sub">
+      Every answer a visitor gave, and how the visitor reached the site. A
+      <span class="lex done">finished</span> chat is also on Inquiries. A
+      <span class="lex pending">stopped</span> chat has no phone number yet.
+    </p>
+  </div>
+
+  <div class="chat-stats" id="chat-stats" hidden></div>
+
+  <div class="controls chat-toolbar">
+    <div class="chat-group">
+      <span class="chat-label">SHOW</span>
+      <div class="seg" id="chat-view-filter" role="group" aria-label="Filter chats">
+        <button type="button" class="seg-btn is-active" data-value="answered">answered</button>
+        <button type="button" class="seg-btn" data-value="completed">finished</button>
+        <button type="button" class="seg-btn" data-value="open">stopped</button>
+        <button type="button" class="seg-btn" data-value="all">all</button>
+      </div>
+    </div>
+    <span class="result-count" id="chat-count" aria-live="polite"></span>
+    <div class="chat-actions">
+      <button type="button" class="btn btn-small" id="chat-refresh">↻ refresh</button>
+    </div>
+  </div>
+
+  <div class="chat-list" id="chat-list" data-state="loading" aria-busy="true">
     {{ skeleton_rows(5) }}
   </div>
 </section>
@@ -1099,7 +1139,7 @@
   var panes = document.querySelectorAll('[data-pane]'), hit = false;
   panes.forEach(function (p) { if (p.dataset.pane === t) hit = true; }); if (!hit) return;
   panes.forEach(function (p) { p.hidden = p.dataset.pane !== t; });
-  var sales = ['quotes', 'inquiries', 'deposits', 'subscribers'].indexOf(t) !== -1, r = sales ? 'sales' : t;
+  var sales = ['quotes', 'inquiries', 'deposits', 'subscribers', 'chats'].indexOf(t) !== -1, r = sales ? 'sales' : t;
   document.querySelectorAll('.rail-tab').forEach(function (a) {
     var on = a.dataset.tab === r; a.classList.toggle('is-active', on);
     if (on) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current');

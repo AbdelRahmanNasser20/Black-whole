@@ -1,0 +1,31 @@
+{#- templates/_site_chat.html — the buyer chat, bottom right of every storefront page (_public_base.html).
+    A fixed question script, no LLM: the server (automation/site_chat.py) writes every line and
+    static/site/site_chat.js only draws it. Self-contained like _updates_strip.html: its own CSS and module.
+    Rendered only when site_chat_on() is true (migration 038 applied). inventory.storage_note never renders
+    here: the one address the chat shows is inventory.pickup_address. Never include it on the admin. -#}
+<link rel="stylesheet" href="/static/site/site_chat.css?v={{ asset_v }}">
+<div class="bwchat" id="bwchat" data-open="false">
+  <button class="bwchat-launch" type="button" aria-expanded="false" aria-controls="bwchat-panel">
+    <span class="bwchat-launch-mark" aria-hidden="true">◉</span>
+    <span class="bwchat-launch-text">Find chairs near you</span>
+  </button>
+  <section class="bwchat-panel" id="bwchat-panel" role="dialog" aria-label="Chat with Black Whole" hidden>
+    <header class="bwchat-head">
+      <span class="bwchat-head-mark" aria-hidden="true">◉</span>
+      <div class="bwchat-head-text">
+        <h2 class="bwchat-title">Black Whole</h2>
+        <p class="bwchat-sub">A few questions, then Abdel texts you.</p>
+      </div>
+      <button class="bwchat-close" type="button" aria-label="Close chat">✕</button>
+    </header>
+    <div class="bwchat-log" role="log" aria-live="polite" tabindex="0"></div>
+    <div class="bwchat-options" hidden></div>
+    <form class="bwchat-form" novalidate>
+      <label class="bwchat-label" for="bwchat-input">Your answer</label>
+      <input class="bwchat-input" id="bwchat-input" type="text" autocomplete="off" maxlength="300"
+             placeholder="Type your answer">
+      <button class="bwchat-send" type="submit">Send</button>
+    </form>
+  </section>
+</div>
+<script type="module" src="/static/site/site_chat.js?v={{ asset_v }}"></script>

@@ -118,6 +118,16 @@ Detail: `docs/claude-reference/` (index at bottom).
 - **TXAuction** (`deals/adapters/txauction.py`, site `txauction`, ordinal 10): parses only the SSR `__APOLLO_STATE__` blob — never `/api/` or `/asset/` (robots.txt); 403/429 stops the run. Daily via `scripts/run_discovery.sh` (discover → watch-once → `mirror-auctions` into `auction_listings` as `tx:<lot>`); detail `deals.md` § TXAuction.
 - Tracking list (`tracked_lots`): polling runs **in the web process** (`_tracking_loop`), not a Render cron; closed = `assetStatusCd != 'STA'` or clock+15 min; on close `record_outcome` writes the exact final into `deal_lots`. Detail: `docs/claude-reference/deals.md`.
 
+**Site chat (storefront) — READ BEFORE TOUCHING `automation/site_chat*.py`:**
+- **A fixed question script, no LLM.** `automation/site_chat.py` (pure) writes every line the buyer sees. The script is the operator's Messenger question form (2026-11-16) with the ZIP and a lot pick in front. Don't put a model in this path.
+- **What the chat may say on its own (operator, 2026-11-17):** price per chair, stock, the hours (`HOURS` = 9 AM to 5 PM, Monday to Friday), and a lot's street address. Every fact comes from an `inventory` row.
+- **The only address source is `inventory.pickup_address`** (operator-entered on the Inventory tab, migration 038). **Never read `storage_note` here.** `set_fields` rejects a `pickup_address` that holds a gate, code, unit or `#`. Blank = the chat gives city and state only. A `fulfillment='dropship'` lot never gets a pickup or viewing question.
+- Lots come from `inventory.list_catalog_feed()` only (no second sellable-lots query), minus `fake_sold_out`. `lot_cards()` is an allow-list: only the keys it builds leave the server. Near = within 300 miles of the buyer's ZIP, else the lots we hold (`owned`, `won_pickup`).
+- Public endpoints `POST /chat/start` + `/chat/answer` are NOT under `/api/` (auth-walled), are plain `def`, and are rate-limited. Every answer is saved at once to `chat_sessions` (`automation/site_chat_store.py`, the only module that touches the table), so a buyer who leaves early is still on file. A finished chat writes ONE inquiry through `inventory.create_inquiry` and sends ONE Telegram `leads` alert. A replayed answer never files a second lead.
+- **Dark-ship gate:** the widget renders and `/chat/*` answers only once `scripts/sql/038_chat_sessions.sql` is applied (`site_chat_store.schema_ready()`, positive answer cached per process: restart the web process after applying). `SITE_CHAT_ENABLED=0` turns it off. 🚨 Migration 038 is **PENDING — NOT applied to prod.**
+- Visitor facts are browser-reported: a random per-browser id, first-touch attribution, the last 30 page paths, device class, country. No IP and no user agent is stored. `chat_sessions.state` is bounded by the code (40 log entries of 300 characters).
+- Admin: **Sales › Chats** (`?tab=chats`, key `c`; `static/admin/chats.js`, `GET /api/chats`, `/api/chats/stats`). Read-only: a finished chat is worked on Inquiries.
+
 **Ops:**
 - Changes to `automation/web/app.py`, `templates/`, or `static/` require killing and relaunching `python -m automation.web`.
 

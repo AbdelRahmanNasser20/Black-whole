@@ -1,0 +1,169 @@
+/* static/site/site_chat.css — the buyer chat (templates/_site_chat.html).
+   Storefront language: square corners, one-pixel ink borders, the hard offset shadow the buttons use.
+   Bot lines are paper with an ink border, buyer lines are solid ink. Tokens only, no hex
+   (tests/web/test_ui_primitives.py). Sits above the sticky header (z-index 50). */
+
+.bwchat {
+  position: fixed; right: 20px; bottom: 20px; z-index: 60;
+  font-family: var(--sans); color: var(--text);
+}
+
+/* ── launcher ── */
+.bwchat-launch {
+  display: flex; align-items: center; gap: 10px;
+  padding: 13px 18px 13px 14px;
+  background: var(--text); color: var(--bg);
+  border: 1px solid var(--text);
+  box-shadow: 4px 4px 0 0 var(--accent);
+  font-family: var(--display); font-size: 15px; letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease;
+}
+.bwchat-launch:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 0 var(--accent); }
+.bwchat-launch-mark { color: var(--accent); font-size: 18px; line-height: 1; }
+.bwchat[data-open="true"] .bwchat-launch { display: none; }
+
+/* ── panel ── */
+.bwchat-panel {
+  display: flex; flex-direction: column;
+  width: 384px; height: min(620px, calc(100vh - 40px)); height: min(620px, calc(100dvh - 40px));
+  background: var(--bg);
+  border: 1px solid var(--text);
+  box-shadow: 6px 6px 0 0 var(--text);
+}
+.bwchat-panel[hidden] { display: none; }
+
+.bwchat-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 14px 14px 14px 16px;
+  background: var(--text); color: var(--bg);
+}
+.bwchat-head-mark { color: var(--accent); font-size: 26px; line-height: 1; }
+.bwchat-head-text { flex: 1; min-width: 0; }
+.bwchat-title { margin: 0; font-family: var(--display); font-size: 17px; font-weight: 400; line-height: 1.15; }
+.bwchat-sub { margin: 2px 0 0; font-size: 13px; line-height: 1.3; color: var(--foot-muted); }
+.bwchat-close {
+  width: 36px; height: 36px; flex: none;
+  background: transparent; color: var(--bg);
+  border: 1px solid var(--foot-rule);
+  font-size: 15px; cursor: pointer;
+}
+.bwchat-close:hover { background: var(--bg); color: var(--text); }
+
+/* ── messages ── */
+.bwchat-log {
+  flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 16px 14px 10px;
+}
+.bwchat-log > * { flex-shrink: 0; }   /* a tall card strip scrolls the log, it is never squashed */
+.bwchat-msg {
+  max-width: 86%;
+  padding: 10px 13px;
+  font-size: 15.5px; line-height: 1.45;
+  white-space: pre-line; overflow-wrap: anywhere;
+}
+.bwchat-msg.is-bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--text); }
+.bwchat-msg.is-user { align-self: flex-end; background: var(--text); color: var(--bg); border: 1px solid var(--text); }
+.bwchat-msg.is-user + .bwchat-msg.is-bot, .bwchat-msg.is-bot + .bwchat-msg.is-user { margin-top: 6px; }
+.bwchat-msg.is-error { border-color: var(--danger); color: var(--danger); background: var(--danger-soft); }
+.bwchat-msg.is-new { animation: bwchat-in 180ms ease-out; }
+@keyframes bwchat-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+.bwchat-typing { display: inline-flex; gap: 5px; align-items: center; height: 22px; }
+.bwchat-typing i { width: 6px; height: 6px; background: var(--muted); animation: bwchat-dot 900ms infinite ease-in-out; }
+.bwchat-typing i:nth-child(2) { animation-delay: 150ms; }
+.bwchat-typing i:nth-child(3) { animation-delay: 300ms; }
+@keyframes bwchat-dot { 0%, 60%, 100% { opacity: 0.25; transform: none; } 30% { opacity: 1; transform: translateY(-3px); } }
+
+/* ── lot cards: a sideways strip inside the log ── */
+.bwchat-cards {
+  align-self: stretch;
+  display: flex; gap: 10px;
+  margin: 2px -14px 2px; padding: 2px 14px 10px;
+  overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: thin;
+}
+.bwchat-card {
+  flex: 0 0 210px; scroll-snap-align: start;
+  display: flex; flex-direction: column;
+  background: var(--surface); border: 1px solid var(--text);
+}
+.bwchat-card.is-picked { box-shadow: 4px 4px 0 0 var(--accent); }
+.bwchat-card-photo { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; background: var(--surface-2); border-bottom: 1px solid var(--text); }
+.bwchat-card-body { display: flex; flex-direction: column; gap: 4px; padding: 10px 11px 11px; flex: 1; }
+.bwchat-card-title { margin: 0; font-family: var(--sans); font-size: 15px; font-weight: 600; line-height: 1.25; letter-spacing: 0; text-transform: none; }
+.bwchat-card-price { font-family: var(--display); font-size: 19px; line-height: 1.1; }
+.bwchat-card-price small { font-family: var(--sans); font-size: 12.5px; color: var(--muted); }
+.bwchat-card-meta { font-size: 13px; line-height: 1.35; color: var(--text-soft); }
+.bwchat-card-link { font-size: 13px; color: var(--text); text-decoration: underline; text-underline-offset: 2px; }
+.bwchat-card-pick {
+  margin-top: auto;
+  padding: 9px 10px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--text);
+  font-family: var(--display); font-size: 13.5px; cursor: pointer;
+}
+.bwchat-card-pick:hover { background: var(--accent-soft); }
+.bwchat-card.is-picked .bwchat-card-pick { background: var(--accent); }
+
+/* ── tap answers ── */
+.bwchat-options {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 4px 14px 12px;
+}
+.bwchat-options[hidden] { display: none; }
+.bwchat-opt {
+  padding: 9px 13px;
+  background: var(--surface); color: var(--text);
+  border: 1px solid var(--text);
+  font-family: var(--sans); font-size: 14.5px; font-weight: 600; line-height: 1.2;
+  cursor: pointer; text-align: left;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+.bwchat-opt:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 0 var(--text); }
+.bwchat-opt.is-primary { background: var(--accent); }
+.bwchat-opt:disabled { opacity: 0.45; cursor: default; transform: none; box-shadow: none; }
+
+/* ── typed answer ── */
+.bwchat-form {
+  display: flex; gap: 0;
+  border-top: 1px solid var(--text);
+  background: var(--surface);
+}
+.bwchat-form[hidden] { display: none; }
+.bwchat-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.bwchat-input {
+  flex: 1; min-width: 0;
+  padding: 15px 14px;
+  background: transparent; color: var(--text);
+  border: 0; border-radius: 0;
+  font-family: var(--sans); font-size: 16px;   /* 16px: iOS does not zoom the page on focus */
+}
+.bwchat-input::placeholder { color: var(--muted); }
+.bwchat-send {
+  padding: 0 18px;
+  background: var(--accent); color: var(--text);
+  border: 0; border-left: 1px solid var(--text);
+  font-family: var(--display); font-size: 14px; cursor: pointer;
+}
+.bwchat-send:hover { background: var(--text); color: var(--bg); }
+.bwchat-send:disabled { opacity: 0.5; cursor: default; }
+
+.bwchat button:focus-visible, .bwchat a:focus-visible, .bwchat-log:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px;
+}
+.bwchat-input:focus-visible { outline: 3px solid var(--accent); outline-offset: -3px; }
+
+/* ── phone: the panel is the whole screen ── */
+@media (max-width: 520px) {
+  .bwchat { right: 12px; bottom: 12px; }
+  .bwchat[data-open="true"] { inset: 0; right: 0; bottom: 0; }
+  .bwchat-panel { width: 100%; height: 100%; border: 0; box-shadow: none; }
+  .bwchat-launch-text { font-size: 14px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bwchat-msg.is-new, .bwchat-typing i { animation: none; }
+  .bwchat-launch, .bwchat-opt { transition: none; }
+}
+@media print { .bwchat { display: none; } }
