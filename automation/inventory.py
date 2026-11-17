@@ -665,6 +665,10 @@ CHAIR_FRAME_MAX_LEN = 60
 CHAIR_FIELDS = frozenset(_CHAIR_NUMERIC) | {"chair_frame"}
 
 
+PICKUP_ADDRESS_MAX_LEN = 160
+_PICKUP_SECRET_RE = re.compile(r"(?i)\b(gate|code|unit|pin|keypad|combo|lock|passcode|password)\b|#")
+
+
 def set_fields(lot_id: str, **fields: Any) -> dict | None:
     """Admin inline-edit path. Whitelisted columns only.
 
@@ -684,6 +688,9 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         # stored URL has to be re-stampable through the ledger rather than by
         # raw UPDATE (automation/auction_sync.py).
         "govdeals_url",
+        # The street address the storefront chat may show a buyer (migration
+        # 038). Operator-entered, and never written by `upsert_from_run`.
+        "pickup_address",
     }
     clean = {k: v for k, v in fields.items() if k in allowed}
     if not clean:
@@ -727,6 +734,13 @@ def set_fields(lot_id: str, **fields: Any) -> dict | None:
         if not low <= value <= high:
             raise ValueError(f"{key} must be between {low:g} and {high:g} {unit}")
         clean[key] = cast(value)
+    if "pickup_address" in clean:
+        address = " ".join(str(clean["pickup_address"] or "").split())[:PICKUP_ADDRESS_MAX_LEN]
+        # This text goes to buyers. A gate code, a unit number or anything
+        # else from `storage_note` must never be pasted into it.
+        if _PICKUP_SECRET_RE.search(address):
+            raise ValueError("pickup_address is the street address only: no unit, gate, code or # number")
+        clean["pickup_address"] = address or None
     if "chair_frame" in clean:
         frame = str(clean["chair_frame"] or "").strip()
         clean["chair_frame"] = frame[:CHAIR_FRAME_MAX_LEN] or None

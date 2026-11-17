@@ -154,6 +154,13 @@ from automation.web.platform_routes import router as _platform_router  # noqa: E
 app.include_router(_platform_router)
 from automation.web.lot_page_routes import router as _lot_page_router  # noqa: E402
 app.include_router(_lot_page_router)   # /deals/lot/..., /sitemap-index.xml, /sitemaps/deals-N.xml
+from automation import site_chat_store  # noqa: E402
+from automation.web.site_chat_routes import router as _site_chat_router  # noqa: E402
+app.include_router(_site_chat_router)  # /chat/start, /chat/answer, /api/chats
+# The storefront chat widget: storefront pages only, and only once migration 038 is applied.
+# This global never reads the DB.
+from automation.web.site_chat_routes import widget_on as _site_chat_widget_on  # noqa: E402
+templates.env.globals["site_chat_on"] = _site_chat_widget_on
 
 # "auth once" (BLACKWHOLE-14): gate /admin + /api/* behind a 365-day signed
 # session cookie once ADMIN_PASSWORD is set (no-op otherwise). The public
@@ -4828,6 +4835,11 @@ async def _start_alerts_loop() -> None:
             await asyncio.to_thread(db.get_pool)
         except Exception as e:  # never block startup on the pool
             print(f"[db] pool pre-warm skipped: {e!r}")
+        # Storefront chat: learn once whether migration 038 is applied (templates read the cached answer).
+        try:
+            await asyncio.to_thread(site_chat_store.schema_ready)
+        except Exception as e:
+            print(f"[site-chat] schema check skipped: {e!r}")
     # Pre-warm pgeocode: constructing Nominatim("us") downloads the GeoNames US
     # dataset to ~/.cache/pgeocode the first time, which is seconds of blocking
     # work no map request should pay for. Fire-and-forget, NEVER awaited: the app
@@ -5005,6 +5017,8 @@ def inv_update(lot_id: str, payload: dict):
         # columns don't exist. Say which command adds them instead of a bare 500.
         if type(e).__name__ == "UndefinedColumn" and (set(payload) & inventory.CHAIR_FIELDS):
             raise HTTPException(409, freight_log.MIGRATION_HINT)
+        if type(e).__name__ == "UndefinedColumn" and "pickup_address" in payload:
+            raise HTTPException(409, "Apply scripts/sql/038_chat_sessions.sql, then restart the web process.")
         raise
     if not row:
         raise HTTPException(404, "not found")
