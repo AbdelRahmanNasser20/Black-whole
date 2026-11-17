@@ -136,6 +136,12 @@ templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
+# Small photo copies for phones (SITE-SPEED): `sized(url, 320|800)` / `srcset(url)`
+# return the full URL / "" for any photo without copies, so a template never
+# builds a URL that cannot exist. Precedence lives in lot_images.
+templates.env.globals["sized"] = lot_images.sized
+templates.env.globals["srcset"] = lot_images.srcset
+templates.env.globals["photo_origin"] = lot_images.origin
 # Vector basemap for the public MapLibre maps (static/ui/glmap.js). Same default as the CRM map.
 templates.env.globals["map_style_url"] = (
     os.getenv("PUBLIC_MAP_STYLE_URL", "").strip() or "https://tiles.openfreemap.org/styles/positron")
@@ -943,9 +949,10 @@ def _decorate(row: dict) -> dict:
     return row
 
 
-@app.get("/listings", response_class=HTMLResponse)
-def public_listings(request: Request):
-    visits.track(request)
+@readcache.cached(ttl=60)
+def _listings_data() -> dict:
+    """Everything `/listings` shows. Memoised like `_landing_data`: two DB
+    reads (~500 ms from the Oregon web service) become one per minute."""
     items = [_decorate(r) for r in inventory.list_public()]
     # Sold lots are shown too (BLACKWHOLE-29) — a buyer who sees 4,000 chairs
     # already moved trusts the 200 on the floor. They render in their own
@@ -954,11 +961,16 @@ def public_listings(request: Request):
     cities = sorted({label for r in items for label in r["location_labels"]})
     chair_types = sorted({(r.get("chair_type") or "").strip()
                           for r in items if r.get("chair_type")})
+    return {"items": items, "sold_items": sold_items,
+            "cities": cities, "chair_types": chair_types,
+            "itemlist_jsonld": _itemlist_jsonld(items)}
+
+
+@app.get("/listings", response_class=HTMLResponse)
+def public_listings(request: Request):
+    visits.track(request)  # outside the memo: every view counts
     return templates.TemplateResponse(
-        request, "listings.html",
-        _public_ctx({"items": items, "sold_items": sold_items,
-                     "cities": cities, "chair_types": chair_types,
-                     "itemlist_jsonld": _itemlist_jsonld(items)}),
+        request, "listings.html", _public_ctx(dict(_listings_data())),
     )
 
 
@@ -987,19 +999,40 @@ def public_listing_detail(request: Request, lot_id: str):
     that has a slug 301s to the slug URL (query string kept, so feed UTM tags
     survive) — every Facebook post, feed row and short link ever sent keeps
     resolving."""
-    row = inventory.get_public(lot_id)
-    if not row or row.get("status") in ("hidden",):
+    try:
+        data = _detail_data(lot_id)
+    except _LotNotFound:
         visits.track(request)
         raise HTTPException(404, "listing not found")
-    if row.get("slug") and lot_id != row["slug"]:
+    if data.get("redirect"):
         # Not tracked: the slug page that follows is the real view, and one
         # click must not count as two lots.
-        target = lot_urls.public_path(row)
+        target = data["redirect"]
         if request.url.query:
             target += f"?{request.url.query}"
         return RedirectResponse(target, status_code=301)
+    visits.track(request, lot_id=data["lot_id"])  # outside the memo: every view counts
+    return templates.TemplateResponse(
+        request, "listing_detail.html", _public_ctx(dict(data["ctx"])),
+    )
+
+
+class _LotNotFound(Exception):
+    """Raised (never returned) so readcache does not keep one memo entry per
+    unknown URL a crawler tries."""
+
+
+@readcache.cached(ttl=60)
+def _detail_data(lot_id: str) -> dict:
+    """The detail page's row + derived context, memoised 60 s per `lot_id`
+    (slug or id). `_LotNotFound` = 404 (not memoised); `redirect` = 301 to the
+    slug URL. A cron or laptop write shows here within a minute, like `/`."""
+    row = inventory.get_public(lot_id)
+    if not row or row.get("status") in ("hidden",):
+        raise _LotNotFound(lot_id)
+    if row.get("slug") and lot_id != row["slug"]:
+        return {"redirect": lot_urls.public_path(row)}
     lot_id = str(row["lot_id"])
-    visits.track(request, lot_id=lot_id)
     _decorate(row)
     hero = _hero_src(row)
     images = _gallery_srcs(row)
@@ -1008,9 +1041,7 @@ def public_listing_detail(request: Request, lot_id: str):
     except Exception:  # noqa: BLE001 — the page must render without the map
         log.exception("nearby lots failed for %s", lot_id)
         near = {"origin": None, "items": []}
-    return templates.TemplateResponse(
-        request, "listing_detail.html",
-        _public_ctx({
+    return {"lot_id": lot_id, "ctx": {
             "item": row,
             "hero": hero,
             "images": images,
@@ -1028,8 +1059,7 @@ def public_listing_detail(request: Request, lot_id: str):
             "robots_noindex": not _indexable(row, hero, images),
             "canonical_url": _canonical_twin(row),
             **_detail_seo(row, hero, images),
-        }),
-    )
+    }}
 
 
 def _city_crumb(row: dict) -> tuple[str, str] | None:

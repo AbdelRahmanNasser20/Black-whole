@@ -1,4 +1,5 @@
 {% extends "_public_base.html" %}
+{% from "_photo.html" import lot_photo %}{% set CARD_SIZES = "(max-width: 700px) 100vw, 400px" %}
 {#- templates/404.html — rendered by app.py::_http_exception_handler for any storefront URL that
     doesn't exist (old Facebook post, feed link to a pulled lot, typo). Context: `lots` = up to six
     live lots from inventory.list_public() (may be empty when the DB is down). Always noindex. -#}
@@ -34,7 +35,7 @@
     <a class="lot-card" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+          {{ lot_photo(item.hero_src, item.title, CARD_SIZES) }}
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}

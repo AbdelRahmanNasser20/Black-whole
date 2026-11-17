@@ -16,3 +16,13 @@ def _no_real_alert_list_writes(monkeypatch):
     monkeypatch.setattr(inventory, "subscribe_from_inquiry",
                         lambda row, attribution=None: calls.append(row))
     return calls
+
+
+@pytest.fixture(autouse=True)
+def _fresh_read_memo():
+    """Public pages (`/`, `/listings`, a lot page) are memoised 60 s in
+    `readcache`; a memo from one test must never answer the next one."""
+    from automation.web import readcache
+    readcache.invalidate_all()
+    yield
+    readcache.invalidate_all()

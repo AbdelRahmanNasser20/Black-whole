@@ -82,6 +82,8 @@ class Converter:
                                                    path=path, data=blob, content_type=ct):
             self.stats["failed"] += 1
             return url
+        if self.apply:  # small copies for phones, from the disguised bytes (SITE-SPEED)
+            r2_images.put_variants(self.s3, bucket=self.cfg["bucket"], path=path, data=blob)
         if hero and self.apply:  # watermark-free twin for the FB catalog feed
             twin = image_disguise.disguise(source, key=li.key_base(lot_key), watermark=False)
             if twin:

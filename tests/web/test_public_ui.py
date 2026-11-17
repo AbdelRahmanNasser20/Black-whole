@@ -306,6 +306,14 @@ def _lot_with_photo(n):
             "hero_image_url": f"https://cdn.example.com/p/{n}.jpg", "image_urls": []}
 
 
+def _hero_more(hero: str) -> list:
+    """The photos site.js adds after `load` ([src, srcset, full] each)."""
+    import html as _html
+    import json
+    raw = hero.split('data-shots="', 1)[1].split('"', 1)[0]
+    return json.loads(_html.unescape(raw))
+
+
 def test_landing_hero_has_no_form_and_shop_goes_to_the_map(landing):
     html = _client().get("/").text
     hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
@@ -321,7 +329,8 @@ def test_landing_hero_shows_moving_lot_photos_when_lots_have_them(monkeypatch, l
     readcache.invalidate_all()
     hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
     assert "hero--media" in html
-    assert hero.count('class="hero-shot"') == 6          # 4 lot photos (capped) + 2 stock rooms
+    assert hero.count('class="hero-shot"') == 1          # one photo in the HTML (the LCP)…
+    assert len(_hero_more(hero)) == 5                    # …the rest wait for `load`: 4 lots + 2 stock rooms
     assert "https://cdn.example.com/p/0.jpg" in hero
     assert "animation-duration: 36s" in hero             # 6 s per photo
 
@@ -349,6 +358,135 @@ def test_landing_hero_plays_the_picked_photos_in_the_operators_order(monkeypatch
     hero = html.split('<section class="hero', 1)[1].split("</section>", 1)[0]
     order = [hero.index(u) for u in ("boise/0.jpg", "boise/2.jpg", "blue/0.jpg", "boise/1.jpg")]
     assert order == sorted(order)                        # hall, tables, blue, classroom
-    assert hero.count('class="hero-shot"') == 6
+    assert hero.count('class="hero-shot"') == 1
+    assert [full for _src, _set, full in _hero_more(hero)][:3] == [
+        "https://cdn.example.com/p/boise/2.jpg", "https://cdn.example.com/p/blue/0.jpg",
+        "https://cdn.example.com/p/boise/1.jpg"]
     assert hero.index("boise/1.jpg") < hero.index("hero/banquet-room.jpg")   # stock rooms play last
     assert "cdn.example.com/p/0.jpg" not in hero         # picks win over the featured lots
+
+
+# ──────────────── SITE-SPEED: small photos, one hero, fonts, memo ───────────
+
+R2 = "https://pub-x.r2.dev/p/tok"
+
+
+@pytest.fixture
+def disguised_lot(monkeypatch, lot):
+    lot.update(hero_image_url=f"{R2}/h.jpg?v=aa",
+               image_urls=[f"{R2}/a.jpg?v=bb", f"{R2}/b.jpg?v=cc"])
+    return lot
+
+
+def test_detail_main_photo_is_a_small_copy_with_srcset_and_high_priority(disguised_lot):
+    html = _client().get("/listings/31225").text
+    main = html.split('id="gal-main-img"', 1)[1].split(">", 1)[0]
+    assert f'src="{R2}/h.w800.jpg?v=aa"' in main
+    assert f'srcset="{R2}/h.w320.jpg?v=aa 320w, {R2}/h.w800.jpg?v=aa 800w"' in main
+    assert 'fetchpriority="high"' in main
+    assert 'loading="lazy"' not in main
+    assert f'data-full="{R2}/h.jpg?v=aa"' in main            # onerror falls back to the full photo
+    assert '<link rel="preconnect" href="https://pub-x.r2.dev">' in html
+
+
+def test_detail_thumbnails_use_the_320_copy_and_click_to_the_full_photo(disguised_lot):
+    html = _client().get("/listings/31225").text
+    thumbs = html.split('class="gal-thumbs"', 1)[1].split("</div>", 1)[0]
+    assert f'data-src="{R2}/a.jpg?v=bb"' in thumbs            # site.js swaps the full photo in on click
+    assert f'src="{R2}/a.w320.jpg?v=bb"' in thumbs
+    assert 'fetchpriority="low"' in thumbs
+    assert f'<img src="{R2}/a.jpg' not in thumbs
+
+
+def test_detail_photo_without_copies_renders_unchanged(lot):
+    html = _client().get("/listings/31225").text
+    main = html.split('id="gal-main-img"', 1)[1].split(">", 1)[0]
+    assert 'src="https://cdn.example/31225.jpg"' in main      # legacy key: full URL, no srcset
+    assert "srcset" not in main and "onerror" not in main
+
+
+def test_listings_cards_stay_lazy_and_use_copies(monkeypatch):
+    # The /listings LCP is the page text. Eager card photos fought site.css for
+    # the slow link and pushed first paint from 2.8 s to 4.6 s (weak phone lab).
+    rows = [dict(make_lot(lot_id=f"L{n}", hero_image_url=f"{R2}/{n}.jpg", image_urls=[]))
+            for n in range(4)]
+    monkeypatch.setattr(inventory, "list_public", lambda: [dict(r) for r in rows])
+    monkeypatch.setattr(inventory, "list_sold_showcase", lambda: [])
+    html = _client().get("/listings").text
+    grid = html.split('id="lot-grid"', 1)[1]
+    imgs = [chunk.split(">", 1)[0] for chunk in grid.split("<img")[1:5]]
+    assert all('loading="lazy"' in i and 'fetchpriority' not in i for i in imgs)
+    assert f'src="{R2}/0.w800.jpg"' in imgs[0] and 'srcset=' in imgs[0]
+
+
+def test_public_pages_self_host_fonts_admin_keeps_google(landing, lot):
+    for path in ("/", "/listings/31225"):
+        html = _client().get(path).text
+        assert "fonts.googleapis.com" not in html
+        assert 'href="/static/site/fonts/archivo-black.woff2" as="font"' in html
+    css = _client().get("/static/site/site.css").text
+    assert "font-display: swap" in css and "size-adjust" in css
+    for name in ("archivo-black", "fraunces", "jetbrains-mono"):
+        assert _client().get(f"/static/site/fonts/{name}.woff2").status_code == 200
+    from pathlib import Path
+    base = (Path(app_module.__file__).parent / "templates" / "_base.html").read_text()
+    assert "fonts.googleapis.com" in base                   # admin shell unchanged
+
+
+def test_listings_and_detail_are_memoised_but_every_view_is_tracked(monkeypatch, lot):
+    reads = {"list": 0, "get": 0}
+    tracked = []
+    monkeypatch.setattr(app_module.visits, "track",
+                        lambda request, lot_id=None: tracked.append(lot_id))
+
+    def _sold():  # only /listings reads the sold showcase
+        reads["list"] += 1
+        return []
+    monkeypatch.setattr(inventory, "list_public", lambda: [make_lot()])
+    monkeypatch.setattr(inventory, "list_sold_showcase", _sold)
+    real_get = inventory.get
+
+    def _get(lot_id):
+        reads["get"] += 1
+        return real_get(lot_id)
+    monkeypatch.setattr(inventory, "get", _get)
+
+    for _ in range(2):
+        assert _client().get("/listings").status_code == 200
+    assert reads["list"] == 1                               # one DB read per minute
+    for _ in range(2):
+        assert _client().get("/listings/31225").status_code == 200
+    assert reads["get"] == 1
+    assert tracked == [None, None, "31225", "31225"]       # visits.track runs outside the memo
+    reads["list"] = 1                                       # the lot page may read it too (nearby, city crumb)
+
+    from automation.web import readcache
+    readcache.invalidate_all()                              # what an API write does
+    _client().get("/listings")
+    assert reads["list"] == 2
+
+
+def test_detail_404_is_not_cached_as_a_page(monkeypatch, lot):
+    tracked = []
+    monkeypatch.setattr(app_module.visits, "track",
+                        lambda request, lot_id=None: tracked.append(lot_id))
+    from automation.web import readcache
+    before = readcache.stats()["entries"]
+    for n in range(3):
+        assert _client().get(f"/listings/nope-{n}").status_code == 404
+    assert tracked == [None, None, None]
+    assert readcache.stats()["entries"] == before          # an unknown URL leaves no memo entry
+
+
+def test_hero_srcset_has_no_full_size_candidate(monkeypatch, landing):
+    # A 390 px DPR-3 phone wants ~1170 px; with the full photo listed it would
+    # skip the 800 px copy. The hero sits under a dark gradient — 800 is enough.
+    galleries = {"31225-atl": [f"{R2}/boise{n}.jpg?v=1" for n in range(3)],
+                 "blue-silver-frame-3000": [f"{R2}/blue0.jpg?v=2"]}
+    monkeypatch.setattr(inventory, "get", lambda lot_id: {
+        "lot_id": lot_id, "hero_image_url": galleries[lot_id][0], "image_urls": galleries[lot_id]})
+    hero = _client().get("/").text.split('<section class="hero', 1)[1].split("</section>", 1)[0]
+    lead = hero.split('<img class="hero-shot"', 1)[1].split(">", 1)[0]
+    assert f'srcset="{R2}/boise0.w320.jpg?v=1 320w, {R2}/boise0.w800.jpg?v=1 800w"' in lead
+    assert "1560w" not in hero
+    assert all(full not in srcset for _src, srcset, full in _hero_more(hero))   # copies only

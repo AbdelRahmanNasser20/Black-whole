@@ -21,8 +21,12 @@ from typing import Any, Callable
 
 DEFAULT_TTL = float(os.getenv("ADMIN_READ_CACHE_TTL", "15"))
 
+# Hard cap on memo entries. Public lot pages key on the URL, so a crawler
+# walking many lots must not grow the dict without bound.
+MAX_ENTRIES = int(os.getenv("READ_CACHE_MAX_ENTRIES", "1000"))
+
 _lock = threading.Lock()
-_store: dict[tuple, tuple[float, Any]] = {}
+_store: dict[tuple, tuple[float, Any, float]] = {}  # key -> (stored_at, value, ttl)
 _stats = {"hits": 0, "misses": 0, "invalidations": 0}
 
 
@@ -32,6 +36,16 @@ def _freeze(v: Any) -> Any:
         return v
     except TypeError:
         return repr(v)
+
+
+def _evict(now: float) -> None:
+    """Drop expired entries; if still over the cap, drop the oldest. Caller
+    holds `_lock`."""
+    for k in [k for k, (at, _v, ttl) in _store.items() if now - at >= ttl]:
+        del _store[k]
+    if len(_store) > MAX_ENTRIES:
+        for k, _ in sorted(_store.items(), key=lambda kv: kv[1][0])[: len(_store) - MAX_ENTRIES]:
+            del _store[k]
 
 
 def invalidate_all() -> None:
@@ -72,7 +86,10 @@ def cached(ttl: float | None = None) -> Callable:
                 _stats["misses"] += 1
             val = fn(*args, **kwargs)
             with _lock:
-                _store[key] = (time.monotonic(), val)
+                stamp = time.monotonic()
+                _store[key] = (stamp, val, ttl_s)
+                if len(_store) > MAX_ENTRIES:
+                    _evict(stamp)
             return val
 
         return wrapper

@@ -99,3 +99,14 @@ FB Marketplace — re-upload with `scripts/fb_replace_photos.py` (writes to FB).
 **Live photos.** `scripts/disguise_live_images.py` (dry-run default, `--apply`,
 `--lot`, `--rollback <log>`). Re-publishes inventory + `auction_favorites.clean_*`
 photos, keeps old objects, logs old→new under `~/.listing_automation/logs/`.
+
+**Phone-size copies (SITE-SPEED, 2026-11-16).** Each disguised `p/…/<name>.jpg`
+also has `<name>.w320.jpg` and `<name>.w800.jpg` — a pure downscale of the
+disguised (public) bytes, never of an original (`listing_images.web_variants`,
+written by `r2_images.put_variants` from `upload_lot_images` and
+`disguise_live_images.py`). No DB column: templates derive the URL with
+`lot_images.sized(url, 320|800)` / `srcset(url)` (Jinja globals `sized`, `srcset`,
+macro `_photo.html::lot_photo`), which return the full URL / "" for anything
+without copies; `onerror` swaps to `data-full` if a copy is missing on R2.
+Old photos: `scripts/backfill_image_variants.py` (dry-run default, `--apply`,
+`--lot`, `--force`). Kill switch: `LOT_IMAGE_VARIANTS=0`.

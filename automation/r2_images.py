@@ -144,6 +144,26 @@ def put_private_object(s3, *, bucket: str, path: str, data: bytes,
     return True
 
 
+def put_variants(s3, *, bucket: str, path: str, data: bytes) -> int:
+    """Upload the small copies of one disguised `p/…/*.jpg` object (SITE-SPEED).
+
+    `data` = the exact bytes just stored at `path` (already disguised). Best
+    effort: returns how many copies were stored; a failure never stops the
+    upload — the site falls back to the full photo.
+    """
+    from automation import lot_images
+    from automation import listing_images as li
+
+    if not lot_images.has_variants(f"https://x/{path.lstrip('/')}"):
+        return 0
+    n = 0
+    for width, small in li.web_variants(data):
+        if put_object(s3, bucket=bucket, path=lot_images.variant_path(path, width),
+                      data=small, content_type="image/jpeg"):
+            n += 1
+    return n
+
+
 def upload_lot_images(lot_id, paths) -> dict | None:
     """R2 twin of `listing_images.upload_lot_images` — same keys, same return.
 
@@ -198,11 +218,15 @@ def upload_lot_images(lot_id, paths) -> dict | None:
                     else li.gallery_object_path(lot_id, i, ext=ext))
         if gal_path and put_object(s3, bucket=bucket, path=gal_path, data=data, content_type=ct):
             gallery.append(public_url(gal_path, public_base=public_base, version=ver))
+            if opaque:
+                put_variants(s3, bucket=bucket, path=gal_path, data=data)
 
         if hero_url is None:  # first photo that made it through is the cover
             hero_path = li.opaque_hero_path(lot_id) if opaque else li.hero_object_path(lot_id, ext=ext)
             if hero_path and put_object(s3, bucket=bucket, path=hero_path, data=data, content_type=ct):
                 hero_url = public_url(hero_path, public_base=public_base, version=ver)
+                if opaque:
+                    put_variants(s3, bucket=bucket, path=hero_path, data=data)
                 if opaque:
                     twin = image_disguise.disguise(source, key=base_key, watermark=False)
                     if twin:

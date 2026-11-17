@@ -472,16 +472,48 @@ function bindCaptureForm(form) {
   });
 })();
 
+// ─── home hero photos ───────────────────────────────────────────────────
+// Only the first photo is in the HTML (it is the LCP). The rest wait for
+// `load`, so they never compete with it on a slow phone; then the 6 s
+// cross-fade starts (keyframes in landing.html).
+(function initHeroShots() {
+  const lead = document.querySelector('.hero-shot[data-shots]');
+  if (!lead) return;
+  const media = lead.parentNode;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  const start = () => {
+    let shots = [];
+    try { shots = JSON.parse(lead.dataset.shots || '[]'); } catch (e) { return; }
+    shots.forEach(([src, set, full], i) => {
+      const img = document.createElement('img');
+      img.className = 'hero-shot';
+      img.alt = '';
+      img.decoding = 'async';
+      img.onerror = () => { img.onerror = null; img.removeAttribute('srcset'); img.src = full; };
+      if (set) { img.sizes = '100vw'; img.srcset = set; }
+      img.src = src;
+      img.style.animationDelay = `${(i + 1) * 6}s`;
+      media.appendChild(img);
+    });
+    media.classList.add('is-playing');
+  };
+  if (document.readyState === 'complete') start();
+  else window.addEventListener('load', start, {once: true});
+})();
+
 // ─── detail page gallery ────────────────────────────────────────────────
 (function initGallery() {
   const main = document.getElementById('gal-main-img');
   if (!main) return;
   const thumbs = document.querySelectorAll('.gal-thumb');
   if (!thumbs.length) return;
-  // Mark the one matching the main src as active
+  // Mark the one matching the main photo as active (data-full = the full URL
+  // when the main <img> shows a small copy).
+  const mainFull = main.dataset.full || main.getAttribute('src');
   thumbs.forEach(t => {
-    if (t.dataset.src === main.getAttribute('src')) t.classList.add('is-active');
+    if (t.dataset.src === mainFull) t.classList.add('is-active');
     t.addEventListener('click', () => {
+      main.removeAttribute('srcset');  // else the srcset copy wins over the new src
       main.src = t.dataset.src;
       thumbs.forEach(x => x.classList.remove('is-active'));
       t.classList.add('is-active');

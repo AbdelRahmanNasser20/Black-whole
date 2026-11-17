@@ -1,4 +1,5 @@
 {% extends "_public_base.html" %}
+{% from "_photo.html" import lot_photo %}{% set CARD_SIZES = "(max-width: 700px) 100vw, 400px" %}
 {#- templates/city.html — /chairs/{city-slug} (SEO city pages, 2026-10-07).
     Context (app.py::public_city): page = automation/web/city_pages.page(slug): label, city, state, live[],
     sold[], nearby[], chairs, moved, min_price, intro, faq, faq_jsonld, title, description, indexable.
@@ -43,7 +44,7 @@
     <a class="lot-card" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+          {{ lot_photo(item.hero_src, item.title, CARD_SIZES) }}
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}
@@ -123,7 +124,7 @@
     <a class="lot-card lot-card--sold" href="{{ lot_url(item) }}">
       <div class="lot-img">
         {% if item.hero_src %}
-          <img src="{{ item.hero_src }}" alt="{{ item.title }}" loading="lazy" width="800" height="600">
+          {{ lot_photo(item.hero_src, item.title, CARD_SIZES) }}
         {% else %}
           <div class="lot-img-fallback">◉</div>
         {% endif %}

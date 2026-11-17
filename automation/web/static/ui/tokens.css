@@ -44,7 +44,7 @@
   --text-lede: #2b2924;  --text-soft: #3a3731;  --text-prose: #2a2822;
   /* footer on ink: muted copy + hairline */
   --foot-muted: #aaa299;  --foot-rule: #333;
-  --display: "Archivo Black", "Helvetica Neue", Arial, sans-serif;
-  --sans: "Fraunces", Georgia, "Times New Roman", serif;
+  --display: "Archivo Black", "Archivo Black Fallback", "Archivo Black Fallback 2", "Helvetica Neue", Arial, sans-serif;
+  --sans: "Fraunces", "Fraunces Fallback", Georgia, "Times New Roman", serif;
   --shadow-overlay: 0 14px 30px -22px rgba(0,0,0,0.6);
 }
