@@ -2237,6 +2237,22 @@ def public_platform(request: Request):
     )
 
 
+@app.get("/platform/how-it-works", response_class=HTMLResponse)
+def public_platform_how(request: Request):
+    """The pipeline behind the platform, in plain words (templates/platform_how.html).
+    Same no-DB stance as /platform: numbers come from platform_api.stats() (memo,
+    never blocks) and the source lists; nothing else is read. Indexable."""
+    return templates.TemplateResponse(
+        request, "platform_how.html",
+        _public_ctx({
+            "platform_sources": list(_PLATFORM_SOURCE_NAMES.values()),
+            "stats": platform_api.stats(),
+            "sources_tracked": len(platform_api.SITES),
+            "sources_planned": len(platform_api.PLANNED_SITES),
+        }),
+    )
+
+
 # Auction sites the recorder knows, in display order. The page renders these
 # names with no DB read; /platform/api/sources adds the live numbers.
 _PLATFORM_SOURCE_NAMES = {

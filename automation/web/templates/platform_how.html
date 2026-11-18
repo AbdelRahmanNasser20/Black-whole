@@ -1,0 +1,138 @@
+{#- templates/platform_how.html — "How it works": the pipeline behind the liquidator
+    platform, in plain words, for a liquidator deciding to trust it and for anyone
+    reading the operator's résumé. Same dark shell as /platform (platform.css).
+    Every number is runtime (platform_api.stats + the source lists); none is typed in.
+    Copy stays honest: what the AI does today, what is not built, what is never shown. -#}
+{% extends "_public_base.html" %}
+{% block title %}How it works | {{ platform_brand | default("Black Whole") }}{% endblock %}
+{% block meta_description %}How the surplus-auction feed is built: recorders on every tracked site, one schema, a Flip Score read from confirmed sales, and a public policy that keeps photos at the source.{% endblock %}
+{% block body_class %}page-platform{% endblock %}
+{% block head_extra %}
+  <link rel="canonical" href="{{ base_url }}/platform/how-it-works">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/site/platform.css?v={{ asset_v }}">
+  <style>
+    .pf-how { padding: 40px 24px 0; }
+    .pf-how > * { max-width: 1200px; margin-left: auto; margin-right: auto; }
+    .pf-how-lede { max-width: 720px; font-size: 19px; line-height: 1.5; color: var(--muted); }
+    .pf-steps { counter-reset: step; display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); margin: 32px auto 0; padding: 0; list-style: none; }
+    .pf-step { border: 1px solid var(--border-strong); border-radius: 10px; padding: 20px 20px 18px; background: var(--surface); }
+    .pf-step::before { counter-increment: step; content: counter(step, decimal-leading-zero); font-family: var(--mono); font-size: 13px; color: var(--accent); }
+    .pf-step h3 { margin: 6px 0 8px; font-size: 20px; font-family: var(--display); font-weight: 400; }
+    .pf-step p { margin: 0; color: var(--muted); line-height: 1.5; }
+    .pf-two { display: grid; gap: 28px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 48px; }
+    .pf-list { margin: 10px 0 0; padding-left: 18px; color: var(--muted); line-height: 1.6; }
+    .pf-list li + li { margin-top: 6px; }
+    .pf-stack { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 0; padding: 0; list-style: none; }
+    .pf-stack li { font-family: var(--mono); font-size: 13px; padding: 5px 10px; border: 1px solid var(--border-strong); border-radius: 6px; }
+  </style>
+{% endblock %}
+
+{% block content %}
+<div class="pf-page" data-theme="dark">
+  <section class="pf-hero" id="top">
+    <nav class="pf-nav" aria-label="Page">
+      <a class="pf-nav-brand" href="/platform">◉ {{ platform_brand | default("Black Whole") }} <span class="pf-nav-sub">platform</span></a>
+      <span class="pf-nav-links">
+        <a href="/platform#app">Live demo</a>
+        <a href="/deals/sold">Sold prices</a>
+        <a href="/platform/how-it-works" aria-current="page">How it works</a>
+        <a href="/platform/signup" class="pf-nav-in">Sign in</a>
+      </span>
+    </nav>
+    <div class="pf-hero-grid">
+      <div class="pf-hero-say">
+        <h1 class="pf-headline">How it works.</h1>
+        <p class="pf-hero-sub">A recorder watches every tracked auction site. Each lot lands in one schema.
+          A confirmed sale, not a guess, sets the price you should stop at.</p>
+      </div>
+      <dl class="pf-tape" aria-label="Live numbers from the database">
+        {% if stats %}
+        <div class="pf-fact">
+          <dt class="pf-fact-n">{{ "{:,}".format(stats.sold_outcomes) }}</dt>
+          <dd class="pf-fact-l">closed auctions with the final price on record</dd>
+        </div>
+        <div class="pf-fact">
+          <dt class="pf-fact-n">{{ "{:,}".format(stats.open_now) }}</dt>
+          <dd class="pf-fact-l">lots open on the feed right now</dd>
+        </div>
+        {% endif %}
+        <div class="pf-fact">
+          <dt class="pf-fact-n">{{ sources_tracked }}<span class="pf-fact-of"> of {{ sources_tracked + sources_planned }}</span></dt>
+          <dd class="pf-fact-l">auction sources tracked today</dd>
+        </div>
+      </dl>
+    </div>
+  </section>
+
+  <section class="pf-how" aria-labelledby="pf-how-title">
+    <h2 class="pf-h2" id="pf-how-title">The pipeline</h2>
+    <p class="pf-how-lede">Five steps, every half hour, for {{ platform_sources | join(", ") }}.</p>
+    <ol class="pf-steps">
+      <li class="pf-step">
+        <h3>Record</h3>
+        <p>One recorder per site reads the public listing pages or the site's own JSON. A site that
+          blocks a region is read through a proxy; a site that changes shape trips a breaker and
+          stops, so a broken read is never mistaken for an empty day.</p>
+      </li>
+      <li class="pf-step">
+        <h3>Normalise</h3>
+        <p>Every lot becomes one row: title, category, current bid, bid count, close time in UTC,
+          city and state, the source link. A lot that states a quantity gets a price per unit.</p>
+      </li>
+      <li class="pf-step">
+        <h3>Judge</h3>
+        <p>A language model sorts each lot into a category. Comparable confirmed sales set the
+          Flip Score and a recommended max bid. No comparable sale, no number — the lot says so.</p>
+      </li>
+      <li class="pf-step">
+        <h3>Publish</h3>
+        <p>The public feed passes one policy: the operator's own picks and tracked lots stay out,
+          photos stay on the source site, and the anonymous feed has a depth cap and a rate limit.</p>
+      </li>
+      <li class="pf-step">
+        <h3>Alert</h3>
+        <p>A saved search runs on a schedule and sends only the lots that are new since the last
+          look. Saved searches work with no account; alerts need a sign-in.</p>
+      </li>
+    </ol>
+
+    <div class="pf-two">
+      <div>
+        <h2 class="pf-h2">What the AI does today</h2>
+        <ul class="pf-list">
+          <li>Sorts lots into categories, with a confidence that gates the sort.</li>
+          <li>Counts the units in a lot from its title and photos; a low-confidence count is shown as unverified and never overrides the title.</li>
+          <li>Judges a lot against confirmed sales of comparable lots.</li>
+        </ul>
+        <h2 class="pf-h2" style="margin-top:32px">What it does not do yet</h2>
+        <ul class="pf-list">
+          <li>Plain-English search over the feed.</li>
+          <li>Sold prices for every source: confirmed closes come from the sites that publish them.</li>
+          <li>A price for a lot with no comparable sale. It stays blank.</li>
+        </ul>
+      </div>
+      <div>
+        <h2 class="pf-h2">The stack</h2>
+        <ul class="pf-stack" aria-label="Technology">
+          <li>Python · FastAPI</li><li>PostgreSQL (Supabase)</li><li>Playwright recorders</li>
+          <li>Render web + crons</li><li>Cloudflare CDN · R2</li><li>MapLibre GL</li><li>pytest</li>
+        </ul>
+        <h2 class="pf-h2" style="margin-top:32px">Rules it keeps</h2>
+        <ul class="pf-list">
+          <li>Not affiliated with any auction site or agency. Every lot links to its source.</li>
+          <li>Photos are never copied or stored; the page shows the source's own image.</li>
+          <li>No operator pick, no stored address, no buyer's data ever reaches the public feed.</li>
+          <li>Every public read is rate-limited and cached at the edge, so one visitor cannot pull the whole feed.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="pf-close" aria-label="Get access">
+    <p class="pf-close-say">See it on real lots.</p>
+    <a class="pf-cta pf-cta--big" href="/platform#app">Open the live demo</a>
+    <p class="pf-close-note">Built and run by the liquidator behind Black Whole — it prices his bids too.</p>
+  </section>
+</div>
+{% endblock %}
