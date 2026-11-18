@@ -17,7 +17,8 @@ def _no_auth(monkeypatch):
 
 def test_deals_page_shell():
     html = TestClient(app).get("/deals").text
-    assert "<title>Surplus Radar" in html
+    from automation.config import PLATFORM_BRAND
+    assert f"<title>{PLATFORM_BRAND} — live government surplus lots" in html
     # §6 "Produces" contract — D's map.js queries these ids
     for el_id in ("feed-q", "feed-chips", "feed-controls", "feed-sort", "feed-state", "feed-view-toggle",
                   "feed-count", "feed-filters", "feed-grid", "feed-more", "feed-rail", "feed-map", "feed-map-panel"):

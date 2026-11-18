@@ -24,7 +24,7 @@
                    Live, Paused or Planned — from /platform/api/sites (fallback /platform/api/sources).
                    A planned site is never shown as scraped. -#}
 {% extends "_public_base.html" %}
-{% block title %}Auction intelligence for liquidators | Black Whole{% endblock %}
+{% block title %}Auction intelligence for liquidators | {{ platform_brand }}{% endblock %}
 {% block meta_description %}One live feed over GovDeals, AllSurplus, GSA Auctions and more, with a Flip Score and a recommended max bid on every lot. Free early access for liquidators.{% endblock %}
 {% block body_class %}page-platform{% endblock %}
 {% block head_extra %}
@@ -43,7 +43,7 @@
       <img class="pf-hero-shot" src="/static/site/platform/hero/feed.webp?v={{ asset_v }}" alt="" width="1428" height="840" decoding="async">
     </div>
     <nav class="pf-nav" aria-label="Page">
-      <a class="pf-nav-brand" href="/">◉ Black Whole <span class="pf-nav-sub">platform</span></a>
+      <a class="pf-nav-brand" href="/">◉ {{ platform_brand }} <span class="pf-nav-sub">platform</span></a>
       <span class="pf-nav-links">
         <a href="#app">Live demo</a>
         <a href="#product">What you get</a>
@@ -90,7 +90,7 @@
     </header>
     <div class="pf-win" id="pf-win">
       <aside class="pf-side">
-        <div class="pf-side-brand">◉ Black Whole</div>
+        <div class="pf-side-brand">◉ {{ platform_brand }}</div>
         <div class="pf-side-nav" role="tablist" aria-label="Sections" aria-orientation="vertical">
           <button class="pf-side-item is-active" type="button" role="tab" id="pf-tab-auctions"
                   aria-controls="pf-pane-auctions" aria-selected="true" data-tab="auctions">

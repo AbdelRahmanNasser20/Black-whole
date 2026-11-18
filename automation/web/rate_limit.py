@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import time
 
+from . import cloudflare_ips
+
 # Per-IP: generous enough that a buyer comparing several lots and quantities
 # never notices, tight enough that a scraper does.
 FREIGHT_PER_IP_LIMIT = 20
@@ -35,27 +37,28 @@ _HITS: dict[str, tuple[float, int]] = {}
 
 
 def client_ip(request) -> str:
-    """Best guess at the caller's IP.
+    """Best guess at the caller's IP, for rate limiting only (never authorization).
 
     The site sits behind Cloudflare, then Render's proxy, so `request.client`
-    is a load-balancer address and useless as a key. `CF-Connecting-IP` is what
-    Cloudflare stamps and is authoritative *when the request actually came
-    through Cloudflare* — it can be spoofed by anyone hitting the origin
-    directly, which is why this only ever feeds a rate limiter and never an
-    authorization decision.
+    is a load-balancer address. Render appends the IP that connected to it as
+    the LAST entry of `X-Forwarded-For`; that hop cannot be forged by the
+    caller. When that hop is a Cloudflare edge (cloudflare_ips), the request
+    really came through Cloudflare and `CF-Connecting-IP` is the client. When
+    it is anything else, the caller reached the origin directly and may have
+    written `CF-Connecting-IP` itself — so the hop IS the client. A loopback /
+    private / test-client peer (dev box, pytest) still honours the header, so
+    local tests can name an IP.
     """
     headers = getattr(request, "headers", {}) or {}
     cf = (headers.get("cf-connecting-ip") or "").strip()
-    if cf:
-        return cf
-    # X-Forwarded-For is a chain "client, proxy1, proxy2" — the client is first.
-    xff = (headers.get("x-forwarded-for") or "").strip()
-    if xff:
-        first = xff.split(",")[0].strip()
-        if first:
-            return first
+    xff = [p.strip() for p in (headers.get("x-forwarded-for") or "").split(",") if p.strip()]
     client = getattr(request, "client", None)
-    return getattr(client, "host", None) or "unknown"
+    peer = xff[-1] if xff else (getattr(client, "host", None) or "")
+    if cf and (cloudflare_ips.is_cloudflare(peer) or cloudflare_ips.is_local(peer)):
+        return cf
+    if peer:
+        return peer
+    return "unknown"
 
 
 def allow(key: str, *, limit: int, window_s: int = 3600) -> bool:

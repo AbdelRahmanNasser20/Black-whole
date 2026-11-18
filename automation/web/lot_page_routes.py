@@ -15,6 +15,7 @@ import sys
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
+from .. import config
 from . import auth as auth_svc
 from . import deal_lot_urls, deal_sitemap, lot_pages
 
@@ -65,7 +66,7 @@ def deal_lot_page(request: Request, tail: str):
         return RedirectResponse(lot["path"], status_code=301)
     webapp = _app()
     gated = lot_pages.photos_mode() == lot_pages.PHOTOS_SIGNED_IN
-    ctx = lot_pages.view(lot, webapp.PUBLIC_BASE_URL, signed_in=gated and _signed_in(request))
+    ctx = lot_pages.view(lot, config.PLATFORM_BASE_URL, signed_in=gated and _signed_in(request))
     resp = webapp.templates.TemplateResponse(request, "deal_lot.html", ctx)
     resp.headers["Cache-Control"] = "private, no-store" if gated else EDGE_CACHE
     return resp
@@ -73,13 +74,13 @@ def deal_lot_page(request: Request, tail: str):
 
 @router.get("/sitemap-index.xml", include_in_schema=False)
 def sitemap_index():
-    return Response(deal_sitemap.index_xml(_app().PUBLIC_BASE_URL), media_type="application/xml",
+    return Response(deal_sitemap.index_xml(config.PLATFORM_BASE_URL, storefront_url=config.PUBLIC_BASE_URL), media_type="application/xml",
                     headers={"Cache-Control": _sitemap_cache()})
 
 
 @router.get("/sitemaps/deals-{n}.xml", include_in_schema=False)
 def sitemap_deals_child(n: int):
-    xml = deal_sitemap.child_xml(_app().PUBLIC_BASE_URL, n)
+    xml = deal_sitemap.child_xml(config.PLATFORM_BASE_URL, n)
     if xml is None:
         raise HTTPException(404, "no such sitemap")
     return Response(xml, media_type="application/xml", headers={"Cache-Control": _sitemap_cache()})

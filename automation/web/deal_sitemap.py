@@ -142,8 +142,14 @@ def children() -> int:
     return max(1, -(-len(urls()) // CHUNK))
 
 
-def index_xml(base_url: str) -> str:
-    locs = [f"{base_url}/sitemap.xml"] + [f"{base_url}/sitemaps/deals-{n}.xml" for n in range(1, children() + 1)]
+def index_xml(base_url: str, storefront_url: str | None = None) -> str:
+    """`base_url` hosts the lot pages. `storefront_url` is the chair site's own
+    /sitemap.xml; on its own host (same URL, or None) it is listed too. On a
+    separate platform host it is left out: a crawler of that host must never be
+    sent to the chair site, and the index would otherwise list itself."""
+    locs = [f"{base_url}/sitemaps/deals-{n}.xml" for n in range(1, children() + 1)]
+    if storefront_url is None or storefront_url == base_url:
+        locs.insert(0, f"{base_url}/sitemap.xml")
     body = "".join(f"<sitemap><loc>{escape(u)}</loc></sitemap>" for u in locs)
     return ('<?xml version="1.0" encoding="UTF-8"?>'
             f'<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{body}</sitemapindex>')

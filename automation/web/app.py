@@ -52,6 +52,7 @@ from ..config import (
     PUBLIC_ADDRESS_POSTAL,
     PUBLIC_ADDRESS_REGION,
     PUBLIC_ADDRESS_STREET,
+    PLATFORM_BRAND,
     PUBLIC_BASE_URL,
     PUBLIC_CONTACT_EMAIL,
     PUBLIC_CONTACT_PHONE,
@@ -90,6 +91,8 @@ from . import public_deals
 from . import public_sold
 from . import chairs_feed
 from . import rate_limit
+from . import edge_cache
+from . import host_split
 from . import scrape_guard
 from . import public_map
 from . import public_distress
@@ -134,6 +137,8 @@ app = FastAPI(title="listing_automation dashboard")
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
+templates.env.globals["platform_brand"] = PLATFORM_BRAND
+templates.env.globals["platform_base_url"] = app_config.PLATFORM_BASE_URL
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 # Small photo copies for phones (SITE-SPEED): `sized(url, 320|800)` / `srcset(url)`
@@ -170,6 +175,9 @@ app.middleware("http")(auth_svc.session_auth_middleware)
 # Any successful write through the API drops the admin read memo (readcache.py).
 app.middleware("http")(readcache.invalidate_on_write_middleware)
 
+# Outermost: the chair host / platform host split (no-op until PLATFORM_HOST is set).
+app.add_middleware(host_split.HostSplitMiddleware)
+
 
 @app.middleware("http")
 async def _response_headers_middleware(request: Request, call_next):
@@ -180,6 +188,13 @@ async def _response_headers_middleware(request: Request, call_next):
     t0 = time.perf_counter()
     response = await call_next(request)
     response.headers["Server-Timing"] = f"app;dur={(time.perf_counter() - t0) * 1000:.1f}"
+    if (response.status_code == 200 and edge_cache.enabled() and edge_cache.cacheable(request.url.path)
+            and "cache-control" not in response.headers
+            and not request.cookies.get(platform_auth.COOKIE_NAME)
+            and not request.cookies.get(auth_svc.SESSION_COOKIE)):
+        # Anonymous, user-independent public read: let the browser and Cloudflare keep it
+        # (automation/web/edge_cache.py). A session cookie means a per-user answer may differ.
+        response.headers["Cache-Control"] = edge_cache.HEADER
     if request.url.path.startswith("/static/") and response.status_code == 200:
         if "v" in request.query_params:
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
@@ -1490,7 +1505,7 @@ async def public_deals_page(request: Request):
         logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
         viewer = None
     return templates.TemplateResponse(request, "deals_public.html", {
-        "base_url": PUBLIC_BASE_URL, "now": int(time.time()),
+        "base_url": app_config.PLATFORM_BASE_URL, "now": int(time.time()),
         # Google indexes the plain page only; a filter, a page or a view is a variant of it.
         "robots_index": not request.query_params,
         "per_page_choices": public_deals.PER_PAGE_CHOICES,
@@ -1581,7 +1596,7 @@ def public_sold_page(request: Request, q: str | None = Query(None, max_length=80
                      days: int | None = None, page: int = Query(1, ge=1)):
     """Public "Sold prices": confirmed closes only. Plain `def` — it reads the DB."""
     filters = _sold_filters(q, category, state, days)
-    ctx = {"base_url": PUBLIC_BASE_URL, "filters": filters, "data": None, "error": False,
+    ctx = {"base_url": app_config.PLATFORM_BASE_URL, "filters": filters, "data": None, "error": False,
            "day_choices": public_sold.DAY_CHOICES, "category_options": []}
     try:
         ctx["data"] = public_sold.fetch_sold(**filters, page=page)
@@ -2390,6 +2405,21 @@ async def bing_site_auth():
     return Response(
         '<?xml version="1.0"?>\n<users>\n\t<user>F1622AF247E88937142BFA0511079194</user>\n</users>\n',
         media_type="application/xml",
+    )
+
+
+@app.get("/platform/robots.txt", response_class=PlainTextResponse, include_in_schema=False)
+async def platform_robots_txt():
+    """robots.txt as served on the platform host (host_split rewrites /robots.txt here)."""
+    return (
+        "User-agent: *\n"
+        "Disallow: /api/\n"
+        "Disallow: /deals/api/\n"
+        "Disallow: /platform/api/\n"
+        "Disallow: /distress/api/\n"
+        "Allow: /\n"
+        "\n"
+        f"Sitemap: {app_config.PLATFORM_BASE_URL}/sitemap-index.xml\n"
     )
 
 

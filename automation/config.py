@@ -159,6 +159,17 @@ FACEBOOK_BUSINESS_URL = os.getenv("FACEBOOK_BUSINESS_URL", "")
 # tags, absolute og:image URLs, sitemap.xml entries. No trailing slash.
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://black-whole.com").rstrip("/")
 
+# The liquidator platform's own front door (host split, automation/web/host_split.py).
+# Unset = everything stays on PUBLIC_BASE_URL as before. Set to the bare host
+# ("surpluslens.com"): that host serves the platform at "/", chair URLs on it
+# 301 to PUBLIC_BASE_URL, and platform URLs on the chair host 301 here.
+PLATFORM_HOST = os.getenv("PLATFORM_HOST", "").strip().lower().removeprefix("www.")
+PLATFORM_BASE_URL = (os.getenv("PLATFORM_BASE_URL", "").strip().rstrip("/")
+                     or (f"https://{PLATFORM_HOST}" if PLATFORM_HOST else PUBLIC_BASE_URL))
+# Product name on the platform pages (title tags, nav, footer). The company
+# behind it stays "Black Whole" in the copy that says who built it.
+PLATFORM_BRAND = os.getenv("PLATFORM_BRAND", "Black Whole").strip() or "Black Whole"
+
 # Google Search Console ownership token. When set, public pages render
 # <meta name="google-site-verification" content="...">. See docs/seo.md.
 GOOGLE_SITE_VERIFICATION = os.getenv("GOOGLE_SITE_VERIFICATION", "")

@@ -864,13 +864,15 @@ def test_client_ip_prefers_cloudflare_then_forwarded_for():
             self.headers = headers
             self.client = type("C", (), {"host": host})()
 
+    # Behind Cloudflare (the connecting hop, XFF's last entry, is a Cloudflare edge)
+    # the stamped header is the client (tests/web/test_client_ip.py has the rest).
     assert rate_limit.client_ip(
-        Req({"cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2, 3.3.3.3"})
+        Req({"cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2, 104.16.1.1"})
     ) == "1.1.1.1"
-    # XFF is a chain "client, proxy1, proxy2" — the client is the first entry.
+    # Direct to the origin: the header is the caller's word; the hop that connected is not.
     assert rate_limit.client_ip(
-        Req({"x-forwarded-for": "2.2.2.2, 3.3.3.3"})
-    ) == "2.2.2.2"
+        Req({"cf-connecting-ip": "1.1.1.1", "x-forwarded-for": "2.2.2.2, 93.184.216.34"})
+    ) == "93.184.216.34"
     assert rate_limit.client_ip(Req({})) == "10.0.0.1"
 
 
