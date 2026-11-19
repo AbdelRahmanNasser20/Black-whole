@@ -627,3 +627,19 @@ a.pf-lot-title:hover { color: var(--accent); text-decoration: underline; }
   .pf-hero-shot { animation: none; }
   html { scroll-behavior: auto; }
 }
+
+/* ───────────────────────── deals: targets (saved filter groups), upgrade note, Find deals ───────────────────────── */
+.pf-find-deals { margin-left: 8px; text-decoration: none; }
+.pf-targets { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 10px; }
+.pf-targets-label { font-family: var(--mono); font-size: 11px; text-transform: uppercase; color: var(--muted); margin-right: 4px; }
+.pf-target { display: inline-flex; align-items: center; border: 1px solid var(--line, var(--dim)); border-radius: 999px; }
+.pf-target.is-active { border-color: var(--accent); background: var(--accent-soft); }
+.pf-target-go, .pf-target-del, .pf-target-save {
+  min-height: 30px; padding: 0 11px; cursor: pointer; background: none; border: 0; color: inherit; font: inherit; font-size: 13px;
+}
+.pf-target-del { padding: 0 9px 0 0; color: var(--muted); }
+.pf-target-save { color: var(--accent); border: 1px dashed var(--accent); border-radius: 999px; }
+.pf-upgrade { margin: 0 0 10px; padding: 8px 12px; font-size: 14px; border-left: 3px solid var(--accent); background: var(--accent-soft); }
+.pf-upgrade a { color: var(--accent); }
+.pf-plan-per { font-size: 0.4em; color: var(--muted); }
+.pf-plan--later .pf-plan-price { color: inherit; }

@@ -1,121 +1,493 @@
 {
-  "_note": "SAMPLE DATA for GET /platform. Every buyer, organisation and message here is invented. No real person, contact, phone, email, address or conversation belongs in this file. Stage names follow the CRM's pipeline (needs_reply, qualifying, closing, routing, parked, won, lost). Times are minutes before 'now' so the demo never looks stale.",
+  "_note": "SAMPLE DATA for GET /platform: real chair lots and real buyer conversations from the operator's CRM, with names shortened to first name + last initial and every phone, email, street address, gate/unit code and profile link removed. Lot ids are renumbered to match inventory.sample.json. Stage names follow the CRM's pipeline (needs_reply, qualifying, closing, routing, parked, won, lost). Times are minutes before 'now' so the demo never looks stale.",
   "sample": true,
   "stages": [
-    {"key": "needs_reply", "label": "Needs reply"},
-    {"key": "qualifying", "label": "Qualifying"},
-    {"key": "closing", "label": "Closing"},
-    {"key": "routing", "label": "Routing"},
-    {"key": "parked", "label": "Parked"},
-    {"key": "won", "label": "Won"},
-    {"key": "lost", "label": "Lost"}
+    {
+      "key": "needs_reply",
+      "label": "Needs reply"
+    },
+    {
+      "key": "qualifying",
+      "label": "Qualifying"
+    },
+    {
+      "key": "closing",
+      "label": "Closing"
+    },
+    {
+      "key": "routing",
+      "label": "Routing"
+    },
+    {
+      "key": "parked",
+      "label": "Parked"
+    },
+    {
+      "key": "won",
+      "label": "Won"
+    },
+    {
+      "key": "lost",
+      "label": "Lost"
+    }
   ],
   "channels": [
-    {"key": "fb_marketplace", "label": "Facebook Marketplace"},
-    {"key": "ebay", "label": "eBay"},
-    {"key": "craigslist", "label": "Craigslist"},
-    {"key": "email", "label": "Email"},
-    {"key": "text", "label": "Text"}
+    {
+      "key": "fb_marketplace",
+      "label": "Facebook Marketplace"
+    },
+    {
+      "key": "ebay",
+      "label": "eBay"
+    },
+    {
+      "key": "craigslist",
+      "label": "Craigslist"
+    },
+    {
+      "key": "email",
+      "label": "Email"
+    },
+    {
+      "key": "text",
+      "label": "Text"
+    }
   ],
   "buyers": [
     {
-      "id": "b1", "name": "Marisol R.", "about": "Event rental company", "channel": "fb_marketplace",
-      "lot_id": "L-2041", "wants": "folding tables", "quantity_wanted": 60, "stage": "needs_reply",
-      "next_action": "Approve the reply that confirms 60 tables",
+      "id": "b1",
+      "name": "Jacqui S.",
+      "about": "Buyer in Knoxville, TN",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1008",
+      "wants": "banquet chairs, black if possible",
+      "quantity_wanted": 50,
+      "stage": "needs_reply",
+      "next_action": "Approve the price reply, then offer the 40 left or the brown lot for all 50",
       "thread": [
-        {"from": "buyer", "mins_ago": 190, "text": "Hi, are the 6 ft folding tables still available?"},
-        {"from": "seller", "mins_ago": 175, "text": "Yes, still available. How many are you looking for?"},
-        {"from": "buyer", "mins_ago": 25, "text": "I need 60 before the 14th. Can you do that many?"}
+        {
+          "from": "buyer",
+          "mins_ago": 410,
+          "text": "Hi, is this still available? And how much for 50 chairs?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 140,
+          "text": "Yes, the chairs are still available. I can give you a price for a set of 50. When would you like to see them?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 133,
+          "text": "Sure, and do you have black by chance or only blue and green?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 133,
+          "text": "Also, do you deliver? We are in Knoxville TN"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 132,
+          "text": "I only have the light grey banquet chairs"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 131,
+          "text": "Can you send those pictures?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 85,
+          "text": "[photo]"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 83,
+          "text": "How much for 50?"
+        }
       ],
-      "draft": {"text": "Yes, 60 is no problem. They are $28 each. Do you want to pick up, or should I get you a freight quote?", "held_for": "names a price"}
+      "draft": {
+        "text": "It's $25 a chair, so $1,250 for 50. Delivery to Knoxville would be very expensive, so you would be better off picking them up in Atlanta.",
+        "held_for": "names a price"
+      }
     },
     {
-      "id": "b2", "name": "Dwayne K.", "about": "Restaurant owner", "channel": "text",
-      "lot_id": "L-2016", "wants": "stainless prep tables", "quantity_wanted": 4, "stage": "closing",
-      "next_action": "Approve the reply that confirms a pickup time",
+      "id": "b2",
+      "name": "Terry D.",
+      "about": "Property management company, Phoenix",
+      "channel": "text",
+      "lot_id": "L-1009",
+      "wants": "mauve banquet chairs",
+      "quantity_wanted": 60,
+      "stage": "closing",
+      "next_action": "Approve the discount reply for moving the rest to Tolleson",
       "thread": [
-        {"from": "buyer", "mins_ago": 1500, "text": "Saw your prep tables. I'd take 4 if they are the 72 inch ones."},
-        {"from": "seller", "mins_ago": 1480, "text": "They are 30 by 72. Four is fine."},
-        {"from": "buyer", "mins_ago": 70, "text": "Good. Can I come Saturday morning with a trailer?"}
+        {
+          "from": "buyer",
+          "mins_ago": 2900,
+          "text": "Hi. We are in North Phoenix and need 60 chairs. Are they still available?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 61,
+          "text": "How about we go with the pink or whatever version. For pickup, we have a box truck that is being used this weekend. Would the chairs still be available on Monday? Our truck is loaded with equipment currently."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 60,
+          "text": "Yes they would be."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 59,
+          "text": "Where are you located?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 58,
+          "text": "How big is the box truck by any chance? The mauve chairs are here: [address sent]"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 57,
+          "text": "16 foot. We also have cargo vans we could use if there is concern not all chairs will fit. Also you are only 6 minutes from us so a second trip would be easy."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 52,
+          "text": "Should easily fit. Honestly I had a request, I can provide a discount if you're able to move the rest of the chairs to a warehouse in Tolleson AZ, but I'm not sure if the remaining ~360 would fit in the 16 footer."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 47,
+          "text": "We are looking into if we can do this. When do you need them all moved by and what sort of discount are we looking at?"
+        }
       ],
-      "draft": {"text": "Saturday morning works. I can meet you at 9. I'll send the pickup details the day before.", "held_for": "confirms a pickup time"}
+      "draft": {
+        "text": "As long as it's by the end of the month. $225, it is a little bit out of the way but let me know. I can also let you borrow the dollies for unloading the chairs.",
+        "held_for": "names a price"
+      }
     },
     {
-      "id": "b3", "name": "Priya S.", "about": "Charter school operations", "channel": "email",
-      "lot_id": "L-2030", "wants": "student desks", "quantity_wanted": 150, "stage": "closing",
-      "next_action": "Send the invoice once she confirms the count",
+      "id": "b3",
+      "name": "Alieu F.",
+      "about": "Buyer in Atlanta, GA",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1010",
+      "wants": "brown convention chairs, the whole lot",
+      "quantity_wanted": 1200,
+      "stage": "qualifying",
+      "next_action": "Send a bulk price for all 1,200 after the call",
       "thread": [
-        {"from": "buyer", "mins_ago": 4400, "text": "We are opening two new classrooms in January and need about 150 desks. Are yours all the same model?"},
-        {"from": "seller", "mins_ago": 4300, "text": "Same model, same colour. I have a little over 200 left."},
-        {"from": "buyer", "mins_ago": 2900, "text": "Good. I need sign-off from our director, then I can confirm 150."},
-        {"from": "seller", "mins_ago": 2880, "text": "No rush. I'll note 150 against your name so you are first in line."}
+        {
+          "from": "seller",
+          "mins_ago": 85000,
+          "text": "Hi, seeing if you are still interested in buying chairs. I also have 1200 of these arriving tomorrow if you or anyone you know is interested. [8 photos]"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 21300,
+          "text": "How much for all 1200"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 20300,
+          "text": "What's your phone number? I could offer a bulk discount but it would still be expensive."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 20180,
+          "text": "[phone number sent]"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 20160,
+          "text": "Okay, giving you a call."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 18840,
+          "text": "[sent 8 photos of the brown convention chairs]"
+        }
       ]
     },
     {
-      "id": "b4", "name": "Hollis T.", "about": "Warehouse manager", "channel": "ebay",
-      "lot_id": "L-2035", "wants": "pallet rack uprights", "quantity_wanted": 64, "stage": "routing",
-      "next_action": "Get a freight quote to his dock",
+      "id": "b4",
+      "name": "Buyer G.",
+      "about": "eBay buyer in San Antonio, TX",
+      "channel": "ebay",
+      "lot_id": "L-1009",
+      "wants": "banquet chairs, shipped LTL",
+      "quantity_wanted": 200,
+      "stage": "qualifying",
+      "next_action": "Wait for colour and dock answer, then book freight",
       "thread": [
-        {"from": "buyer", "mins_ago": 600, "text": "Would take all 64 uprights if you can ship. We have a dock and a forklift."},
-        {"from": "seller", "mins_ago": 560, "text": "I can ship. Which state are you in? I'll get a freight number."},
-        {"from": "buyer", "mins_ago": 410, "text": "Northern Colorado. Send the quote and I'll decide this week."}
+        {
+          "from": "seller",
+          "mins_ago": 32400,
+          "text": "Hi, doing well, thanks. Heads-up: that listing's title was off, I just fixed it. Those are the blue padded banquet chairs in Atlanta and only about 40 are left. What city are you in and how many do you need? Other stock right now: Atlanta, 1,200 brown padded stacking banquet chairs at $25 each; Phoenix, 442 mauve banquet chairs at $28 each. Photos of the Atlanta and Phoenix chairs attached."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 31900,
+          "text": "Thank you for the pics and information. I am currently in San Antonio Texas. I need 150 to 200 chairs, how much would a ltl cost for that from the tollison location?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 30900,
+          "text": "San Antonio, got it. Closest stock is Phoenix (442 mauve padded banquet chairs, $28 each) and Atlanta (1,200 brown padded stacking banquet chairs, $25 each), both about 1,000 miles from you. Freight for 200 chairs to San Antonio runs roughly $850 to $1,200 from either city, about 4 days, delivered to a dock or with a liftgate. So 200 of the Atlanta brown is $5,000 plus freight. Which color works for you, and do you have a dock or forklift at delivery?"
+        }
       ]
     },
     {
-      "id": "b5", "name": "Renee A.", "about": "Garage organizer", "channel": "craigslist",
-      "lot_id": "L-2027", "wants": "wire shelving", "quantity_wanted": null, "stage": "qualifying",
-      "next_action": "Ask how many units she needs",
+      "id": "b5",
+      "name": "James S.",
+      "about": "Buyer in Middlesboro, KY",
+      "channel": "craigslist",
+      "lot_id": "L-1010",
+      "wants": "brown padded stacking chairs",
+      "quantity_wanted": 50,
+      "stage": "qualifying",
+      "next_action": "Wait for his number, then set a viewing time",
       "thread": [
-        {"from": "buyer", "mins_ago": 2100, "text": "Do you still have the chrome shelving? What is the least you will sell?"},
-        {"from": "seller", "mins_ago": 2050, "text": "Still have it, and there is no minimum. How many units were you thinking?"}
+        {
+          "from": "buyer",
+          "mins_ago": 25800,
+          "text": "Hi, I'm interested in buying 50 of your brown padded banquet stacking chairs. Are 50 matching chairs in good condition still available? What is the total for 50, and can you quote freight/delivery to Middlesboro, Kentucky, or is pickup in metro Atlanta only? Can I inspect them in person before paying? Please send photos of the actual 50 chairs. What payment methods do you accept? Thank you"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 23200,
+          "text": "Hi James, yes, 50 are available at $25 each, $1,250 for the 50. They're in Atlanta. I checked freight to a residential address there and it isn't worth it on 50 chairs, so pickup is the way to go. You're welcome to come see them before paying. Photos attached, that's the lot stacked in the warehouse. If you're serious, send me your number and I'll text you to set up a time."
+        }
       ]
     },
     {
-      "id": "b6", "name": "Imani J.", "about": "Community center", "channel": "fb_marketplace",
-      "lot_id": "L-2041", "wants": "folding tables", "quantity_wanted": 40, "stage": "qualifying",
-      "next_action": "Find out where she is, pickup or freight",
+      "id": "b6",
+      "name": "Donald H.",
+      "about": "Restaurant group purchasing, Pasadena, CA",
+      "channel": "email",
+      "lot_id": "L-1003",
+      "wants": "white folding chairs",
+      "quantity_wanted": 1000,
+      "stage": "qualifying",
+      "next_action": "Wait for his answer on the 1,000 white padded chairs",
       "thread": [
-        {"from": "buyer", "mins_ago": 3100, "text": "Interested in 40 tables for our hall."},
-        {"from": "seller", "mins_ago": 3080, "text": "Happy to help. Where is the hall? That tells me if pickup makes sense or if I should quote freight."}
+        {
+          "from": "seller",
+          "mins_ago": 90000,
+          "text": "Hi Donald, thank you for reaching out. We have 1,000+ white metal folding chairs available right now at $10/chair (photos attached). We also carry white resin padded folding chairs at $25/chair. A few questions so I can quote properly: timeline / delivery date? Which exact chair (metal folding, resin padded, other)? Chairs ship palletized LTL, freight quoted by delivery ZIP."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 89000,
+          "text": "Thank you for your email. We will be purchasing the metal folding chairs. Please let me know the lead time you will have these units in stock."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 46000,
+          "text": "Hi Donald, sorry for the long silence on this. Are you still looking for folding chairs? Right now we have 200 white resin padded folding chairs coming out of an event-rental company in Vancouver, WA. $25 a chair. Tell me how many you need and I'll secure the full 200 and look for more. Payment is upfront before pickup."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 43200,
+          "text": "Hi Donald, following up on the white padded folding chairs. I may have up to 1,000 available in early November, plus about 600 standard white folding. Still interested? Same terms: payment up front before pickup or shipping."
+        }
       ]
     },
     {
-      "id": "b7", "name": "Gabe M.", "about": "Boutique hotel", "channel": "fb_marketplace",
-      "lot_id": "L-2024", "wants": "luggage carts", "quantity_wanted": 12, "stage": "won",
-      "next_action": "Check back in spring about a second order",
+      "id": "b7",
+      "name": "David B.",
+      "about": "Buyer in Louisiana",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1010",
+      "wants": "banquet chairs, one colour, shipped",
+      "quantity_wanted": 66,
+      "stage": "routing",
+      "next_action": "Get a freight quote to his ZIP",
       "thread": [
-        {"from": "buyer", "mins_ago": 14500, "text": "We'll take 12 carts."},
-        {"from": "seller", "mins_ago": 14400, "text": "Done. I've marked 12 as yours."},
-        {"from": "buyer", "mins_ago": 8700, "text": "Picked up today. They look great, thank you."},
-        {"from": "seller", "mins_ago": 8650, "text": "Glad to hear it. If you open the second property, I'll have more."}
+        {
+          "from": "buyer",
+          "mins_ago": 1350,
+          "text": "Hello, looking for 66 of these, or olive (1 color), delivered to my ZIP code. Thanks"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 965,
+          "text": "Would you be able to pick up?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 950,
+          "text": "I'm not currently in town, let me know?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 10,
+          "text": "No, I need them shipped to the ZIP code provided."
+        }
       ]
     },
     {
-      "id": "b8", "name": "Tomasz W.", "about": "Electronics reseller", "channel": "ebay",
-      "lot_id": "L-2033", "wants": "business laptops", "quantity_wanted": 75, "stage": "parked",
-      "next_action": "Tell him when the next laptop lot arrives",
+      "id": "b8",
+      "name": "Tony B.",
+      "about": "Buyer in Marietta, GA",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1008",
+      "wants": "banquet chairs",
+      "quantity_wanted": 40,
+      "stage": "closing",
+      "next_action": "Set a viewing and pickup time",
       "thread": [
-        {"from": "buyer", "mins_ago": 7300, "text": "Any more of the 14 inch laptops coming? I missed the last batch."},
-        {"from": "seller", "mins_ago": 7200, "text": "That lot sold out. I've put you on the list for the next one."}
+        {
+          "from": "buyer",
+          "mins_ago": 7500,
+          "text": "Hi, do you have 40 available?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 7360,
+          "text": "Only these so far, do they interest you? Where are you located? City and zip?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 7150,
+          "text": "Marietta GA"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 7130,
+          "text": "Would you be able to pick them up?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 6340,
+          "text": "Yes"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 1500,
+          "text": "Hey Tony, sorry for the late reply. The chairs are still here in Atlanta, about 100 left. Since pickup works for you, want to come take a look this week?"
+        }
       ]
     },
     {
-      "id": "b9", "name": "Noor H.", "about": "Summer camp director", "channel": "email",
-      "lot_id": "L-2021", "wants": "cafeteria tables", "quantity_wanted": 20, "stage": "parked",
-      "next_action": "Message her when the lot is picked up and counted",
+      "id": "b9",
+      "name": "Magda A.",
+      "about": "Buyer in Omaha, NE",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1009",
+      "wants": "banquet chairs, shipped",
+      "quantity_wanted": 200,
+      "stage": "parked",
+      "next_action": "Tell her when a lot lands closer to Omaha",
       "thread": [
-        {"from": "buyer", "mins_ago": 5200, "text": "I saw the cafeteria tables marked as arriving soon. Can I reserve 20?"},
-        {"from": "seller", "mins_ago": 5100, "text": "They are not in hand yet. I'll write to you the day they land, before they go anywhere else."}
+        {
+          "from": "buyer",
+          "mins_ago": 38000,
+          "text": "Hi, is this available? Am looking for 200 chair. I live in Omaha Nebraska. I need to know how much is the shipping and chair cost"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 35000,
+          "text": "Closest I've got to you is about 300 maroon banquet chairs in Flint, MI at $25 a chair, so 200 works. Omaha's a drive though, so it'd be pickup in Flint or I'd have to quote you shipping. Want me to price that out?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 32000,
+          "text": "I also have these in Phoenix if they interest you? [photo]"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 2900,
+          "text": "I recently got these chairs if they interest you. I've got about 250 chairs in Fort Sill, OK, would those work for you? [photo]"
+        }
       ]
     },
     {
-      "id": "b10", "name": "Carl B.", "about": "Gym owner", "channel": "text",
-      "lot_id": "L-2012", "wants": "lockers", "quantity_wanted": 25, "stage": "lost",
-      "next_action": "None. Bought elsewhere.",
+      "id": "b10",
+      "name": "Esther T.",
+      "about": "New church, Phoenix",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1009",
+      "wants": "banquet chairs",
+      "quantity_wanted": 300,
+      "stage": "won",
+      "next_action": "Collect the rest of the balance next week",
       "thread": [
-        {"from": "buyer", "mins_ago": 21000, "text": "Do you have 25 lockers left?"},
-        {"from": "seller", "mins_ago": 20900, "text": "I have 25. Do you want them held?"},
-        {"from": "buyer", "mins_ago": 19800, "text": "Found some closer to me, thanks anyway."}
+        {
+          "from": "buyer",
+          "mins_ago": 21000,
+          "text": "Is this still available?"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 20960,
+          "text": "Hi yes, it depends on how many you need and where you are located."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 20700,
+          "text": "Phoenix. How many of those you have? I need 200 chair but I have $15 for each than I can take 300 chair"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 20698,
+          "text": "Send me your number if you're really interested. Can you see the chairs?"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 20697,
+          "text": "U have 300 chair"
+        },
+        {
+          "from": "seller",
+          "mins_ago": 20696,
+          "text": "Yes"
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 4300,
+          "text": "We are the ones who bought them but we are missing 8 of them. They are wonderful. The other money we will bring it next week."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 4299,
+          "text": "Oh I see, yeah I talked to the church contact and she said it was a miscount and that you have all 300."
+        }
+      ]
+    },
+    {
+      "id": "b11",
+      "name": "Wayne S.",
+      "about": "Starting a new church",
+      "channel": "fb_marketplace",
+      "lot_id": "L-1011",
+      "wants": "banquet chairs",
+      "quantity_wanted": 200,
+      "stage": "lost",
+      "next_action": "None. Over budget.",
+      "thread": [
+        {
+          "from": "buyer",
+          "mins_ago": 15000,
+          "text": "How much would you charge for 200 chairs. Starting a church and looking around to see cost."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 14580,
+          "text": "It would cost $5000 for the chairs."
+        },
+        {
+          "from": "seller",
+          "mins_ago": 14579,
+          "text": "If you let me know where you are located, city and zip, I can let you know if I have anything closer."
+        },
+        {
+          "from": "buyer",
+          "mins_ago": 14540,
+          "text": "Ill pass cant afford that"
+        }
       ]
     }
   ]

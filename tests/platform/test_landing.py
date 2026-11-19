@@ -48,28 +48,25 @@ def test_platform_page_has_signup_cta(monkeypatch):
     html = _page(monkeypatch, STATS)
     assert 'href="/platform/signup"' in html
     assert "Get free early access" in html
-    assert "Founding members" in html
     # the CTA is page-wide: hero, pricing and the closing band all carry it
     assert html.count('href="/platform/signup"') >= 3
-    # free-beta framing, no card
-    assert "Free while the beta runs" in html and "No card" in html
+    assert "No card" in html
 
 
 def test_billing_stays_dark_on_the_landing(monkeypatch):
     html = _page(monkeypatch, STATS)
-    assert "/platform/api/subscribe" not in html
-    assert "stripe" not in html.lower()
-    # the Pro tease names no number: no dollar amount anywhere in the pricing section
+    # billing dark: no checkout call and no subscribe button; the plans still show the operator's prices
+    assert "/platform/api/subscribe" not in html and 'id="pf-subscribe"' not in html
     pricing = html.split('id="pricing"', 1)[1].split("</section>", 1)[0]
-    assert "Not priced yet" in pricing
-    assert not re.search(r"\$\s*\d", pricing)
-    assert "preferred pricing" in pricing and "first access" in pricing
-    # the Pro tease names only real, free-tier-distinct advantages — never an
-    # unbuilt feature and never a free feature moved behind a paywall
-    assert "forecast" not in pricing.lower()
-    assert "unlimited" not in pricing.lower()
-    later = pricing.split('pf-plan--later', 1)[1]
-    assert "max bid" not in later.lower() and "flip score" not in later.lower()
+    assert sorted(set(re.findall(r"\$\s*\d+", pricing))) == ["$0", "$5"]
+    assert "3 favorite lots" in pricing and "Unlimited favorite lots" in pricing
+
+
+def test_subscribe_button_only_when_billing_live(monkeypatch):
+    monkeypatch.setenv("PLATFORM_BILLING_ENABLED", "1")
+    monkeypatch.setenv("PLATFORM_STRIPE_PRICE_ID", "price_test")
+    html = _page(monkeypatch, STATS)
+    assert 'id="pf-subscribe"' in html and "/platform/api/subscribe" in html
 
 
 # ───────────────────────── real numbers only ─────────────────────────

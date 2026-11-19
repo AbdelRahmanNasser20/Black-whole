@@ -11,6 +11,7 @@
 //     the /platform page shows them there. A marker stops the same set from being sent again.
 // Safe to call on every signed-in page: with nothing to move it makes no request. Never throws.
 import {readPending, writePending, toQuery, starRefs} from './finds_store.js';
+import {setPlan} from '/static/ui/plan.js';
 
 const STAR_MARK = 'pf.stars.merged.v1';
 
@@ -26,6 +27,11 @@ async function post(url, body) {
 export async function mergeAll() {
   const out = {searches: 0, stars: 0, kept: 0, capped: false, held: 0, rejected: []};
   try {
+    // The plan decides the browser's star cap (free = 3). The server enforces the same cap.
+    try {
+      const me = await fetch('/platform/api/saved', {credentials: 'include'});
+      if (me.ok) setPlan((await me.json()).plan);
+    } catch { /* offline: keep the last known plan */ }
     let pending = readPending();
     for (const it of [...pending]) {
       const body = Object.fromEntries(toQuery(it));

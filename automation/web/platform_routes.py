@@ -182,15 +182,23 @@ def list_saved(user: dict = Depends(onboarded_user)):
     rows = db.fetch_all(
         "SELECT source, lot_key FROM platform_saved_lots WHERE user_id = %s ORDER BY created_at DESC",
         (user["user_id"],))
-    return {"saved": rows}
+    plan, limit = platform_finds.saved_plan(user["user_id"])
+    return {"saved": rows, "plan": plan, "limit": limit}
 
 
 @router.post("/platform/api/saved")
 def save_lot(body: SavedBody, user: dict = Depends(onboarded_user)):
-    db.execute(
-        "INSERT INTO platform_saved_lots (user_id, source, lot_key) VALUES (%s, %s, %s) "
+    """Free plan keeps 3 lots, Standard keeps PLATFORM_MAX_SAVED_LOTS. Full list -> 402 star_limit."""
+    _plan, cap = platform_finds.saved_plan(user["user_id"])
+    n = db.execute(
+        "INSERT INTO platform_saved_lots (user_id, source, lot_key) SELECT %s, %s, %s "
+        "WHERE (SELECT count(*) FROM platform_saved_lots WHERE user_id = %s) < %s "
         "ON CONFLICT (user_id, source, lot_key) DO NOTHING",
-        (user["user_id"], body.source, body.lot_key))
+        (user["user_id"], body.source, body.lot_key, user["user_id"], cap))
+    if not n and not db.fetch_one(
+            "SELECT 1 AS x FROM platform_saved_lots WHERE user_id = %s AND source = %s AND lot_key = %s",
+            (user["user_id"], body.source, body.lot_key)):
+        raise HTTPException(status_code=402, detail={"error": "star_limit", "max": cap})
     return {"ok": True}
 
 

@@ -13,6 +13,7 @@
 //              real favorites are private: nothing here reads them.
 // Read-only: no writes to the server. The map library is the storefront's own (/static/admin_map.js).
 import { api, esc, fmt } from '/static/ui/state.js';
+import { starLimit, UPGRADE_TEXT, UPGRADE_URL } from '/static/ui/plan.js';
 
 const PRIMARY_URL = '/platform/api/auctions';
 const LOTS_URL = '/deals/api/lots';
@@ -59,9 +60,76 @@ function writeStars() {
 }
 function toggleStar(item) {
   if (starred.has(item.id)) starred.delete(item.id);
+  else if (starred.size >= starLimit()) { showUpgrade(); return; }
   else starred.set(item.id, Object.fromEntries(STAR_FIELDS.map((k) => [k, item[k] ?? null])));
   writeStars();
   starListeners.forEach((cb) => cb());
+}
+
+function showUpgrade() {
+  const el = $('#pf-au-upgrade');
+  if (!el) return;
+  el.innerHTML = `${esc(UPGRADE_TEXT)} <a href="${UPGRADE_URL}">See the plans</a>`;
+  el.hidden = false;
+}
+
+/* ── targets: saved filter groups, for any kind of lot ───────────────────────
+   A target is a named filter set (keyword, site, category, state, max bid, no bids) — the public
+   version of the admin Auctions tab's research profiles. Presets show the idea across lot types;
+   the visitor's own targets live in this browser under TARGET_KEY (try/catch). */
+const TARGET_KEY = 'pf.targets.v1';
+const TARGET_FIELDS = ['q', 'site', 'category', 'state', 'maxBid', 'noBids'];
+const PRESET_TARGETS = [
+  { id: 'p-chairs', name: 'Banquet chairs', f: { q: 'chairs' } },
+  { id: 'p-medical', name: 'Medical equipment', f: { q: 'medical' } },
+  { id: 'p-kitchen', name: 'Restaurant kitchen', f: { q: 'restaurant' } },
+  { id: 'p-tools', name: 'Generators', f: { q: 'generator' } },
+  { id: 'p-fitness', name: 'Gym equipment', f: { q: 'treadmill' } },
+  { id: 'p-laptops', name: 'Laptops', f: { q: 'laptops' } },
+];
+function readTargets() {
+  try { const t = JSON.parse(window.localStorage.getItem(TARGET_KEY) || '[]'); return Array.isArray(t) ? t : []; }
+  catch { return []; }
+}
+function writeTargets(t) {
+  try { window.localStorage.setItem(TARGET_KEY, JSON.stringify(t)); } catch { /* blocked storage */ }
+}
+const blank = (k) => (k === 'noBids' ? false : '');
+const targetPatch = (tf) => Object.fromEntries(TARGET_FIELDS.map((k) => [k, tf[k] ?? blank(k)]));
+const sameTarget = (tf) => TARGET_FIELDS.every((k) => String(tf[k] ?? blank(k)) === String(f[k]));
+function renderTargets() {
+  const box = $('#pf-au-targets');
+  if (!box) return;
+  const chip = (t, own) => {
+    const on = sameTarget(t.f);
+    return `<span class="pf-target${on ? ' is-active' : ''}"><button type="button" class="pf-target-go" data-target="${esc(t.id)}" aria-pressed="${on}">${esc(t.name)}</button>${
+      own ? `<button type="button" class="pf-target-del" data-target-del="${esc(t.id)}" aria-label="Delete target ${esc(t.name)}">×</button>` : ''}</span>`;
+  };
+  box.innerHTML = '<span class="pf-targets-label">Targets</span>'
+    + PRESET_TARGETS.map((t) => chip(t, false)).join('') + readTargets().map((t) => chip(t, true)).join('')
+    + '<button type="button" class="pf-target-save" data-target-save>+ Save these filters</button>';
+}
+function wireTargets() {
+  const box = $('#pf-au-targets');
+  if (!box) return;
+  box.addEventListener('click', (e) => {
+    const go = e.target.closest('[data-target]');
+    if (go) {
+      const t = [...PRESET_TARGETS, ...readTargets()].find((x) => x.id === go.dataset.target);
+      if (t) { hooks.clearSearch?.(); setFilters({ ...targetPatch(t.f), status: 'open' }); }
+      return;
+    }
+    const del = e.target.closest('[data-target-del]');
+    if (del) { writeTargets(readTargets().filter((x) => x.id !== del.dataset.targetDel)); renderTargets(); return; }
+    if (e.target.closest('[data-target-save]')) {
+      const tf = targetPatch(f);
+      if (!TARGET_FIELDS.some((k) => tf[k])) { e.target.textContent = 'Set a filter first'; return; }
+      const name = [tf.q, tf.category && cap(tf.category), tf.state, tf.site && cap(tf.site),
+        tf.maxBid && `under $${tf.maxBid}`, tf.noBids && 'no bids'].filter(Boolean).join(' · ').slice(0, 60);
+      writeTargets([...readTargets(), { id: 'u-' + Date.now(), name, f: tf }].slice(-20));
+      renderTargets();
+    }
+  });
 }
 
 /* ── state ───────────────────────────────────────────────────────────────── */
@@ -211,6 +279,7 @@ function paintTruth() {
   $('#pf-au-tag').textContent = live ? 'Live data' : 'Real data';
 }
 function paintControls() {
+  renderTargets();
   $$('#pf-au-status .pf-seg-btn').forEach((b) => {
     const on = b.dataset.status === f.status;
     b.classList.toggle('is-active', on); b.setAttribute('aria-pressed', String(on));
@@ -501,6 +570,7 @@ export function init(shellHooks) {
   readStars();
   starred.forEach((it, id) => byId.set(id, it));
   wire();
+  wireTargets();
   paintControls();
   renderFavorites();
   load();
