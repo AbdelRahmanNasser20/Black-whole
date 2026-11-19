@@ -24,6 +24,8 @@ import re
 import time
 from typing import Any, Callable
 
+from .chair_types import CHAIR_TYPES
+
 HOURS = "9 AM to 5 PM, Monday to Friday"
 NEAR_MILES = 300.0          # same radius as the CRM lot-to-buyer match (CRM-R300)
 MAX_CARDS = 4
@@ -34,16 +36,17 @@ MAX_LOG = 40                # question/answer pairs kept per session
 # Lots we hold or have won: what "chairs we own" means when nothing is near.
 OWNED_STATUSES = ("owned", "won_pickup")
 
-STEPS = ("zip", "lots", "qty", "when", "fulfil", "pay", "org", "slot", "date", "name", "phone", "done")
+STEPS = ("zip", "lots", "type", "qty", "when", "fulfil", "pay", "org", "slot", "date", "name", "phone", "done")
 
 # Short labels for the admin view ("stopped at ...").
 STEP_LABELS = {
-    "zip": "ZIP code", "lots": "Chair pick", "qty": "Quantity", "when": "Time frame",
+    "zip": "ZIP code", "lots": "Chair pick", "type": "Chair type", "qty": "Quantity", "when": "Time frame",
     "fulfil": "Pickup or delivery", "pay": "Payment", "org": "Organization",
     "slot": "Viewing time", "date": "Viewing date", "name": "Name", "phone": "Phone",
     "done": "Finished",
 }
 
+TYPE_OPTIONS = CHAIR_TYPES
 QTY_OPTIONS = ("50", "100", "200")
 WHEN_OPTIONS = ("Same day as viewing, if I like them", "This week", "Within 1 month")
 FULFIL_OPTIONS = ("I can pick up", "I need delivery", "Not sure yet")
@@ -195,6 +198,9 @@ def prompt(state: dict, offer: dict | None = None) -> dict:
         out["input"] = "lots"
         out["max_picks"] = MAX_PICKS
         out["placeholder"] = "Or tell us what you need"
+    elif step == "type":
+        out["messages"] = ["What type of chairs are you looking for?"]
+        out["options"] = list(TYPE_OPTIONS)
     elif step == "qty":
         out["messages"] = ["How many chairs do you need?"]
         out["options"] = list(QTY_OPTIONS)
@@ -249,8 +255,11 @@ def _next_step(state: dict) -> str:
     i = order.index(state["step"]) + 1
     while i < len(order):
         step = order[i]
+        # A tapped lot already says the chair type.
+        if step == "type" and state.get("picked"):
+            pass
         # A ship-only lot has no pickup and no viewing: never invite one.
-        if step == "fulfil" and _ship_only(state):
+        elif step == "fulfil" and _ship_only(state):
             state["answers"]["fulfil"] = "I need delivery"
         elif step in ("slot", "date") and (_wants_delivery(state) or _ship_only(state)):
             pass
@@ -351,7 +360,7 @@ def summary(state: dict) -> str:
     """One line for `inquiries.message` and the Telegram alert."""
     a = state["answers"]
     parts = [
-        ("chairs", a.get("lots")), ("qty", a.get("qty")), ("when", a.get("when")),
+        ("chairs", a.get("lots")), ("type", a.get("type")), ("qty", a.get("qty")), ("when", a.get("when")),
         ("pickup or delivery", a.get("fulfil")), ("pay", a.get("pay")), ("for", a.get("org")),
         ("time", a.get("slot")), ("date", a.get("date")),
     ]

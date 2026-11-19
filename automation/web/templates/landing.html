@@ -262,6 +262,14 @@
       </div>
       <div class="mf-row mf-row--two">
         <label><span>QUANTITY</span><input name="quantity_interested" type="number" min="1"></label>
+        <label><span>CHAIR TYPE</span>
+          <select name="chair_type" required>
+            <option value="" disabled selected>Pick one</option>
+            {%- for t in chair_types %}
+            <option value="{{ t }}">{{ t }}</option>
+            {%- endfor %}
+          </select>
+        </label>
       </div>
       <label class="mf-row"><span>MESSAGE</span>
         <textarea name="message" rows="4" placeholder="Tell us which lot or describe what you have."></textarea>

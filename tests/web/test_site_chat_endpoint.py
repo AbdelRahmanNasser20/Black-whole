@@ -153,7 +153,7 @@ def test_resume_returns_the_history_and_the_current_question(chat):
     c.post("/chat/answer", json={"sid": sid, "value": "30301"})
     c.post("/chat/answer", json={"sid": sid, "value": "none"})
     again = _start(c, sid=sid).json()
-    assert again["sid"] == sid and again["step"] == "qty"
+    assert again["sid"] == sid and again["step"] == "type"   # no lot tapped: ask the chair type
     assert [h["a"] for h in again["history"]] == ["30301", "None of these"]
     assert len(chat["rows"]) == 1
 
@@ -164,7 +164,7 @@ def test_a_lead_is_kept_when_the_inquiry_write_fails(chat, monkeypatch):
     monkeypatch.setattr(inventory, "create_inquiry", boom)
     c = _client()
     sid = _start(c).json()["sid"]
-    for value in ("30301", "none", "50", "This week", "I need delivery", "Zelle", "Nonprofit", "Sam", "sam@church.org"):
+    for value in ("30301", "none", "Chiavari", "50", "This week", "I need delivery", "Zelle", "Nonprofit", "Sam", "sam@church.org"):
         r = c.post("/chat/answer", json={"sid": sid, "value": value})
         assert r.status_code == 200
     assert chat["rows"][sid]["status"] == "completed"

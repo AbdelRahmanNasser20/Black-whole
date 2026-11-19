@@ -30,6 +30,7 @@ from psycopg.types.json import Jsonb
 
 from . import db
 from . import attribution as attribution_mod
+from .chair_types import CHAIR_TYPES
 from .config import ATTACHMENTS_ROOT
 
 # Re-export the connection opener so favorites.py (and any other caller) can do
@@ -965,6 +966,7 @@ def create_inquiry(
     quantity_interested: int | None = None,
     zip_code: str | None = None,
     attribution: dict | None = None,
+    chair_type: str | None = None,
 ) -> dict:
     if kind not in ("buy", "sell"):
         raise ValueError("kind must be 'buy' or 'sell'")
@@ -975,6 +977,9 @@ def create_inquiry(
     message = (message or "").strip() or None
     zip5 = clean_zip(zip_code)
     tagged = bool(message) and message.startswith(_NO_ZIP_LEAD_TAGS)
+    chair_type = (chair_type or "").strip() or None
+    if chair_type and chair_type not in CHAIR_TYPES:
+        raise ValueError("unknown chair type")
     if zip5 is None and not tagged:
         # A chair lead without a location cannot be routed (no lane, no
         # nearest lot). The site forms require it; the API enforces it.
@@ -989,6 +994,10 @@ def create_inquiry(
         # than drop it on the floor.
         message = f"ZIP {zip5}" + (f"\n\n{message}" if message else "")
         zip5 = None
+    if chair_type:
+        # No column: the line rides on top of the message, so the lead ping
+        # and the admin card show it as they are.
+        message = f"Chair type: {chair_type}" + (f"\n\n{message}" if message else "")
     vals: list[Any] = [
         kind, str(lot_id) if lot_id else None, name.strip(),
         (email or "").strip() or None, (phone or "").strip() or None,
