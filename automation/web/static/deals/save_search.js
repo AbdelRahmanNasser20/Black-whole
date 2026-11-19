@@ -3,10 +3,35 @@
 // Signed in: the search goes to the account (POST /platform/api/finds). No account, or the account call is
 // refused: it is kept in this browser and shows on /platform/finds; merge.js moves it over after sign-in.
 import {api, toast} from '../ui/state.js';
-import {addPending, fromParams, hasSession, describe} from '../site/platform/finds_store.js';
+import {addPending, fromParams, hasSession, describe, readPending, toQuery, sameFilters, STARTERS} from '../site/platform/finds_store.js';
+import {esc} from '../ui/state.js';
 
 const slot = document.getElementById('feed-actions');
+const strip = document.getElementById('feed-saved');
 let current = null;
+let account = null;      // the account's saved searches, when signed in and the call answered
+
+// Saved searches (yours) and starter searches (ours) as chips on the feed: one click loads the filters.
+function paintStrip() {
+  if (!strip) return;
+  const mine = [...(account || []), ...readPending()];
+  const chip = (f, cls) => {
+    const on = current && sameFilters(f, current);
+    return `<a class="chip${on ? ' is-active' : ''}${cls ? ' ' + cls : ''}" href="/deals?${esc(toQuery(f).toString())}" aria-pressed="${on ? 'true' : 'false'}">${esc(f.name || describe(f))}</a>`;
+  };
+  const html = (mine.length ? `<span class="feed-saved-label">Saved</span>${mine.map((f) => chip(f, '')).join('')}` : '')
+    + `<span class="feed-saved-label">Try</span>${STARTERS.filter((s) => !mine.some((m) => sameFilters(m, s))).map((f) => chip(f, 'is-starter')).join('')}`;
+  strip.innerHTML = html;
+  strip.hidden = false;
+}
+async function loadAccount() {
+  if (!hasSession()) return;
+  try {
+    const d = await api('/platform/api/finds', {credentials: 'include'});
+    account = ((d && d.finds) || []).map((f) => ({...f, name: f.name || ''}));
+  } catch (_) { account = null; }
+  paintStrip();
+}
 
 function paint() {
   if (!slot) return;
@@ -52,6 +77,6 @@ async function save() {
 
 document.addEventListener('feed:params', (e) => {
   current = fromParams(e.detail.params);
-  paint();
+  paint(); paintStrip();
 });
-paint();
+paint(); paintStrip(); loadAccount();

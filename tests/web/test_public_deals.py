@@ -67,7 +67,9 @@ def test_public_order_rejects_private_sorts():
 
 
 def test_public_cols_never_leak_private_fields():
-    for col in ("hero_image_url", "archived_hero_url", "gallery_urls", "description",
+    # hero_image_url IS selected since 2026-11-19: it is the SOURCE site's own link and leaves
+    # as `photo_url` through deals_sources.safe_photo_url (enrich_public); never our copies.
+    for col in ("archived_hero_url", "gallery_urls", "description",
                 "seller", "high_bidder", "raw"):
         assert col not in pd.PUBLIC_COLS
 

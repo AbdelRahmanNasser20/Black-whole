@@ -571,7 +571,7 @@ def lots(status: str = "active", *, now: datetime | None = None,
 # ── in-memory filters (mirror deals_query.build_where for the snapshot half) ─
 def apply_filters(items: list[dict], *, q=None, category=None, state=None, max_bids=None,
                   ending_within=None, min_price=None, max_price=None, bbox=None,
-                  site=None, now: datetime | None = None) -> list[dict]:
+                  site=None, now: datetime | None = None, origin=None) -> list[dict]:
     now = now or datetime.now(timezone.utc)
     if site:
         items = [i for i in items if i["source"] == site]
@@ -596,4 +596,12 @@ def apply_filters(items: list[dict], *, q=None, category=None, state=None, max_b
         s, w, n, e = bbox
         items = [i for i in items if i["lat"] is not None and i["lng"] is not None
                  and s <= i["lat"] <= n and w <= i["lng"] <= e]
+    if origin is not None:          # (lat, lng, radius_mi); unmapped lots drop out
+        from automation.alerts import geo
+        from .public_deals import plausible_states
+        olat, olng, radius = origin
+        ok_states = set(plausible_states(olat, olng, radius))
+        items = [i for i in items if i["lat"] is not None and i["lng"] is not None
+                 and (not i.get("state") or i["state"] in ok_states)
+                 and geo.haversine_miles(olat, olng, i["lat"], i["lng"]) <= radius]
     return items

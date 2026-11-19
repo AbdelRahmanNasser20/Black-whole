@@ -8,7 +8,7 @@
 import {api, esc, fmt, toast, renderEmpty, renderError, skeleton} from '../../ui/state.js';
 import {tickTimers} from '../../ui/card.js';
 import {renderCards, renderTable, mountMap} from '../../deals/views.js';
-import {readPending, addPending, removePending, touchPending, patchPending, toQuery, describe, clean,
+import {STARTERS, readPending, addPending, removePending, touchPending, patchPending, toQuery, describe, clean,
         MAX_SEARCHES} from './finds_store.js';
 import {mergeAll} from './merge.js';
 
@@ -302,6 +302,15 @@ $('#finds-view').addEventListener('click', (e) => {
 });
 $('#finds-alert').addEventListener('click', toggleAlert);
 $('#finds-delete').addEventListener('click', removeSearch);
+// Starter searches on the empty page: one click saves it (browser or account) like the form would.
+const starters = $('#finds-starters');
+if (starters) {
+  starters.innerHTML = STARTERS.map((f, i) => `<button type="button" class="chip" data-starter="${i}">${esc(f.name)}</button>`).join('');
+  starters.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-starter]'); if (!b) return;
+    const f = STARTERS[Number(b.dataset.starter)]; if (f) addSearch({...f});
+  });
+}
 $('#finds-add').addEventListener('submit', (e) => {
   e.preventDefault();
   addSearch(Object.fromEntries(new FormData(e.target).entries()));

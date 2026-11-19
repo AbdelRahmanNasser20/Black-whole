@@ -24,7 +24,7 @@
 .feed-rail .select { width: 100%; }
 .feed-rail .seg { display: flex; }
 .feed-rail .seg-btn { flex: 1 1 0; }
-.feed-rail-search { display: none; }               /* the topbar search owns ≥ 1024; the rail copy shows when it collapses */
+.feed-rail-search { display: none; }               /* the topbar search owns ≥ 1024; the panel copy shows when it collapses */
 .feed-rail-search input { width: 100%; height: 32px; padding: 0 10px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font-family: var(--sans); }
 .feed-rail-search input::placeholder { color: var(--dim); }
 .feed-rail-search input:focus { border-color: var(--border-strong); outline: none; }
@@ -40,10 +40,29 @@
 .feed-rail-done { display: none; }
 @media (max-width: 767px) { .feed-rail-done { display: inline-flex; } }
 
+/* ── filter panel (under the control row; was the side rail) ─────────── */
+.feed-filter-panel { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0 20px; margin: 10px 0 2px; padding: 4px 14px 10px;
+  border: 1px solid var(--border); background: var(--surface); }
+.feed-filter-panel[hidden] { display: none; }
+.feed-filter-panel .rail-group { border-top: 0; padding: 10px 0; }
+.feed-filter-panel .feed-rail-actions { grid-column: 1 / -1; padding-top: 4px; }
+.feed-near { display: flex; gap: 6px; }
+.feed-near input { flex: 1 1 0; min-width: 0; height: 32px; padding: 0 8px; background: var(--surface); border: 1px solid var(--border); color: var(--text); font: 400 var(--fs-sm)/1 var(--mono); }
+.feed-near input::placeholder { color: var(--dim); }
+.feed-near input:focus { border-color: var(--border-strong); outline: none; }
+.feed-near .select { flex: 0 0 92px; }
+.feed-saved { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0 2px; }
+.feed-saved[hidden] { display: none; }
+.feed-saved-label { font: 500 var(--fs-xs)/1 var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--dim); margin-right: 4px; }
+.feed-saved .chip { text-decoration: none; }
+.feed-saved .chip.is-starter { opacity: .85; }
+.card-photo { display: block; margin: 0 calc(-1 * var(--pad)) 6px; aspect-ratio: 4 / 3; overflow: hidden; background: var(--surface-2); }
+.card-photo img { display: block; width: 100%; height: 100%; object-fit: cover; }
+
 /* ── control row ───────────────────────────────────────────────────── */
-.feed-filters-btn { display: none; }
+.feed-filters-btn { display: inline-flex; }
+.feed-filters-btn[aria-expanded="true"] { border-color: var(--border-strong); }
 @media (max-width: 767px) {
-  .feed-filters-btn { display: inline-flex; }
   .feed-controls .select { flex: 1 1 120px; min-width: 0; }
   .feed-controls .result-count { flex-basis: 100%; margin-left: 0; }
 }

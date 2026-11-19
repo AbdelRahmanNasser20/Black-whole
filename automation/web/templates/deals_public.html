@@ -18,7 +18,7 @@
 {% block topbar_center %}
 <form class="topbar-search" role="search" id="feed-search" autocomplete="off">
   <input type="search" id="feed-q" name="q" placeholder="Search lots — laptops, forklift, fryer…" aria-label="Search lots">
-  <button class="btn btn-ghost btn-small topbar-search-btn" type="button" data-rail-open data-feed-search-open aria-label="Open search and filters">⌕</button>
+  <button class="btn btn-ghost btn-small topbar-search-btn" type="button" data-filters-toggle data-feed-search-open aria-label="Open search and filters">⌕</button>
 </form>
 {% endblock %}
 {% block topbar_nav %}
@@ -27,11 +27,82 @@
 <a href="/sources">Sources</a>
 {% endblock %}
 
-{% block rail %}
-<div id="feed-rail" class="feed-rail">
+
+
+{% block content %}
+<a href="{{ trap_path }}" rel="nofollow" aria-hidden="true" tabindex="-1" hidden>Full export</a>
+<details class="feed-about" id="feed-about">
+  <summary><span class="feed-about-kicker">What this is</span> <span class="feed-about-title">Government surplus, priced by the unit.</span></summary>
+  <div class="feed-about-body">
+    <div class="feed-about-copy">
+      <p>Surplus Radar sweeps every live GovDeals auction every six hours, follows each lot to its close, and records how it ended — the no-bids, the $1 wins, the final prices GovDeals itself never publishes. Lots from GSA Auctions, Purple Wave, AllSurplus (US only) and other public surplus sites ride along from the same recorder.</p>
+      <p>It reads the quantity out of the listing text so a "Lot of (286) HP EliteOne" is priced per machine, not per lot, and adds buyer premium so the number you see is what you'd actually pay.</p>
+      <ol class="feed-how">
+        <li><b>Sweep</b> the whole site through the public search API, every 6 h</li>
+        <li><b>Watch</b> each lot's clock to its close; anti-snipe extensions included</li>
+        <li><b>Record</b> outcome + final bid per auction — relists never overwrite history</li>
+        <li><b>Price</b> quantity from the title → $/unit, plus 12.5 % buyer premium → landed</li>
+      </ol>
+    </div>
+    <dl class="feed-stats" id="feed-stats">
+      <div><dt>Lots tracked</dt><dd data-stat="tracked">—</dd></div>
+      <div><dt>Live now</dt><dd data-stat="active">—</dd></div>
+      <div><dt>Outcomes recorded</dt><dd data-stat="closed">—</dd></div>
+      <div><dt>Closed with no bids</dt><dd data-stat="no_bid">—</dd></div>
+      <div><dt>States live</dt><dd data-stat="states">—</dd></div>
+    </dl>
+  </div>
+</details>
+
+{% if platform_authed %}
+<meta name="platform-authed" content="1">
+{% else %}
+<p class="feed-cta"><a class="btn btn-primary btn-small" href="/platform/signup">Sign up free for alerts + max bid</a></p>
+{% endif %}
+
+<div class="chips" id="feed-chips" data-state="loading" aria-label="Category">{% for _ in range(6) %}<span class="sk sk-pill" aria-hidden="true"></span>{% endfor %}</div>
+
+<div class="controls feed-controls" id="feed-controls">
+  <button class="btn btn-ghost btn-small feed-filters-btn" type="button" id="feed-filters-toggle" data-filters-toggle aria-expanded="false" aria-controls="feed-rail">Filters</button>
+  <select class="select" id="feed-sort" aria-label="Sort">
+    <option value="ends">Ending soonest</option>
+    <option value="newest">Newest</option>
+    <option value="bid:asc">Bid: low → high</option>
+    <option value="bid:desc">Bid: high → low</option>
+    <option value="bids:desc">Most bids</option>
+  </select>
+  <select class="select" id="feed-state" aria-label="State"><option value="">All states</option></select>
+  <select class="select" id="feed-site" aria-label="Site"><option value="">All sites</option></select>
+  <div class="seg feed-view-seg" id="feed-view-toggle" role="group" aria-label="View">
+    <button class="seg-btn is-active" type="button" data-view="cards" aria-pressed="true">Cards</button>
+    <button class="seg-btn" type="button" data-view="table" aria-pressed="false">Table</button>
+    <button class="seg-btn" type="button" data-view="map" aria-pressed="false">Map</button>
+  </div>
+  {#- Slot for per-search actions ("Save this search"); the module that owns the button mounts into it. -#}
+  <div id="feed-actions"></div>
+  <span class="result-count" id="feed-count" aria-live="polite"></span>
+</div>
+
+{#- Filters: the groups that used to sit in the side rail (same ids; feed.js owns them). Toggled by any
+    [data-filters-toggle]; the ⌕ in the topbar opens it on the search box. -#}
+<div id="feed-rail" class="feed-rail feed-filter-panel" hidden>
   <div class="rail-group feed-rail-search">
     <label class="rail-group-title" for="feed-rail-q">Search</label>
     <input type="search" id="feed-rail-q" placeholder="laptops, forklift, fryer…" aria-label="Search lots" autocomplete="off">
+  </div>
+  <div class="rail-group feed-rail-near">
+    <label class="rail-group-title" for="feed-near">Near</label>
+    <div class="feed-near">
+      <input type="text" id="feed-near" inputmode="numeric" placeholder="ZIP or city, ST" aria-label="Near ZIP or city" autocomplete="postal-code" maxlength="80">
+      <select class="select" id="feed-radius" aria-label="Within miles">
+        <option value="25">25 mi</option>
+        <option value="50">50 mi</option>
+        <option value="100" selected>100 mi</option>
+        <option value="250">250 mi</option>
+        <option value="500">500 mi</option>
+      </select>
+    </div>
+    <p class="hint">Lots with a known city only. The search stays as you switch cards, table and map.</p>
   </div>
   <div class="rail-group">
     <span class="rail-group-title" id="feed-bids-label">Bids</span>
@@ -71,66 +142,13 @@
   </div>
   <div class="rail-group feed-rail-actions">
     <button class="btn btn-ghost btn-small" type="button" id="feed-clear">Clear all filters</button>
-    <button class="btn btn-primary btn-small feed-rail-done" type="button" data-rail-close>Done</button>
+    <button class="btn btn-primary btn-small feed-rail-done" type="button" data-filters-close>Done</button>
   </div>
-</div>
-{% endblock %}
-
-{% block content %}
-<a href="{{ trap_path }}" rel="nofollow" aria-hidden="true" tabindex="-1" hidden>Full export</a>
-<details class="feed-about" id="feed-about">
-  <summary><span class="feed-about-kicker">What this is</span> <span class="feed-about-title">Government surplus, priced by the unit.</span></summary>
-  <div class="feed-about-body">
-    <div class="feed-about-copy">
-      <p>Surplus Radar sweeps every live GovDeals auction every six hours, follows each lot to its close, and records how it ended — the no-bids, the $1 wins, the final prices GovDeals itself never publishes. Lots from GSA Auctions, Purple Wave, AllSurplus (US only) and other public surplus sites ride along from the same recorder.</p>
-      <p>It reads the quantity out of the listing text so a "Lot of (286) HP EliteOne" is priced per machine, not per lot, and adds buyer premium so the number you see is what you'd actually pay.</p>
-      <ol class="feed-how">
-        <li><b>Sweep</b> the whole site through the public search API, every 6 h</li>
-        <li><b>Watch</b> each lot's clock to its close; anti-snipe extensions included</li>
-        <li><b>Record</b> outcome + final bid per auction — relists never overwrite history</li>
-        <li><b>Price</b> quantity from the title → $/unit, plus 12.5 % buyer premium → landed</li>
-      </ol>
-    </div>
-    <dl class="feed-stats" id="feed-stats">
-      <div><dt>Lots tracked</dt><dd data-stat="tracked">—</dd></div>
-      <div><dt>Live now</dt><dd data-stat="active">—</dd></div>
-      <div><dt>Outcomes recorded</dt><dd data-stat="closed">—</dd></div>
-      <div><dt>Closed with no bids</dt><dd data-stat="no_bid">—</dd></div>
-      <div><dt>States live</dt><dd data-stat="states">—</dd></div>
-    </dl>
-  </div>
-</details>
-
-{% if platform_authed %}
-<meta name="platform-authed" content="1">
-{% else %}
-<p class="feed-cta"><a class="btn btn-primary btn-small" href="/platform/signup">Sign up free for alerts + max bid</a></p>
-{% endif %}
-
-<div class="chips" id="feed-chips" data-state="loading" aria-label="Category">{% for _ in range(6) %}<span class="sk sk-pill" aria-hidden="true"></span>{% endfor %}</div>
-
-<div class="controls feed-controls" id="feed-controls">
-  <button class="btn btn-ghost btn-small feed-filters-btn" type="button" data-rail-open>Filters</button>
-  <select class="select" id="feed-sort" aria-label="Sort">
-    <option value="ends">Ending soonest</option>
-    <option value="newest">Newest</option>
-    <option value="bid:asc">Bid: low → high</option>
-    <option value="bid:desc">Bid: high → low</option>
-    <option value="bids:desc">Most bids</option>
-  </select>
-  <select class="select" id="feed-state" aria-label="State"><option value="">All states</option></select>
-  <select class="select" id="feed-site" aria-label="Site"><option value="">All sites</option></select>
-  <div class="seg feed-view-seg" id="feed-view-toggle" role="group" aria-label="View">
-    <button class="seg-btn is-active" type="button" data-view="cards" aria-pressed="true">Cards</button>
-    <button class="seg-btn" type="button" data-view="table" aria-pressed="false">Table</button>
-    <button class="seg-btn" type="button" data-view="map" aria-pressed="false">Map</button>
-  </div>
-  {#- Slot for per-search actions ("Save this search"); the module that owns the button mounts into it. -#}
-  <div id="feed-actions"></div>
-  <span class="result-count" id="feed-count" aria-live="polite"></span>
 </div>
 
 <div class="active-filters" id="feed-filters" hidden></div>
+{#- Saved searches as chips on the feed itself (browser store + the account's when signed in); save_search.js paints it. -#}
+<div class="feed-saved" id="feed-saved" hidden aria-label="Your saved searches"></div>
 
 <div id="feed-map" data-style-url="{{ map_style_url }}" hidden></div>
 <aside id="feed-map-panel" hidden aria-label="Lots in view"></aside>
