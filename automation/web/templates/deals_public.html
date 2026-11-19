@@ -80,6 +80,7 @@
   </div>
   {#- Slot for per-search actions ("Save this search"); the module that owns the button mounts into it. -#}
   <div id="feed-actions"></div>
+  <button class="btn btn-ghost btn-small feed-fav-btn" type="button" id="feed-fav-toggle" aria-pressed="false" title="Lots you starred, kept in this browser">★ Saved <span id="feed-fav-count">0</span></button>
   <span class="result-count" id="feed-count" aria-live="polite"></span>
 </div>
 
@@ -94,13 +95,8 @@
     <label class="rail-group-title" for="feed-near">Near</label>
     <div class="feed-near">
       <input type="text" id="feed-near" inputmode="numeric" placeholder="ZIP or city, ST" aria-label="Near ZIP or city" autocomplete="postal-code" maxlength="80">
-      <select class="select" id="feed-radius" aria-label="Within miles">
-        <option value="25">25 mi</option>
-        <option value="50">50 mi</option>
-        <option value="100" selected>100 mi</option>
-        <option value="250">250 mi</option>
-        <option value="500">500 mi</option>
-      </select>
+      <label class="feed-radius" for="feed-radius"><output id="feed-radius-out" for="feed-radius">100 mi</output>
+        <input type="range" id="feed-radius" min="10" max="500" step="10" value="100" aria-label="Within miles"></label>
     </div>
     <p class="hint">Lots with a known city only. The search stays as you switch cards, table and map.</p>
   </div>
@@ -150,6 +146,10 @@
 {#- Saved searches as chips on the feed itself (browser store + the account's when signed in); save_search.js paints it. -#}
 <div class="feed-saved" id="feed-saved" hidden aria-label="Your saved searches"></div>
 
+{#- The results scroll inside their own box (#feed-scroll) so the filters and the controls stay on screen;
+    feed.js sets --feed-scroll-top to where the box starts. -#}
+<div id="feed-scroll" class="feed-scroll">
+<p class="feed-fav-note" id="feed-fav-note" hidden>Starred lots live in this browser only. <a href="/platform/signup">Sign up free</a> to keep them on every device and get them by email.</p>
 <div id="feed-map" data-style-url="{{ map_style_url }}" hidden></div>
 <aside id="feed-map-panel" hidden aria-label="Lots in view"></aside>
 
@@ -157,6 +157,7 @@
 <div id="feed-table" class="table-wrap feed-table-wrap" aria-live="polite"></div>
 <nav id="feed-pager" class="feed-pager" aria-label="Pages" hidden></nav>
 <div class="load-more feed-more-wrap"><button id="feed-more" class="btn" type="button" hidden>Load more</button></div>
+</div>
 {% endblock %}
 
 {% block footer %}
