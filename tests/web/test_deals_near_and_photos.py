@@ -162,3 +162,15 @@ def test_starter_searches_use_real_category_keys():
                        "lawn_landscaping", "av_equipment", "comms_radios", "musical_instruments", "collectibles_jewelry", "other"), key
     assert "STARTERS" in (WEB / "static/deals/save_search.js").read_text()
     assert 'id="finds-starters"' in (WEB / "templates/platform_finds.html").read_text()
+
+
+def test_pins_apply_the_radius_to_every_source(monkeypatch):
+    """The GovDeals half is filtered in SQL; the other sites' rows must pass through the same origin."""
+    seen = {}
+    monkeypatch.setattr(public_deals.db, "fetch_all", lambda *a, **k: [])
+    def fake_snapshot(**kw):
+        seen.update(kw); return []
+    monkeypatch.setattr(public_deals, "_snapshot_rows", fake_snapshot)
+    origin = {"label": "30301", "radius": 100.0, "lat": 33.75, "lng": -84.39, "resolved": True}
+    public_deals.fetch_pins(origin=origin)
+    assert seen.get("origin") == origin
