@@ -63,6 +63,7 @@ from ..progress import EVENT_PREFIX, parse as parse_event
 from .. import config as app_config
 from .. import db
 from .. import catalog_feed, google_feed, indexnow, lot_channels
+from ..chair_types import CHAIR_TYPES
 from .. import inventory
 from .. import inquiry_photos
 from .. import lot_images
@@ -141,6 +142,7 @@ templates.env.globals["trap_path"] = scrape_guard.TRAP_PATH
 templates.env.globals["platform_brand"] = PLATFORM_BRAND
 templates.env.globals["platform_base_url"] = app_config.PLATFORM_BASE_URL
 templates.env.globals["asset_v"] = str(int(time.time()))  # cache-bust per process start
+templates.env.globals["chair_types"] = CHAIR_TYPES  # inquiry form dropdown
 templates.env.globals["lot_url"] = lot_urls.public_path  # the one way templates build a lot link
 # Small photo copies for phones (SITE-SPEED): `sized(url, 320|800)` / `srcset(url)`
 # return the full URL / "" for any photo without copies, so a template never
@@ -2667,6 +2669,7 @@ async def public_contact(payload: dict):
                 else None
             ),
             zip_code=(str(payload.get("zip_code") or "")).strip() or None,
+            chair_type=(str(payload.get("chair_type") or "")).strip() or None,
         ))
     except ValueError as e:
         raise HTTPException(400, str(e))

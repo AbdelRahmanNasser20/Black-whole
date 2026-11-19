@@ -76,7 +76,7 @@ def _run(answers, rows=ROWS):
     return state
 
 
-FULL = {"zip": "30301", "lots": ["31225-atl"], "qty": "100", "when": "This week",
+FULL = {"zip": "30301", "lots": ["31225-atl"], "type": "Chiavari", "qty": "100", "when": "This week",
         "fulfil": "I can pick up", "pay": "Zelle", "org": "Nonprofit", "slot": "9-11 AM",
         "date": "Friday at 10", "name": "Dana Reed", "phone": "(404) 555-0143"}
 
@@ -84,7 +84,8 @@ FULL = {"zip": "30301", "lots": ["31225-atl"], "qty": "100", "when": "This week"
 def test_full_pickup_chat_asks_every_question_and_builds_the_lead():
     state = _run(FULL)
     assert state["step"] == "done"
-    assert [e["step"] for e in state["log"]] == list(sc.STEPS[:-1])
+    # A tapped lot already says the chair type, so the type question is skipped.
+    assert [e["step"] for e in state["log"]] == [s for s in sc.STEPS[:-1] if s != "type"]
     lead = sc.lead(state)
     assert lead["name"] == "Dana Reed" and lead["phone"] == "4045550143" and lead["email"] is None
     assert lead["zip_code"] == "30301" and lead["quantity_interested"] == 100

@@ -21,6 +21,12 @@
 }
 .bwchat-launch:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 0 var(--accent); }
 .bwchat-launch-mark { color: var(--accent); font-size: 18px; line-height: 1; }
+.bwchat-launch-text { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; text-align: left; }
+.bwchat-launch-kicker {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--accent); line-height: 1;
+}
+.bwchat-launch-main { line-height: 1.1; }
 .bwchat[data-open="true"] .bwchat-launch { display: none; }
 
 /* ── panel ── */
