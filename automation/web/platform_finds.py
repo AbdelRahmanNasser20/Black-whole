@@ -73,6 +73,22 @@ def _max_saved_lots() -> int:
         return 500
 
 
+def _free_saved_lots() -> int:
+    """Free plan cap. Standard ($5/month, plan 'pro') gets _max_saved_lots()."""
+    try:
+        return int(os.getenv("PLATFORM_FREE_SAVED_LOTS", "3"))
+    except ValueError:
+        return 3
+
+
+def saved_plan(user_id) -> tuple[str, int]:
+    """(plan, saved-lot cap) for one user. Any plan but 'pro' is the free plan."""
+    row = db.fetch_one("SELECT plan FROM platform_users WHERE user_id = %s", (user_id,)) or {}
+    if row.get("plan") == "pro":
+        return "pro", _max_saved_lots()
+    return "free", _free_saved_lots()
+
+
 def _private(payload) -> JSONResponse:
     return JSONResponse(jsonable_encoder(payload), headers=_PRIVATE)
 
@@ -313,5 +329,5 @@ def import_saved(body: ImportBody, user: dict = Depends(onboarded_user)):
             "LIMIT greatest(0, %s - (SELECT count(*) FROM platform_saved_lots WHERE user_id = %s)) "
             "ON CONFLICT (user_id, source, lot_key) DO NOTHING",
             (user["user_id"], [l.source for l in body.lots], [l.lot_key for l in body.lots],
-             _max_saved_lots(), user["user_id"])) or 0
+             saved_plan(user["user_id"])[1], user["user_id"])) or 0
     return _private({"ok": True, "received": len(body.lots), "imported": imported})

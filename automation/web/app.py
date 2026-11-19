@@ -2264,8 +2264,15 @@ def public_platform(request: Request):
             "sources_tracked": len(platform_api.SITES),
             "sources_planned": len(platform_api.PLANNED_SITES),
             "planned_sources": [name for name, _kind in platform_api.PLANNED_SITES.values()],
+            # Standard plan ($5/month): the Subscribe button shows only when Stripe billing is live.
+            "billing_live": _platform_billing_live(),
         }),
     )
+
+
+def _platform_billing_live() -> bool:
+    from automation import platform_billing
+    return platform_billing.enabled() and bool(os.getenv("PLATFORM_STRIPE_PRICE_ID", "").strip())
 
 
 @app.get("/platform/how-it-works", response_class=HTMLResponse)

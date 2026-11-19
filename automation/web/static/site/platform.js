@@ -179,7 +179,7 @@ function invDetail(l) {
 function renderInv() {
   const tbody = $('#pf-inv-rows');
   const rows = invRows();
-  $('#pf-inv-count').textContent = `${rows.length} of ${inv.data.lots.length} sample lots`;
+  $('#pf-inv-count').textContent = `${rows.length} of ${inv.data.lots.length} lots`;
   $$('#pf-pane-inventory .pf-sort').forEach(b => {
     const on = b.dataset.sort === inv.sort;
     b.classList.toggle('is-sorted', on);
@@ -187,7 +187,7 @@ function renderInv() {
     b.dataset.dir = on ? inv.dir : '';
   });
   if (!rows.length) {
-    msgRow(tbody, 11, 'No sample lots match. <button class="pf-btn" type="button" data-inv-reset>Clear filters</button>');
+    msgRow(tbody, 11, 'No lots match. <button class="pf-btn" type="button" data-inv-reset>Clear filters</button>');
     return;
   }
   tbody.innerHTML = rows.map(l => {
@@ -218,7 +218,7 @@ async function loadInv() {
   try {
     inv.data = await api(SAMPLE_BASE + 'inventory.sample.json');
   } catch {
-    msgRow(tbody, 11, 'The sample lots did not load. <button class="pf-btn" type="button" data-inv-retry>Try again</button>');
+    msgRow(tbody, 11, 'The lots did not load. <button class="pf-btn" type="button" data-inv-retry>Try again</button>');
     return;
   }
   const statuses = [...new Set(inv.data.lots.map(l => l.status))];
@@ -270,9 +270,9 @@ function crmRows() {
 function renderBuyers() {
   const rows = crmRows();
   const list = $('#pf-crm-list');
-  $('#pf-crm-count').textContent = `${rows.length} of ${crm.data.buyers.length} sample buyers`;
+  $('#pf-crm-count').textContent = `${rows.length} of ${crm.data.buyers.length} buyers`;
   if (!rows.length) {
-    list.innerHTML = '<li class="pf-row-msg">No sample buyers match. <button class="pf-btn" type="button" data-crm-reset>Clear filters</button></li>';
+    list.innerHTML = '<li class="pf-row-msg">No buyers match. <button class="pf-btn" type="button" data-crm-reset>Clear filters</button></li>';
     return;
   }
   list.innerHTML = rows.map(b => {
@@ -319,7 +319,7 @@ async function loadCrm() {
   try {
     crm.data = await api(SAMPLE_BASE + 'crm.sample.json');
   } catch {
-    $('#pf-crm-list').innerHTML = '<li class="pf-row-msg">The sample buyers did not load. <button class="pf-btn" type="button" data-crm-retry>Try again</button></li>';
+    $('#pf-crm-list').innerHTML = '<li class="pf-row-msg">The buyers did not load. <button class="pf-btn" type="button" data-crm-retry>Try again</button></li>';
     return;
   }
   if ($('#pf-crm-stage').options.length === 1) {

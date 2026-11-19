@@ -2,8 +2,8 @@
 // (the same key the platform demo and merge.js use, so a star travels into the account after sign-in).
 // Storage can be blocked or full: every read and write is guarded; the page works with no stars.
 // A star id is "<source>:<lot key>" — the key is the tail of the lot page URL, so it is stable across loads.
+import {starLimit, UPGRADE_TEXT} from './plan.js';
 export const STAR_KEY = 'pf.stars.v1';
-const MAX = 300;
 const KEEP = ['title', 'viewer_url', 'url', 'govdeals_url', 'source', 'source_name', 'city', 'state', 'current_bid',
   'bid_count', 'end_utc', 'photo_url', 'canonical_category', 'quantity', 'quantity_source', 'unit_bid',
   'landed_cost', 'outcome_complete', 'outcome', 'final_bid', 'final_bid_count', 'asset_id', 'account_id', 'auction_id'];
@@ -40,7 +40,7 @@ export function toggle(row) {
   const id = starId(row); if (!id) return null;
   const all = readAll();
   if (all[id]) { delete all[id]; write(all); notify(); return false; }
-  if (Object.keys(all).length >= MAX) return null;
+  if (Object.keys(all).length >= starLimit()) return null;   // free = 3, Standard = plan.MAX_STARS
   const keep = {}; for (const k of KEEP) if (row[k] !== undefined) keep[k] = row[k];
   all[id] = {...keep, id, starred_at: new Date().toISOString()};
   write(all); notify(); return true;
@@ -66,6 +66,6 @@ document.addEventListener('click', (e) => {
   try { row = JSON.parse(b.closest('.card').dataset.row || 'null'); } catch { row = null; }
   if (!row) return;
   const r = toggle(row);
-  if (r === null) { b.title = 'This browser holds the most stars it can (300).'; return; }
+  if (r === null) { b.title = UPGRADE_TEXT; if (window.confirm(UPGRADE_TEXT + ' See the plans?')) window.location.href = '/platform#pricing'; return; }
   paint(b.closest('.card'));
 });

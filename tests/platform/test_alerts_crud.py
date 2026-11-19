@@ -24,6 +24,10 @@ class FakeDB:
         raise AssertionError(sql)
 
     def fetch_one(self, sql, params=None):
+        if "FROM platform_users" in sql:
+            return {"plan": "beta"}
+        if "FROM platform_saved_lots" in sql:
+            return {"x": 1} if tuple(params) in self.saved else None
         assert "INSERT INTO platform_alerts" in sql and "%s" in sql
         uid, kw, st, src, mp, _uid2, cap = params
         if len([a for a in self.alerts if a["user_id"] == uid]) >= cap:
@@ -41,7 +45,10 @@ class FakeDB:
             return before - len(self.alerts)
         if "INSERT INTO platform_saved_lots" in sql:
             assert "ON CONFLICT" in sql and "DO NOTHING" in sql
-            self.saved.add(tuple(params))
+            key = tuple(params[:3])
+            if key in self.saved:
+                return 0
+            self.saved.add(key)
             return 1
         if "DELETE FROM platform_saved_lots" in sql:
             key = tuple(params)

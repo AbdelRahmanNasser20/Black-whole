@@ -68,6 +68,8 @@ def setup(monkeypatch, migrated=True):
     for n in ("fetch_all", "fetch_one", "execute"):
         monkeypatch.setattr(db, n, getattr(f, n))
     monkeypatch.setattr(platform_finds, "_columns_ready", False)
+    # Star-cap tests here are about the Standard (pro) ceiling; the free cap has its own file.
+    monkeypatch.setattr(platform_finds, "saved_plan", lambda uid: ("pro", platform_finds._max_saved_lots()))
     app = FastAPI()
     app.include_router(platform_routes.router)
     app.dependency_overrides[platform_auth.get_current_user] = lambda: {

@@ -112,9 +112,9 @@ def test_sample_sections_are_labelled_in_the_html(no_db):
         block = html.split(f'id="pf-pane-{pane}"', 1)[1].split('role="tabpanel"', 1)[0]
         assert 'data-source="sample"' in block.split(">", 1)[0]
         head = block.split('class="pf-pane-head"', 1)[1].split("</div>", 1)[0]
-        assert "Sample data" in head and "invented" in head
+        assert "Snapshot" in head                        # real snapshot, labelled as such
         tab = html.split(f'id="pf-tab-{pane}"', 1)[1].split("</button>", 1)[0]
-        assert "Sample" in tab
+        assert "Snapshot" in tab
     for pane in ("auctions", "favorites", "sites"):
         block = html.split(f'id="pf-pane-{pane}"', 1)[1].split('role="tabpanel"', 1)[0]
         assert "Sample" not in block.split('class="pf-pane-head"', 1)[1].split("</div>", 1)[0], pane
@@ -141,8 +141,9 @@ def test_auctions_view_has_every_filter_a_list_and_a_map(no_db):
 def test_favorites_are_the_visitors_own_stars():
     # kept in this browser, every storage call guarded, and nothing reads the operator's favorites
     assert "const STAR_KEY = 'pf.stars.v1';" in AUCTIONS_JS
-    assert AUCTIONS_JS.count("window.localStorage.") == 2
-    for call in ("window.localStorage.getItem(STAR_KEY)", "window.localStorage.setItem(STAR_KEY"):
+    assert AUCTIONS_JS.count("window.localStorage.") == 4    # stars (2) + targets (2)
+    for call in ("window.localStorage.getItem(STAR_KEY)", "window.localStorage.setItem(STAR_KEY",
+                 "window.localStorage.getItem(TARGET_KEY)", "window.localStorage.setItem(TARGET_KEY"):
         before = AUCTIONS_JS.split(call, 1)[0]
         assert before.rstrip().endswith("try {") or "try {" in before.rsplit("\n", 3)[-1] or "try {" in before[-120:], call
     for src in (JS, AUCTIONS_JS):
@@ -177,12 +178,13 @@ def test_no_storefront_nav_or_self_link(no_db):
 
 def test_copy_makes_no_price_or_customer_claims(no_db):
     html = _page().lower()
-    for banned in ("testimonial", "trusted by", "per month", "/mo", "customers use",
-                   "free trial", "$0", "$9", "$19", "$29", "$49", "$99"):
+    for banned in ("testimonial", "trusted by", "customers use", "free trial",
+                   "$9", "$19", "$29", "$49", "$99"):
         assert banned not in html, banned
-    # no live checkout, no invented Pro price — billing ships dark
-    assert "stripe" not in html and "/platform/api/subscribe" not in html
-    assert "not priced yet" in html
+    # The one price is the operator's (2026-11-19): Standard = $5 a month. With billing dark the page
+    # carries no checkout call.
+    assert "$5 <span class=\"pf-plan-per\">a month</span>" in html
+    assert "/platform/api/subscribe" not in html
     # No number about the feed is baked into the template: the counts come from the endpoints at runtime.
     for slot in ("pf-au-count", "pf-n-auctions", "pf-sites-count", "pf-n-sites"):
         assert TEMPLATE.split(f'id="{slot}"', 1)[1].split("</span>", 1)[0].split(">", 1)[1].strip() == "", slot
@@ -209,8 +211,8 @@ def test_hero_sells_the_signup(no_db):
     hero = html.split('class="pf-hero"', 1)[1].split("</section>", 1)[0]
     headline = hero.split('class="pf-headline">', 1)[1].split("</h1>", 1)[0]
     assert 1 <= len(re.sub(r"<[^>]+>", " ", headline).split()) <= 10, headline
-    assert '<a class="pf-cta" href="/platform/signup">' in hero
-    assert "Get free early access" in hero
+    assert '<a class="pf-cta" href="/deals">Find deals</a>' in hero   # operator 2026-11-19: deals first
+    assert 'href="/platform/signup"' in hero and "Get free early access" in hero
     assert 'href="#app"' in hero, "a quiet path to the live demo"
     # the whole page runs on the product's own dark tokens
     assert 'class="pf-page" data-theme="dark"' in html

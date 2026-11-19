@@ -17,8 +17,10 @@
                    The tag says "Real data" until the feed reports open auctions, then "Live data".
     · Favorites  = the VISITOR's own stars, kept in this browser (localStorage, try/catch). The operator's
                    real favorites are private and never reach this page.
-    · Inventory  = SAMPLE, invented (static/site/platform/inventory.sample.json).
-    · Buyers     = SAMPLE, invented (crm.sample.json) + the lot → buyers-in-radius map (_platform_map.html).
+    · Inventory  = SNAPSHOT of the operator's real chair lots, ids renumbered, no cost / storage_note / address
+                   (static/site/platform/inventory.sample.json).
+    · Buyers     = the Marketplace CRM: SNAPSHOT of real buyer chats (crm.sample.json), first name + last initial,
+                   every phone, email, address, code and profile link removed; + the lot → buyers map (_platform_map.html).
                    No real lot, cost, buyer, message, phone or address; inventory.storage_note never renders.
     · Sites      = names render server-side (no DB read); platform.js adds each site's TRUE status —
                    Live, Paused or Planned — from /platform/api/sites (fallback /platform/api/sources).
@@ -45,6 +47,7 @@
     <nav class="pf-nav" aria-label="Page">
       <a class="pf-nav-brand" href="/">◉ {{ platform_brand }} <span class="pf-nav-sub">platform</span></a>
       <span class="pf-nav-links">
+        <a href="/deals">Find deals</a>
         <a href="#app">Live demo</a>
         <a href="#product">What you get</a>
         <a href="/deals/sold">Sold prices</a>
@@ -59,10 +62,11 @@
         <p class="pf-hero-sub">One feed over the government-surplus auction sites, with a Flip Score
           and a recommended max bid read from recorded outcomes — not gut feel at 11:58&nbsp;pm.</p>
         <p class="pf-hero-ctas">
-          <a class="pf-cta" href="/platform/signup">Get free early access</a>
-          <a class="pf-cta-quiet" href="#app">See the live feed</a>
+          <a class="pf-cta" href="/deals">Find deals</a>
+          <a class="pf-cta-quiet" href="/platform/signup">Get free early access</a>
+          <a class="pf-cta-quiet" href="#app">See the live product</a>
         </p>
-        <p class="pf-hero-note">Free while the beta runs. No card, no invite code.</p>
+        <p class="pf-hero-note">Free plan: the full feed and 3 favorites. Standard: $5 a month.</p>
       </div>
       <dl class="pf-tape" aria-label="Live numbers from the database">
         {% if stats %}
@@ -118,7 +122,7 @@
     <header class="pf-app-head">
       <h2 class="pf-h2">The live product</h2>
       <p class="pf-app-lede">The window below is the real feed — read-only, no account. Auctions and
-        Sites are live; Inventory and Buyers run on invented sample data and say so.</p>
+        Sites are live; Listings and the Marketplace CRM are a snapshot of our own chair business, with buyer contact details removed.</p>
     </header>
     <div class="pf-win" id="pf-win">
       <aside class="pf-side">
@@ -127,7 +131,7 @@
           <button class="pf-side-item is-active" type="button" role="tab" id="pf-tab-auctions"
                   aria-controls="pf-pane-auctions" aria-selected="true" data-tab="auctions">
             <i class="pf-glyph pf-glyph--auctions" aria-hidden="true"></i>
-            <span class="pf-side-name">Auctions</span>
+            <span class="pf-side-name">Deals</span>
             <span class="pf-side-n" id="pf-n-auctions"></span>
           </button>
           <button class="pf-side-item" type="button" role="tab" id="pf-tab-favorites"
@@ -139,14 +143,14 @@
           <button class="pf-side-item" type="button" role="tab" id="pf-tab-inventory"
                   aria-controls="pf-pane-inventory" aria-selected="false" tabindex="-1" data-tab="inventory">
             <i class="pf-glyph pf-glyph--inventory" aria-hidden="true"></i>
-            <span class="pf-side-name">Inventory</span>
-            <span class="pf-side-tag">Sample</span>
+            <span class="pf-side-name">Listings</span>
+            <span class="pf-side-tag">Snapshot</span>
           </button>
           <button class="pf-side-item" type="button" role="tab" id="pf-tab-buyers"
                   aria-controls="pf-pane-buyers" aria-selected="false" tabindex="-1" data-tab="buyers">
             <i class="pf-glyph pf-glyph--buyers" aria-hidden="true"></i>
-            <span class="pf-side-name">Buyers</span>
-            <span class="pf-side-tag">Sample</span>
+            <span class="pf-side-name">Marketplace CRM</span>
+            <span class="pf-side-tag">Snapshot</span>
           </button>
           <button class="pf-side-item" type="button" role="tab" id="pf-tab-sites"
                   aria-controls="pf-pane-sites" aria-selected="false" tabindex="-1" data-tab="sites">
@@ -170,10 +174,15 @@
         {# ───────────── Auctions — REAL: filters, list and map in sync ───────────── #}
         <div class="pf-pane pf-pane--auctions" role="tabpanel" id="pf-pane-auctions" aria-labelledby="pf-tab-auctions" data-source="live">
           <div class="pf-pane-head">
-            <h2 class="pf-pane-title">Auctions</h2>
+            <h2 class="pf-pane-title">Deals</h2>
             <span class="pf-tag pf-tag--live" id="pf-au-tag">Real data</span>
             <span class="pf-pane-count" id="pf-au-count" aria-live="polite"></span>
+            <a class="pf-btn pf-find-deals" href="/deals">Find deals →</a>
           </div>
+          {# Targets = saved filter groups (keyword, site, category, state, max bid) for any kind of lot —
+             the public version of the admin Auctions tab's research profiles. auctions.js fills it. #}
+          <div class="pf-targets" id="pf-au-targets" role="group" aria-label="Targets: saved filter groups"></div>
+          <p class="pf-upgrade" id="pf-au-upgrade" role="status" hidden></p>
           <form class="pf-filters" id="pf-au-form" autocomplete="off">
             <div class="pf-seg" role="group" aria-label="Auction status" id="pf-au-status">
               <button class="pf-seg-btn is-active" type="button" data-status="open" aria-pressed="true">Open</button>
@@ -228,8 +237,8 @@
         {# ───────────── Inventory — SAMPLE ───────────── #}
         <div class="pf-pane" role="tabpanel" id="pf-pane-inventory" aria-labelledby="pf-tab-inventory" data-source="sample" hidden>
           <div class="pf-pane-head">
-            <h2 class="pf-pane-title">Inventory</h2>
-            <span class="pf-tag pf-tag--sample">Sample data, invented</span>
+            <h2 class="pf-pane-title">Listings inventory</h2>
+            <span class="pf-tag pf-tag--sample">Snapshot of real chair lots</span>
             <span class="pf-pane-count" id="pf-inv-count"></span>
           </div>
           <form class="pf-filters" id="pf-inv-form" autocomplete="off">
@@ -271,7 +280,7 @@
                 </tr>
               </thead>
               <tbody id="pf-inv-rows">
-                <tr class="pf-row-msg"><td colspan="11">Loading sample lots…</td></tr>
+                <tr class="pf-row-msg"><td colspan="11">Loading lots…</td></tr>
               </tbody>
             </table>
           </div>
@@ -280,8 +289,8 @@
         {# ───────────── Buyers — SAMPLE: CRM list + thread, then the lot → buyers map ───────────── #}
         <div class="pf-pane" role="tabpanel" id="pf-pane-buyers" aria-labelledby="pf-tab-buyers" data-source="sample" hidden>
           <div class="pf-pane-head">
-            <h2 class="pf-pane-title">Buyers</h2>
-            <span class="pf-tag pf-tag--sample">Sample data, invented</span>
+            <h2 class="pf-pane-title">Marketplace CRM</h2>
+            <span class="pf-tag pf-tag--sample">Snapshot of real chats, contact details removed</span>
             <span class="pf-pane-count" id="pf-crm-count"></span>
           </div>
           <form class="pf-filters" id="pf-crm-form" autocomplete="off">
@@ -295,7 +304,7 @@
           </form>
           <div class="pf-crm" id="pf-crm">
             <ul class="pf-buyers" id="pf-crm-list" aria-label="Buyers">
-              <li class="pf-row-msg">Loading sample buyers…</li>
+              <li class="pf-row-msg">Loading buyers…</li>
             </ul>
             <div class="pf-thread" id="pf-crm-thread" aria-live="polite"></div>
           </div>
@@ -380,7 +389,7 @@
         <dt class="pf-feat-name">For liquidators: the desk</dt>
         <dd class="pf-feat-copy">
           The operator runs his own lots on the same stack: inventory, the buyers near each lot on a
-          map, and the chats to pickup. The window above shows it on sample data. Access for other
+          map, and the chats to pickup. The window above shows a snapshot of it. Access for other
           liquidators is by request while the beta runs.
         </dd>
       </div>
@@ -418,31 +427,37 @@
 
   {# ───────────── Founding members — billing ships dark; no invented prices, no live checkout. ───────────── #}
   <section class="pf-pricing" id="pricing" aria-labelledby="pf-pricing-title">
-    <h2 class="pf-h2" id="pf-pricing-title">Founding members</h2>
+    <h2 class="pf-h2" id="pf-pricing-title">Pricing</h2>
     <div class="pf-plans">
       <div class="pf-plan pf-plan--now">
-        <h3 class="pf-plan-name">While the beta runs</h3>
-        <p class="pf-plan-price">Free</p>
+        <h3 class="pf-plan-name">Free</h3>
+        <p class="pf-plan-price">$0</p>
         <ul class="pf-plan-list">
           <li>The full feed, open and closed auctions</li>
           <li>Flip Score and recommended max bid</li>
-          <li>Keyword, state and price-cap email alerts</li>
-          <li>Saved lots and the map</li>
+          <li>Targets: saved filter groups for any kind of lot</li>
+          <li>3 favorite lots to track</li>
         </ul>
-        <p class="pf-plan-note">No card. Founding members get a direct line to the operator and
-          steer what gets built next.</p>
-        <a class="pf-cta" href="/platform/signup">Get free early access</a>
+        <p class="pf-plan-note">No card.</p>
+        <a class="pf-cta" href="/deals">Find deals</a>
       </div>
       <div class="pf-plan pf-plan--later">
-        <h3 class="pf-plan-name">Pro, when billing launches</h3>
-        <p class="pf-plan-price">Not priced yet</p>
+        <h3 class="pf-plan-name">Standard</h3>
+        <p class="pf-plan-price">$5 <span class="pf-plan-per">a month</span></p>
         <ul class="pf-plan-list">
-          <li>Higher alert limits</li>
-          <li>Priority access to new sources as they ship</li>
-          <li>Early access to new tools</li>
+          <li>Everything in Free</li>
+          <li>Unlimited favorite lots to track</li>
+          <li>Email alerts on your targets</li>
+          <li>The Marketplace CRM: your listings, your buyers, every chat to pickup</li>
+          <li>Listing automation to Facebook (Meta) and eBay</li>
         </ul>
-        <p class="pf-plan-note">Founding members get first access and preferred pricing when billing
-          launches — that is the whole deal, and the only one.</p>
+        <p class="pf-plan-note">Cancel any time. Payments by Stripe.</p>
+        {% if billing_live %}
+        <button class="pf-cta" type="button" id="pf-subscribe">Start Standard — $5/month</button>
+        <p class="pf-plan-note" id="pf-subscribe-msg" role="status"></p>
+        {% else %}
+        <a class="pf-cta" href="/platform/signup">Get Standard</a>
+        {% endif %}
       </div>
     </div>
   </section>
@@ -458,4 +473,23 @@
 {% block scripts %}
 <script type="module" src="/static/site/platform.js?v={{ asset_v }}"></script>
 <script type="module" src="/static/site/platform/map.js?v={{ asset_v }}"></script>
+{% if billing_live %}
+<script type="module">
+  // Standard checkout: the server picks the price (env PLATFORM_STRIPE_PRICE_ID); a visitor with no
+  // account goes to sign-in first.
+  const b = document.getElementById('pf-subscribe'), msg = document.getElementById('pf-subscribe-msg');
+  b.addEventListener('click', async () => {
+    b.disabled = true; msg.textContent = 'Opening checkout…';
+    try {
+      const r = await fetch('/platform/api/subscribe', {method: 'POST', credentials: 'include'});
+      if (r.status === 401 || r.status === 403) { window.location.href = '/platform/signup?next=pricing'; return; }
+      if (r.status === 409) { msg.textContent = 'You already have Standard.'; return; }
+      const d = await r.json();
+      if (d && d.url) { window.location.href = d.url; return; }
+      msg.textContent = 'Checkout is not available right now. Try again soon.';
+    } catch { msg.textContent = 'Checkout is not available right now. Try again soon.'; }
+    finally { b.disabled = false; }
+  });
+</script>
+{% endif %}
 {% endblock %}
