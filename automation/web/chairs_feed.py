@@ -24,6 +24,7 @@ Callers: `GET /api/deals/chairs` (admin, auth-walled) and
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from datetime import datetime, timezone
 
 from .. import db
@@ -57,6 +58,9 @@ _GD_PICK = (
 
 
 # ── quantity ─────────────────────────────────────────────────────────────────
+# Pure, and the same ~1,600 live lots come back on every Chairs load: parsing
+# them cost ~1 s per load on Render's 0.5 CPU (2026-11-10).
+@lru_cache(maxsize=16384)
 def best_quantity(title: str | None, description: str | None = None) -> tuple[int | None, str]:
     """(quantity, source) for a seating lot. Named patterns first
     (`lot_quantity`: title, then description head), then the chair noun count
