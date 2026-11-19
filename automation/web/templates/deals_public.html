@@ -6,9 +6,9 @@
 {% set nav_active = 'deals' %}
 {% extends "_base.html" %}
 {% from "_ui/macros.html" import skeleton_cards %}
-{% block title %}Surplus Radar — live government surplus lots{% endblock %}
+{% block title %}{{ platform_brand }} — live government surplus lots{% endblock %}
 {% block head %}
-<meta name="description" content="Live government surplus lots from GovDeals, GSA Auctions, Purple Wave and more, with quantity-aware $/unit and recorded outcomes. A side project by Black Whole.">
+<meta name="description" content="Live government surplus lots from GovDeals, GSA Auctions, Purple Wave and more, with quantity-aware $/unit and recorded outcomes. Built by Black Whole.">
 <meta name="robots" content="{{ 'index,follow' if robots_index else 'noindex,follow' }}">
 <link rel="canonical" href="{{ base_url }}/deals">
 <link rel="stylesheet" href="/static/deals/feed.css?v={{ asset_v }}">
@@ -144,8 +144,8 @@
 {% block footer %}
 {% include "_updates_strip.html" %}
 <footer class="footer feed-footer">
-  <p class="footer-note">Surplus Radar aggregates public surplus listings (GovDeals, GSA Auctions, Purple Wave, AllSurplus and others) and is not affiliated with any of those sites or any agency. Photos stay on the source site.</p>
-  <p class="footer-note">© 2026 Black Whole</p>
+  <p class="footer-note">{{ platform_brand }} aggregates public surplus listings (GovDeals, GSA Auctions, Purple Wave, AllSurplus and others) and is not affiliated with any of those sites or any agency. Photos stay on the source site.</p>
+  <p class="footer-note">© 2026 {{ platform_brand }}</p>
 </footer>
 {% endblock %}
 

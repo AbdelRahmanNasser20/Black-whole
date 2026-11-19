@@ -2,7 +2,7 @@
     (/liquidators, /platform/bankruptcies, /platform/deals). Set `current` before including.
     /platform itself keeps its own nav and never links here (its test forbids a self-link). -#}
 <nav class="pt-nav" aria-label="Platform pages">
-  <a class="pt-nav-brand" href="/">◉ BLACK&nbsp;WHOLE</a>
+  <a class="pt-nav-brand" href="/">◉ {{ platform_brand | upper | replace(" ", "&nbsp;") }}</a>
   <span class="pt-nav-links">
     <a href="/platform">Platform</a>
     <a href="/platform/deals"{% if current == "deals" %} aria-current="page"{% endif %}>Deals</a>
