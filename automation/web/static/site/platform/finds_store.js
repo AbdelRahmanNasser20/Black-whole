@@ -7,6 +7,18 @@ export const SEARCH_KEY = 'pf.pending_searches.v1';
 export const STAR_KEY = 'pf.stars.v1';
 export const FILTERS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'min_price', 'max_price'];
 export const MAX_SEARCHES = 10;      // the account cap (PLATFORM_MAX_ALERTS_PER_USER default)
+// Starter searches: ready-made filter sets a visitor can run or save with one click (the /deals
+// strip and the empty Finds page). Category keys are the feed's own canonical categories.
+export const STARTERS = [
+  {name: 'Banquet chairs', category: 'seating_furniture', q: 'chairs'},
+  {name: 'Forklifts', q: 'forklift'},
+  {name: 'Vehicles, no bids yet', category: 'vehicles', max_bids: 0},
+  {name: 'Laptops under $500', q: 'laptop', max_price: 500},
+  {name: 'Restaurant kitchen', category: 'kitchen_restaurant'},
+  {name: 'Medical equipment', category: 'medical_equipment'},
+  {name: 'Tools, ending today', category: 'tools_shop', ending_within: 24},
+  {name: 'Trailers', q: 'trailer'},
+];
 const NUMERIC = ['max_bids', 'ending_within', 'min_price', 'max_price'];
 const ZERO_IS_NOTHING = ['ending_within', 'min_price', 'max_price'];   // 0 bids means "no bids"; these at 0 mean no filter
 const CEILING = {max_bids: 1000, ending_within: 720, min_price: 100000000, max_price: 100000000};

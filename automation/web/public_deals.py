@@ -66,8 +66,59 @@ PUBLIC_COLS = (
     "asset_id, account_id, auction_id, title, canonical_category, "
     "native_category_name, city, state, bid_count, current_bid, currency_code, "
     "end_utc, outcome, final_bid, final_bid_count, outcome_complete, "
-    "first_seen_at, lat, lng, site, native_id"
+    "first_seen_at, lat, lng, site, native_id, hero_image_url"
 )
+# `hero_image_url` is the SOURCE site's own photo link (never archived_hero_url /
+# gallery_urls, our private copies). It leaves as `photo_url` after
+# deals_sources.safe_photo_url, like a snapshot row — the feed card hotlinks it
+# under the same site setting as the lot page (lot_pages.show_photos).
+
+# ZIP + miles ("near me"): (lat, lng, radius_mi). Resolved once per request from
+# the typed place by `resolve_origin`; a place that does not resolve is an
+# empty result with `near.resolved = False`, never a silent "everything".
+RADIUS_CHOICES = (25, 50, 100, 250, 500)
+RADIUS_MAX = 1000
+_ORIGIN_SQL = ("2 * 3958.8 * asin(sqrt(power(sin((radians(lat) - radians(%s)) / 2), 2) "
+               "+ cos(radians(%s)) * cos(radians(lat)) * power(sin((radians(lng) - radians(%s)) / 2), 2))) <= %s")
+
+
+def resolve_origin(near: str | None, radius: float | None) -> dict | None:
+    """None when nothing was typed. `{"lat","lng","radius","label","resolved"}`
+    otherwise; `resolved` False when the place is unknown (lat/lng None)."""
+    if not near or not str(near).strip():
+        return None
+    from automation.alerts import geo
+    label = str(near).strip()[:80]
+    try:
+        r = float(radius) if radius is not None else 100.0
+    except (TypeError, ValueError):
+        r = 100.0
+    r = max(1.0, min(r, float(RADIUS_MAX)))
+    city, state, zip_code = geo.parse_place(label)
+    lat, lng, _prec = geo.resolve_place(city, state, zip_code)
+    if lat is None:
+        return {"label": label, "radius": r, "lat": None, "lng": None, "resolved": False}
+    return {"label": label, "radius": r, "lat": float(lat), "lng": float(lng), "resolved": True}
+
+
+def _origin_tuple(origin: dict | None):
+    if not origin or not origin.get("resolved"):
+        return None
+    return (origin["lat"], origin["lng"], origin["radius"])
+
+
+# A state is "plausible" for a radius search when its centroid lies within the
+# radius plus half a big state. A lot whose stored point sits inside the circle
+# but whose state is nowhere near it is bad source data (GovDeals gives some
+# remarketing accounts one fixed Phoenix point for Indiana and Pennsylvania
+# lots, 2026-11-19: 12 accounts, 48,951 rows) — the state wins, the point loses.
+STATE_SLACK_MI = 450.0
+
+
+def plausible_states(lat: float, lng: float, radius: float) -> list[str]:
+    from automation.alerts import geo
+    return sorted(code for code, (slat, slng) in geo.STATE_CENTROIDS.items()
+                  if geo.haversine_miles(lat, lng, slat, slng) <= radius + STATE_SLACK_MI)
 PUBLIC_SORTS = {"ends": "end_utc", "newest": "first_seen_at",
                 "bid": "current_bid", "bids": "bid_count"}
 PER_PAGE_CHOICES = (25, 50, 100)
@@ -294,14 +345,20 @@ def is_operator_pick(picks: OperatorPicks, *, source_lot_id: Any,
 
 def build_public_where(*, q=None, category=None, state=None, max_bids=None,
                        ending_within=None, status="active", min_price=None,
-                       max_price=None, bbox=None) -> tuple[str, list]:
+                       max_price=None, bbox=None, origin=None) -> tuple[str, list]:
     where, args = deals_query.build_where(
         q=q, category=category, state=state, max_bids=max_bids,
         ending_within=ending_within, status=status, min_price=min_price,
         max_price=max_price, bbox=bbox, search_fields=("title",),
     )
     ex_where, ex_args = exclusion_where()
-    return f"{where} AND {ex_where}", [*args, *ex_args]
+    where, args = f"{where} AND {ex_where}", [*args, *ex_args]
+    o = _origin_tuple(origin) if isinstance(origin, dict) else origin
+    if o is not None:                 # (lat, lng, radius_mi); a NULL lat never passes
+        lat, lng, radius = o
+        where += f" AND lat IS NOT NULL AND lng IS NOT NULL AND {_ORIGIN_SQL} AND state = ANY(%s)"
+        args += [lat, lat, lng, radius, plausible_states(lat, lng, radius)]
+    return where, args
 
 
 def public_sort(sort: str, direction: str | None) -> tuple[str, str]:
@@ -329,8 +386,11 @@ def _with_source(row: dict) -> dict:
 
 def enrich_public(row: dict, fees) -> dict:
     site = row.get("source") or GOVDEALS
+    hero = row.pop("hero_image_url", None)
     row = deals_query.enrich(row, fees)  # PUBLIC_COLS already excludes private fields
     row["source"] = site                 # enrich() stamps govdeals; keep the row's real site
+    from . import deals_sources
+    row["photo_url"] = deals_sources.safe_photo_url(hero)
     # Public rows link the canonical lot page; the id-trio URL is the operator view.
     row["viewer_url"] = deal_lot_urls.for_row(row)
     return row
@@ -366,14 +426,14 @@ def _merge_sorted(rows: list[dict], col: str, direction: str) -> list[dict]:
 
 
 def _snapshot_rows(*, status, q, category, state, max_bids, ending_within,
-                   min_price, max_price, bbox, site, now) -> list[dict]:
+                   min_price, max_price, bbox, site, now, origin=None) -> list[dict]:
     from . import deals_sources
     if site and site == GOVDEALS:
         return []
     return deals_sources.apply_filters(
         deals_sources.lots(status, now=now), q=q, category=category, state=state,
         max_bids=max_bids, ending_within=ending_within, min_price=min_price,
-        max_price=max_price, bbox=bbox, site=site, now=now)
+        max_price=max_price, bbox=bbox, site=site, now=now, origin=_origin_tuple(origin))
 
 
 # ── reads ────────────────────────────────────────────────────────────────────
@@ -381,18 +441,22 @@ def _snapshot_rows(*, status, q, category, state, max_bids, ending_within,
 def fetch_page(*, q=None, category=None, state=None, max_bids=None,
                ending_within=None, status="active", min_price=None,
                max_price=None, bbox=None, site=None, sort="ends", dir=None,
-               page=1, per_page=25) -> dict:
+               page=1, per_page=25, origin=None) -> dict:
     page, per_page = clamp_page(page, per_page)
     col, direction = public_sort(sort, dir)
     now = datetime.now(timezone.utc)
     fees = fee_model_from_env()
     gd_rows: list[dict] = []
     gd_total = 0
+    if origin and not origin.get("resolved"):
+        # A typed place we cannot place: say so, show nothing. Not "everything".
+        return {"rows": [], "total": 0, "page": 1, "per_page": per_page, "pages": 1,
+                "near": {"label": origin["label"], "resolved": False, "radius": origin["radius"]}}
     if govdeals_half(site):
         where, args = build_public_where(
             q=q, category=category, state=state, max_bids=max_bids,
             ending_within=ending_within, status=status, min_price=min_price,
-            max_price=max_price, bbox=bbox)
+            max_price=max_price, bbox=bbox, origin=origin)
         order = f"ORDER BY {col} {direction.upper()} NULLS LAST"
         # Top-N (N = page × per_page) from SQL is enough: anything in the true
         # top N of the union is either in deal_lots' top N or in the snapshot set.
@@ -408,15 +472,26 @@ def fetch_page(*, q=None, category=None, state=None, max_bids=None,
     snap = [enrich_snapshot(r, fees) for r in _snapshot_rows(
         status=status, q=q, category=category, state=state, max_bids=max_bids,
         ending_within=ending_within, min_price=min_price, max_price=max_price,
-        bbox=bbox, site=site, now=now)]
+        bbox=bbox, site=site, now=now, origin=origin)]
     merged = _merge_sorted(gd_rows + snap, col, direction)
     total = gd_total + len(snap)
     start = (page - 1) * per_page
-    return {
+    out = {
         "rows": merged[start:start + per_page],
         "total": total, "page": page, "per_page": per_page,
         "pages": max(1, -(-total // per_page)),
     }
+    if origin:
+        out["near"] = {"label": origin["label"], "resolved": True, "radius": origin["radius"],
+                       "lat": origin["lat"], "lng": origin["lng"]}
+    return out
+
+
+def strip_photos(out: dict) -> dict:
+    """The same page without `photo_url` (site setting `deal_lot_photos` off, or
+    signed-in only and the caller is anonymous). A copy: `out` may be shared."""
+    rows = [{k: v for k, v in r.items() if k != "photo_url"} for r in out.get("rows") or []]
+    return {**out, "rows": rows}
 
 
 def similar_rows(*, category=None, state=None, limit: int = 12) -> list[dict]:
@@ -513,17 +588,20 @@ def add_platform_extras(rows: list[dict], user_id: str) -> list[dict]:
 
 def fetch_pins(*, q=None, category=None, state=None, max_bids=None,
                ending_within=None, status="active", min_price=None,
-               max_price=None, site=None) -> dict:
+               max_price=None, site=None, origin=None) -> dict:
     params = dict(q=q, category=category, state=state, max_bids=max_bids,
                   ending_within=ending_within, status=status,
                   min_price=min_price, max_price=max_price, site=site)
-    key = "pins:" + json.dumps(params, sort_keys=True, default=str)
+    o = _origin_tuple(origin)
+    key = "pins:" + json.dumps({**params, "origin": o}, sort_keys=True, default=str)
+    if origin and not origin.get("resolved"):
+        return {"points": [], "capped": False, "near": {"label": origin["label"], "resolved": False}}
 
     def load():
         now = datetime.now(timezone.utc)
         points: list[dict] = []
         if govdeals_half(site):
-            where, args = build_public_where(**{k: v for k, v in params.items() if k != "site"})
+            where, args = build_public_where(**{k: v for k, v in params.items() if k != "site"}, origin=o)
             points = db.fetch_all(
                 "SELECT asset_id, account_id, auction_id, title, current_bid, bid_count, "
                 "end_utc, city, state, lat, lng, site, native_id FROM deal_lots "

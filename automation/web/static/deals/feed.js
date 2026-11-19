@@ -19,13 +19,14 @@ import {renderCards, renderTable, renderPager, lastPage} from './views.js';
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
 
-const KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'sort', 'dir', 'page', 'view'];
+const KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'near', 'radius', 'sort', 'dir', 'page', 'view'];
 const DEFAULTS = {status: 'active', sort: 'ends', page: '1', view: 'cards'};
 const VIEWS = ['cards', 'table', 'map'];
 const VIEW_ALIAS = {list: 'cards'};   // links shared before the table existed
 const VIEW_STORE = 'feed.view';
-const FILTER_KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price'];
-const NARROWING_KEYS = ['category', 'state', 'site', 'max_bids', 'ending_within', 'min_price', 'max_price'];
+const FILTER_KEYS = ['q', 'category', 'state', 'site', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'near', 'radius'];
+const NARROWING_KEYS = ['category', 'state', 'site', 'max_bids', 'ending_within', 'min_price', 'max_price', 'near'];
+const DEFAULT_RADIUS = '100';
 const PER_PAGE = 24;          // divisible by 4/3/2 columns; the server clamps to its own choices and reports back
 const TABLE_PER_PAGE = 50;    // one of the server's own page sizes
 const MAX_RESTORE_PAGES = 10; // refresh restores `page` depth by appending pages 1..N, capped
@@ -56,6 +57,7 @@ let lastGoodPage = '';   // table: the last page that loaded, to go back to when
 function filterParams() {
   const p = new URLSearchParams();
   for (const k of FILTER_KEYS) if (st[k]) p.set(k, st[k]);
+  if (!st.near) p.delete('radius');          // miles mean nothing without a place
   if (st.sort) p.set('sort', st.sort);
   if (st.dir) p.set('dir', st.dir);
   return p;
@@ -100,6 +102,8 @@ function syncControls() {
   $('#feed-site').value = st.site || '';
   $('#feed-min-price').value = st.min_price || '';
   $('#feed-max-price').value = st.max_price || '';
+  if ($('#feed-near').value !== (st.near || '')) $('#feed-near').value = st.near || '';
+  $('#feed-radius').value = st.radius || DEFAULT_RADIUS;
   $$('#feed-chips .chip[data-cat]').forEach(c => {
     const on = (c.dataset.cat || '') === (st.category || '');
     c.classList.toggle('is-active', on); c.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -136,6 +140,7 @@ function renderActiveFilters() {
   if (st.status && st.status !== DEFAULTS.status) add('status', st.status === 'closed' ? 'closed' : 'live + closed', DEFAULTS.status);
   if (st.min_price) add('min_price', `min ${fmt.money(st.min_price)}`);
   if (st.max_price) add('max_price', `max ${fmt.money(st.max_price)}`);
+  if (st.near) add('near', `within ${st.radius || DEFAULT_RADIUS} mi of ${st.near}`);
   const host = $('#feed-filters');
   host.hidden = !chips.length;
   host.innerHTML = chips.map(c =>
@@ -179,8 +184,10 @@ function renderCount() {
   const el = $('#feed-count');
   if (!lastBody) { el.textContent = ''; return; }
   const states = facets && facets.stats && facets.stats.states;
+  const near = lastBody.near;
+  if (near && near.resolved === false) { el.innerHTML = `<strong>0</strong> lots · we could not place “${esc(near.label)}” — try a 5-digit ZIP`; return; }
   el.innerHTML = `<strong>${esc(fmt.int(lastBody.total))}</strong> lot${lastBody.total === 1 ? '' : 's'}`
-    + (states ? ` · ${esc(fmt.int(states))} states` : '') + (st.bbox ? ' · in map view' : '');
+    + (states ? ` · ${esc(fmt.int(states))} states` : '') + (near ? ` · within ${esc(String(near.radius))} mi of ${esc(near.label)}` : '') + (st.bbox ? ' · in map view' : '');
 }
 function renderMore() {
   const btn = $('#feed-more');
@@ -291,7 +298,22 @@ for (const sel of ['#feed-min-price', '#feed-max-price']) $(sel).addEventListene
   clearTimeout(priceTimer);
   priceTimer = setTimeout(() => set({min_price: $('#feed-min-price').value, max_price: $('#feed-max-price').value}), 400);
 });
+let nearTimer = null;
+$('#feed-near').addEventListener('input', e => { clearTimeout(nearTimer); nearTimer = setTimeout(() => set({near: e.target.value.trim(), radius: $('#feed-radius').value}), 500); });
+$('#feed-near').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(nearTimer); set({near: e.target.value.trim(), radius: $('#feed-radius').value}); } });
+$('#feed-radius').addEventListener('change', e => { if (st.near) set({radius: e.target.value}); else st.radius = e.target.value; });
 $('#feed-clear').addEventListener('click', resetFilters);
+// Filter panel (under the control row). Open when the page lands with a filter set, else as last left.
+const panel = $('#feed-rail');
+function showPanel(open) {
+  panel.hidden = !open;
+  $$('[data-filters-toggle]').forEach(b => b.setAttribute('aria-expanded', open ? 'true' : 'false'));
+  try { localStorage.setItem('feed.filters', open ? 'open' : 'closed'); } catch (_) {}
+}
+$$('[data-filters-toggle]').forEach(b => b.addEventListener('click', () => showPanel(panel.hidden)));
+$$('[data-filters-close]').forEach(b => b.addEventListener('click', () => showPanel(false)));
+showPanel((() => { try { return localStorage.getItem('feed.filters') === 'open'; } catch (_) { return false; } })()
+  || NARROWING_KEYS.some(k => st[k]));
 $('#feed-chips').addEventListener('click', e => { const c = e.target.closest('.chip[data-cat]'); if (c) set({category: c.dataset.cat}); });
 $('#feed-filters').addEventListener('click', e => {
   const x = e.target.closest('[data-unset]');

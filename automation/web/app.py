@@ -88,6 +88,7 @@ from . import deals_sources
 from . import platform_api
 from . import public_deals
 from . import public_sold
+from . import lot_pages
 from . import chairs_feed
 from . import rate_limit
 from . import scrape_guard
@@ -1505,6 +1506,7 @@ async def public_deals_lots(
     status: str = "active", min_price: float | None = None,
     max_price: float | None = None, bbox: str | None = None, site: str | None = None,
     sort: str = "ends", dir: str | None = None, page: int = 1, per_page: int = 25,
+    near: str | None = Query(None, max_length=80), radius: float | None = Query(None, ge=1, le=public_deals.RADIUS_MAX),
 ):
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
@@ -1515,11 +1517,15 @@ async def public_deals_lots(
         logging.getLogger(__name__).warning("deals: viewer lookup failed; serving anonymous", exc_info=True)
         viewer = None
     try:
+        origin = public_deals.resolve_origin(near, radius)     # memo-backed centroids, no DB
         out = await asyncio.to_thread(
             public_deals.fetch_page, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
             min_price=min_price, max_price=max_price, bbox=_parse_bbox(bbox),
-            site=site, sort=sort, dir=dir, page=page, per_page=per_page)
+            site=site, sort=sort, dir=dir, page=page, per_page=per_page, origin=origin)
+        # Feed photos follow the lot page's site setting (deal_lot_photos: off / signed-in / everyone).
+        if not lot_pages.show_photos(viewer is not None):
+            out = public_deals.strip_photos(out)
         if viewer is None:
             if scrape_guard.enabled() and not auth_svc.request_has_session(request) and out.get("per_page"):
                 # The last page a visitor with no account may read (the scrape guard's depth
@@ -1549,6 +1555,7 @@ async def public_deals_pins(
     max_bids: int | None = None, ending_within: int | None = None,
     status: str = "active", min_price: float | None = None, max_price: float | None = None,
     site: str | None = None,
+    near: str | None = Query(None, max_length=80), radius: float | None = Query(None, ge=1, le=public_deals.RADIUS_MAX),
 ):
     if status not in _PUBLIC_STATUSES:
         raise HTTPException(400, "status must be active|closed|all")
@@ -1557,7 +1564,8 @@ async def public_deals_pins(
         return await asyncio.to_thread(
             public_deals.fetch_pins, q=q, category=category, state=state,
             max_bids=max_bids, ending_within=ending_within, status=status,
-            min_price=min_price, max_price=max_price, site=site)
+            min_price=min_price, max_price=max_price, site=site,
+            origin=public_deals.resolve_origin(near, radius))
     except Exception as e:
         raise HTTPException(503, f"pins query failed: {e!r}")
 
