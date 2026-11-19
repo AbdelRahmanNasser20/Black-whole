@@ -61,6 +61,10 @@
     <section class="section" id="lot-similar">
       <div class="section-head"><h2>{{ 'Live lots like this' if lot.ended else 'Similar lots' }}</h2><a class="mono section-link" href="/deals{% if lot.category %}?category={{ lot.category }}{% endif %}">Browse all →</a></div>
       <div class="section-body">
+        {#- Cards in a horizontal row, loaded by detail.js from the public feed (same category, same state first).
+            The server list below is the crawler's copy of the same links. -#}
+        <div id="similar" class="similar-row" data-category="{{ lot.category or '' }}" data-st="{{ lot.state or '' }}" data-self="{{ lot.path }}" aria-label="Similar lots"></div>
+        <noscript>
         {% if similar %}
         <ul class="bidders">
           {% for s in similar %}<li><a href="{{ s.viewer_url }}">{{ s.title }}</a> <span class="mono">· {{ [s.city, s.state]|select|join(', ') }}{% if s.current_bid is not none %} · ${{ '%.0f'|format(s.current_bid) }}{% endif %}</span></li>{% endfor %}
@@ -68,6 +72,7 @@
         {% else %}
         <p class="muted">No similar live lots right now. <a href="/deals">Browse the whole feed</a>.</p>
         {% endif %}
+        </noscript>
       </div>
     </section>
 

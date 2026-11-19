@@ -12,9 +12,10 @@
 // Three views over the same filters (#feed-view-toggle): cards (Load more), table (a real pager, 50 rows a page),
 // map. The view lives in the URL (wins) and in localStorage 'feed.view'. `view=map`: this file sets
 // body.dataset.view and hides the grid; map.js does the rest.
-import {load, api, pending, fmt, esc} from '../ui/state.js';
+import {load, api, pending, fmt, esc, renderEmpty} from '../ui/state.js';
 import {tickTimers} from '../ui/card.js';
 import {renderCards, renderTable, renderPager, lastPage} from './views.js';
+import * as stars from '../ui/stars.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -104,6 +105,7 @@ function syncControls() {
   $('#feed-max-price').value = st.max_price || '';
   if ($('#feed-near').value !== (st.near || '')) $('#feed-near').value = st.near || '';
   $('#feed-radius').value = st.radius || DEFAULT_RADIUS;
+  $('#feed-radius-out').value = `${st.radius || DEFAULT_RADIUS} mi`;
   $$('#feed-chips .chip[data-cat]').forEach(c => {
     const on = (c.dataset.cat || '') === (st.category || '');
     c.classList.toggle('is-active', on); c.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -209,7 +211,46 @@ function emptyArgs() {
   else cta = {label: 'Clear filters', onClick: resetFilters};
   return {glyph: '⌕', title, body: 'Try fewer filters, or search everywhere.', cta};
 }
+// ── starred lots (this browser) ─────────────────────────────────────────
+let favMode = false;
+function paintFavCount() { $('#feed-fav-count').textContent = String(stars.count()); }
+function renderFavs() {
+  const grid = $('#feed-grid');
+  const rows = stars.list();
+  $('#feed-table').innerHTML = ''; $('#feed-pager').hidden = true; $('#feed-more').hidden = true;
+  $('#feed-fav-note').hidden = false;
+  if (!rows.length) {
+    renderEmpty(grid, {glyph: '☆', title: 'No starred lots yet', body: 'Press ☆ on any lot and it stays here, in this browser.',
+      cta: {label: 'Back to the feed', onClick: () => setFavMode(false)}});
+  } else {
+    grid.dataset.state = 'ready';
+    grid.innerHTML = renderCards(rows);
+    stars.paint(grid); tickTimers(grid);
+  }
+  $('#feed-count').innerHTML = `<strong>${esc(fmt.int(rows.length))}</strong> starred lot${rows.length === 1 ? '' : 's'}`;
+}
+function setFavMode(on) {
+  favMode = on;
+  $('#feed-fav-toggle').setAttribute('aria-pressed', on ? 'true' : 'false');
+  document.body.dataset.fav = on ? '1' : '';
+  if (on) { if (st.view === 'map') setView('cards'); renderFavs(); }
+  else { $('#feed-fav-note').hidden = true; loadLots(); }
+}
+$('#feed-fav-toggle').addEventListener('click', () => setFavMode(!favMode));
+stars.onChange(() => { paintFavCount(); if (favMode) renderFavs(); });
+paintFavCount();
+
+// ── the results box: it scrolls on its own, from wherever it starts on the page ──
+function sizeScrollBox() {
+  const box = $('#feed-scroll'); if (!box) return;
+  const top = Math.max(0, Math.round(box.getBoundingClientRect().top + window.scrollY));
+  document.documentElement.style.setProperty('--feed-scroll-top', `${top + 8}px`);
+}
+window.addEventListener('resize', sizeScrollBox);
+new ResizeObserver(sizeScrollBox).observe(document.body);
+
 async function loadLots({append = false, clamped = false} = {}) {
+  if (favMode) { renderFavs(); return undefined; }
   let refused = false;
   const view = st.view;                            // an answer that lands after a view switch is dropped
   const table = isTable();
@@ -254,7 +295,7 @@ async function loadLots({append = false, clamped = false} = {}) {
   lastBody = body;
   if (table) lastGoodPage = String(body.page);
   if (String(body.page) !== st.page) { st.page = String(body.page); pushUrl(); }
-  renderCount(); renderMore(); tickTimers(grid);
+  renderCount(); renderMore(); tickTimers(grid); stars.paint(grid);
   document.dispatchEvent(new CustomEvent('feed:params', {detail: {
     params: filterParams(), total: body.total, rows: body.rows, page: body.page, view: st.view, bbox: st.bbox,
   }}));
@@ -301,7 +342,12 @@ for (const sel of ['#feed-min-price', '#feed-max-price']) $(sel).addEventListene
 let nearTimer = null;
 $('#feed-near').addEventListener('input', e => { clearTimeout(nearTimer); nearTimer = setTimeout(() => set({near: e.target.value.trim(), radius: $('#feed-radius').value}), 500); });
 $('#feed-near').addEventListener('keydown', e => { if (e.key === 'Enter') { clearTimeout(nearTimer); set({near: e.target.value.trim(), radius: $('#feed-radius').value}); } });
-$('#feed-radius').addEventListener('change', e => { if (st.near) set({radius: e.target.value}); else st.radius = e.target.value; });
+let radiusTimer = null;
+$('#feed-radius').addEventListener('input', e => {
+  $('#feed-radius-out').value = `${e.target.value} mi`;
+  clearTimeout(radiusTimer);
+  radiusTimer = setTimeout(() => { if (st.near) set({radius: e.target.value}); else st.radius = e.target.value; }, 350);
+});
 $('#feed-clear').addEventListener('click', resetFilters);
 // Filter panel (under the control row). Open when the page lands with a filter set, else as last left.
 const panel = $('#feed-rail');

@@ -2,6 +2,7 @@
 // Input: one `/deals/api/lots` row. `photo_url` (when the server sends one) is the SOURCE site's own image,
 // hotlinked with no referrer — never a copy of ours.
 import {esc, fmt, skeleton} from './state.js';
+import {starId} from './stars.js';
 
 const HOUR_MS = 3600 * 1000;
 
@@ -53,9 +54,13 @@ export function card(row, {compact = false} = {}) {
     : `<span class="card-title">${title}</span>`;
   const photo = !compact && typeof row.photo_url === 'string' && /^https:\/\//.test(row.photo_url)
     ? `<a class="card-photo" href="${esc(row.viewer_url || extUrl || '#')}"${row.viewer_url ? '' : ' target="_blank" rel="noopener"'} tabindex="-1" aria-hidden="true"><img src="${esc(row.photo_url)}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.parentNode.remove()"></a>` : '';
-  return `<article class="card${compact ? ' card-compact' : ''}${closed ? ' is-closed' : ''}" data-source="${esc(source)}">
+  // A star for everyone: stars.js keeps them in this browser (data-row carries what the star stores).
+  const sid = starId(row);
+  const star = !compact && sid ? `<button type="button" class="card-star" data-star-id="${esc(sid)}" aria-pressed="false" aria-label="Star this lot"></button>` : '';
+  const rowAttr = star ? ` data-row="${esc(JSON.stringify(row))}"` : '';
+  return `<article class="card${compact ? ' card-compact' : ''}${closed ? ' is-closed' : ''}" data-source="${esc(source)}"${rowAttr}>
   <div class="card-band"><span class="card-cat">${bandLabel(row)}</span>${ext}${timerHtml(row, nowMs)}</div>
-  ${photo}
+  ${photo}${star}
   <div class="card-price-row"><span class="card-price">${esc(fmt.money(price))}</span>${showUnit
     ? `<span class="card-unit">${esc(fmt.int(qty))} × ${esc(fmt.money(row.unit_bid))} /unit</span>` : ''}</div>
   ${titleHtml}

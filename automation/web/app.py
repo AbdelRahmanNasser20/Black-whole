@@ -178,6 +178,10 @@ app.middleware("http")(readcache.invalidate_on_write_middleware)
 
 # Outermost: the chair host / platform host split (no-op until PLATFORM_HOST is set).
 app.add_middleware(host_split.HostSplitMiddleware)
+# Gzip at the origin: Cloudflare fetches /deals/api/pins (2.4 MB raw) from Render uncompressed otherwise,
+# and the map waits on that hop. Small answers (< 1 KB) stay as they are.
+from starlette.middleware.gzip import GZipMiddleware  # noqa: E402
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 @app.middleware("http")
