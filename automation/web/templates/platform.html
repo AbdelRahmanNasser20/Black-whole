@@ -83,6 +83,37 @@
     </div>
   </section>
 
+  {# ───────────── Top deals — flip_top.top(): real lots, real closing prices, or no section. ───────────── #}
+  {% if top_deals and top_deals.lots %}
+  <section class="pf-best" id="top-deals" aria-labelledby="pf-best-title">
+    <header class="pf-app-head">
+      <h2 class="pf-h2" id="pf-best-title">Top {{ top_deals.lots | length }} deals closing soon</h2>
+      <p class="pf-app-lede">Live lots where the bid is lowest against what similar lots closed for.
+        Flip Score 100 = far under the usual closing price, 50 = at it. Bids rise before the close.
+        A score is a start, not bidding advice.</p>
+    </header>
+    <ol class="pf-best-list">
+      {% for d in top_deals.lots %}
+      <li class="pf-best-card">
+        <a class="pf-best-link" href="{{ d.url }}">
+          {% if d.photo_url %}<img class="pf-best-img" src="{{ d.photo_url }}" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" onerror="this.remove()">{% endif %}
+          <span class="pf-best-score" title="Flip Score">{{ d.score }}</span>
+          <span class="pf-best-body">
+            <span class="pf-best-title">{{ d.title }}</span>
+            <span class="pf-best-nums">
+              <b>${{ "{:,.0f}".format(d.bid) }}</b> bid · {{ d.bid_count }} bids
+            </span>
+            <span class="pf-best-comp">Similar lots closed near ${{ "{:,.0f}".format(d.comp_value) }} ({{ d.comp_count }} sales)</span>
+            <span class="pf-best-meta">{% if d.place %}{{ d.place }} · {% endif %}closes in {{ d.closes_in }}</span>
+          </span>
+        </a>
+      </li>
+      {% endfor %}
+    </ol>
+    <p class="pf-best-foot"><a href="/deals">See every live lot</a> · <a href="/platform/how-it-works">How the score works</a></p>
+  </section>
+  {% endif %}
+
   <section class="pf-app" id="app" aria-label="Product demo">
     <header class="pf-app-head">
       <h2 class="pf-h2">The live product</h2>

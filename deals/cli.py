@@ -145,7 +145,13 @@ def main():
     ch.add_argument("--sort", default="unit_bid", choices=["unit_bid", "ends", "quantity", "bid"])
     ch.add_argument("--limit", type=int, default=None, help="print at most N rows")
     ch.add_argument("--json", action="store_true", help="JSON instead of a table")
+    ft = sub.add_parser("flip-top",
+                        help="read-only: the welcome page's top deals (bid against similar closed lots, no LLM)")
+    ft.add_argument("--limit", type=int, default=10)
+    ft.add_argument("--json", action="store_true", help="JSON instead of a table")
     a = ap.parse_args()
+    if a.cmd == "flip-top":     # read-only; same read the web process memoises
+        return run_flip_top(a)
     if a.cmd == "chairs":       # read-only; dispatched before the GovDeals adapter (its --site is any source)
         return run_chairs(a)
     prof = resolve_profile(getattr(a, "profile", None))
@@ -272,6 +278,20 @@ def main():
                                     petitions=not a.no_petitions))
         except distress.DistressUnavailable as e:
             raise SystemExit(f"distress-sync failed: {e}")
+
+def run_flip_top(a) -> int:
+    import json
+    from automation.web import flip_top
+    data = flip_top.compute(limit=a.limit)
+    if a.json:
+        print(json.dumps(data, indent=2))
+        return 0
+    print(f"live lots read {data['scanned']}, scored {data['scored']}, shown {len(data['lots'])}")
+    for c in data["lots"]:
+        print(f"{c['score']:>3}  ${c['bid']:>9,.0f} bid ({c['bid_count']:>2})  comp ${c['comp_value']:>9,.0f} "
+              f"x{c['comp_count']:<2}  {c['ends'][:16]}Z  {c['title'][:60]}")
+    return 0
+
 
 def run_chairs(a, out=None) -> int:
     """`deals.cli chairs` — twin of GET /api/deals/chairs (same chairs_feed.fetch)."""

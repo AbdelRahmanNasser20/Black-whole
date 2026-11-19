@@ -87,6 +87,7 @@ from . import deal_lot_urls
 from . import deals_query
 from . import deals_sources
 from . import platform_api
+from . import flip_top
 from . import public_deals
 from . import public_sold
 from . import lot_pages
@@ -2252,6 +2253,7 @@ def public_platform(request: Request):
         _public_ctx({
             "platform_sources": list(_PLATFORM_SOURCE_NAMES.values()),
             "stats": platform_api.stats(),
+            "top_deals": flip_top.top(),    # memo only; None -> the section is absent
             "sold_head": public_sold.headline(),
             "sources_tracked": len(platform_api.SITES),
             "sources_planned": len(platform_api.PLANNED_SITES),

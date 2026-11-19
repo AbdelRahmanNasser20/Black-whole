@@ -26,3 +26,10 @@ def _fresh_read_memo():
     readcache.invalidate_all()
     yield
     readcache.invalidate_all()
+
+
+@pytest.fixture(autouse=True)
+def _no_flip_top_read(monkeypatch):
+    """`/platform` asks `flip_top.top()`, which starts a background read of
+    the real database. Off in tests; a test of it sets the flag back to 1."""
+    monkeypatch.setenv("FLIP_TOP_ENABLED", "0")
