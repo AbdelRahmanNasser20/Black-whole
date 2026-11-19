@@ -70,7 +70,8 @@
 
 /* ── grid / load more ──────────────────────────────────────────────── */
 /* Smaller cards, more per row: the feed fills the width with 200 px columns (5 on a laptop, 7+ on a wide screen). */
-.feed-grid { min-height: 160px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.feed-grid { min-height: 160px; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
+@media (min-width: 1100px) { .feed-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 .feed-grid .card { min-height: 0; gap: 4px; padding-bottom: 10px; }
 .feed-grid .card-band { height: 24px; margin-bottom: 4px; font-size: 10px; }
 .feed-grid .card-price { font-size: 15px; }

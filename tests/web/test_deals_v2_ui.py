@@ -26,7 +26,8 @@ def test_results_scroll_in_their_own_box_under_the_controls():
 
 def test_cards_are_denser():
     rule = FEED_CSS.split(".feed-grid {", 1)[1].split("}", 1)[0]
-    assert "auto-fill" in rule and "minmax(200px" in rule
+    assert "auto-fill" in rule and "minmax(190px" in rule
+    assert "repeat(5, minmax(0, 1fr))" in FEED_CSS          # five per row on a laptop or wider
 
 
 def test_radius_is_a_slider_with_a_live_label():

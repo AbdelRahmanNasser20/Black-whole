@@ -618,7 +618,7 @@ def fetch_pins(*, q=None, category=None, state=None, max_bids=None,
         for r in _snapshot_rows(status=status, q=q, category=category, state=state,
                                 max_bids=max_bids, ending_within=ending_within,
                                 min_price=min_price, max_price=max_price, bbox=None,
-                                site=site, now=now):
+                                site=site, now=now, origin=origin):
             if r["lat"] is None or r["lng"] is None:
                 continue
             points.append({k: r.get(k) for k in (

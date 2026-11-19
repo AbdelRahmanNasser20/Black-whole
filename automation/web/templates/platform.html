@@ -295,11 +295,25 @@
       <div class="pf-feat">
         <dt class="pf-feat-name">One feed, not {{ sources_tracked + sources_planned }} tabs</dt>
         <dd class="pf-feat-copy">
-          {{ platform_sources | join(", ") }} in one list today.
+          {{ platform_sources | join(", ") }} in one list today, each lot with the source's own photo.
           On the roadmap, named and labelled as such until they ship:
           {{ planned_sources | join(", ") }}.
         </dd>
         <dd class="pf-feat-fact">{{ sources_tracked }} sources tracked · {{ sources_planned }} planned</dd>
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">Priced by the unit</dt>
+        <dd class="pf-feat-copy">
+          A "Lot of (286) laptops" is priced per laptop, not per lot, and the buyer's premium is added
+          so the number on the card is close to what you pay. Sort any search by price per unit.
+        </dd>
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">Near you, in miles</dt>
+        <dd class="pf-feat-copy">
+          Type a ZIP and slide the radius. The search stays as you move between cards, the table and
+          the map, so what is within a truck's drive is one filter, not a tab per site.
+        </dd>
       </div>
       <div class="pf-feat">
         <dt class="pf-feat-name">A max bid, not a hunch</dt>
@@ -311,24 +325,32 @@
         {% if stats %}<dd class="pf-feat-fact">{{ "{:,}".format(stats.sold_outcomes) }} recorded outcomes behind the score</dd>{% endif %}
       </div>
       <div class="pf-feat">
-        <dt class="pf-feat-name">Alerts that watch the feed for you</dt>
+        <dt class="pf-feat-name">Saved searches and alerts</dt>
         <dd class="pf-feat-copy">
-          Keyword, state, price cap. When a matching lot appears anywhere on the feed, you get one
-          email with the lots and their closing times. One click unsubscribes.
+          Save any search with no account; it lives in your browser. Sign in and the same search
+          emails you the new lots and their closing times. One click unsubscribes.
         </dd>
       </div>
       <div class="pf-feat">
-        <dt class="pf-feat-name">One saved list across the feed</dt>
+        <dt class="pf-feat-name">Stars that stay</dt>
         <dd class="pf-feat-copy">
-          Star a lot on any tracked site and watch it from a single page — current bid, bid count,
-          closing time — instead of five open tabs and a notes app.
+          Star a lot on any tracked site and it waits for you on your next visit, no account needed.
+          Sign in to keep the same list on every device.
         </dd>
       </div>
       <div class="pf-feat">
-        <dt class="pf-feat-name">The map</dt>
+        <dt class="pf-feat-name">The map, your size</dt>
         <dd class="pf-feat-copy">
-          Open lots plotted city-level, so you can see what is within a truck's drive before you
-          fall in love with a price three states away.
+          Open lots plotted city-level, with the matching cards beside them. Drag the divider to make
+          the map wider, drag its corner to make it taller.
+        </dd>
+      </div>
+      <div class="pf-feat">
+        <dt class="pf-feat-name">For liquidators: the desk</dt>
+        <dd class="pf-feat-copy">
+          The operator runs his own lots on the same stack: inventory, the buyers near each lot on a
+          map, and the chats to pickup. The window above shows it on sample data. Access for other
+          liquidators is by request while the beta runs.
         </dd>
       </div>
     </dl>

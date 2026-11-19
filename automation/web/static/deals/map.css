@@ -8,12 +8,20 @@ body[data-view="map"] [id="feed-grid"], body[data-view="map"] [id="feed-more"] {
 
 .feed-map-split {
   --map-h: max(420px, calc(100vh - var(--topbar-h) - 160px));
-  display: grid; grid-template-columns: 7fr 3fr; gap: var(--gap); align-items: start; margin: 0 0 var(--gap);
+  --map-w: 58%;                                   /* the map's share of the width; the gutter drag changes it */
+  display: grid; grid-template-columns: minmax(280px, var(--map-w)) 10px minmax(280px, 1fr); gap: 0; align-items: start; margin: 0 0 var(--gap);
 }
+.feed-scroll .feed-map-split { --map-h: max(320px, calc(100dvh - var(--feed-scroll-top, 320px) - 32px)); }
 [id="feed-map"] {
-  height: var(--map-h); min-height: 420px; min-width: 0;
+  height: var(--map-h); min-height: 320px; min-width: 0; max-height: 90vh;
+  resize: vertical; overflow: hidden;              /* drag the bottom-right corner to make the map taller or shorter */
   background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
 }
+.feed-map-gutter { align-self: stretch; cursor: col-resize; position: relative; touch-action: none; }
+.feed-map-gutter::before { content: ""; position: absolute; top: 0; bottom: 0; left: 4px; width: 2px; background: var(--border); border-radius: 1px; }
+.feed-map-gutter:hover::before, .feed-map-gutter.is-dragging::before { background: var(--accent); }
+.feed-map-split.is-dragging { user-select: none; }
+.feed-map-split.is-dragging [id="feed-map"] { pointer-events: none; }
 [id="feed-map"].map-loading { position: relative; overflow: hidden; background: var(--sk-a); }
 [id="feed-map"].map-loading::after {
   content: ""; position: absolute; inset: 0; z-index: 1; transform: translateX(-100%); pointer-events: none;
@@ -31,12 +39,22 @@ body[data-view="map"] [id="feed-grid"], body[data-view="map"] [id="feed-more"] {
 .map-panel-count strong { font-size: var(--fs-xl); font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
 .map-panel-hint { margin: 4px 0 0; font-size: var(--fs-sm); color: var(--muted); }
 .map-panel-note { margin: 6px 0 0; font: 400 var(--fs-xs)/1.4 var(--mono); color: var(--warn); }
-.grid.grid-1 { grid-template-columns: minmax(0, 1fr); }   /* the side list is always one column */
+.grid.grid-1 { grid-template-columns: minmax(0, 1fr); }
+/* the side list: two cards per row on a laptop or wider, dense like the feed */
+[id="feed-map-panel"] .map-panel-list { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+[id="feed-map-panel"] .map-panel-list .card { min-height: 0; gap: 4px; padding-bottom: 8px; }
+[id="feed-map-panel"] .map-panel-list .card-price { font-size: 14px; }
+[id="feed-map-panel"] .map-panel-list .card-title { font-size: 12px; line-height: 1.3; }
+[id="feed-map-panel"] .map-panel-list .card-meta, [id="feed-map-panel"] .map-panel-list .card-unit { font-size: 11px; }
+[id="feed-map-panel"] .map-panel-list .card-band { height: 22px; margin-bottom: 2px; font-size: 10px; }
+[id="feed-map-panel"] .map-panel-list .card-photo { aspect-ratio: 16 / 9; margin-bottom: 2px; }
+@media (max-width: 1279px) { [id="feed-map-panel"] .map-panel-list { grid-template-columns: minmax(0, 1fr); } }
 [id="feed-map-panel"] .ui-empty, [id="feed-map-panel"] .ui-error { padding: 32px 12px; }
 
 /* < 1024: stack — map 50 vh on top, the list below it in the page flow */
 @media (max-width: 1023px) {
   .feed-map-split { grid-template-columns: minmax(0, 1fr); }
-  [id="feed-map"] { height: 50vh; min-height: 280px; }
+  .feed-map-gutter { display: none; }
+  [id="feed-map"] { height: 50vh; min-height: 280px; resize: none; }
   [id="feed-map-panel"] { height: auto; max-height: none; overflow: visible; }
 }

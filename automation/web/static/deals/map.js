@@ -11,7 +11,7 @@ import {card, tickTimers} from '../ui/card.js';
 import {mount as mountGlMap} from '../ui/glmap.js';   // MapLibre GL; the style URL comes from #feed-map[data-style-url]
 
 const $ = (s, r = document) => r.querySelector(s);
-const FILTER_KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'site'];
+const FILTER_KEYS = ['q', 'category', 'state', 'max_bids', 'ending_within', 'status', 'min_price', 'max_price', 'site', 'near', 'radius'];
 const PINS_CAP_LABEL = '5,000';
 const VIEWPORT_DEBOUNCE_MS = 400;
 
@@ -44,12 +44,52 @@ function ensureEls() {
   if (!split) {
     split = document.createElement('div');
     split.className = 'feed-map-split'; split.hidden = true;
-    box.before(split); split.append(box, panel);
+    const gutter = document.createElement('div');
+    gutter.className = 'feed-map-gutter'; gutter.setAttribute('role', 'separator');
+    gutter.setAttribute('aria-orientation', 'vertical'); gutter.setAttribute('aria-label', 'Drag to resize the map');
+    gutter.title = 'Drag to resize the map';
+    box.before(split); split.append(box, gutter, panel);
+    wireResize(split, box, gutter, panel);
   }
   box.setAttribute('role', 'region'); box.setAttribute('aria-label', 'Map of lots');
   panel.setAttribute('aria-label', 'Lots in view');
   els = {box, panel, split};
   return els;
+}
+
+// The visitor sizes the map: drag the gutter for width (kept in localStorage), drag the box's corner for
+// height. Either way MapLibre has to be told its box changed, and the list keeps the map's height.
+const SPLIT_STORE = 'feed.map.w';
+function wireResize(split, box, gutter, panel) {
+  try { const w = localStorage.getItem(SPLIT_STORE); if (w && /^\d{2}%$/.test(w)) split.style.setProperty('--map-w', w); } catch (_) {}
+  let drag = null;
+  gutter.addEventListener('pointerdown', (e) => {
+    drag = {x0: e.clientX, w0: box.getBoundingClientRect().width, total: split.getBoundingClientRect().width};
+    gutter.setPointerCapture(e.pointerId); gutter.classList.add('is-dragging'); split.classList.add('is-dragging');
+  });
+  gutter.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    const pct = Math.round(Math.min(80, Math.max(30, ((drag.w0 + e.clientX - drag.x0) / drag.total) * 100)));
+    split.style.setProperty('--map-w', pct + '%');
+  });
+  const end = () => {
+    if (!drag) return;
+    drag = null; gutter.classList.remove('is-dragging'); split.classList.remove('is-dragging');
+    try { localStorage.setItem(SPLIT_STORE, split.style.getPropertyValue('--map-w').trim()); } catch (_) {}
+    if (map) map.invalidateSize();
+  };
+  gutter.addEventListener('pointerup', end); gutter.addEventListener('pointercancel', end);
+  gutter.addEventListener('dblclick', () => { split.style.removeProperty('--map-w'); try { localStorage.removeItem(SPLIT_STORE); } catch (_) {} if (map) map.invalidateSize(); });
+  let raf = 0;
+  new ResizeObserver(() => {
+    cancelAnimationFrame(raf);
+    raf = requestAnimationFrame(() => {
+      if (box.hidden) return;
+      const h = box.getBoundingClientRect().height;
+      if (h > 0) panel.style.height = `${Math.round(h)}px`;
+      if (map) map.invalidateSize();
+    });
+  }).observe(box);
 }
 
 /* ── params ─────────────────────────────────────────────────────────────── */
