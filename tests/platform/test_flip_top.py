@@ -140,3 +140,27 @@ def test_landing_renders_the_section_only_with_data(monkeypatch):
     assert 'href="/deals/lot/x-az-govdeals-1.2.3"' in html
     assert "Similar lots closed near $9,000 (20 sales)" in html
     assert "not bidding advice" in html
+
+
+def test_thread_start_failure_never_raises_and_does_not_stick(monkeypatch):
+    class Dead:
+        def __init__(self, *a, **k): pass
+        def start(self): raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(flip_top.threading, "Thread", Dead)
+    assert flip_top.top() is None
+    assert flip_top._memo["refreshing"] is False
+
+
+def test_old_memo_is_dropped_when_reads_keep_failing(monkeypatch):
+    flip_top._memo.update(data=_data(), at=time.monotonic() - flip_top.MAX_AGE - 1,
+                          fail_until=time.monotonic() + 60)
+    assert flip_top.top() is None
+
+
+def test_pick_skips_a_lot_with_no_public_page(monkeypatch):
+    live = [_row("2018 Ford Transit Cargo Van", n=1), _row("2017 Ford F-550 Dump Truck", n=2)]
+    real = flip_top.deal_lot_urls.for_row
+    monkeypatch.setattr(flip_top.deal_lot_urls, "for_row",
+                        lambda row: None if row["asset_id"] == 1 else real(row))
+    picked = flip_top.pick(live, {0: _res(), 1: _res()}, now=NOW)
+    assert [r["asset_id"] for r, _ in picked] == [2]

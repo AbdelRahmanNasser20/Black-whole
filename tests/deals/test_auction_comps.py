@@ -66,7 +66,7 @@ def test_scattered_comps_are_discarded():
 
 
 def test_bulk_lot_is_priced_per_unit():
-    sales = [("Dell Latitude 5490 Laptop", 100 + n) for n in range(8)]
+    sales = [("Lot of 2 Dell Latitude 5490 Laptops", 200 + 2 * n) for n in range(8)]
     res = _matcher(200, title="Lot of 10 Dell Latitude 5490 Laptops", sales=sales,
                    category="computers_electronics").results()["lot"]
     assert res.quantity == 10
@@ -99,3 +99,11 @@ def test_deal_rank_prefers_real_bids_and_a_near_close():
 def test_weighted_median():
     assert ac.weighted_median([(1, 1), (2, 1), (100, 1)]) == 2
     assert ac.weighted_median([(1, 10), (2, 1), (100, 1)]) == 1
+
+
+def test_bulk_lot_ignores_sales_with_no_stated_count():
+    """A whole-lot price is not a unit price: 25 x $450 would read $11,000."""
+    sales = [("Dell Latitude 5490 Laptops", 400 + 10 * n) for n in range(10)]
+    m = _matcher(500, title="Lot of 25 Dell Latitude 5490 Laptops", sales=sales,
+                 category="computers_electronics")
+    assert m.results() == {}

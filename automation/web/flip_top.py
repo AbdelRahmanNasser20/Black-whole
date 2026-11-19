@@ -36,6 +36,8 @@ log = logging.getLogger(__name__)
 
 TTL = int(os.getenv("FLIP_TOP_INTERVAL_SEC", "3600"))
 FAIL_BACKOFF = 300
+MAX_AGE = 3 * TTL                 # reads keep failing: drop the list, never show old bids
+READ_TIMEOUT = "120s"
 LIMIT = 10
 MIN_HOURS, MAX_HOURS = 1, 48      # closes soon, but not too late to act
 MIN_BIDS = 2                      # an untouched opening bid is not a deal yet
@@ -58,7 +60,7 @@ _SOLD_SQL = (
     "extract(epoch FROM now() - closed_at) / 86400.0 AS age_days "
     "FROM deal_lots WHERE final_bid > 0 AND outcome IN ('sold', 'low_bid') "
     "AND currency_code = 'USD' AND closed_at > now() - make_interval(days => %s) "
-    "AND canonical_category = ANY(%s)"
+    "AND title IS NOT NULL AND canonical_category = ANY(%s)"
 )
 
 
@@ -100,7 +102,7 @@ def pick(live: list[dict], results: dict, *, now: datetime, limit: int = LIMIT) 
             continue
         hours = (row["end_utc"] - now).total_seconds() / 3600.0
         rank = auction_comps.deal_rank(res.cost, res.comp_value, hours, int(row["bid_count"] or 0))
-        if rank > 0:
+        if rank > 0 and deal_lot_urls.for_row(row):   # no public page, no card
             ranked.append((rank, i, row, res))
     ranked.sort(key=lambda x: (-x[0], x[1]))
     out, seen, per_cat = [], set(), {}
@@ -141,6 +143,7 @@ def compute(limit: int = LIMIT) -> dict:
     from a background thread or the CLI, never from a request."""
     policy, args = public_deals.exclusion_where()
     with db.connect() as conn:
+        conn.execute(f"SET LOCAL statement_timeout = '{READ_TIMEOUT}'")
         live = conn.execute(_LIVE_SQL.format(policy=policy),
                             [MIN_HOURS, MAX_HOURS, MIN_BIDS, *args]).fetchall()
         results = score_live(conn, live) if live else {}
@@ -199,10 +202,18 @@ def top() -> dict | None:
         return None
     with _lock:
         now = time.monotonic()
+        if _memo["data"] is not None and now - _memo["at"] >= MAX_AGE:
+            _memo["data"] = None
         stale = _memo["data"] is None or now - _memo["at"] >= TTL
         if not stale or _memo["refreshing"] or now < _memo["fail_until"]:
             return _live_only(_memo["data"])
         _memo["refreshing"] = True
         data = _memo["data"]
-    threading.Thread(target=_refresh, name="flip-top", daemon=True).start()
+    try:
+        threading.Thread(target=_refresh, name="flip-top", daemon=True).start()
+    except Exception:
+        log.warning("flip top thread did not start", exc_info=True)
+        with _lock:
+            _memo["refreshing"] = False
+            _memo["fail_until"] = time.monotonic() + FAIL_BACKOFF
     return _live_only(data)

@@ -8,7 +8,8 @@ bulk lots, weak evidence clamped, damage capped). Ours differs in three ways:
 
 - cost = bid + the site's buyer premium, not the bare bid;
 - comps are weighted by title match (rare words count more) and by age;
-- a vehicle comp must be within YEAR_SPAN model years.
+- a vehicle comp must be within YEAR_SPAN model years;
+- a bulk lot is compared only with sales that state their count.
 
 `deals/flip.py` is the other half (resale margin from a verdict). This module
 needs no verdict, so it can score every live lot.
@@ -204,11 +205,15 @@ class Matcher:
                 hits[i] += 1
         if not hits:
             return
-        unit = float(price) / lot_quantity(title)[0]
+        qty, qty_source = lot_quantity(title)
+        unit = float(price) / qty
         for i, shared in hits.items():
             lot = self._lots[i]
             if lot.key == key and key is not None:
                 continue
+            if lot.quantity > 1 and qty_source == "default":
+                continue                # a bulk lot needs a sale that states its count:
+                                        # a whole-lot price is not a unit price
             if lot.year and year and abs(lot.year - year) > YEAR_SPAN:
                 continue
             if bool(lot.year) != bool(year) and (lot.year or year):
