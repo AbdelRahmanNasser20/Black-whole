@@ -60,5 +60,45 @@ def test_due_for_poll_filters_by_site(monkeypatch):
     store.due_for_poll(now)
     store.due_for_poll(now, site="txauction")
     (gd_sql, gd_p), (tx_sql, tx_p) = cap
-    assert "site = %s" in gd_sql and gd_p[0] == "govdeals" and gd_sql.startswith("SELECT raw ")
+    assert "site = %s" in gd_sql and gd_p[0] == "govdeals" and "raw" not in gd_sql.split(" FROM ")[0]
     assert tx_p[0] == "txauction" and "native_id" in tx_sql   # stored columns, not maestro raw
+
+
+def test_due_for_poll_never_loads_raw_and_is_bounded(monkeypatch):
+    """deals-watch OOM (512 MiB): the govdeals pass loaded the ~15 KB `raw`
+    blob of every due row (135k+) with no LIMIT. Select the poll columns only,
+    soonest-ending first, capped by DEALS_WATCH_MAX_PER_RUN."""
+    from deals import store
+    cap = []
+    monkeypatch.setattr(store.db, "fetch_all", lambda sql, params=(): cap.append((sql, params)) or [])
+    monkeypatch.setenv("DEALS_WATCH_MAX_PER_RUN", "123")
+    now = datetime(2026, 7, 3, 12, tzinfo=timezone.utc)
+    store.due_for_poll(now)
+    store.due_for_poll(now, site="txauction")
+    for sql, params in cap:
+        select = sql.split(" FROM ")[0]
+        assert "raw" not in select and "description" not in select
+        assert "raw IS NOT NULL" in sql and "end_utc IS NOT NULL" in sql
+        assert "ORDER BY end_utc" in sql and "LIMIT %s" in sql and params[-1] == 123
+
+
+def test_due_for_poll_default_limit(monkeypatch):
+    from deals import store
+    cap = []
+    monkeypatch.setattr(store.db, "fetch_all", lambda sql, params=(): cap.append(params) or [])
+    monkeypatch.delenv("DEALS_WATCH_MAX_PER_RUN", raising=False)
+    store.due_for_poll(datetime(2026, 7, 3, 12, tzinfo=timezone.utc))
+    assert cap[0][-1] == 5000
+
+
+def test_due_for_poll_builds_govdeals_lot_from_columns(monkeypatch):
+    from deals import store
+    end = datetime(2026, 7, 3, 13, tzinfo=timezone.utc)
+    row = {"asset_id": 984, "account_id": 6466, "auction_id": 2, "end_utc": end,
+           "bid_count": 0, "current_bid": 10, "status": "STA", "site": "govdeals",
+           "native_id": "984/6466/2"}
+    monkeypatch.setattr(store.db, "fetch_all", lambda sql, params=(): [row])
+    (lot,) = store.due_for_poll(datetime(2026, 7, 3, 12, tzinfo=timezone.utc))
+    assert (lot.asset_id, lot.account_id, lot.auction_id) == (984, 6466, 2)
+    assert lot.end_utc == end and lot.bid_count == 0 and lot.current_bid == 10.0
+    assert lot.status == "STA" and lot.site == "govdeals"

@@ -222,9 +222,14 @@ def table_size_pretty() -> str:
 
 
 def newest_observed_at(source: str) -> datetime | None:
-    """Most recent observed_at for a source, or None if nothing recorded yet."""
+    """Most recent observed_at for a source, or None if nothing recorded yet.
+    Skips bidbox_final/bidbox_recheck rows (raw.recorder_capture): the poll
+    and recheck passes write those every run, so they say nothing about when
+    the source was last discovered. cmd_run uses this only as the staleness
+    fallback when last_discover_at is unknown."""
     row = db.fetch_one(
-        "SELECT MAX(observed_at) AS max_observed_at FROM listing_snapshots WHERE source = %s",
+        "SELECT MAX(observed_at) AS max_observed_at FROM listing_snapshots "
+        "WHERE source = %s AND raw->'recorder_capture' IS NULL",
         (source,),
     )
     return row["max_observed_at"] if row else None

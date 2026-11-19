@@ -270,6 +270,34 @@ def test_run_skips_discover_for_open_source_and_uses_last_discover_for_staleness
     assert {r["source"]: r["state"] for r in db_stubs} == {"mibid": "closed"}
 
 
+def test_run_staleness_uses_last_discover_not_fresh_poll_rows(monkeypatch, db_stubs):
+    """Discover starved since 10-29: poll + bidbox_recheck rows kept
+    newest_observed_at fresh, so max(newest, last_discover_at) never went
+    stale. A known last_discover_at alone decides."""
+    monkeypatch.setattr(store, "tracked_active", lambda: [])
+    monkeypatch.setattr(store, "newest_observed_at", lambda s: NOW)
+    monkeypatch.setattr(store, "load_source_health", lambda: {
+        "gd": {"state": "closed", "consecutive_failures": 0,
+               "last_discover_at": NOW - timedelta(days=10)},
+        "fresh": {"state": "closed", "consecutive_failures": 0,
+                  "last_discover_at": NOW - timedelta(hours=1)}})
+    gd, fresh = _Src("gd"), _Src("fresh")
+    cli.cmd_run({"gd": gd, "fresh": fresh}, discover_stale_hours=6, now=NOW)
+    assert gd.discover_calls == 1
+    assert fresh.discover_calls == 0
+
+
+def test_run_staleness_falls_back_to_newest_row_when_last_discover_unknown(monkeypatch, db_stubs):
+    monkeypatch.setattr(store, "tracked_active", lambda: [])
+    monkeypatch.setattr(store, "newest_observed_at",
+                        lambda s: {"recent": NOW - timedelta(hours=1), "old": NOW - timedelta(days=2)}[s])
+    monkeypatch.setattr(store, "load_source_health", lambda: {})
+    recent, old = _Src("recent"), _Src("old")
+    cli.cmd_run({"recent": recent, "old": old}, discover_stale_hours=6, now=NOW)
+    assert recent.discover_calls == 0
+    assert old.discover_calls == 1
+
+
 def test_run_empty_discover_counts_as_success(monkeypatch, db_stubs):
     """Fetched fine, matched 0 lots (mibid most days) = a quiet day, not an
     outage: the breaker resets and last_discover_at moves."""
