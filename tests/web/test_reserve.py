@@ -223,6 +223,20 @@ def test_reserve_page_renders_the_rule(monkeypatch, lot):
     assert stripe_gateway.REFUND_POLICY_SHORT in r.text
 
 
+def test_reserve_page_is_noindex_and_the_lot_link_is_nofollow(monkeypatch, lot):
+    """robots.txt no longer blocks /reserve/ (Search Console flagged the
+    blocked URL on 2026-11-26), so the page itself must say noindex and the
+    lot page must not hand Google the link as one worth crawling."""
+    _lit(monkeypatch)
+    client = _client()
+    r = client.get("/reserve/31225")
+    assert r.status_code == 200
+    assert '<meta name="robots" content="noindex">' in r.text
+    r = client.get("/listings/31225")
+    assert r.status_code == 200
+    assert 'href="/reserve/31225" rel="nofollow"' in r.text
+
+
 def test_reserve_page_404s_on_unknown_and_hidden_lots(monkeypatch, lot):
     _lit(monkeypatch)
     client = _client()
