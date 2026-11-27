@@ -58,7 +58,10 @@ def test_robots_txt(client):
     assert r.status_code == 200
     assert "Disallow: /admin" in r.text
     assert "Disallow: /api/" in r.text
-    assert "Disallow: /reserve/" in r.text
+    # /reserve/ pages carry their own noindex tag. A robots block hides that
+    # tag from Google and surfaces as "Blocked by robots.txt" in Search
+    # Console (2026-11-26) — so the crawl is allowed and the tag does the work.
+    assert "Disallow: /reserve/" not in r.text
     assert "Sitemap: https://black-whole.com/sitemap.xml" in r.text
 
 

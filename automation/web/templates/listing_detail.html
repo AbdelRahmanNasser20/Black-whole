@@ -213,7 +213,7 @@
           pay: feature lit, lot unsold, priced, and something left to hold.
           Every other case keeps the original primary button verbatim. #}
       {% if reserve_enabled and not item.is_sold and item.price_per_chair and (item.quantity_remaining or 0) > 0 %}
-      <a href="/reserve/{{ item.lot_id }}" class="btn btn-primary">RESERVE WITH DEPOSIT →</a>
+      <a href="/reserve/{{ item.lot_id }}" rel="nofollow" class="btn btn-primary">RESERVE WITH DEPOSIT →</a>
       <a href="#contact-form" class="btn btn-ghost">ASK A QUESTION</a>
       {% else %}
       <a href="#contact-form" class="btn btn-primary">

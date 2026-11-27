@@ -2472,7 +2472,9 @@ async def robots_txt():
         "Disallow: /platform/api/\n"
         "Disallow: /map/api/\n"
         "Disallow: /distress/api/\n"
-        "Disallow: /reserve/\n"
+        # /reserve/ is NOT disallowed on purpose: the page carries its own
+        # noindex tag, and a robots block hides that tag from Google — Search
+        # Console then reports the URL as "Blocked by robots.txt" (2026-11-26).
         "Allow: /\n"
         "\n"
         f"Sitemap: {PUBLIC_BASE_URL}/sitemap.xml\n"
